@@ -21,13 +21,15 @@ Implement **V1** cho hệ thống vận hành nội bộ xử lý order ảnh/s�
 
 ## 3. Workflow V1 phải triển khai
 
-### B1 — Claim đơn trên web mẹ
+> **Ghi chú thuật ngữ:** "web mẹ" và "web khách" trong các bản nháp trước thực chất là **MỘT website duy nhất** của khách hàng — nơi khách giao batch đơn (status `waiting`, chưa có designer), và cũng chính nơi đó đơn đi hết `waiting → doing → review → done`, kể cả submit kết quả. Chỉ có 1 adapter website (§4), không có 2 adapter riêng.
 
-Customer gửi batch đơn (ví dụ 100) lên web mẹ. Đơn hợp lệ ở trạng thái `waiting`. Đổi designer sang `ntth` để claim và phân biệt với đơn cũ/đơn designer khác. Xác minh từng write.
+### B1 — Claim đơn trên website khách
+
+Khách gửi batch đơn (ví dụ 100) lên website khách — hệ thống có thêm 100 dòng đơn mới, status `waiting`, chưa gán designer. Đổi designer sang `ntth` để claim và phân biệt với đơn cũ/đơn designer khác. Xác minh từng write.
 
 ### B2 — Import batch và bắt đầu làm
 
-Lọc các đơn `waiting + ntth`; tải ảnh; upload/đăng ký vào intake Google Sheet; đổi status web mẹ `waiting → doing` nhưng vẫn giữ `ntth`. Không đổi internal state thành `IMPORTED` nếu asset và mapping Sheet chưa được xác minh.
+Lọc các đơn `waiting + ntth`; tải ảnh; upload/đăng ký vào intake Google Sheet; đổi status website khách `waiting → doing` nhưng vẫn giữ `ntth`. Không đổi internal state thành `IMPORTED` nếu asset và mapping Sheet chưa được xác minh.
 
 ### B3 — Designer đăng ký và chia đơn
 
@@ -37,7 +39,7 @@ Thông báo Telegram để designer đăng ký số lượng (ví dụ Lâm nh�
 
 ### B4 — Validate và admin approval
 
-Với từng assignment draft: truy xuất web khách để lấy/check thông tin đơn (tên, ảnh, mẫu, màu) cùng designer; gửi Telegram card cho admin **Approve** hoặc **Cancel**.
+Với từng assignment draft: truy xuất website khách để lấy/check thông tin đơn (tên, ảnh, mẫu, màu) cùng designer; gửi Telegram card cho admin **Approve** hoặc **Cancel**.
 
 Cancel nghĩa là đơn đã làm/không hợp lệ. Lưu lý do và bằng chứng, release order, trả quota còn thiếu của designer, quay lại B3 để chọn đơn bù. Tuyệt đối không thay đơn âm thầm. Chỉ assignment approved được projection sang Sheet 2.
 
@@ -45,9 +47,9 @@ Cancel nghĩa là đơn đã làm/không hợp lệ. Lưu lý do và bằng ch�
 
 Từ Sheet 2, dispatch order approved sang bảng riêng của designer. Designer gắn Drive result link. Collector kiểm tra và map link về order/bảng tổng.
 
-### B6 — Submit kết quả lên web khách
+### B6 — Submit kết quả lên website khách
 
-Đọc result đã kiểm tra từ bảng tổng, post lên web khách và verify `doing → review`.
+Đọc result đã kiểm tra từ bảng tổng, post lên website khách (gán link Drive vào placeholder của đơn) và verify `doing → review`. Cơ chế chính xác ai/khi nào set `review → done` và có phải chính bot set link cùng lúc với đổi status hay không — xem mục 17 (nợ kỹ thuật, cần xác nhận thêm).
 
 ### B7 — QC bởi con người và vòng sửa
 
@@ -55,7 +57,7 @@ Gửi order ở review kèm context/result link vào Telegram QC. Admin bắt bu
 
 - **Approve:** ghi nhận duyệt và hoàn tất đơn.
 - **Edit:** bắt buộc có feedback; gửi designer sửa.
-- **Skip:** web khách tạm xử lý và dự kiến tự đổi trạng thái; lên lịch reconcile.
+- **Skip:** website khách tạm xử lý và dự kiến tự đổi trạng thái; lên lịch reconcile.
 - **Cancel + Reply:** hủy có lý do và gửi/lưu phản hồi.
 
 Khi designer gửi result đã sửa, kiểm tra có result version mới, submit lại review, rồi tạo QC approval request mới. Không dùng quyết định QC cũ cho result version mới.
@@ -71,8 +73,7 @@ Application service + deterministic workflow/state machine
       │                 └─ PostgreSQL: state, event, approval, operation
       ▼
 Business tools / MCP façade
- ├─ Parent website adapter → Selenium worker
- ├─ Customer website adapter → Selenium worker
+ ├─ Website khách adapter → Selenium worker (một adapter duy nhất, cùng 1 site: claim/import/submit/QC-context)
  ├─ Google Sheets / Drive adapter
  └─ Telegram adapter
 
@@ -175,7 +176,7 @@ Phân loại: `VALIDATION`, `AUTH`, `RATE_LIMIT`, `TRANSIENT_NETWORK`, `EXTERNAL
 - Redis lock/queue chỉ hỗ trợ; correctness phải dựa vào DB constraint/transaction.
 - Dùng transactional outbox cho message và scheduling external work.
 - Hết retry đưa vào `dead_letters` kèm recovery action cho operator.
-- Xây reconciliation sớm: đối chiếu DB, hai website và Sheet; trả diff rõ ràng, không tự sửa nếu chưa có policy an toàn.
+- Xây reconciliation sớm: đối chiếu DB, website khách và Sheet; trả diff rõ ràng, không tự sửa nếu chưa có policy an toàn.
 
 ## 12. Quy tắc LLM/agent
 
@@ -220,7 +221,7 @@ Việc "tự gọi tool" chỉ là bỏ qua bước hỏi xác nhận trước k
 
 1. Scaffold, config, Postgres local, migration, test harness, audit/event primitive.
 2. State machine, operation/idempotency ledger, role, outbox, reconciliation skeleton.
-3. Adapter read-only cho web mẹ, web khách, Sheets/Drive, Telegram và tài liệu field map.
+3. Adapter read-only cho website khách, Sheets/Drive, Telegram và tài liệu field map.
 4. B1–B2 deterministic workflow, dry-run rồi pilot.
 5. B3–B4 signup, allocation, validation, approval/replacement.
 6. B5 dispatch/result collection và result versioning.
@@ -230,7 +231,7 @@ Việc "tự gọi tool" chỉ là bỏ qua bước hỏi xác nhận trước k
 
 ## 16. Bối cảnh vận hành đã xác nhận (2026-09)
 
-- **Web khách:** một website duy nhất. Công ty vận hành như "công ty con" qua **một tài khoản cố định** do khách cấp (tài khoản A trong số nhiều tài khoản A/B/C/D khách chia cho các đối tác khác nhau) — không cần adapter đa-site, không cần đa-tài khoản trong V1.
+- **Website khách:** một website duy nhất, dùng chung cho toàn bộ luồng — nhận batch mới (`waiting`), claim, `doing → review → done`, và cũng là nơi gán link Drive kết quả. Không tách "web mẹ"/"web khách" như bản nháp trước. Công ty vận hành như "công ty con" qua **một tài khoản cố định** do khách cấp (tài khoản A trong số nhiều tài khoản A/B/C/D khách chia cho các đối tác khác nhau) — không cần adapter đa-site, không cần đa-tài khoản trong V1.
 - **Kênh designer:** designer đăng ký số lượng ngay trong group Telegram chung; sau khi được chia, tự lên Google Sheet lấy mã đơn được giao, tự lên web khách (đã scope theo tài khoản công ty) xem chi tiết/ảnh mẫu bằng trình duyệt cá nhân (không qua Selenium), làm xong tự upload Drive rồi dán link vào sheet tổng để hệ thống thu thập. Selenium chỉ dùng cho các thao tác backend (claim, submit, QC-related), không dùng để tự động hoá việc designer xem đơn.
 - **Khối lượng:** biến động, đỉnh có thể tới vài trăm order/ngày — xác nhận việc dùng Redis/Celery/Dramatiq từ V1 (roadmap mục 3) là hợp lý, không phải over-engineering.
 - **Hạ tầng chạy Qwen/production:** build/pilot hiện tại chạy trên MacBook Pro M3 Pro 32GB (máy dev). Production dự kiến build local server 24/7 riêng, cấu hình phần cứng **chưa chốt**. Gợi ý nhanh (không chặn V1): giữ nguyên hệ Apple Silicon (Mac mini/Studio M-series, tối thiểu 32–48GB unified memory) để tận dụng MLX-LM đã chọn trong stack, tránh phải đổi runtime LLM khi lên production; nếu chấp nhận đổi sang llama.cpp/vLLM thì một máy Linux + GPU 16–24GB VRAM là phương án thay thế.
@@ -244,6 +245,7 @@ Việc "tự gọi tool" chỉ là bỏ qua bước hỏi xác nhận trước k
 | 3 | Nơi lưu trữ `order_assets` (ảnh tải về) | Chưa chốt: VPS hoặc hạ tầng local | V1 dùng local disk cho pilot, thiết kế adapter lưu trữ qua interface để đổi backend sau không phải sửa domain |
 | 4 | Giới hạn concurrency Selenium (số session song song) | Chưa đo | Đo thực tế ở Phase 2, mặc định an toàn: 1 session/site cho tới khi có số liệu |
 | 5 | Cấu hình phần cứng production 24/7 | Chưa chốt | Xem gợi ý mục 16; quyết định sau khi có ngân sách |
+| 6 | Cơ chế chính xác `review → done` trên website khách | Cần xác nhận | Bot mình set `done` sau khi admin QC Approve (B7), hay bên khách tự set `done` sau khi họ tự review (giống case Skip)? Link Drive được gán cùng lúc với lúc submit (`doing→review`) hay chỉ lúc `done`? Ảnh hưởng trực tiếp cơ chế B6/B7 — hỏi ở Phase 0.2/0.3 |
 
 ## 18. Definition of done V1
 

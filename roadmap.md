@@ -1,18 +1,18 @@
 # AI Operations Agent — Roadmap V1
 
 > **Phiên bản:** V1  
-> **Mục tiêu:** Xây hệ thống vận hành nội bộ đáng tin cậy để điều phối nhận đơn, chia đơn, sản xuất, duyệt và QC giữa web mẹ/web khách, Google Sheets/Drive và Telegram. AI chỉ hỗ trợ hiểu yêu cầu, tóm tắt và đề xuất có kiểm soát; mọi thay đổi trạng thái phải do workflow xác định thực hiện.
+> **Mục tiêu:** Xây hệ thống vận hành nội bộ đáng tin cậy để điều phối nhận đơn, chia đơn, sản xuất, duyệt và QC giữa website khách, Google Sheets/Drive và Telegram. AI chỉ hỗ trợ hiểu yêu cầu, tóm tắt và đề xuất có kiểm soát; mọi thay đổi trạng thái phải do workflow xác định thực hiện.
 
 ## 1. Kết quả cần đạt
 
 Hệ thống xử lý một batch đơn hàng từ đầu đến cuối theo luồng có thể kiểm tra, khôi phục và audit:
 
-1. Nhận các đơn `waiting` trên web mẹ, đổi designer sang `ntth` để claim đơn.
-2. Lọc `waiting + ntth`, tải ảnh, đưa dữ liệu vào Google Sheet, rồi đổi trạng thái web mẹ `waiting → doing` nhưng vẫn giữ `ntth`.
+1. Nhận các đơn `waiting` trên website khách, đổi designer sang `ntth` để claim đơn.
+2. Lọc `waiting + ntth`, tải ảnh, đưa dữ liệu vào Google Sheet, rồi đổi trạng thái website khách `waiting → doing` nhưng vẫn giữ `ntth`.
 3. Thông báo Telegram để designer đăng ký số lượng; ghi cụ thể designer vào các dòng đơn trên Sheet.
-4. Đối chiếu từng đơn với web khách và gửi admin duyệt trên Telegram. Đơn đã làm/không hợp lệ bị hủy, trả lại quota để bù đơn ở B3.
+4. Đối chiếu từng đơn với website khách và gửi admin duyệt trên Telegram. Đơn đã làm/không hợp lệ bị hủy, trả lại quota để bù đơn ở B3.
 5. Chỉ các đơn đã duyệt mới được copy sang Sheet 2, phân phát tới bảng riêng của designer và kéo link Drive kết quả về bảng tổng.
-6. Đẩy kết quả lên web khách, xác minh chuyển `doing → review`.
+6. Đẩy kết quả lên website khách, xác minh chuyển `doing → review`.
 7. Gửi đơn ở review sang Telegram cho QC quyết định **duyệt**, **chỉnh sửa**, **bỏ qua**, hoặc **hủy + phản hồi**. Khi designer sửa xong, hệ thống nhận diện version kết quả mới và đưa đơn quay lại review.
 
 ### Chỉ số thành công V1
@@ -48,7 +48,7 @@ FastAPI chat gateway ──► Agent Orchestrator (Qwen, tool calling)
         │             Redis (queue, lock, rate limit; có thể thêm sau)
         ▼
 Business tool / MCP gateway
- ├─ Adapter web mẹ/web khách ─ Selenium execution worker
+ ├─ Adapter website khách ─ Selenium execution worker
  ├─ Adapter Google Sheets + Drive ─ API / Apps Script
  └─ Adapter Telegram ─ message, button, callback verification
 ```
@@ -71,22 +71,22 @@ Các luồng xác định, approval và reconciliation vẫn phải chạy đư�
 
 ## 4. Workflow/state machine chuẩn
 
-Lưu **internal state** riêng, đồng thời lưu trạng thái quan sát được từ từng website.
+Lưu **internal state** riêng (nhiều state hơn status thô của website, vì cần theo dõi thêm assignment/approval/QC nội bộ), đồng thời lưu trạng thái quan sát được từ website khách.
 
 | Internal state | Ý nghĩa | State tiếp theo chính |
 |---|---|---|
-| `DISCOVERED` | Đã phát hiện trên web mẹ, chưa claim | `CLAIMED` / `EXCEPTION` |
+| `DISCOVERED` | Đã phát hiện trên website khách, chưa claim | `CLAIMED` / `EXCEPTION` |
 | `CLAIMED` | Designer đã là `ntth`, web vẫn waiting | `IMPORTED` / `EXCEPTION` |
-| `IMPORTED` | Sheet/asset đã xác minh; web mẹ đã doing | `OPEN_FOR_SIGNUP` |
+| `IMPORTED` | Sheet/asset đã xác minh; website khách đã doing | `OPEN_FOR_SIGNUP` |
 | `OPEN_FOR_SIGNUP` | Chờ designer đăng ký/chia đơn | `ASSIGNMENT_PENDING_APPROVAL` |
 | `ASSIGNMENT_PENDING_APPROVAL` | Phân đơn dự kiến đã gửi admin duyệt | `ASSIGNED` / `OPEN_FOR_SIGNUP` / `EXCEPTION` |
 | `ASSIGNED` | Admin đã duyệt, đã tạo projection sang Sheet 2 | `DISPATCHED` |
 | `DISPATCHED` | Đã có ở bảng riêng của designer | `RESULT_RECEIVED` / `REASSIGNMENT_REQUIRED` |
 | `RESULT_RECEIVED` | Link Drive kết quả đã hợp lệ ở bảng tổng | `SUBMITTED_FOR_REVIEW` |
-| `SUBMITTED_FOR_REVIEW` | Đã post lên web khách và xác minh review | `QC_PENDING` |
+| `SUBMITTED_FOR_REVIEW` | Đã post lên website khách và xác minh review | `QC_PENDING` |
 | `QC_PENDING` | Đợi admin QC bấm quyết định | `DONE` / `REVISION_REQUESTED` / `SKIPPED` / `CANCELLED` |
 | `REVISION_REQUESTED` | Đã có feedback yêu cầu designer sửa | `DISPATCHED` |
-| `SKIPPED` | Web khách sẽ tự đổi trạng thái; cần reconcile | kết thúc sau khi reconcile |
+| `SKIPPED` | Website khách sẽ tự đổi trạng thái (do phía khách xử lý); cần reconcile | kết thúc sau khi reconcile |
 | `DONE` / `CANCELLED` | Hoàn tất / hủy có lý do | terminal |
 | `EXCEPTION` | Cần operator xử lý | chỉ recovery transition đã ghi rõ |
 
@@ -98,7 +98,7 @@ Lưu **internal state** riêng, đồng thời lưu trạng thái quan sát đư
 
 **Deliverables**
 
-- Từ điển status chính xác và rule chuyển status của cả hai website.
+- Từ điển status chính xác và rule chuyển status của website khách.
 - SOP/video một đơn đi đủ luồng, bao gồm hủy và QC revision.
 - Test account, test order, browser profile, giới hạn tốc độ thao tác.
 - Bản đồ trường dữ liệu: order/image ID, sheet row key, designer ID, result link, comment, deadline.
@@ -130,8 +130,7 @@ Lưu **internal state** riêng, đồng thời lưu trạng thái quan sát đư
 
 **Deliverables**
 
-- Adapter web mẹ: lọc đơn, claim `ntth`, tải asset, đổi/xác minh status.
-- Adapter web khách: lấy detail, kiểm tra đơn đã làm, submit kết quả, đọc ngữ cảnh review/QC.
+- Adapter website khách (một adapter duy nhất, cùng 1 site): lọc đơn, claim `ntth`, tải asset, đổi/xác minh status, lấy detail đơn, kiểm tra đơn đã làm, submit kết quả, đọc ngữ cảnh review/QC.
 - Adapter Google: import/sync mapping row; dispatch sheet và result link.
 - Selenium reliability package: session, explicit wait, retry có giới hạn, screenshot/HTML khi lỗi, kiểm tra selector.
 
@@ -154,7 +153,7 @@ Lưu **internal state** riêng, đồng thời lưu trạng thái quan sát đư
 - Telegram flow để designer đăng ký số lượng, kèm capacity ledger.
 - Allocation service chọn chính xác các order có sẵn và tạo draft — thuật toán V1 đã chốt: FIFO theo thứ tự đăng ký, cấp khối liền kề trên danh sách order còn `unassigned` của batch (designer đăng ký trước nhận khối trước); giữ chỗ bằng transaction tuần tự hóa (lock theo order) để tránh 2 designer nhận trùng order khi đăng ký gần như đồng thời. Không ưu tiên theo skill trong V1. Chi tiết: claude.md §3 B3.
 - Assignment approval gửi vào group chat chung, nhiều admin cùng quyền bấm, quyết định đầu tiên hợp lệ thắng (claude.md §10).
-- Validation web khách và Telegram card **Approve** / **Cancel**.
+- Validation website khách và Telegram card **Approve** / **Cancel**.
 - Cancel phải lưu lý do, release row, khôi phục quota cần bù và tạo nhiệm vụ bù đơn.
 - Chỉ copy assignment đã approved sang Sheet 2.
 
@@ -170,7 +169,7 @@ Lưu **internal state** riêng, đồng thời lưu trạng thái quan sát đư
 
 **Deliverables**
 
-- Submit result hợp lệ lên web khách và xác minh `doing → review`.
+- Submit result hợp lệ lên website khách và xác minh `doing → review`.
 - QC Telegram card: **Approve**, **Edit**, **Skip**, **Cancel + Reply**.
 - Gửi feedback, nhận diện result version mới, resubmit review; timed reconciliation cho `SKIPPED`.
 
@@ -214,7 +213,7 @@ Lưu **internal state** riêng, đồng thời lưu trạng thái quan sát đư
 
 Xem chi tiết đầy đủ ở `claude.md` §16–17 (bối cảnh vận hành đã xác nhận + bảng nợ kỹ thuật). Tóm tắt ảnh hưởng roadmap:
 
-- Web khách là **một site duy nhất**, công ty vận hành qua **một tài khoản cố định** khách cấp → không cần thiết kế adapter đa-site/đa-account ở Phase 2.
+- Website khách là **một site duy nhất** cho toàn bộ luồng (claim, doing, review, done — không tách "web mẹ"/"web khách"), công ty vận hành qua **một tài khoản cố định** khách cấp → không cần thiết kế adapter đa-site/đa-account ở Phase 2.
 - Khối lượng đỉnh **vài trăm order/ngày** → xác nhận Redis/Celery/Dramatiq đưa vào từ V1 (mục 3) là đúng mức, không hoãn được xuống V2.
 - Concurrency Selenium, nơi lưu `order_assets`, tiêu chí "đơn đã làm", và cấu hình phần cứng production 24/7 **chưa chốt** — theo dõi ở claude.md §17, không block Phase 0–1.
 
