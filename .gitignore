@@ -1,0 +1,23 @@
+# secrets / env
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+token.json
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# browser automation profiles / evidence (may contain client data)
+chrome-profile/
+selenium-evidence/
+screenshots/
+
+# os / editor
+.DS_Store
+.vscode/
+.idea/
