@@ -245,7 +245,10 @@ Việc "tự gọi tool" chỉ là bỏ qua bước hỏi xác nhận trước k
 | 3 | Nơi lưu trữ `order_assets` (ảnh tải về) | Chưa chốt: VPS hoặc hạ tầng local | V1 dùng local disk cho pilot, thiết kế adapter lưu trữ qua interface để đổi backend sau không phải sửa domain |
 | 4 | Giới hạn concurrency Selenium (số session song song) | Chưa đo | Đo thực tế ở Phase 2, mặc định an toàn: 1 session/site cho tới khi có số liệu |
 | 5 | Cấu hình phần cứng production 24/7 | Chưa chốt | Xem gợi ý mục 16; quyết định sau khi có ngân sách |
-| 6 | Cơ chế chính xác `review → done` trên website khách | Cần xác nhận | Bot mình set `done` sau khi admin QC Approve (B7), hay bên khách tự set `done` sau khi họ tự review (giống case Skip)? Link Drive được gán cùng lúc với lúc submit (`doing→review`) hay chỉ lúc `done`? Ảnh hưởng trực tiếp cơ chế B6/B7 — hỏi ở Phase 0.2/0.3 |
+| 6 | Cơ chế chính xác `review → done` trên website khách | Cần xác nhận — **cập nhật:** status thật có 6 giá trị `Waiting/Doing/Review/Fix/Confirm/Done`, không phải 4 như giả định ban đầu. Xem `docs/phase0-field-map.md` | `Fix`/`Confirm` là gì, ai/khi nào set — chưa rõ. Nghi vấn: `Fix` = kết quả Edit của QC nội bộ B7 (trang có cơ chế -5 điểm khi chuyển Fix); `Confirm` chưa rõ là bước nội bộ hay do khách tự xác nhận (giống case Skip) |
+| 7 | Cơ chế điểm designer (-5đ/lần Fix) + tiền phạt đã có sẵn trên website | Cần xác nhận | Có cần đồng bộ vào Postgres để ảnh hưởng thứ tự phân đơn B3, hay đây là tính năng riêng của website, hệ thống mình không cần đụng vào? |
+| 8 | 3 mốc thời gian mỗi đơn: `Created at` / `Order created at` / `Deadline at` | Cần xác nhận | Chưa rõ cái nào tính SLA/trễ hạn, cái nào là mốc claim |
+| 9 | Phạm vi loại job: chỉ 2D, hay cả 3D/ART/WOOD/CALENDAR/EMBROIDERY/AI | Cần xác nhận | Website có filter riêng cho từng loại — ảnh hưởng scope V1 |
 
 ## 18. Definition of done V1
 
