@@ -16,6 +16,7 @@ venv/
 # browser automation profiles / evidence (may contain client data)
 chrome-profile/
 selenium-evidence/
+playwright-evidence/
 screenshots/
 
 # os / editor
