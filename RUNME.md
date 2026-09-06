@@ -25,7 +25,10 @@
 ```bash
 cd /Users/hongphuc/Documents/01_congViec/pinterval    # (hoặc nhánh/worktree đang có code)
 
-cp .env.example .env          # chỉnh nếu muốn, mặc định đã chạy được luôn
+cp .env.example .env
+# Sửa COOKIE_SECURE=true -> COOKIE_SECURE=false trong .env vừa tạo — test local
+# qua http://127.0.0.1 (không có HTTPS), để true thì trình duyệt có thể không gửi
+# lại cookie session sau khi login.
 
 python3.12 -m venv .venv
 source .venv/bin/activate
