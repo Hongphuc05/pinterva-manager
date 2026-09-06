@@ -12,9 +12,18 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 
 TEST_DATABASE_URL = os.environ["DATABASE_URL"]
+
+# `setdefault` above means a shell-exported DATABASE_URL wins — and `_truncate_tables`
+# wipes every table in whatever it points at. Refuse anything not obviously a test DB.
+_resolved_db_name = make_url(TEST_DATABASE_URL).database
+assert _resolved_db_name and "test" in _resolved_db_name, (
+    f"refusing to run tests against database {_resolved_db_name!r} — "
+    "it must contain 'test' in its name (safety guard against wiping a real DB)"
+)
 
 
 @pytest.fixture(scope="session")
@@ -36,9 +45,14 @@ def db_session(engine):
 
 
 @pytest.fixture(autouse=True)
-def _truncate_tables(engine):
+def _truncate_tables(request):
     yield
-    with engine.begin() as conn:
+    # Pure-domain / pure-config tests need no Postgres at all; only touch (and thus
+    # only build) the `engine` fixture for tests that actually asked for the DB.
+    if "db_session" not in request.fixturenames and "engine" not in request.fixturenames:
+        return
+    eng = request.getfixturevalue("engine")
+    with eng.begin() as conn:
         tables = conn.execute(
             text(
                 "SELECT tablename FROM pg_tables "
