@@ -1,6 +1,7 @@
 # secrets / env
 .env
 .env.*
+!.env.example
 *.pem
 *.key
 credentials.json
@@ -21,3 +22,10 @@ screenshots/
 .DS_Store
 .vscode/
 .idea/
+
+# build artifacts
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
