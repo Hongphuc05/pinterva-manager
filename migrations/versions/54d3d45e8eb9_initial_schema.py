@@ -1,16 +1,16 @@
 """initial schema
 
-Revision ID: d068a16735a5
+Revision ID: 54d3d45e8eb9
 Revises: 
-Create Date: 2026-09-06 22:04:59.246703
+Create Date: 2026-09-06 22:44:40.450546
 
 """
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision = 'd068a16735a5'
+revision = '54d3d45e8eb9'
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -24,7 +24,7 @@ def upgrade() -> None:
     sa.Column('owner', sa.String(length=64), nullable=False),
     sa.Column('count', sa.Integer(), nullable=False),
     sa.Column('lifecycle_state', sa.String(length=32), nullable=False),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('dead_letters',
@@ -33,7 +33,7 @@ def upgrade() -> None:
     sa.Column('payload', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
     sa.Column('error_class', sa.String(length=64), nullable=False),
     sa.Column('recovery_action', sa.String(length=512), nullable=True),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('operations',
@@ -45,8 +45,8 @@ def upgrade() -> None:
     sa.Column('result', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('evidence', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.Column('retry_count', sa.Integer(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('idempotency_key')
     )
@@ -55,8 +55,8 @@ def upgrade() -> None:
     sa.Column('topic', sa.String(length=128), nullable=False),
     sa.Column('payload', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
     sa.Column('status', sa.String(length=16), nullable=False),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
-    sa.Column('sent_at', sa.DateTime(), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('sent_at', sa.DateTime(timezone=True), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('users',
@@ -67,7 +67,7 @@ def upgrade() -> None:
     sa.Column('password_hash', sa.String(length=255), nullable=False),
     sa.Column('active', sa.Boolean(), nullable=False),
     sa.Column('capacity', sa.Integer(), nullable=True),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.CheckConstraint("role IN ('admin', 'designer')", name='ck_users_role'),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('username')
@@ -79,8 +79,8 @@ def upgrade() -> None:
     sa.Column('state', sa.String(length=32), nullable=False),
     sa.Column('version', sa.Integer(), nullable=False),
     sa.Column('external_observation', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.ForeignKeyConstraint(['batch_id'], ['batches.id'], ),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('external_order_id')
@@ -93,8 +93,8 @@ def upgrade() -> None:
     sa.Column('sub_status', sa.String(length=32), nullable=True),
     sa.Column('cancel_reason', sa.String(length=512), nullable=True),
     sa.Column('replacement_of_id', sa.Uuid(), nullable=True),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.ForeignKeyConstraint(['designer_id'], ['users.id'], ),
     sa.ForeignKeyConstraint(['order_id'], ['orders.id'], ),
     sa.ForeignKeyConstraint(['replacement_of_id'], ['assignments.id'], ),
@@ -107,7 +107,7 @@ def upgrade() -> None:
     sa.Column('external_id', sa.String(length=255), nullable=False),
     sa.Column('observed_state', sa.String(length=32), nullable=True),
     sa.Column('evidence', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    sa.Column('observed_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
+    sa.Column('observed_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.ForeignKeyConstraint(['order_id'], ['orders.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
@@ -117,7 +117,7 @@ def upgrade() -> None:
     sa.Column('source_image_ref', sa.String(length=512), nullable=False),
     sa.Column('checksum', sa.String(length=128), nullable=True),
     sa.Column('storage_location', sa.String(length=512), nullable=False),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.ForeignKeyConstraint(['order_id'], ['orders.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
@@ -127,9 +127,11 @@ def upgrade() -> None:
     sa.Column('from_state', sa.String(length=32), nullable=True),
     sa.Column('to_state', sa.String(length=32), nullable=False),
     sa.Column('actor_id', sa.Uuid(), nullable=True),
+    sa.Column('operation_id', sa.Uuid(), nullable=True),
     sa.Column('evidence', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.ForeignKeyConstraint(['actor_id'], ['users.id'], ),
+    sa.ForeignKeyConstraint(['operation_id'], ['operations.id'], ),
     sa.ForeignKeyConstraint(['order_id'], ['orders.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
@@ -139,8 +141,8 @@ def upgrade() -> None:
     sa.Column('drive_url', sa.String(length=1024), nullable=False),
     sa.Column('version_marker', sa.Integer(), nullable=False),
     sa.Column('validated', sa.Boolean(), nullable=False),
-    sa.Column('submitted_at', sa.DateTime(), nullable=True),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
+    sa.Column('submitted_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.ForeignKeyConstraint(['assignment_id'], ['assignments.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
@@ -150,8 +152,8 @@ def upgrade() -> None:
     sa.Column('target_id', sa.Uuid(), nullable=False),
     sa.Column('target_version_id', sa.Uuid(), nullable=True),
     sa.Column('status', sa.String(length=16), nullable=False),
-    sa.Column('expires_at', sa.DateTime(), nullable=True),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
+    sa.Column('expires_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.CheckConstraint("kind IN ('assignment', 'qc')", name='ck_approval_requests_kind'),
     sa.ForeignKeyConstraint(['target_version_id'], ['result_versions.id'], ),
     sa.PrimaryKeyConstraint('id')
@@ -162,7 +164,7 @@ def upgrade() -> None:
     sa.Column('actor_id', sa.Uuid(), nullable=False),
     sa.Column('decision', sa.String(length=32), nullable=False),
     sa.Column('comment', sa.String(length=2048), nullable=True),
-    sa.Column('decided_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
+    sa.Column('decided_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.ForeignKeyConstraint(['actor_id'], ['users.id'], ),
     sa.ForeignKeyConstraint(['approval_request_id'], ['approval_requests.id'], ),
     sa.PrimaryKeyConstraint('id'),
