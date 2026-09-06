@@ -1,7 +1,7 @@
-from enum import Enum
+from enum import StrEnum
 
 
-class OrderState(str, Enum):
+class OrderState(StrEnum):
     DISCOVERED = "DISCOVERED"
     CLAIMED_IMPORTED = "CLAIMED_IMPORTED"
     OPEN_FOR_ALLOCATION = "OPEN_FOR_ALLOCATION"
