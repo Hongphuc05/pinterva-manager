@@ -35,9 +35,13 @@ ALLOWED_TRANSITIONS: dict[OrderState, set[OrderState]] = {
     OrderState.SUBMITTING_TO_SITE: {OrderState.DONE, OrderState.EXCEPTION},
     OrderState.REVISION_REQUESTED: {OrderState.IN_PROGRESS, OrderState.EXCEPTION},
     OrderState.REASSIGNMENT_REQUIRED: {OrderState.OPEN_FOR_ALLOCATION, OrderState.EXCEPTION},
-    OrderState.SKIPPED: set(),
-    OrderState.DONE: set(),
-    OrderState.CANCELLED: set(),
+    # Terminal states are terminal for the happy path only. claude.md §5 requires that
+    # *any* state can still be escalated into EXCEPTION (e.g. a DONE order later found
+    # mismatched on the external site — claude.md §12.1 group 3), and a SKIPPED order
+    # reaches DONE once reconciliation confirms the site finished it.
+    OrderState.SKIPPED: {OrderState.DONE, OrderState.EXCEPTION},
+    OrderState.DONE: {OrderState.EXCEPTION},
+    OrderState.CANCELLED: {OrderState.EXCEPTION},
     OrderState.EXCEPTION: set(OrderState),
 }
 
