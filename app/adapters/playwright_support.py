@@ -2,16 +2,14 @@ from __future__ import annotations
 
 import random
 import time
+from collections.abc import Callable
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable, TypeVar
 
 from playwright.sync_api import Page, sync_playwright
 
 EVIDENCE_DIR = Path("playwright-evidence")
-
-T = TypeVar("T")
 
 
 @contextmanager
@@ -37,7 +35,7 @@ def playwright_session(profile_dir: str = "chrome-profile", headless: bool = Fal
             context.close()
 
 
-def with_retry(fn: Callable[[], T], max_attempts: int = 3, base_delay: float = 0.5) -> T:
+def with_retry[T](fn: Callable[[], T], max_attempts: int = 3, base_delay: float = 0.5) -> T:
     """Call fn() up to max_attempts times while its result is retryable.
 
     fn() must return an object with boolean `.success` and `.retryable`
@@ -66,7 +64,7 @@ def capture_evidence(page: Page, label: str) -> dict:
     any capture failure here is recorded in the returned dict instead of propagating.
     """
     EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%f")
     base = f"{label}_{timestamp}"
     screenshot_path = EVIDENCE_DIR / f"{base}.png"
     html_path = EVIDENCE_DIR / f"{base}.html"
