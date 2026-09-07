@@ -13,17 +13,24 @@ from app.domain.models import OrderState
 
 
 def _remaining_order_ids(session: Session, batch_id: uuid.UUID) -> list[Order]:
-    """Orders of this batch still open for allocation with no Assignment row yet,
-    in a stable order (external_order_id) — locked FOR UPDATE so two concurrent
-    callers serialize on this batch instead of double-granting an order. Returns
-    Order objects (not just ids) since callers need more than the id."""
-    assigned_order_ids = session.query(Assignment.order_id).subquery()
+    """Orders of this batch still open for allocation with no ACTIVE Assignment
+    (draft/approved) — a cancelled Assignment must not permanently exclude its
+    order, since decide_assignment's cancel path releases the order back to
+    OPEN_FOR_ALLOCATION expecting it to be re-grantable. Locked FOR UPDATE so two
+    concurrent callers serialize on this batch instead of double-granting an
+    order. Returns Order objects (not just ids) since callers need more than the
+    id."""
+    active_assignment_order_ids = (
+        session.query(Assignment.order_id)
+        .filter(Assignment.status.in_(["draft", "approved"]))
+        .subquery()
+    )
     return (
         session.query(Order)
         .filter(
             Order.batch_id == batch_id,
             Order.state == OrderState.OPEN_FOR_ALLOCATION.value,
-            ~Order.id.in_(session.query(assigned_order_ids.c.order_id)),
+            ~Order.id.in_(session.query(active_assignment_order_ids.c.order_id)),
         )
         .order_by(Order.external_order_id)
         .with_for_update()
