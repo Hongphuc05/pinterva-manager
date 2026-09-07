@@ -142,8 +142,11 @@ Google Sheets/Drive) — kể cả trong lúc phát triển/test, không chỉ l
 ## 8. Tiết kiệm quota — cắt bước rườm rà
 
 Điều phối nhiều subagent (SDD) vốn đã tốn token/turn hơn làm trực tiếp. Giữ kỷ luật review/
-safety ở mục 3, 4, 7 — không cắt các bước đó — nhưng cắt mọi round-trip không cần thiết:
+safety ở mục 3, 4, 7 — không cắt các bước đó — nhưng cắt mọi round-trip không cần thiết.
+Đây là **mặc định áp dụng chủ động** (không cần chờ user nhắc lại mỗi lần), theo yêu cầu
+2026-09-07: "tiết kiệm quota, lược bỏ bước không cần thiết".
 
+**Đã áp dụng, giữ nguyên:**
 - Khi dispatch một reviewer sẽ dùng `ReportFindings`, luôn dặn nó **ghi luôn findings đầy
   đủ (file/line/summary/failure_scenario/verdict) ra file report**, cùng chỗ với report
   của implementer. Đọc file đó trực tiếp — không gửi thêm 1 lượt "paste lại findings cho
@@ -154,8 +157,31 @@ safety ở mục 3, 4, 7 — không cắt các bước đó — nhưng cắt m�
   model "cho chắc" khi chưa cần.
 - Không đọc lại / xác minh lại thứ đã có sẵn trong ledger hoặc report của lượt trước
   trong cùng session — tin vào file đã ghi, không dispatch lại để kiểm tra cho yên tâm.
-- Việc này CHỈ áp dụng cho bước thừa — không được bỏ qua review/verify bắt buộc vì lý do
-  an toàn hay đúng-sai (đặc biệt là kỷ luật snapshot-restore ở mục 7).
+
+**Thêm (2026-09-07, áp dụng từ Phase 3 trở đi):**
+- **Tự review thay vì dispatch reviewer riêng** cho diff nhỏ/rủi ro thấp (transcription
+  thuần, sửa lỗi đã biết rõ hình dạng, tài liệu): controller đọc diff trực tiếp
+  (`git diff`) và tự kết luận PASS/NEEDS FIXES, không tốn 1 lượt subagent chỉ để xác nhận
+  lại điều đã biết chắc. Chỉ dispatch reviewer riêng khi có rủi ro thật (đụng site/API
+  thật, logic phức tạp nhiều nhánh, bảo mật) hoặc khi tự tin không đủ cao.
+- **Gộp task nhỏ cùng dạng vào 1 lượt dispatch** thay vì 1 task = 1 subagent, khi các
+  task trong plan là sửa nhỏ lặp lại cùng kiểu (đã có sẵn trong quy tắc SDD gốc, nhắc lại
+  vì hay bị bỏ qua).
+- **Gộp câu hỏi khi dùng AskUserQuestion**: hỏi tối đa 4 câu trong 1 lần gọi thay vì hỏi
+  từng câu một qua nhiều lượt, khi các câu hỏi độc lập với nhau.
+- **Chọn model review cuối theo rủi ro thực tế của phase**, không mặc định luôn dùng
+  model mạnh nhất: phase có đụng hệ thống ngoài thật/logic nghiệp vụ phức tạp mới cần
+  model mạnh nhất cho review tổng cuối; phase nhỏ/ít rủi ro dùng model tầm trung.
+- **Ledger ghi cô đọng**: chỉ ghi sự kiện/quyết định/số liệu cần cho việc resume, không
+  lặp lại diễn giải đã rõ từ ngữ cảnh trước đó trong cùng ledger.
+- **Ưu tiên nhánh "bounded" của skill `brainstorming`** (chat ngắn + duyệt miệng, không
+  cần file spec/plan riêng) cho phần việc thực sự nhỏ/đã có flow sẵn trong repo, thay vì
+  mặc định luôn đi full architectural (spec doc + plan doc) cho mọi thứ — đúng theo tinh
+  thần gốc của skill đó, không phải ngoại lệ mới.
+
+Việc này CHỈ áp dụng cho bước thừa — không được bỏ qua review/verify bắt buộc vì lý do
+an toàn hay đúng-sai (đặc biệt là kỷ luật snapshot-restore ở mục 7, và 4 điều kiện bắt
+buộc dừng hỏi user ở mục 4).
 
 ## 9. Tham chiếu
 
