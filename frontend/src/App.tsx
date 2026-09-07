@@ -1,8 +1,26 @@
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { AuthProvider } from './auth/AuthContext'
+import { ProtectedRoute } from './auth/ProtectedRoute'
+import { LoginPage } from './pages/LoginPage'
+
 function App() {
   return (
-    <div className="p-6">
-      <h1 className="text-xl font-bold">Pinterval Ops Dashboard</h1>
-    </div>
+    <BrowserRouter basename="/spa">
+      <AuthProvider>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route
+            path="/orders"
+            element={
+              <ProtectedRoute>
+                <div className="p-6">Danh sách đơn (Task 4)</div>
+              </ProtectedRoute>
+            }
+          />
+          <Route path="/" element={<Navigate to="/orders" replace />} />
+        </Routes>
+      </AuthProvider>
+    </BrowserRouter>
   )
 }
 
