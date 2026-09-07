@@ -139,7 +139,25 @@ Google Sheets/Drive) — kể cả trong lúc phát triển/test, không chỉ l
   adapter cùng interface (`typing.Protocol`) với adapter thật, đảm bảo bằng
   contract test.
 
-## 8. Tham chiếu
+## 8. Tiết kiệm quota — cắt bước rườm rà
+
+Điều phối nhiều subagent (SDD) vốn đã tốn token/turn hơn làm trực tiếp. Giữ kỷ luật review/
+safety ở mục 3, 4, 7 — không cắt các bước đó — nhưng cắt mọi round-trip không cần thiết:
+
+- Khi dispatch một reviewer sẽ dùng `ReportFindings`, luôn dặn nó **ghi luôn findings đầy
+  đủ (file/line/summary/failure_scenario/verdict) ra file report**, cùng chỗ với report
+  của implementer. Đọc file đó trực tiếp — không gửi thêm 1 lượt "paste lại findings cho
+  tao" (tốn nguyên 1 turn subagent chỉ để lộ lại dữ liệu đã có sẵn).
+- Gộp các fix liên quan vào ít lượt dispatch nhất có thể theo cụm file, thay vì mỗi
+  finding một lượt dispatch riêng.
+- Mặc định dùng model rẻ nhất còn làm được việc (theo bảng ở mục 3); không tự ý nâng
+  model "cho chắc" khi chưa cần.
+- Không đọc lại / xác minh lại thứ đã có sẵn trong ledger hoặc report của lượt trước
+  trong cùng session — tin vào file đã ghi, không dispatch lại để kiểm tra cho yên tâm.
+- Việc này CHỈ áp dụng cho bước thừa — không được bỏ qua review/verify bắt buộc vì lý do
+  an toàn hay đúng-sai (đặc biệt là kỷ luật snapshot-restore ở mục 7).
+
+## 9. Tham chiếu
 
 - `claude.md` — spec sản phẩm (V1 Web Dashboard Vận Hành): bất biến nghiệp vụ,
   state machine, data model, business tool contract.
