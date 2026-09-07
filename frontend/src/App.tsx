@@ -7,6 +7,7 @@ import { OrderDetailPage } from './pages/OrderDetailPage'
 import { PrintervalLoginPage } from './pages/PrintervalLoginPage'
 import { AllocationBoardPage } from './pages/AllocationBoardPage'
 import { MyTasksPage } from './pages/MyTasksPage'
+import { KanbanPage } from './pages/KanbanPage'
 
 function App() {
   return (
@@ -54,6 +55,7 @@ function App() {
               </ProtectedRoute>
             }
           />
+          <Route path="/kanban" element={<ProtectedRoute><KanbanPage /></ProtectedRoute>} />
           <Route path="/" element={<Navigate to="/orders" replace />} />
         </Routes>
       </AuthProvider>

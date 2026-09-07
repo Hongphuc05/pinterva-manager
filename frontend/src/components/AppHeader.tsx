@@ -23,6 +23,7 @@ export function AppHeader() {
             Phân bổ
           </Link>
         )}
+        {user.role === 'admin' && <Link to="/kanban" className="underline">Kanban</Link>}
         {user.role === 'designer' && (
           <Link to="/my-tasks" className="underline">
             Task của tôi
