@@ -1,11 +1,17 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { apiFetch, ApiError } from '../api/client'
 
-export type User = { id: string; role: 'admin' | 'designer'; full_name: string }
+export type User = {
+  id: string
+  username: string
+  role: 'admin' | 'designer' | string
+  full_name: string
+}
 
 type AuthState = {
   user: User | null
   loading: boolean
+  isAdmin: boolean
   login: (username: string, password: string) => Promise<void>
   logout: () => Promise<void>
 }
@@ -19,23 +25,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     apiFetch<User>('/me')
       .then(setUser)
-      .catch(() => setUser(null))
+      .catch(() => {
+        localStorage.removeItem('token')
+        setUser(null)
+      })
       .finally(() => setLoading(false))
   }, [])
 
   async function login(username: string, password: string) {
-    await apiFetch('/login', { method: 'POST', body: JSON.stringify({ username, password }) })
+    const res = await apiFetch<{
+      access_token?: string
+      user?: User
+      id: string
+      role: string
+    }>('/login', { method: 'POST', body: JSON.stringify({ username, password }) })
+
+    if (res.access_token) {
+      localStorage.setItem('token', res.access_token)
+    }
+
     const me = await apiFetch<User>('/me')
     setUser(me)
   }
 
   async function logout() {
-    await apiFetch('/logout', { method: 'POST' })
-    setUser(null)
+    try {
+      await apiFetch('/logout', { method: 'POST' })
+    } catch {
+      // ignore logout fetch errors
+    } finally {
+      localStorage.removeItem('token')
+      setUser(null)
+    }
   }
 
+  const isAdmin = user?.role === 'admin'
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, loading, isAdmin, login, logout }}>
       {children}
     </AuthContext.Provider>
   )
@@ -48,3 +75,4 @@ export function useAuth(): AuthState {
 }
 
 export { ApiError }
+

@@ -9,6 +9,10 @@ from playwright.sync_api import Page
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from app.adapters.playwright_support import capture_evidence
+from app.adapters.printerval.image_helper import (
+    append_to_crawled_orders_csv,
+    download_and_save_image,
+)
 from app.adapters.printerval.interface import ALL_JOB_TYPES
 from app.adapters.printerval.models import (
     AssetResult,
@@ -158,7 +162,21 @@ def _search_and_get_row(page: Page, external_order_id: str):
     call may have left the page showing.
     """
     page.goto(ADMIN_URL)
-    page.wait_for_load_state("networkidle")
+    page.wait_for_load_state("domcontentloaded")
+    if "login" in page.url.lower() or page.locator("input[name='username']").count() > 0:
+        from app.config import get_settings
+        settings = get_settings()
+        if settings.printerval_username and settings.printerval_password:
+            if page.locator("input[name='username']").count() > 0:
+                page.locator("input[name='username']").fill(settings.printerval_username)
+            if page.locator("input[name='password']").count() > 0:
+                page.locator("input[name='password']").fill(settings.printerval_password)
+            submit_btn = page.locator("button[type='submit'], input[type='submit'], button:has-text('Login'), button:has-text('Đăng nhập')").first
+            if submit_btn.count() > 0:
+                submit_btn.click()
+                page.wait_for_load_state("domcontentloaded")
+            page.goto(ADMIN_URL)
+            page.wait_for_load_state("domcontentloaded")
     page.get_by_placeholder("Search products...").fill(external_order_id)
     status_select = _find_select_by_option_text(page, "All status")
     status_select.select_option(label="All status", force=True)
@@ -247,9 +265,51 @@ def _extract_custom_config(row) -> CustomConfig | None:
     return CustomConfig(original=original, translated_vn=translated)
 
 
+def _extract_row_thumbnail_url(row) -> str | None:
+    sku_item = row.locator(".product-sku-item").first
+    if sku_item.count() > 0:
+        img = sku_item.locator(".sb-design-thumbnail img").first
+        if img.count() > 0:
+            url = img.get_attribute("ng-src") or img.get_attribute("src")
+            if url and not any(ignored in url.lower() for ignored in ["flag", "us-flag", "us.png", "icon", "avatar"]):
+                return url.strip()
+
+    for img in row.locator("img").all():
+        url = img.get_attribute("ng-src") or img.get_attribute("src")
+        if url:
+            url_lower = url.lower()
+            if any(ignored in url_lower for ignored in ["flag", "us-flag", "us.png", "icon", "avatar"]):
+                continue
+            if any(kw in url_lower for kw in ["assets.printerval", "custom-product", "gdn.printerval", "product", "design", "upload"]):
+                return url.strip()
+            if url_lower.startswith("http") or url_lower.startswith("//"):
+                return url.strip()
+
+    return None
+
+
+def _extract_row_has_template(row) -> bool:
+    if row.locator(".label.label-success:has-text('template')").count() > 0:
+        return True
+    if row.locator(":has-text('Đã có template')").count() > 0:
+        return True
+    if row.locator("button[ng-click*='openModalTemplateJob']").count() > 0:
+        return True
+    if row.locator("button:has-text('template')").count() > 0 or row.locator("button:has-text('Template')").count() > 0:
+        return True
+    return False
+
+
 class PlaywrightPrintervalAdapter:
-    def __init__(self, page: Page):
+    def __init__(
+        self,
+        page: Page,
+        crawl_username: str | None = None,
+        crawl_password: str | None = None,
+    ):
         self.page = page
+        self.crawl_username = crawl_username
+        self.crawl_password = crawl_password
 
     def discover_orders(
         self,
@@ -257,10 +317,29 @@ class PlaywrightPrintervalAdapter:
         job_type: str = ALL_JOB_TYPES,
         limit: int = 40,
         cursor: str | None = None,
+        platform_id: str | None = None,
     ) -> DiscoverResult:
         page = self.page
         page.goto(ADMIN_URL)
-        page.wait_for_load_state("networkidle")
+        page.wait_for_load_state("domcontentloaded")
+        if "login" in page.url.lower() or page.locator("input[name='username']").count() > 0 or page.locator("input[name='email']").count() > 0:
+            from app.config import get_settings
+            settings = get_settings()
+            user = self.crawl_username or settings.printerval_username
+            pwd = self.crawl_password or settings.printerval_password
+            if user and pwd:
+                user_input = page.locator("input[name='username'], input[name='email'], input[type='email']").first
+                if user_input.count() > 0:
+                    user_input.fill(user)
+                pass_input = page.locator("input[name='password'], input[type='password']").first
+                if pass_input.count() > 0:
+                    pass_input.fill(pwd)
+                submit_btn = page.locator("button[type='submit'], input[type='submit'], button:has-text('Login'), button:has-text('Đăng nhập')").first
+                if submit_btn.count() > 0:
+                    submit_btn.click()
+                    page.wait_for_load_state("domcontentloaded")
+                page.goto(ADMIN_URL)
+                page.wait_for_load_state("domcontentloaded")
         try:
             status_select = _find_select_by_option_text(page, status)
             status_select.select_option(label=status, force=True)
@@ -280,7 +359,10 @@ class PlaywrightPrintervalAdapter:
         orders: list[OrderSummary] = []
         for row in rows[:limit]:
             text = row.inner_text()
-            order_id = next((tok for tok in text.split() if tok.startswith("DJ")), None)
+            order_id = next(
+                (tok for tok in text.split() if tok.startswith("DJ") or (tok.isdigit() and len(tok) >= 6)),
+                None,
+            )
             if order_id is None:
                 continue
             selects = row.locator("select")
@@ -288,36 +370,44 @@ class PlaywrightPrintervalAdapter:
             status_value = _selected_option_text(selects.nth(1)) if selects.count() >= 2 else status
             headings = row.locator("h5")
             product_name = headings.first.inner_text().strip() if headings.count() > 0 else ""
+
+            raw_img_url = _extract_row_thumbnail_url(row)
+            has_template = _extract_row_has_template(row)
+
+            local_path = (
+                download_and_save_image(order_id, raw_img_url, platform_id=platform_id)
+                if raw_img_url
+                else None
+            )
+            final_thumbnail = local_path or raw_img_url
+
+            append_to_crawled_orders_csv(
+                external_order_id=order_id,
+                product_name=product_name,
+                status=status_value,
+                thumbnail_url=raw_img_url,
+                local_image_path=local_path,
+                platform_id=platform_id,
+            )
+
             orders.append(
                 OrderSummary(
                     external_order_id=order_id,
                     product_name=product_name,
                     designer=designer_value,
                     status=status_value,
+                    has_template=has_template,
+                    thumbnail_url=final_thumbnail,
                 )
             )
         return DiscoverResult(success=True, orders=orders, cursor=None)
 
     def _extract_order_detail_from_row(self, row, external_order_id: str) -> OrderDetailResult:
-        """Extract every OrderDetailResult field from an already-located row.
-
-        Split out from get_order_detail so this pure extraction can be exercised
-        offline against a static HTML fixture (page.set_content(), no live site/
-        Cloudflare needed) — see tests/test_playwright_adapter_extraction.py. Every
-        read here must be non-raising per claude.md §8 / spec §4: an absent or
-        multiple-matching field yields None/False/"" for that field, never a
-        Playwright TimeoutError or strict-mode violation escaping this method. The
-        caller (get_order_detail) additionally wraps the call in try/except as a
-        backstop in case a future field read is added without following this rule.
-        """
+        """Extract every OrderDetailResult field from an already-located row."""
         selects = row.locator("select")
         designer = _selected_option_text(selects.nth(0)) if selects.count() >= 1 else None
         status = _selected_option_text(selects.nth(1)) if selects.count() >= 2 else None
         note_group = _note_outsource_group(row)
-        # Read the textarea's real ng-model value directly (works even
-        # while hidden) rather than the displayed `.pre-note` text, which
-        # shows a misleading "Double click here to note!" placeholder when
-        # the underlying value is genuinely empty.
         note_outsource = (
             note_group.locator("textarea").input_value() if note_group.count() > 0 else ""
         )
@@ -331,14 +421,8 @@ class PlaywrightPrintervalAdapter:
         product_category = None
         product_variants: list[ProductVariant] = []
         if sku_item.count() > 0:
-            # Spec §3: "img trong .sb-design-thumbnail" — not just any <img> under
-            # .product-sku-item (that would be a different, non-thumbnail image).
-            img = sku_item.locator(".sb-design-thumbnail img").first
-            if img.count() > 0:
-                thumbnail_url = img.get_attribute("src")
             sku_span = sku_item.locator("[ng-bind='productSku.product_sku']")
             if sku_span.count() > 0:
-                # Spec §3: take the first SKU if more than one is present.
                 sku = sku_span.first.inner_text().strip()
             for line in sku_item.inner_text().splitlines():
                 line = line.strip()
@@ -351,10 +435,12 @@ class PlaywrightPrintervalAdapter:
                     name, _, value = line.partition(" : ")
                     product_variants.append(ProductVariant(name=name.strip(), value=value.strip()))
 
-        # `:has-text('template')` narrows to the actual "has template" badge —
-        # `.label.label-success` alone would false-positive on any other success
-        # badge in the row.
-        has_template = row.locator(".label.label-success:has-text('template')").count() > 0
+        raw_url = _extract_row_thumbnail_url(row)
+        if raw_url:
+            local_path = download_and_save_image(external_order_id, raw_url)
+            thumbnail_url = local_path or raw_url
+
+        has_template = _extract_row_has_template(row)
 
         multiple_design_checkbox = row.locator("#multiple-design")
         multiple_design = (
@@ -365,11 +451,6 @@ class PlaywrightPrintervalAdapter:
             double_sided_checkbox.is_checked() if double_sided_checkbox.count() > 0 else False
         )
 
-        # Live DOM: <div class="mt-2" ...><strong>Độ ưu tiên: </strong>
-        # <span class="label" ng-class="...">Ưu tiên</span></div>. Scoping by the
-        # `.mt-2` container (not `:has-text`/`div:has(...)`) avoids the C2 bug of
-        # substring/ancestor matching, and doesn't require a specific label-* class
-        # to be present (spec: any class on that span).
         priority_container = row.locator("div.mt-2")
         priority_span = priority_container.locator("span.label")
         priority_label = (
@@ -392,6 +473,10 @@ class PlaywrightPrintervalAdapter:
             design_tool_link.first.get_attribute("href") if design_tool_link.count() > 0 else None
         )
 
+        template_jobs = None
+        if has_template:
+            template_jobs = self._extract_template_jobs_from_modal(row)
+
         return OrderDetailResult(
             success=True,
             external_order_id=external_order_id,
@@ -411,12 +496,67 @@ class PlaywrightPrintervalAdapter:
             product_category=product_category,
             product_variants=product_variants,
             has_template=has_template,
+            template_jobs=template_jobs,
             multiple_design=multiple_design,
             double_sided=double_sided,
             priority_label=priority_label,
             custom_config=_extract_custom_config(row),
             design_tool_url=design_tool_url,
         )
+
+    def _extract_template_jobs_from_modal(self, row) -> list[dict] | None:
+        btn = row.locator("button[ng-click*='openModalTemplateJob'], button:has-text('Xem template'), button:has-text('template'), button:has-text('Template')").first
+        if btn.count() == 0:
+            return None
+        try:
+            btn.click()
+            page = self.page
+            modal = page.locator(".modal-dialog, .modal-content").first
+            modal.wait_for(state="visible", timeout=3000)
+
+            provider_name = None
+            note = None
+            psd_files: list[dict] = []
+
+            modal_text = modal.inner_text()
+            for line in modal_text.splitlines():
+                line = line.strip()
+                if "Nhà in:" in line or "Nhà in :" in line:
+                    provider_name = line.partition(":")[2].strip()
+                elif "Note:" in line or "Note :" in line:
+                    if not note:
+                        note = line.partition(":")[2].strip()
+
+            for link in modal.locator("a[href]").all():
+                href = link.get_attribute("href")
+                if href and ("drive.google.com" in href or "dropbox" in href or "http" in href):
+                    psd_files.append({"url": href.strip()})
+
+            for img in modal.locator("img").all():
+                src = img.get_attribute("src") or img.get_attribute("ng-src")
+                if src and not any(k in src.lower() for k in ["flag", "icon", "avatar"]):
+                    if psd_files:
+                        psd_files[0]["image_url"] = src.strip()
+                    else:
+                        psd_files.append({"image_url": src.strip()})
+                    break
+
+            close_btn = modal.locator("button:has-text('Đóng'), button:has-text('Close'), .close").first
+            if close_btn.count() > 0:
+                close_btn.click()
+            else:
+                page.keyboard.press("Escape")
+
+            if provider_name or note or psd_files:
+                return [{
+                    "provider_name": provider_name or "C-EZ",
+                    "note": note or "",
+                    "psd_file": psd_files if psd_files else []
+                }]
+        except Exception:
+            pass
+        return None
+
 
     def get_order_detail(self, external_order_id: str) -> OrderDetailResult:
         page = self.page

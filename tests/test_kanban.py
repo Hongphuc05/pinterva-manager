@@ -22,10 +22,16 @@ def client(db_session):
 
 
 def _login(client, db_session, role, username):
-    user = User(username=username, full_name=username, role=role, password_hash=hash_password("x"))
-    db_session.add(user)
+    user = db_session.query(User).filter_by(username=username).one_or_none()
+    if user is None:
+        user = User(username=username, full_name=username, role=role, password_hash=hash_password("x"))
+        db_session.add(user)
+    else:
+        user.password_hash = hash_password("x")
+        user.role = role
     db_session.commit()
-    client.post("/api/login", json={"username": username, "password": "x"})
+    resp = client.post("/api/login", json={"username": username, "password": "x"})
+    assert resp.status_code == 200
     return user
 
 

@@ -42,6 +42,7 @@ class PrintervalAdapter(Protocol):
         job_type: str = ALL_JOB_TYPES,
         limit: int = 40,
         cursor: str | None = None,
+        platform_id: str | None = None,
     ) -> DiscoverResult: ...
 
     def get_order_detail(self, external_order_id: str) -> OrderDetailResult: ...

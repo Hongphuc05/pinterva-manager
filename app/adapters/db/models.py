@@ -10,6 +10,19 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.adapters.db.base import Base
 
 
+class Platform(Base):
+    __tablename__ = "platforms"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    account_username: Mapped[str] = mapped_column(String(128), nullable=False)
+    account_password: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, server_default=text("true"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class User(Base):
     __tablename__ = "users"
     __table_args__ = (CheckConstraint("role IN ('admin', 'designer')", name="ck_users_role"),)
@@ -21,6 +34,7 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     active: Mapped[bool] = mapped_column(default=True, nullable=False)
     capacity: Mapped[int | None] = mapped_column(nullable=True)
+    platform_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("platforms.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -34,6 +48,7 @@ class Batch(Base):
     owner: Mapped[str] = mapped_column(String(64), nullable=False, default="ntth")
     count: Mapped[int] = mapped_column(nullable=False, default=0)
     lifecycle_state: Mapped[str] = mapped_column(String(32), nullable=False, default="open")
+    platform_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("platforms.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -45,6 +60,7 @@ class Order(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     external_order_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     batch_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("batches.id"), nullable=True)
+    platform_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("platforms.id"), nullable=True)
     state: Mapped[str] = mapped_column(String(32), nullable=False, default="DISCOVERED")
     version: Mapped[int] = mapped_column(nullable=False, default=1)
     external_observation: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
@@ -85,6 +101,7 @@ class Order(Base):
         Text, nullable=False, default="", server_default=text("''")
     )
     custom_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    template_jobs: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     design_tool_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

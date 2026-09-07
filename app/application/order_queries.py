@@ -13,6 +13,7 @@ def list_orders_for_user(
     status: str | None = None,
     batch_id: str | None = None,
     designer_id: str | None = None,
+    platform_id: uuid.UUID | None = None,
 ) -> list[Order]:
     """Admin: all orders, optionally filtered. Designer: forced to only their own
     assigned orders (any designer_id param is ignored, never trusted for a designer's
@@ -23,18 +24,25 @@ def list_orders_for_user(
     # assignments must never grant visibility after a replacement is issued.
     query = session.query(Order)
 
+    if platform_id:
+        query = query.filter((Order.platform_id == platform_id) | (Order.platform_id.is_(None)))
+
     if user.role == "designer":
         query = query.join(Assignment, Assignment.order_id == Order.id).filter(
             Assignment.designer_id == user.id, Assignment.status == "approved"
         )
     elif designer_id:
-        try:
-            designer_uuid = uuid.UUID(designer_id)
-        except ValueError:
-            return []
-        query = query.join(Assignment, Assignment.order_id == Order.id).filter(
-            Assignment.designer_id == designer_uuid, Assignment.status == "approved"
-        )
+        if designer_id == "unassigned":
+            subq = session.query(Assignment.order_id).filter(Assignment.status == "approved")
+            query = query.filter(Order.id.not_in(subq))
+        else:
+            try:
+                designer_uuid = uuid.UUID(designer_id)
+            except ValueError:
+                return []
+            query = query.join(Assignment, Assignment.order_id == Order.id).filter(
+                Assignment.designer_id == designer_uuid, Assignment.status == "approved"
+            )
 
     if status:
         query = query.filter(Order.state == status)

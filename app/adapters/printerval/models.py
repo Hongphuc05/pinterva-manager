@@ -13,6 +13,8 @@ class OrderSummary(BaseModel):
     thumbnail_url: str | None = None
     designer: str | None = None
     status: str
+    has_template: bool = False
+    template_jobs: list[dict] | None = None
 
 
 class DiscoverResult(AdapterResult):
@@ -55,6 +57,7 @@ class OrderDetailResult(AdapterResult):
     double_sided: bool = False
     priority_label: str | None = None
     custom_config: CustomConfig | None = None
+    template_jobs: list[dict] | None = None
     design_tool_url: str | None = None
 
 

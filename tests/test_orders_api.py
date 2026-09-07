@@ -100,3 +100,23 @@ def test_api_printerval_login_status_defaults_closed(client, db_session):
     resp = client.get("/api/printerval-login/status")
     assert resp.status_code == 200
     assert resp.json() == {"session_open": False}
+
+
+def test_api_bulk_assign_orders(client, db_session):
+    admin = _login(client, db_session, "admin", "bulk_admin")
+    designer = User(
+        username="des1", full_name="Linh Designer", role="designer", password_hash="hash"
+    )
+    order1 = Order(external_order_id="B1", state=OrderState.DISCOVERED.value)
+    order2 = Order(external_order_id="B2", state=OrderState.DISCOVERED.value)
+    db_session.add_all([designer, order1, order2])
+    db_session.commit()
+
+    resp = client.post(
+        "/api/orders/bulk-assign",
+        json={"order_ids": [str(order1.id), str(order2.id)], "designer_id": str(designer.id)},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    assert resp.json()["assigned_count"] == 2
+

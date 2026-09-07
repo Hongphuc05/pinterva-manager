@@ -27,25 +27,19 @@ class DiscoverFailedError(Exception):
         self.error_class = error_class
 
 
-def discover_waiting_orders(
+def discover_waiting_orders_with_summaries(
     session: Session,
     adapter: PrintervalAdapter,
     limit: int = 40,
     job_type: str = ALL_JOB_TYPES,
-) -> list[str]:
-    """Return external_order_ids from the adapter's Waiting queue that don't already
-    have an `Order` row — safe to call repeatedly. Defaults to every job type (claude.md
-    §16, changed 2026-09-07 — job type is a customer-facing label, not a processing
-    constraint); pass a specific type (e.g. "2D") to narrow it.
-
-    Raises DiscoverFailedError (after dead-lettering) on an exhausted-retry adapter
-    failure — never silently returns an empty list for that case, so a prolonged
-    failure (login/session expired, site markup/filter text changed) can never look
-    identical to "nothing new right now" to a caller.
-    """
-    result = with_retry(
-        lambda: adapter.discover_orders(status="Waiting", job_type=job_type, limit=limit)
-    )
+    platform_id: uuid.UUID | None = None,
+) -> tuple[list[str], list[OrderSummary]]:
+    """Return new external_order_ids + OrderSummary objects from adapter's Waiting queue."""
+    platform_str = str(platform_id) if platform_id else None
+    kwargs = {"status": "Waiting", "job_type": job_type, "limit": limit}
+    if platform_str:
+        kwargs["platform_id"] = platform_str
+    result = with_retry(lambda: adapter.discover_orders(**kwargs))
     if not result.success:
         session.add(
             DeadLetter(
@@ -58,14 +52,68 @@ def discover_waiting_orders(
         raise DiscoverFailedError(result.error_class or "BUG")
     discovered_ids = [o.external_order_id for o in result.orders]
     if not discovered_ids:
-        return []
-    existing_ids = {
-        row[0]
-        for row in session.query(Order.external_order_id)
-        .filter(Order.external_order_id.in_(discovered_ids))
-        .all()
-    }
-    return [oid for oid in discovered_ids if oid not in existing_ids]
+        return [], []
+
+    candidate_ids = set(discovered_ids)
+    for oid in list(candidate_ids):
+        if oid.startswith("DJ"):
+            candidate_ids.add(oid[2:])
+        else:
+            candidate_ids.add(f"DJ{oid}")
+
+    query = session.query(Order).filter(Order.external_order_id.in_(list(candidate_ids)))
+    if platform_id:
+        query = query.filter(Order.platform_id == platform_id)
+    existing_orders = query.all()
+    existing_map = {o.external_order_id: o for o in existing_orders}
+
+    summary_map = {}
+    for s in result.orders:
+        summary_map[s.external_order_id] = s
+        if s.external_order_id.startswith("DJ"):
+            summary_map[s.external_order_id[2:]] = s
+        else:
+            summary_map[f"DJ{s.external_order_id}"] = s
+
+    for oid, existing_order in existing_map.items():
+        summary = summary_map.get(oid)
+        if summary:
+            if not existing_order.thumbnail_url and summary.thumbnail_url:
+                existing_order.thumbnail_url = summary.thumbnail_url
+            if not existing_order.product_name and summary.product_name:
+                existing_order.product_name = summary.product_name
+            if summary.template_jobs:
+                existing_order.template_jobs = summary.template_jobs
+                existing_order.has_template = True
+            elif summary.has_template:
+                existing_order.has_template = True
+
+    new_ids = [oid for oid in discovered_ids if oid not in existing_map and f"DJ{oid}" not in existing_map and (oid[2:] if oid.startswith("DJ") else oid) not in existing_map]
+    new_summaries = [o for o in result.orders if o.external_order_id in new_ids]
+    return new_ids, new_summaries
+
+
+def discover_waiting_orders(
+    session: Session,
+    adapter: PrintervalAdapter,
+    limit: int = 40,
+    job_type: str = ALL_JOB_TYPES,
+    platform_id: uuid.UUID | None = None,
+) -> list[str]:
+    """Return external_order_ids from the adapter's Waiting queue that don't already
+    have an `Order` row — safe to call repeatedly. Defaults to every job type (claude.md
+    §16, changed 2026-09-07 — job type is a customer-facing label, not a processing
+    constraint); pass a specific type (e.g. "2D") to narrow it.
+
+    Raises DiscoverFailedError (after dead-lettering) on an exhausted-retry adapter
+    failure — never silently returns an empty list for that case, so a prolonged
+    failure (login/session expired, site markup/filter text changed) can never look
+    identical to "nothing new right now" to a caller.
+    """
+    new_ids, _ = discover_waiting_orders_with_summaries(
+        session, adapter, limit=limit, job_type=job_type, platform_id=platform_id
+    )
+    return new_ids
 
 
 def claim_batch(
@@ -73,6 +121,8 @@ def claim_batch(
     adapter: PrintervalAdapter,
     order_ids: list[str],
     owner: str = NTTH_DESIGNER_OPTION,
+    order_summaries: list[OrderSummary] | None = None,
+    platform_id: uuid.UUID | None = None,
 ) -> dict:
     """Create a Batch + Order rows for order_ids (skipping any that already have an
     Order row — defensive re-entrancy if a prior crash happened between discover and
@@ -87,9 +137,10 @@ def claim_batch(
     # order_ids set, preserving the idempotency guarantee.
     ids_key = hashlib.sha256(",".join(sorted(order_ids)).encode("utf-8")).hexdigest()
     idempotency_key = f"claim_batch:{ids_key}"
+    summaries_map = {s.external_order_id: s for s in (order_summaries or [])}
 
     def _do() -> dict:
-        batch = Batch(source="printerval_crawl", owner=owner, count=len(order_ids))
+        batch = Batch(source="printerval_crawl", owner=owner, count=len(order_ids), platform_id=platform_id)
         session.add(batch)
         session.flush()  # populate batch.id before it's referenced below
 
@@ -100,10 +151,16 @@ def claim_batch(
                 session.query(Order).filter_by(external_order_id=order_id).one_or_none()
             )
             if order is None:
+                summary = summaries_map.get(order_id)
                 order = Order(
                     external_order_id=order_id,
                     batch_id=batch.id,
+                    platform_id=platform_id,
                     state=OrderState.DISCOVERED.value,
+                    product_name=summary.product_name if summary else None,
+                    thumbnail_url=summary.thumbnail_url if summary else None,
+                    template_jobs=summary.template_jobs if summary else None,
+                    has_template=summary.has_template if summary else False,
                 )
                 session.add(order)
                 session.flush()
@@ -210,6 +267,8 @@ def import_claimed_orders(session: Session, adapter: PrintervalAdapter) -> dict:
             order.product_category = detail_result.product_category
             order.product_variants = [v.model_dump() for v in detail_result.product_variants]
             order.has_template = detail_result.has_template
+            if detail_result.template_jobs:
+                order.template_jobs = detail_result.template_jobs
             order.multiple_design = detail_result.multiple_design
             order.double_sided = detail_result.double_sided
             order.priority_label = detail_result.priority_label

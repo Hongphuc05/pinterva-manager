@@ -2,35 +2,173 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiFetch, ApiError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { DashboardLayout } from '../components/DashboardLayout'
+import { ImageModal } from '../components/ImageModal'
+import { TemplateModal, type TemplateJob } from '../components/TemplateModal'
+import { getStatusInfo, STATE_MAP } from '../utils/statusTranslation'
+import { 
+  Package, 
+  Search, 
+  Filter, 
+  RotateCcw, 
+  Clock, 
+  CheckCircle2, 
+  Layers,
+  ChevronRight,
+  User,
+  FileText,
+  UserPlus,
+  X,
+  Loader2
+} from 'lucide-react'
 
 type OrderSummary = {
   id: string
   external_order_id: string
   state: string
   batch_id: string | null
+  product_name: string | null
   sku: string | null
   thumbnail_url: string | null
+  assigned_designer_name: string | null
+  template_jobs: TemplateJob[] | null
   deadline_at_ext: string | null
   created_at: string
 }
 
+type UserOption = {
+  id: string
+  username: string
+  full_name: string
+  role: string
+}
+
 export function OrdersListPage() {
   const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
   const [orders, setOrders] = useState<OrderSummary[]>([])
   const [statusOptions, setStatusOptions] = useState<string[]>([])
   const [statusFilter, setStatusFilter] = useState('')
+  const [designerFilter, setDesignerFilter] = useState('')
+  const [hasTemplateFilter, setHasTemplateFilter] = useState('')
   const [batchFilter, setBatchFilter] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
   const [flash, setFlash] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [refreshing, setRefreshing] = useState(false)
+
+  // Highlight state for newly crawled jobs
+  const [newlyCrawledOrderIds, setNewlyCrawledOrderIds] = useState<string[]>([])
+
+  // Modals state
+  const [selectedImage, setSelectedImage] = useState<string | null>(null)
+  const [activeTemplateJobs, setActiveTemplateJobs] = useState<{ jobs: TemplateJob[]; orderId: string } | null>(null)
+
+  // Assignment Modal state
+  const [assigningOrder, setAssigningOrder] = useState<OrderSummary | null>(null)
+  const [usersList, setUsersList] = useState<UserOption[]>([])
+  const [selectedUserId, setSelectedUserId] = useState('')
+  const [assigning, setAssigning] = useState(false)
+
+  // Bulk Selection State
+  const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([])
+  const [bulkDesignerId, setBulkDesignerId] = useState<string>('')
+  const [bulkAssigning, setBulkAssigning] = useState<boolean>(false)
+
+  useEffect(() => {
+    if (isAdmin) {
+      apiFetch<UserOption[]>('/users').then(setUsersList).catch(() => {})
+    }
+  }, [isAdmin])
+
+  function dismissHighlight(orderId: string) {
+    setNewlyCrawledOrderIds((prev) => prev.filter((id) => id !== orderId))
+  }
+
+  function handleSelectAll(checked: boolean) {
+    if (checked) {
+      setSelectedOrderIds(filteredOrders.map((o) => o.id))
+    } else {
+      setSelectedOrderIds([])
+    }
+  }
+
+  function handleToggleSelect(orderId: string) {
+    dismissHighlight(orderId)
+    setSelectedOrderIds((prev) =>
+      prev.includes(orderId) ? prev.filter((id) => id !== orderId) : [...prev, orderId]
+    )
+  }
+
+  async function handleBulkAssign() {
+    if (!bulkDesignerId || selectedOrderIds.length === 0) return
+    setBulkAssigning(true)
+    try {
+      const res = await apiFetch<{ ok: boolean; message: string }>('/orders/bulk-assign', {
+        method: 'POST',
+        body: JSON.stringify({
+          order_ids: selectedOrderIds,
+          designer_id: bulkDesignerId,
+        }),
+      })
+      setFlash(res.message)
+      selectedOrderIds.forEach(dismissHighlight)
+      setSelectedOrderIds([])
+      setBulkDesignerId('')
+      loadOrders()
+    } catch (err) {
+      if (err instanceof ApiError) {
+        alert(`Lỗi phân công hàng loạt: ${err.message}`)
+      }
+    } finally {
+      setBulkAssigning(false)
+    }
+  }
+
+  async function handleAssignOrder(e: React.FormEvent) {
+    e.preventDefault()
+    if (!assigningOrder || !selectedUserId) return
+    setAssigning(true)
+    try {
+      await apiFetch(`/orders/${assigningOrder.id}/assign`, {
+        method: 'POST',
+        body: JSON.stringify({ designer_id: selectedUserId }),
+      })
+      dismissHighlight(assigningOrder.id)
+      setAssigningOrder(null)
+      loadOrders()
+    } catch (err) {
+      if (err instanceof ApiError) {
+        alert(`Lỗi phân công: ${err.message}`)
+      }
+    } finally {
+      setAssigning(false)
+    }
+  }
 
   async function loadOrders() {
     const params = new URLSearchParams()
     if (statusFilter) params.set('status', statusFilter)
     if (batchFilter) params.set('batch_id', batchFilter)
+    if (designerFilter && designerFilter !== 'unassigned') params.set('designer_id', designerFilter)
+    if (designerFilter === 'unassigned') params.set('designer_id', 'unassigned')
     const qs = params.toString()
     const data = await apiFetch<{ orders: OrderSummary[] }>(`/orders${qs ? `?${qs}` : ''}`)
-    setOrders(data.orders)
+    
+    // Detect newly arrived orders
+    setOrders((prevOrders) => {
+      if (prevOrders.length > 0) {
+        const existingIds = new Set(prevOrders.map((o) => o.id))
+        const newIds = data.orders.filter((o) => !existingIds.has(o.id)).map((o) => o.id)
+        if (newIds.length > 0) {
+          setNewlyCrawledOrderIds((prev) => Array.from(new Set([...prev, ...newIds])))
+          // Auto-remove highlights after 3 minutes (180,000ms)
+          setTimeout(() => {
+            setNewlyCrawledOrderIds((prev) => prev.filter((id) => !newIds.includes(id)))
+          }, 180000)
+        }
+      }
+      return data.orders
+    })
   }
 
   useEffect(() => {
@@ -43,98 +181,514 @@ export function OrdersListPage() {
     loadOrders().catch((e) => {
       setError(e instanceof ApiError ? e.message : 'Không tải được danh sách đơn.')
     })
-  }, [statusFilter, batchFilter])
+  }, [statusFilter, batchFilter, designerFilter])
 
-  async function handleRefresh() {
-    setRefreshing(true)
-    setError(null)
-    try {
-      const result = await apiFetch<{ flash: string }>('/orders/refresh', { method: 'POST' })
-      setFlash(result.flash)
-      await loadOrders()
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Refresh thất bại.')
-    } finally {
-      setRefreshing(false)
+  // Filter client-side search & template filters
+  const filteredOrders = orders.filter((o) => {
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase()
+      const matches =
+        o.external_order_id.toLowerCase().includes(q) ||
+        (o.product_name && o.product_name.toLowerCase().includes(q)) ||
+        (o.assigned_designer_name && o.assigned_designer_name.toLowerCase().includes(q))
+      if (!matches) return false
     }
-  }
+
+    if (designerFilter) {
+      if (designerFilter === 'unassigned') {
+        if (o.assigned_designer_name) return false
+      } else {
+        const desUser = usersList.find((u) => u.id === designerFilter)
+        if (desUser) {
+          const name = desUser.full_name || desUser.username
+          if (o.assigned_designer_name !== name) return false
+        }
+      }
+    }
+
+    if (hasTemplateFilter) {
+      const hasT = o.template_jobs && o.template_jobs.length > 0
+      if (hasTemplateFilter === 'yes' && !hasT) return false
+      if (hasTemplateFilter === 'no' && hasT) return false
+    }
+
+    return true
+  })
+
+  // Calculate Metrics
+  const totalCount = orders.length
+  const openCount = orders.filter(o => o.state === 'OPEN_FOR_ALLOCATION' || o.state === 'DISCOVERED').length
+  const inProgressCount = orders.filter(o => o.state === 'IN_PROGRESS' || o.state === 'ASSIGNED').length
+  const doneCount = orders.filter(o => o.state === 'DONE' || o.state === 'CLAIMED_IMPORTED').length
 
   return (
-    <div className="p-6">
-      <h1 className="text-xl font-bold mb-4">Đơn hàng</h1>
-      {flash && <p className="mb-4 font-semibold">{flash}</p>}
-      {error && <p className="mb-4 text-red-600">{error}</p>}
-      {user?.role === 'admin' && (
-        <div className="mb-4 space-x-4">
-          <button
-            className="bg-blue-600 text-white px-3 py-1 disabled:opacity-50"
-            onClick={handleRefresh}
-            disabled={refreshing}
-          >
-            {refreshing ? 'Đang crawl...' : 'Refresh'}
-          </button>
-          <Link className="underline" to="/printerval-login">
-            Đăng nhập Printerval
-          </Link>
+    <DashboardLayout>
+      {/* Image Zoom Modal */}
+      <ImageModal
+        isOpen={!!selectedImage}
+        onClose={() => setSelectedImage(null)}
+        imageUrl={selectedImage}
+      />
+
+      {/* Template Details Modal */}
+      <TemplateModal
+        isOpen={!!activeTemplateJobs}
+        onClose={() => setActiveTemplateJobs(null)}
+        templateJobs={activeTemplateJobs?.jobs}
+        orderId={activeTemplateJobs?.orderId}
+      />
+
+      {/* Flash / Error Banner */}
+      {flash && (
+        <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-medium flex items-center justify-between shadow-xs">
+          <span>{flash}</span>
+          <button onClick={() => setFlash(null)} className="text-emerald-600 hover:text-emerald-900 text-xs font-bold cursor-pointer">X</button>
         </div>
       )}
-      <div className="mb-4 space-x-4">
-        <select
-          className="border p-1"
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-        >
-          <option value="">Tất cả</option>
-          {statusOptions.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
-        {user?.role === 'admin' && (
-          <input
-            className="border p-1"
-            placeholder="Batch ID"
-            value={batchFilter}
-            onChange={(e) => setBatchFilter(e.target.value)}
-          />
-        )}
+      {error && (
+        <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-800 text-sm font-medium flex items-center justify-between shadow-xs">
+          <span>{error}</span>
+          <button onClick={() => setError(null)} className="text-red-600 hover:text-red-900 text-xs font-bold cursor-pointer">X</button>
+        </div>
+      )}
+
+      {/* KPI Summary Cards Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="rounded-xl border border-[hsl(var(--border))] bg-white p-5 shadow-xs flex items-center justify-between">
+          <div>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Tổng Đơn Hàng</p>
+            <h3 className="text-2xl font-bold font-mono text-slate-800 mt-1">{totalCount}</h3>
+          </div>
+          <div className="p-3 bg-blue-50 text-blue-600 rounded-xl">
+            <Package className="h-6 w-6" />
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-[hsl(var(--border))] bg-white p-5 shadow-xs flex items-center justify-between">
+          <div>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Mới / Chờ Phân Bổ</p>
+            <h3 className="text-2xl font-bold font-mono text-amber-600 mt-1">{openCount}</h3>
+          </div>
+          <div className="p-3 bg-amber-50 text-amber-600 rounded-xl">
+            <Clock className="h-6 w-6" />
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-[hsl(var(--border))] bg-white p-5 shadow-xs flex items-center justify-between">
+          <div>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Đang Thực Hiện</p>
+            <h3 className="text-2xl font-bold font-mono text-blue-600 mt-1">{inProgressCount}</h3>
+          </div>
+          <div className="p-3 bg-blue-50 text-blue-600 rounded-xl">
+            <Layers className="h-6 w-6" />
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-[hsl(var(--border))] bg-white p-5 shadow-xs flex items-center justify-between">
+          <div>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Đã Hoàn Thành / Claim</p>
+            <h3 className="text-2xl font-bold font-mono text-emerald-600 mt-1">{doneCount}</h3>
+          </div>
+          <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl">
+            <CheckCircle2 className="h-6 w-6" />
+          </div>
+        </div>
       </div>
-      <table className="w-full border-collapse">
-        <thead>
-          <tr className="text-left border-b">
-            <th>Ảnh</th>
-            <th>Mã đơn</th>
-            <th>SKU</th>
-            <th>Trạng thái</th>
-            <th>Batch</th>
-            <th>Deadline</th>
-            <th>Ngày tạo</th>
-          </tr>
-        </thead>
-        <tbody>
-          {orders.length === 0 && (
-            <tr>
-              <td colSpan={7}>Không có đơn nào.</td>
-            </tr>
-          )}
-          {orders.map((o) => (
-            <tr key={o.id} className="border-b">
-              <td>{o.thumbnail_url && <img src={o.thumbnail_url} alt="" className="h-10" />}</td>
-              <td>
-                <Link className="underline" to={`/orders/${o.id}`}>
-                  {o.external_order_id}
-                </Link>
-              </td>
-              <td>{o.sku ?? '-'}</td>
-              <td>{o.state}</td>
-              <td>{o.batch_id ?? '-'}</td>
-              <td>{o.deadline_at_ext ?? '-'}</td>
-              <td>{o.created_at}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+
+      {/* Filter Bar & Search */}
+      <div className="rounded-xl border border-[hsl(var(--border))] bg-white p-4 shadow-xs space-y-3">
+        <div className="flex flex-col md:flex-row items-center justify-between gap-4 flex-wrap">
+          {/* Search Box */}
+          <div className="relative w-full md:w-72">
+            <Search className="h-4 w-4 absolute left-3.5 top-3 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Tìm theo Mã Đơn, Tên SP, DES..."
+              className="w-full pl-10 pr-4 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0052CC] bg-slate-50"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+
+          {/* Filters */}
+          <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
+            <div className="flex items-center gap-1.5">
+              <Filter className="h-3.5 w-3.5 text-slate-400" />
+              <select
+                className="text-xs border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 font-medium focus:outline-none focus:border-[#0052CC]"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+              >
+                <option value="">Tất cả Trạng Thái</option>
+                {statusOptions.map((s) => (
+                  <option key={s} value={s}>
+                    {STATE_MAP[s] ? STATE_MAP[s].label : s}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Filter by Designer */}
+            <select
+              className="text-xs border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 font-medium focus:outline-none focus:border-[#0052CC]"
+              value={designerFilter}
+              onChange={(e) => setDesignerFilter(e.target.value)}
+            >
+              <option value="">Tất cả DES</option>
+              <option value="unassigned">Chưa phân công</option>
+              {usersList.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.full_name || u.username} ({u.role})
+                </option>
+              ))}
+            </select>
+
+            {/* Filter by Template */}
+            <select
+              className="text-xs border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 font-medium focus:outline-none focus:border-[#0052CC]"
+              value={hasTemplateFilter}
+              onChange={(e) => setHasTemplateFilter(e.target.value)}
+            >
+              <option value="">Tất cả Template</option>
+              <option value="yes">Có Template</option>
+              <option value="no">Chưa có Template</option>
+            </select>
+
+            {user?.role === 'admin' && (
+              <input
+                className="text-xs border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 font-medium focus:outline-none focus:border-[#0052CC] w-28"
+                placeholder="Batch ID..."
+                value={batchFilter}
+                onChange={(e) => setBatchFilter(e.target.value)}
+              />
+            )}
+
+            {(statusFilter || designerFilter || hasTemplateFilter || batchFilter || searchQuery) && (
+              <button
+                onClick={() => {
+                  setStatusFilter('')
+                  setDesignerFilter('')
+                  setHasTemplateFilter('')
+                  setBatchFilter('')
+                  setSearchQuery('')
+                }}
+                className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-800 font-semibold px-2.5 py-1.5 rounded-lg hover:bg-slate-100 cursor-pointer"
+              >
+                <RotateCcw className="h-3 w-3" />
+                <span>Xóa lọc</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Bulk Action Bar (For Admin when orders selected) */}
+      {isAdmin && selectedOrderIds.length > 0 && (
+        <div className="bg-[#0052CC] text-white px-5 py-3 rounded-xl shadow-lg flex flex-wrap items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2 border border-blue-400/30">
+          <div className="flex items-center gap-2">
+            <span className="bg-white/20 px-3 py-1 rounded-lg text-xs font-bold font-mono">
+              Đã chọn {selectedOrderIds.length} đơn hàng
+            </span>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <select
+              value={bulkDesignerId}
+              onChange={(e) => setBulkDesignerId(e.target.value)}
+              className="bg-white text-slate-800 text-xs font-semibold px-3 py-1.5 rounded-lg border border-white/30 focus:outline-none shadow-xs"
+            >
+              <option value="">-- Chọn Designer phân công --</option>
+              {usersList.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.full_name || u.username} ({u.role})
+                </option>
+              ))}
+            </select>
+
+            <button
+              onClick={handleBulkAssign}
+              disabled={!bulkDesignerId || bulkAssigning}
+              className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-[#0052CC] bg-white hover:bg-slate-100 rounded-lg shadow-sm transition-all disabled:opacity-50 cursor-pointer"
+            >
+              {bulkAssigning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
+              <span>Phân Công {selectedOrderIds.length} Đơn</span>
+            </button>
+
+            <button
+              onClick={() => setSelectedOrderIds([])}
+              className="text-xs text-white/80 hover:text-white underline px-2 cursor-pointer font-medium"
+            >
+              Bỏ chọn tất cả
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Dynamic Dense Data Table UI */}
+      <div className="rounded-xl border border-[hsl(var(--border))] bg-white shadow-xs overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-semibold uppercase text-slate-500 tracking-wider">
+                {isAdmin && (
+                  <th className="py-3 px-3 w-10 text-center">
+                    <input
+                      type="checkbox"
+                      checked={
+                        filteredOrders.length > 0 &&
+                        filteredOrders.every((o) => selectedOrderIds.includes(o.id))
+                      }
+                      onChange={(e) => handleSelectAll(e.target.checked)}
+                      className="rounded border-slate-300 text-[#0052CC] focus:ring-[#0052CC] h-3.5 w-3.5 cursor-pointer"
+                    />
+                  </th>
+                )}
+                <th className="py-3 px-4 w-14 text-center">Ảnh</th>
+                <th className="py-3 px-4">Mã Đơn Hàng</th>
+                <th className="py-3 px-4">Trạng Thái</th>
+                <th className="py-3 px-4">DES Đảm Nhận</th>
+                <th className="py-3 px-4">Template</th>
+                <th className="py-3 px-4">Deadline Printerval</th>
+                <th className="py-3 px-4">Ngày Tạo</th>
+                <th className="py-3 px-4 text-right">Thao Tác</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-xs">
+              {filteredOrders.length === 0 ? (
+                <tr>
+                  <td colSpan={isAdmin ? 9 : 8} className="py-12 text-center text-slate-400">
+                    <Package className="h-10 w-10 mx-auto mb-2 opacity-30" />
+                    <p className="font-medium text-sm text-slate-500">Không tìm thấy đơn hàng nào</p>
+                    <p className="text-xs text-slate-400 mt-1">Thử thay đổi bộ lọc hoặc quét đơn mới từ Printerval</p>
+                  </td>
+                </tr>
+              ) : (
+                filteredOrders.map((o) => {
+                  const statusInfo = getStatusInfo(o.state)
+                  const isSelected = selectedOrderIds.includes(o.id)
+                  const isNewlyCrawled = newlyCrawledOrderIds.includes(o.id)
+
+                  return (
+                    <tr
+                      key={o.id}
+                      onClick={() => isNewlyCrawled && dismissHighlight(o.id)}
+                      className={`transition-all duration-300 ${
+                        isNewlyCrawled
+                          ? 'bg-emerald-50/80 border-l-4 border-l-emerald-500 shadow-xs'
+                          : isSelected
+                          ? 'bg-blue-50/80 font-medium'
+                          : 'hover:bg-blue-50/40'
+                      }`}
+                    >
+                      {isAdmin && (
+                        <td className="py-2.5 px-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => handleToggleSelect(o.id)}
+                            className="rounded border-slate-300 text-[#0052CC] focus:ring-[#0052CC] h-3.5 w-3.5 cursor-pointer"
+                          />
+                        </td>
+                      )}
+                      {/* Image Thumbnail with Click-to-Zoom */}
+                      <td className="py-2.5 px-4 text-center">
+                        {o.thumbnail_url ? (
+                          <img
+                            src={o.thumbnail_url}
+                            alt={o.external_order_id}
+                            title="Click để xem ảnh to"
+                            onClick={() => setSelectedImage(o.thumbnail_url)}
+                            className="h-10 w-10 rounded-lg object-cover border border-slate-200 mx-auto shadow-2xs cursor-pointer hover:scale-105 transition-transform hover:ring-2 hover:ring-[#0052CC]"
+                          />
+                        ) : (
+                          <div className="h-10 w-10 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center mx-auto text-slate-400">
+                            <Package className="h-5 w-5" />
+                          </div>
+                        )}
+                      </td>
+
+                      {/* Order Code */}
+                      <td className="py-2.5 px-4 font-mono font-semibold text-[#0052CC]">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <Link
+                            to={`/orders/${o.id}`}
+                            onClick={() => isNewlyCrawled && dismissHighlight(o.id)}
+                            className="hover:underline flex items-center gap-1"
+                          >
+                            <span>{o.external_order_id}</span>
+                          </Link>
+                          {isNewlyCrawled && (
+                            <span
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                dismissHighlight(o.id)
+                              }}
+                              className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 font-black bg-emerald-600 text-white rounded-full animate-pulse shadow-2xs cursor-pointer"
+                              title="Đơn mới crawl về! Click để tắt highlight"
+                            >
+                              ⚡ MỚI CRAWL
+                            </span>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* Status in Vietnamese */}
+                      <td className="py-2.5 px-4">
+                        <span
+                          title={statusInfo.description}
+                          className={`inline-block px-2.5 py-1 text-[11px] font-semibold rounded-md border ${statusInfo.badgeClass}`}
+                        >
+                          {statusInfo.label}
+                        </span>
+                      </td>
+
+                      {/* DES Đảm Nhận */}
+                      <td className="py-2.5 px-4 font-medium text-slate-700">
+                        {o.assigned_designer_name ? (
+                          <span
+                            onClick={() => isAdmin && setAssigningOrder(o)}
+                            className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-blue-50 text-[#0052CC] font-semibold ${
+                              isAdmin ? 'cursor-pointer hover:bg-blue-100 hover:scale-105 transition-all' : ''
+                            }`}
+                            title={isAdmin ? 'Click để đổi Designer đảm nhận' : undefined}
+                          >
+                            <User className="h-3 w-3" />
+                            <span>{o.assigned_designer_name}</span>
+                          </span>
+                        ) : (
+                          <span
+                            onClick={() => isAdmin && setAssigningOrder(o)}
+                            className={`text-slate-400 font-normal ${
+                              isAdmin ? 'cursor-pointer hover:text-[#0052CC] hover:underline font-semibold' : ''
+                            }`}
+                            title={isAdmin ? 'Click để phân công Designer' : undefined}
+                          >
+                            {isAdmin ? '+ Phân công DES' : 'Chưa phân bổ'}
+                          </span>
+                        )}
+                      </td>
+
+                      {/* Template Button */}
+                      <td className="py-2.5 px-4">
+                        {o.template_jobs && o.template_jobs.length > 0 ? (
+                          <button
+                            onClick={() => setActiveTemplateJobs({ jobs: o.template_jobs!, orderId: o.external_order_id })}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-white bg-[#0052CC] hover:bg-[#0041A3] rounded-lg transition-colors shadow-2xs cursor-pointer"
+                          >
+                            <FileText className="h-3 w-3" />
+                            <span>Xem template của job</span>
+                          </button>
+                        ) : (
+                          <span className="text-slate-300">-</span>
+                        )}
+                      </td>
+
+                      {/* Deadline */}
+                      <td className="py-2.5 px-4 font-mono text-slate-600">
+                        {o.deadline_at_ext ? (
+                          <span>{new Date(o.deadline_at_ext).toLocaleString('vi-VN')}</span>
+                        ) : (
+                          <span className="text-slate-300">-</span>
+                        )}
+                      </td>
+
+                      {/* Created At */}
+                      <td className="py-2.5 px-4 font-mono text-slate-500">
+                        {new Date(o.created_at).toLocaleDateString('vi-VN')}
+                      </td>
+
+                      {/* Actions */}
+                      <td className="py-2.5 px-4 text-right">
+                        <Link
+                          to={`/orders/${o.id}`}
+                          className="inline-flex items-center gap-1 text-xs font-semibold text-[#0052CC] hover:text-[#003D99] hover:bg-blue-50 px-2.5 py-1 rounded-md transition-colors"
+                        >
+                          <span>Chi tiết</span>
+                          <ChevronRight className="h-3.5 w-3.5" />
+                        </Link>
+                      </td>
+                    </tr>
+                  )
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Assign Order Modal */}
+      {assigningOrder && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-200"
+          onClick={() => setAssigningOrder(null)}
+        >
+          <div
+            className="relative w-full max-w-sm bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col border border-slate-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50">
+              <div className="flex items-center gap-2">
+                <UserPlus className="h-5 w-5 text-[#0052CC]" />
+                <h2 className="text-base font-bold text-slate-800">Phân Công Designer</h2>
+              </div>
+              <button
+                onClick={() => setAssigningOrder(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleAssignOrder} className="p-6 space-y-4">
+              <div className="text-xs space-y-1">
+                <p className="text-slate-500 font-medium">
+                  Đơn hàng: <strong className="text-slate-800 font-mono">{assigningOrder.external_order_id}</strong>
+                </p>
+                {assigningOrder.product_name && (
+                  <p className="text-slate-600 line-clamp-1 font-semibold">{assigningOrder.product_name}</p>
+                )}
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-700 block">
+                  Chọn Designer / Người Đảm Nhận <span className="text-red-500">*</span>
+                </label>
+                <select
+                  required
+                  value={selectedUserId}
+                  onChange={(e) => setSelectedUserId(e.target.value)}
+                  className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-[#0052CC]/20 focus:border-[#0052CC]"
+                >
+                  <option value="">-- Chọn tài khoản --</option>
+                  {usersList.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.full_name || u.username} ({u.role})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setAssigningOrder(null)}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  disabled={assigning || !selectedUserId}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-[#0052CC] hover:bg-[#0041A3] rounded-xl transition-colors shadow-2xs disabled:opacity-50 cursor-pointer"
+                >
+                  {assigning && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  <span>{assigning ? 'Đang phân công...' : 'Xác Nhận'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </DashboardLayout>
   )
 }

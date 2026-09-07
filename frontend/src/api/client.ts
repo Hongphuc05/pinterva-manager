@@ -7,13 +7,23 @@ export class ApiError extends Error {
 }
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = localStorage.getItem('token')
+  const activePlatformId = localStorage.getItem('activePlatformId')
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(init?.headers as Record<string, string> ?? {}),
+  }
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+  if (activePlatformId) {
+    headers['X-Platform-Id'] = activePlatformId
+  }
+
   const resp = await fetch(`/api${path}`, {
     ...init,
     credentials: 'same-origin',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
+    headers,
   })
   if (resp.status === 401 && !path.startsWith('/me') && !path.startsWith('/login')) {
     window.location.assign('/login')

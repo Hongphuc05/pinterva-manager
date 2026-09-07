@@ -12,6 +12,18 @@ from playwright.sync_api import Page, sync_playwright
 EVIDENCE_DIR = Path("playwright-evidence")
 
 
+def cleanup_profile_locks(profile_dir: str = "chrome-profile") -> None:
+    path = Path(profile_dir)
+    if path.exists():
+        for lock_name in ["SingletonLock", "SingletonSocket", "SingletonCookie"]:
+            lock_file = path / lock_name
+            if lock_file.exists() or lock_file.is_symlink():
+                try:
+                    lock_file.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+
 def open_playwright_session(profile_dir: str = "chrome-profile", headless: bool = False):
     """Low-level open: launch the persistent Chrome profile and return
     `(playwright_cm, context, page)` WITHOUT closing anything — the caller owns
@@ -25,6 +37,7 @@ def open_playwright_session(profile_dir: str = "chrome-profile", headless: bool 
     the browser and a second, later one closing it; a single `with` block can't span
     two separate request/response cycles.
     """
+    cleanup_profile_locks(profile_dir)
     playwright_cm = sync_playwright()
     p = playwright_cm.__enter__()
     context = p.chromium.launch_persistent_context(

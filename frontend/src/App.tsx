@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './auth/AuthContext'
+import { PlatformProvider } from './auth/PlatformContext'
 import { ProtectedRoute } from './auth/ProtectedRoute'
 import { LoginPage } from './pages/LoginPage'
 import { OrdersListPage } from './pages/OrdersListPage'
@@ -8,12 +9,14 @@ import { PrintervalLoginPage } from './pages/PrintervalLoginPage'
 import { AllocationBoardPage } from './pages/AllocationBoardPage'
 import { MyTasksPage } from './pages/MyTasksPage'
 import { KanbanPage } from './pages/KanbanPage'
+import { UsersPage } from './pages/UsersPage'
 
 function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <Routes>
+        <PlatformProvider>
+          <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route
             path="/orders"
@@ -28,6 +31,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <OrderDetailPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/users"
+            element={
+              <ProtectedRoute>
+                <UsersPage />
               </ProtectedRoute>
             }
           />
@@ -58,6 +69,7 @@ function App() {
           <Route path="/kanban" element={<ProtectedRoute><KanbanPage /></ProtectedRoute>} />
           <Route path="/" element={<Navigate to="/orders" replace />} />
         </Routes>
+        </PlatformProvider>
       </AuthProvider>
     </BrowserRouter>
   )

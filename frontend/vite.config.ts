@@ -8,6 +8,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': 'http://localhost:8000',
+      '/crawled_assets': 'http://localhost:8000',
     },
   },
   test: {

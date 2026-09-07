@@ -8,20 +8,38 @@ from app.adapters.db.session import SessionLocal
 from app.adapters.playwright_support import playwright_session
 from app.adapters.printerval.interface import NTTH_DESIGNER_OPTION, PrintervalAdapter
 from app.adapters.printerval.playwright_adapter import PlaywrightPrintervalAdapter
-from app.application.crawl import claim_batch, discover_waiting_orders, import_claimed_orders
+from app.application.crawl import (
+    claim_batch,
+    discover_waiting_orders_with_summaries,
+    import_claimed_orders,
+)
 from app.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
 
-def run_crawl_cycle(session: Session, adapter: PrintervalAdapter, limit: int = 40) -> dict:
+def run_crawl_cycle(
+    session: Session,
+    adapter: PrintervalAdapter,
+    limit: int = 40,
+    platform_id: uuid.UUID | None = None,
+) -> dict:
     """The pure crawl-cycle logic: discover -> claim -> import, in order. Takes an
     already-open session/adapter so it's directly unit-testable with a fake adapter and
     the test DB session — no Celery or Playwright involved here.
     """
-    new_order_ids = discover_waiting_orders(session, adapter, limit=limit)
+    new_order_ids, summaries = discover_waiting_orders_with_summaries(
+        session, adapter, limit=limit, platform_id=platform_id
+    )
     if new_order_ids:
-        claim_result = claim_batch(session, adapter, new_order_ids, owner=NTTH_DESIGNER_OPTION)
+        claim_result = claim_batch(
+            session,
+            adapter,
+            new_order_ids,
+            owner=NTTH_DESIGNER_OPTION,
+            order_summaries=summaries,
+            platform_id=platform_id,
+        )
         claimed_count = len(claim_result["claimed"])
         failed_claim_count = len(claim_result["failed"])
     else:

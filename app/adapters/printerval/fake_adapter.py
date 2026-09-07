@@ -51,7 +51,12 @@ class FakePrintervalAdapter:
         return order
 
     def discover_orders(
-        self, status: str, job_type: str = ALL_JOB_TYPES, limit: int = 40, cursor: str | None = None
+        self,
+        status: str,
+        job_type: str = ALL_JOB_TYPES,
+        limit: int = 40,
+        cursor: str | None = None,
+        platform_id: str | None = None,
     ) -> DiscoverResult:
         matched = [o for o in self._orders.values() if o.status == status]
         orders = [

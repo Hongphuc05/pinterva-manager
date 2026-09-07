@@ -1,1 +1,83 @@
 @import "tailwindcss";
+
+::selection {
+  background-color: #0052CC;
+  color: #ffffff;
+}
+::-moz-selection {
+  background-color: #0052CC;
+  color: #ffffff;
+}
+
+@layer base {
+  :root {
+    /* Nền trang & Chữ cơ bản */
+    --background: 0 0% 100%;             /* Trắng tinh #FFFFFF */
+    --foreground: 210 10% 18%;           /* Đen xám đậm #292D32 */
+
+    /* Thẻ (Card) & Popover */
+    --card: 0 0% 100%;
+    --card-foreground: 210 10% 18%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 210 10% 18%;
+
+    /* Màu Chủ Đạo (Primary - Deep Navy Blue) */
+    --primary: 218 100% 40%;             /* #0052CC - Xanh Navy chuyên nghiệp */
+    --primary-foreground: 0 0% 100%;     /* Trắng */
+
+    /* Màu Phụ (Secondary - Bright Blue) */
+    --secondary: 218 90% 52%;           /* #1E6FFF - Xanh dương tươi */
+    --secondary-foreground: 0 0% 100%;
+
+    /* Màu Nền Phụ (Tertiary Background) */
+    --tertiary: 210 16% 96%;            /* #F4F6F8 - Xám xanh nhạt cho body background */
+    --tertiary-foreground: 210 10% 18%;
+
+    /* Màu Trung Tính & Muted */
+    --neutral: 0 0% 100%;
+    --neutral-foreground: 210 10% 18%;
+    --muted: 210 14% 90%;               /* #E2E8F0 */
+    --muted-foreground: 210 10% 30%;    /* #475569 */
+
+    /* Màu Điểm Nhấn & Trạng Thái (Status Colors) */
+    --accent: 148 48% 40%;              /* Emerald Green #34A853 */
+    --accent-foreground: 0 0% 100%;
+
+    --success: 148 48% 40%;             /* Xanh lá - Hoàn thành / Đã duyệt */
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 90% 50%;              /* Cam hổ phách - Chờ duyệt / Cảnh báo */
+    --warning-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;           /* Đỏ Crimson - Từ chối / Xóa / Lỗi */
+    --destructive-foreground: 0 0% 100%;
+
+    /* Viền & Bo góc */
+    --border: 210 14% 90%;              /* Viền mỏng nhẹ */
+    --input: 210 14% 90%;
+    --ring: 218 100% 40%;
+    --radius: 0.5rem;                   /* Bo góc chuẩn 8px */
+  }
+}
+
+.font-sans {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+.font-mono {
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+/* Gradients */
+.gradient-1 {
+  background: linear-gradient(135deg, hsl(218, 100%, 40%) 0%, hsl(218, 90%, 52%) 100%);
+}
+
+.gradient-2 {
+  background: linear-gradient(135deg, hsl(148, 48%, 40%) 0%, hsl(148, 48%, 50%) 100%);
+}
+
+.button-border-gradient {
+  background: linear-gradient(145deg, hsl(218, 90%, 52%) 0%, hsl(148, 48%, 40%) 100%);
+}
+

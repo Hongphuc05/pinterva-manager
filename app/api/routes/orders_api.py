@@ -7,17 +7,20 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
-from app.adapters.db.models import User
+from app.adapters.db.models import Assignment, Order, User
 from app.adapters.playwright_support import playwright_session
 from app.adapters.printerval import login_session
+from app.adapters.printerval.api_adapter import PrintervalApiAdapter
+from app.adapters.printerval.api_client import PrintervalApiClient
 from app.adapters.printerval.playwright_adapter import PlaywrightPrintervalAdapter
-from app.api.deps import get_current_user, get_db, require_role
+from app.api.deps import get_current_platform_id, get_current_user, get_db, require_role
 from app.application.crawl import DiscoverFailedError
 from app.application.order_queries import (
     get_order_detail_for_user,
     get_order_history,
     list_orders_for_user,
 )
+from app.config import get_settings
 from app.domain.models import OrderState
 from app.workers.crawl_tasks import run_crawl_cycle
 
@@ -30,9 +33,12 @@ class OrderSummaryOut(BaseModel):
     external_order_id: str
     state: str
     batch_id: uuid.UUID | None
-    sku: str | None
-    thumbnail_url: str | None
-    deadline_at_ext: datetime | None
+    product_name: str | None = None
+    sku: str | None = None
+    thumbnail_url: str | None = None
+    assigned_designer_name: str | None = None
+    template_jobs: list[dict] | None = None
+    deadline_at_ext: datetime | None = None
     created_at: datetime
 
 
@@ -59,6 +65,8 @@ class OrderDetailOut(BaseModel):
     note_outsource: str
     order_note: str
     custom_config: dict | None
+    template_jobs: list[dict] | None = None
+    assigned_designer_name: str | None = None
     design_tool_url: str | None
     created_at: datetime
 
@@ -99,12 +107,30 @@ def api_orders_list(
     batch_id: str | None = None,
     designer_id: str | None = None,
     user: User = Depends(get_current_user),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
     orders = list_orders_for_user(
-        db, user, status=status_filter, batch_id=batch_id, designer_id=designer_id
+        db, user, status=status_filter, batch_id=batch_id, designer_id=designer_id, platform_id=platform_id
     )
-    return OrdersListResponse(orders=[OrderSummaryOut.model_validate(o) for o in orders])
+    order_ids = [o.id for o in orders]
+    assignments = (
+        db.query(Assignment, User)
+        .join(User, User.id == Assignment.designer_id)
+        .filter(Assignment.order_id.in_(order_ids), Assignment.status == "approved")
+        .all()
+        if order_ids
+        else []
+    )
+    designer_map = {a.order_id: u.full_name or u.username for a, u in assignments}
+
+    out_list = []
+    for o in orders:
+        item = OrderSummaryOut.model_validate(o)
+        item.assigned_designer_name = designer_map.get(o.id)
+        out_list.append(item)
+
+    return OrdersListResponse(orders=out_list)
 
 
 @router.get("/orders/{order_id}", response_model=OrderDetailResponse)
@@ -115,22 +141,60 @@ def api_order_detail(
     if order is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Order not found")
     history = get_order_history(db, order_id)
+
+    assignment = (
+        db.query(Assignment, User)
+        .join(User, User.id == Assignment.designer_id)
+        .filter(Assignment.order_id == order.id, Assignment.status == "approved")
+        .first()
+    )
+    order_out = OrderDetailOut.model_validate(order)
+    if assignment:
+        order_out.assigned_designer_name = assignment[1].full_name or assignment[1].username
+
     return OrderDetailResponse(
-        order=OrderDetailOut.model_validate(order),
+        order=order_out,
         history=[WorkflowEventOut.model_validate(e) for e in history],
     )
 
 
 @router.post("/orders/refresh", response_model=RefreshResponse)
 def api_orders_refresh(
-    user: User = Depends(require_role("admin")), db: Session = Depends(get_db)
+    user: User = Depends(require_role("admin")),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
 ):
     try:
-        with playwright_session() as page:
-            adapter = PlaywrightPrintervalAdapter(page=page)
-            summary = run_crawl_cycle(db, adapter)
+        settings = get_settings()
+        from app.adapters.db.models import Platform
+        platform = db.get(Platform, platform_id)
+        crawl_username = platform.account_username if platform and platform.account_username else settings.printerval_username
+        crawl_password = platform.account_password if platform and platform.account_password else settings.printerval_password
+
+        if not platform or not platform.account_password:
+            return RefreshResponse(
+                flash=f"Tài khoản '{crawl_username}' chưa được lưu mật khẩu Printerval trong CSDL. Vui lòng vào menu 'Acc Mẹ Printerval' -> 'Đăng Nhập Acc Mẹ Mới' để đăng nhập lại."
+            )
+
+        clean_user_slug = crawl_username.replace("@", "_").replace(".", "_").replace("+", "_") if crawl_username else "default"
+        profile_dir = f"chrome-profile-{clean_user_slug}"
+
+        with PrintervalApiClient(
+            base_url=settings.printerval_api_base_url,
+            username=crawl_username,
+            password=crawl_password,
+            team_outsource=settings.printerval_team_outsource,
+        ) as api_client:
+            with playwright_session(profile_dir=profile_dir, headless=True) as page:
+                fallback = PlaywrightPrintervalAdapter(
+                    page=page,
+                    crawl_username=crawl_username,
+                    crawl_password=crawl_password,
+                )
+                adapter = PrintervalApiAdapter(api_client=api_client, fallback_adapter=fallback)
+                summary = run_crawl_cycle(db, adapter, platform_id=platform_id)
         flash = (
-            f"Đã crawl xong: {summary['discovered']} đơn mới, "
+            f"Đã crawl xong qua API ({crawl_username}): {summary['discovered']} đơn mới, "
             f"{summary['imported']} đơn nhập thành công"
         )
         failed_total = summary["failed_claim"] + summary["failed_import"]
@@ -141,14 +205,14 @@ def api_orders_refresh(
     except DiscoverFailedError:
         db.rollback()
         flash = (
-            "Crawl thất bại khi tìm đơn mới — có thể site đổi giao diện hoặc bộ lọc "
-            "sai. Xem bảng dead_letters (source=crawl.discover_waiting_orders) để "
-            "biết chi tiết lỗi thật."
+            f"Crawl thất bại khi tìm đơn mới cho tài khoản '{crawl_username}' — "
+            "có thể tài khoản/mật khẩu chưa đúng hoặc team_outsource không khớp. "
+            "Xem bảng dead_letters (source=crawl.discover_waiting_orders) để biết chi tiết lỗi."
         )
         return RefreshResponse(flash=flash)
-    except Exception:
+    except Exception as exc:
         db.rollback()
-        flash = "Crawl thất bại — kiểm tra Chrome profile đã đăng nhập Printerval chưa."
+        flash = f"Crawl thất bại ({crawl_username}): {str(exc)}"
         return RefreshResponse(flash=flash)
 
 
@@ -167,3 +231,171 @@ def api_printerval_login_start(user: User = Depends(require_role("admin"))):
 def api_printerval_login_done(user: User = Depends(require_role("admin"))):
     login_session.close_session()
     return PrintervalLoginStatus(session_open=False)
+
+
+class AssignOrderRequest(BaseModel):
+    designer_id: str
+
+
+@router.post("/orders/{order_id}/assign")
+def api_assign_order(
+    order_id: str,
+    payload: AssignOrderRequest,
+    user: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    order = get_order_detail_for_user(db, user, order_id)
+    if order is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Order not found")
+
+    try:
+        designer_uuid = uuid.UUID(payload.designer_id)
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid designer ID")
+
+    designer = db.get(User, designer_uuid)
+    if designer is None or not designer.active:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Designer not found or inactive")
+
+    # Update or create assignment
+    existing_assignment = (
+        db.query(Assignment)
+        .filter(Assignment.order_id == order.id)
+        .one_or_none()
+    )
+    if existing_assignment:
+        existing_assignment.designer_id = designer.id
+        existing_assignment.status = "approved"
+    else:
+        new_assignment = Assignment(
+            order_id=order.id,
+            designer_id=designer.id,
+            status="approved",
+        )
+        db.add(new_assignment)
+
+    order.state = OrderState.ASSIGNED.value
+    db.commit()
+    return {"ok": True, "assigned_designer_name": designer.full_name or designer.username}
+
+
+class BulkAssignOrdersRequest(BaseModel):
+    order_ids: list[str]
+    designer_id: str
+
+
+@router.post("/orders/bulk-assign")
+def api_bulk_assign_orders(
+    payload: BulkAssignOrdersRequest,
+    user: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    if not payload.order_ids:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Danh sách đơn hàng không được để trống")
+
+    try:
+        designer_uuid = uuid.UUID(payload.designer_id)
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid designer ID")
+
+    designer = db.get(User, designer_uuid)
+    if designer is None or not designer.active:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Designer not found or inactive")
+
+    # Fetch orders (accepting either internal UUID or external_order_id)
+    valid_uuids = []
+    for oid in payload.order_ids:
+        try:
+            valid_uuids.append(uuid.UUID(oid))
+        except ValueError:
+            pass
+
+    if valid_uuids:
+        orders = db.query(Order).filter(Order.id.in_(valid_uuids)).all()
+    else:
+        orders = db.query(Order).filter(Order.external_order_id.in_(payload.order_ids)).all()
+
+    if not orders:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng phù hợp")
+
+    updated_count = 0
+    for order in orders:
+        existing_assignment = (
+            db.query(Assignment)
+            .filter(Assignment.order_id == order.id)
+            .one_or_none()
+        )
+        if existing_assignment:
+            existing_assignment.designer_id = designer.id
+            existing_assignment.status = "approved"
+        else:
+            new_assignment = Assignment(
+                order_id=order.id,
+                designer_id=designer.id,
+                status="approved",
+            )
+            db.add(new_assignment)
+        order.state = OrderState.ASSIGNED.value
+        updated_count += 1
+
+    db.commit()
+    return {
+        "ok": True,
+        "assigned_count": updated_count,
+        "designer_name": designer.full_name or designer.username,
+        "message": f"Đã phân công thành công {updated_count} đơn hàng cho {designer.full_name or designer.username}.",
+    }
+
+
+class UpdatePrintervalCredentialsRequest(BaseModel):
+    username: str
+    password: str
+    team_outsource: str | None = None
+
+
+@router.post("/orders/printerval-credentials")
+def api_update_printerval_credentials(
+    payload: UpdatePrintervalCredentialsRequest,
+    user: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    import os
+    from app.adapters.db.models import Platform
+
+    username_clean = payload.username.strip()
+    password_clean = payload.password.strip()
+    os.environ["PRINTERVAL_USERNAME"] = username_clean
+    os.environ["PRINTERVAL_PASSWORD"] = password_clean
+    if payload.team_outsource:
+        os.environ["PRINTERVAL_TEAM_OUTSOURCE"] = payload.team_outsource.strip()
+
+    # Get or create Platform for this mother account
+    platform = (
+        db.query(Platform)
+        .filter(Platform.account_username == username_clean)
+        .first()
+    )
+    if not platform:
+        platform = Platform(
+            name=f"Acc Mẹ: {username_clean}",
+            account_username=username_clean,
+            account_password=password_clean,
+            is_active=True,
+        )
+        db.add(platform)
+    else:
+        platform.account_password = password_clean
+        platform.is_active = True
+
+    db.commit()
+    db.refresh(platform)
+
+    get_settings.cache_clear()
+    return {
+        "ok": True,
+        "platform_id": str(platform.id),
+        "platform_name": platform.name,
+        "account_username": platform.account_username,
+        "message": f"Đã đăng nhập tài khoản Printerval thành công: {username_clean}",
+    }
+

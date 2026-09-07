@@ -34,3 +34,12 @@ dist/
 .pytest_cache/
 .ruff_cache/
 credentials/
+
+# runtime temporary data & profiles
+chrome-profile-*/
+crawled_assets/
+crawled_orders.csv
+cookies.txt
+200
+COOKIE_SECURE=false
+scratch/

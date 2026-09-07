@@ -29,3 +29,25 @@ def read_session_token(token: str) -> dict | None:
         return _serializer().loads(token, max_age=settings.session_max_age_seconds)
     except (BadSignature, SignatureExpired):
         return None
+
+
+def ensure_seed_users(db: Session) -> None:
+    """Ensure seed users exist in DB."""
+    from app.adapters.db.models import User
+    from sqlalchemy.exc import IntegrityError
+
+    admin_user = db.query(User).filter_by(username="admin").first()
+    if admin_user is None:
+        try:
+            admin_user = User(
+                username="admin",
+                full_name="System Administrator",
+                role="admin",
+                password_hash=hash_password("admin123"),
+                active=True,
+            )
+            db.add(admin_user)
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+
