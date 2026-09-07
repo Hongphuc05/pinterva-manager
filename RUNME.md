@@ -1,48 +1,27 @@
-# RUNME — Chạy & test Phase 1 (nền tảng backend)
+# RUNME — Chạy toàn bộ Pinterval Ops (Phase 1-4)
 
-> **Quan trọng:** Phase 1 **chưa có giao diện web** (chưa có trang HTML nào để bấm
-> chuột qua trình duyệt). Đây mới là phần nền: Postgres schema, state machine,
-> idempotency ledger, và 1 API JSON thuần cho auth (login/logout/me) + 2 route ví dụ
-> phân quyền (admin/designer). Trang dashboard thật (nhìn danh sách đơn, duyệt, nhận
-> task...) là **Phase 4 trở đi** theo `roadmap.md`, chưa code.
->
-> Cái mày test được ngay bây giờ: gọi API bằng trình duyệt qua Swagger UI tự sinh
-> (`/docs`), hoặc `curl`/Postman. Xem phần 4 bên dưới.
+Đã có: Postgres schema + state machine (P1), Printerval/Google adapter (P2), crawl job
+tự động (P3), web dashboard login + danh sách/chi tiết đơn (P4). **Chưa có**: phân bổ
+đơn, QC, submit-to-site (Phase 5 trở đi) — nên web hiện chỉ hiển thị, chưa có nút thao
+tác.
 
-## 1. Yêu cầu máy
-
-- Docker + Docker Compose (đã cài — repo dùng để chạy Postgres 16 local).
-- Python 3.12. Máy mày mặc định `python3` là 3.9.6 (quá cũ) — nếu chưa có 3.12:
-  ```bash
-  brew install python@3.12
-  ```
-  Sau đó dùng `python3.12` thay vì `python3` ở các lệnh dưới.
-- `pg_dump`/`pg_restore`/`createdb`/`dropdb`/`psql` (chỉ cần nếu muốn test script
-  backup/restore ở phần 6) — cài qua `brew install postgresql@16`.
-
-## 2. Cài đặt lần đầu
+## 1. Cài đặt lần đầu
 
 ```bash
-cd /Users/hongphuc/Documents/01_congViec/pinterval    # (hoặc nhánh/worktree đang có code)
+cd /Users/hongphuc/Documents/01_congViec/pinterval
 
 cp .env.example .env
-# Sửa COOKIE_SECURE=true -> COOKIE_SECURE=false trong .env vừa tạo — test local
-# qua http://127.0.0.1 (không có HTTPS), để true thì trình duyệt có thể không gửi
-# lại cookie session sau khi login.
+# Sửa COOKIE_SECURE=true -> false trong .env (test local http, không có https)
 
-python3.12 -m venv .venv
-source .venv/bin/activate
+python3.12 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
+playwright install chrome        # chỉ cần nếu sẽ chạy crawl job thật (mục 4)
 
-docker compose up -d db       # chạy Postgres 16 trong Docker, cổng 5432
-alembic upgrade head          # tạo toàn bộ 13 bảng theo schema mới nhất
+docker compose up -d db redis    # Postgres 16 + Redis
+alembic upgrade head             # tạo toàn bộ bảng
 ```
 
-## 3. Tạo user đầu tiên để đăng nhập
-
-Chưa có API "đăng ký" (đó là quyết định V1 — admin tạo tài khoản tay, không tự
-đăng ký). Tạo 1 admin bằng script nhỏ này (dán nguyên đoạn vào terminal, đã activate
-venv ở bước 2):
+Tạo user để đăng nhập (chưa có API tự đăng ký — tạo tay):
 
 ```bash
 python -c "
@@ -51,86 +30,81 @@ from app.adapters.db.models import User
 from app.application.auth import hash_password
 
 db = SessionLocal()
-db.add(User(
-    username='admin',
-    full_name='Admin Test',
-    role='admin',
-    password_hash=hash_password('admin123'),
-))
+db.add(User(username='admin', full_name='Admin Test', role='admin',
+            password_hash=hash_password('admin123')))
+db.add(User(username='designer1', full_name='Designer Test', role='designer',
+            password_hash=hash_password('designer123')))
 db.commit()
-print('Đã tạo user: admin / admin123')
+print('Đã tạo: admin/admin123 (role admin), designer1/designer123 (role designer)')
 "
 ```
 
-Muốn có thêm user role `designer` để test phân quyền, đổi `username`, `role='designer'`
-rồi chạy lại.
-
-## 4. Chạy server và test API
+## 2. Chạy web dashboard
 
 ```bash
 uvicorn app.api.main:app --reload
 ```
 
-Mở trình duyệt: **http://127.0.0.1:8000/docs** — đây là Swagger UI tự sinh của
-FastAPI, có thể bấm "Try it out" trực tiếp trên trình duyệt, không cần Postman.
+Mở **http://127.0.0.1:8000/login** — đăng nhập `admin`/`admin123`. Sẽ vào `/orders`
+(hiện rỗng nếu chưa chạy crawl job ở mục 4 — DB chưa có đơn nào là bình thường).
 
-Các route hiện có:
+Trang có: danh sách đơn lọc theo status/batch (HTMX, không reload trang), trang chi
+tiết đơn kèm lịch sử chuyển trạng thái. `admin` thấy mọi đơn; `designer` chỉ thấy đơn
+được giao (luôn rỗng cho tới khi Phase 5 xong).
 
-| Route | Method | Mô tả |
-|---|---|---|
-| `/api/health` | GET | Kiểm tra server sống |
-| `/api/login` | POST | Đăng nhập, trả về cookie session (body: `{"username":..., "password":...}`) |
-| `/api/logout` | POST | Xoá cookie session |
-| `/api/me` | GET | Thông tin user đang đăng nhập (cần đã login) |
-| `/api/admin/ping` | GET | Route ví dụ, chỉ role `admin` gọi được (403 nếu sai role) |
-| `/api/designer/ping` | GET | Route ví dụ, chỉ role `designer` gọi được |
+API JSON thuần (Swagger) vẫn còn ở **http://127.0.0.1:8000/docs** nếu cần test qua
+Postman/curl thay vì trình duyệt.
 
-Test bằng `curl` (giữ cookie qua `-c`/`-b`):
+## 3. (Tuỳ chọn) Nạp dữ liệu mẫu để xem giao diện ngay, không cần crawl thật
 
 ```bash
-curl -c cookies.txt -X POST http://127.0.0.1:8000/api/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"admin123"}'
+python -c "
+from app.adapters.db.session import SessionLocal
+from app.adapters.db.models import Order, WorkflowEvent
+from app.domain.models import OrderState
 
-curl -b cookies.txt http://127.0.0.1:8000/api/me
-curl -b cookies.txt http://127.0.0.1:8000/api/admin/ping     # -> 200
-curl -b cookies.txt http://127.0.0.1:8000/api/designer/ping  # -> 403 (vì admin không phải designer)
+db = SessionLocal()
+o = Order(external_order_id='DJ0000001', state=OrderState.CLAIMED_IMPORTED.value)
+db.add(o); db.commit()
+db.add(WorkflowEvent(order_id=o.id, from_state='DISCOVERED', to_state='CLAIMED_IMPORTED'))
+db.commit()
+print('Đã tạo đơn mẫu DJ0000001')
+"
 ```
 
-Qua Swagger UI (`/docs`): gọi `POST /api/login` trước (Swagger tự giữ cookie cho các
-lần gọi sau trong cùng tab trình duyệt), rồi thử `GET /api/me`, `GET /api/admin/ping`.
+## 4. Chạy crawl job thật (đụng site Printerval thật — cẩn thận)
+
+Cần Chrome profile đã login Printerval (`chrome-profile/`, làm 1 lần thủ công qua
+Playwright — xem `docs/superpowers/specs/2026-09-07-phase2-adapter-design.md` nếu chưa
+setup). Sau đó:
+
+```bash
+celery -A app.workers.celery_app worker --beat --loglevel=info
+```
+
+Job `crawl_and_claim` tự chạy mỗi `CRAWL_INTERVAL_SECONDS` (mặc định 300s = 5 phút).
+Gọi tay ngay lập tức thay vì chờ:
+
+```bash
+python -c "from app.workers.crawl_tasks import crawl_and_claim; crawl_and_claim()"
+```
 
 ## 5. Chạy test tự động
 
 ```bash
-docker compose up -d db
 createdb -h localhost -U postgres pinterval_test 2>/dev/null || true
-DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/pinterval_test \
-  pytest -v
+DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/pinterval_test pytest -v
+ruff check .   # phải sạch (exit 0)
 ```
 
-Hiện tại: 34 test, tất cả pass. Có thể chạy `ruff check .` để lint — phải sạch (exit 0).
+126 test, không đụng site/Redis/Celery/Google thật (trừ 2 test Google bị deselect mặc
+định — chạy riêng bằng `pytest -m integration` nếu có
+`credentials/google-service-account.json`).
 
-## 6. (Tuỳ chọn) Test backup/restore
+## 6. Nếu có lỗi
 
-```bash
-DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/pinterval \
-  bash scripts/db_backup.sh /tmp/backup.dump
-DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/pinterval \
-  bash scripts/db_restore.sh /tmp/backup.dump
-```
-
-## 7. Những thứ chưa có (đừng ngạc nhiên khi thấy thiếu)
-
-- Không có trang web nào — chỉ API JSON.
-- Không có API tạo user qua HTTP (chỉ tạo tay qua script ở mục 3, hoặc thao tác DB
-  trực tiếp).
-- Chưa có crawl Printerval, chưa có chia đơn, chưa có QC — đó là Phase 2 trở đi.
-- `docker compose down` sẽ tắt Postgres nhưng giữ data (volume `pinterval_db_data`);
-  `docker compose down -v` mới xoá sạch data.
-
-## 8. Nếu có lỗi
-
-- `ModuleNotFoundError`: quên `source .venv/bin/activate` hoặc quên `pip install -e ".[dev]"`.
-- Lỗi kết nối Postgres: `docker compose ps` xem container `db` đã `Up` chưa; `docker compose up -d db` lại nếu cần.
-- `alembic upgrade head` báo lỗi: kiểm tra `.env`/`DATABASE_URL` trỏ đúng `localhost:5432`.
+- `ModuleNotFoundError`: quên `source .venv/bin/activate` hoặc `pip install -e ".[dev]"`.
+- Lỗi kết nối Postgres/Redis: `docker compose ps` xem `db`/`redis` đã `Up` chưa.
+- Login trên web không giữ session: kiểm tra `.env` có `COOKIE_SECURE=false` (test qua
+  http, không phải https).
+- `docker compose down` giữ data (volume); `docker compose down -v` mới xoá sạch.
