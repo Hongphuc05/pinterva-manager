@@ -19,6 +19,8 @@ selenium-evidence/
 playwright-evidence/
 screenshots/
 order_assets/
+frontend/node_modules/
+frontend/dist/
 
 # os / editor
 .DS_Store
