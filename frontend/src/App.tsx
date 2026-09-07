@@ -2,6 +2,8 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './auth/AuthContext'
 import { ProtectedRoute } from './auth/ProtectedRoute'
 import { LoginPage } from './pages/LoginPage'
+import { OrdersListPage } from './pages/OrdersListPage'
+import { PrintervalLoginPage } from './pages/PrintervalLoginPage'
 
 function App() {
   return (
@@ -13,7 +15,15 @@ function App() {
             path="/orders"
             element={
               <ProtectedRoute>
-                <div className="p-6">Danh sách đơn (Task 4)</div>
+                <OrdersListPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/printerval-login"
+            element={
+              <ProtectedRoute>
+                <PrintervalLoginPage />
               </ProtectedRoute>
             }
           />
