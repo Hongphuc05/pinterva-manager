@@ -1,6 +1,6 @@
 import pytest
 
-from app.config import DEFAULT_SECRET_KEY, Settings
+from app.config import DEFAULT_SECRET_KEY, Settings, get_settings
 
 
 def test_settings_defaults(monkeypatch):
@@ -28,3 +28,22 @@ def test_default_secret_allowed_for_local_dev(monkeypatch):
     monkeypatch.delenv("SECRET_KEY", raising=False)
     s = Settings(_env_file=None, cookie_secure=False)
     assert s.secret_key == DEFAULT_SECRET_KEY
+
+
+def test_settings_have_redis_and_crawl_interval_defaults(monkeypatch):
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    monkeypatch.delenv("CRAWL_INTERVAL_SECONDS", raising=False)
+    get_settings.cache_clear()
+    settings = get_settings()
+    assert settings.redis_url == "redis://localhost:6379/0"
+    assert settings.crawl_interval_seconds == 300
+
+
+def test_settings_read_redis_and_crawl_interval_from_env(monkeypatch):
+    monkeypatch.setenv("REDIS_URL", "redis://example.test:6380/2")
+    monkeypatch.setenv("CRAWL_INTERVAL_SECONDS", "120")
+    get_settings.cache_clear()
+    settings = get_settings()
+    assert settings.redis_url == "redis://example.test:6380/2"
+    assert settings.crawl_interval_seconds == 120
+    get_settings.cache_clear()

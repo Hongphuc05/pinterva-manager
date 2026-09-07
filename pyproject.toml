@@ -12,8 +12,10 @@ dependencies = [
   "pydantic>=2.7",
   "pydantic-settings>=2.3",
   "bcrypt>=4.1",
+  "celery>=5.4",
   "itsdangerous>=2.2",
   "playwright>=1.46",
+  "redis>=5.0",
   "google-api-python-client>=2.140",
   "google-auth>=2.34",
 ]

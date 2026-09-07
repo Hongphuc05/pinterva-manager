@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     secret_key: str = DEFAULT_SECRET_KEY
     cookie_secure: bool = True
     session_max_age_seconds: int = 60 * 60 * 12
+    redis_url: str = "redis://localhost:6379/0"
+    crawl_interval_seconds: int = 300
 
     @model_validator(mode="after")
     def _reject_default_secret_in_production(self) -> "Settings":
