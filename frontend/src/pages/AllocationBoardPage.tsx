@@ -47,14 +47,24 @@ function DesignerColumn({
   onDecide,
 }: {
   designer: BoardDesigner
-  onOffer: (designerId: string, quantity: number) => void
+  onOffer: (designerId: string, quantity: number) => Promise<void>
   onDecide: (approvalId: string, decision: 'approve' | 'cancel', reason?: string) => void
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: designer.id })
   const { user } = useAuth()
   const [quantity, setQuantity] = useState(1)
+  const [submitting, setSubmitting] = useState(false)
   const full = designer.capacity !== null && designer.held >= designer.capacity
   const isSelf = user?.id === designer.id
+
+  async function handleClickOffer() {
+    setSubmitting(true)
+    try {
+      await onOffer(designer.id, quantity)
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   return (
     <div ref={setNodeRef} className={`border p-2 w-64 min-h-40 ${isOver ? 'bg-blue-50' : ''}`}>
@@ -72,8 +82,9 @@ function DesignerColumn({
             onChange={(e) => setQuantity(Number(e.target.value))}
           />
           <button
-            className="bg-green-600 text-white px-2"
-            onClick={() => onOffer(designer.id, quantity)}
+            className="bg-green-600 text-white px-2 disabled:opacity-50"
+            disabled={submitting}
+            onClick={handleClickOffer}
           >
             Nhận
           </button>
@@ -126,10 +137,15 @@ export function AllocationBoardPage() {
     if (!over || !board) return
     const order = board.unassigned.find((o) => o.id === active.id)
     if (!order) return
+    const requestId = crypto.randomUUID()
     try {
       await apiFetch('/allocation/assign', {
         method: 'POST',
-        body: JSON.stringify({ order_id: order.external_order_id, designer_id: over.id }),
+        body: JSON.stringify({
+          order_id: order.external_order_id,
+          designer_id: over.id,
+          request_id: requestId,
+        }),
       })
       await loadBoard(batchId)
     } catch {
@@ -138,10 +154,11 @@ export function AllocationBoardPage() {
   }
 
   async function handleOffer(_designerId: string, quantity: number) {
+    const requestId = crypto.randomUUID()
     try {
       await apiFetch('/allocation/offer', {
         method: 'POST',
-        body: JSON.stringify({ batch_id: batchId, quantity }),
+        body: JSON.stringify({ batch_id: batchId, quantity, request_id: requestId }),
       })
       await loadBoard(batchId)
     } catch {
