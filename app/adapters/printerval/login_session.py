@@ -6,9 +6,8 @@ from app.adapters.printerval.playwright_adapter import ADMIN_URL
 # Module-level state for the interactive "log in to Printerval" flow: one admin, one
 # browser window, opened by one request and closed by a later one — a plain global is
 # enough for this single-operator, rare, admin-only action. None means no interactive
-# login window is currently open. Extracted from web.py so both the old Jinja2 routes
-# (until Task 6 deletes them) and the new JSON API can share the same live session
-# instead of each holding a separate, inconsistent one.
+# login window is currently open. Extracted from the old web.py so the JSON API can
+# hold a single live session instead of each caller holding a separate, inconsistent one.
 _login_session: dict | None = None
 
 

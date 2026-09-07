@@ -62,7 +62,7 @@ audit, tất cả thao tác qua web:
 ```text
                  ┌─────────────────────────────┐
                  │   Web Dashboard (FastAPI)    │
-                 │  Jinja2 + HTMX + Alpine.js   │
+                 │   React + TS + Vite + Tailwind│
                  │  role: admin | designer      │
                  └───────────────┬─────────────┘
                                  │
@@ -83,7 +83,7 @@ audit, tất cả thao tác qua web:
 
 | Tầng | Chọn cho V1 |
 |---|---|
-| Web / API | Python 3.12, FastAPI, Jinja2 + HTMX + Alpine.js (server-rendered, không SPA riêng) |
+| Web / API | Python 3.12, FastAPI, React + TypeScript + Vite + Tailwind (SPA) |
 | Domain / dữ liệu | Pydantic v2, SQLAlchemy 2, Alembic |
 | Worker / workflow nền | Celery hoặc Dramatiq với Redis; transactional outbox cho crawl job, submit-to-site job, Sheet export job |
 | CSDL | PostgreSQL 16 chạy Docker/OrbStack; backup mã hóa hằng ngày |
