@@ -392,16 +392,28 @@ class PlaywrightPrintervalAdapter:
             note_group = _note_outsource_group(row)
             if note_group.count() == 0:
                 raise LookupError(f"No Note outsource field found for order {external_order_id}")
-            note_group.dblclick()
             textarea = note_group.locator("textarea")
             if textarea.count() == 0:
                 raise LookupError(f"No note textarea found for order {external_order_id}")
-            textarea.fill(drive_url)
-            with page.expect_response(
-                lambda r: "/design-job-meta" in r.url and r.request.method == "POST"
-            ) as resp_info:
-                note_group.get_by_role("button", name="Save").click()
-            _ensure_save_succeeded(resp_info.value)
+            if textarea.input_value() == drive_url:
+                # Already the target value (reading the textarea's real
+                # ng-model value works even while hidden, no dblclick
+                # needed). Clicking Save would still fire a real write —
+                # unlike the two <select>s, this button has no "did the
+                # value change" guard — so restore_order's unconditional
+                # call would otherwise perform a redundant live write on
+                # every single smoke test, on the exact field that already
+                # caused a real incident this session. Skip straight to the
+                # fresh-state confirmation below.
+                pass
+            else:
+                note_group.dblclick()
+                textarea.fill(drive_url)
+                with page.expect_response(
+                    lambda r: "/design-job-meta" in r.url and r.request.method == "POST"
+                ) as resp_info:
+                    note_group.get_by_role("button", name="Save").click()
+                _ensure_save_succeeded(resp_info.value)
 
             # Genuine fresh-state check: re-navigate/re-search independently
             # instead of trusting the same in-page textarea we just filled —
