@@ -45,11 +45,15 @@ Có một khu vực quản lý tài khoản khác trong DOM (`Email / Mật kh�
 | Search | theo tên product (text) |
 | Status | All / Waiting+Doing+Fix / Waiting / Doing / Review / Fix / Confirm / Done |
 | Designer | Tất cả / Chưa chia cho ai / (2 account ntth ở trên) |
-| Loại design job | Tất cả 2D&3D / 2D / 3D / ART / WOOD / CALENDAR / EMBROIDERY / AI |
+| Loại design job | Tất cả 2D & 3D / 2D / 3D / ART / WOOD / CALENDAR / EMBROIDERY / AI |
 | Trạng thái tìm design | Đang tìm / Đã tìm xong (sub-workflow riêng: tìm nguồn ảnh/mẫu tham khảo, tách biệt với việc thiết kế) |
 | Ngày | theo Ngày tạo / Ngày hoàn thành / Ngày tạo đơn hàng / Ngày hết hạn, kèm Date from/to |
 
-→ **Lưu ý quan trọng:** ngoài loại "2D" (thiết kế đồ hoạ) còn có WOOD (khắc gỗ), EMBROIDERY (thêu), CALENDAR, AI, ART — nếu team hiện tại chỉ làm 2D thì V1 chỉ cần filter cứng `type=2D`, nhưng cần xác nhận.
+→ **Đã xác nhận (2026-09-07):** ngoài loại "2D" (thiết kế đồ hoạ) còn có WOOD (khắc gỗ),
+EMBROIDERY (thêu), CALENDAR, AI, ART — nhưng loại job chỉ là nhãn phân loại từ khách,
+không phải rào cản xử lý. V1 crawl mặc định **tất cả loại** ("Tất cả 2D & 3D" — lưu ý
+có dấu cách quanh dấu `&`, đã từng ghi sai không dấu cách ở bản đầu và gây crawl im
+lặng trả về 0 đơn), không lọc cứng `type=2D` như dự định ban đầu.
 
 ## 5. Cấu trúc 1 dòng đơn (job)
 
