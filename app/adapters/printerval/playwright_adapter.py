@@ -45,15 +45,23 @@ def _classify_exception(exc: Exception) -> tuple[str, bool]:
     return "BUG", False
 
 
-def _find_select_by_option_text(page: Page, expected_option_substring: str):
+def _find_select_by_option_text(page: Page, expected_option_text: str):
     """Locate a <select> by one of its option texts (stable — independent of
-    position on the page, unlike an index-based selector)."""
+    position on the page, unlike an index-based selector).
+
+    Exact match (after strip), not substring: Task 6 found live that a
+    substring match is ambiguous under some accounts — e.g. a Designer
+    filter option literally named "Nguyễn Thị Thuý Hường - 2D Prin" contains
+    the substring "2D" and would shadow the real job-type "2D" option
+    (which comes later in DOM order), making a substring search pick the
+    wrong <select>.
+    """
     for select in page.locator("select").all():
         options_text = select.locator("option").all_inner_texts()
-        if any(expected_option_substring in opt for opt in options_text):
+        if any(opt.strip() == expected_option_text for opt in options_text):
             return select
     raise LookupError(
-        f"No <select> found with an option containing {expected_option_substring!r}"
+        f"No <select> found with an option exactly matching {expected_option_text!r}"
     )
 
 
@@ -68,6 +76,25 @@ def _selected_option_text(select) -> str | None:
     return select.evaluate(
         "el => el.options[el.selectedIndex] ? el.options[el.selectedIndex].text : null"
     )
+
+
+def _note_outsource_group(row):
+    """Locate the row's live "Note outsource" field group.
+
+    Real-DOM finding (Task 6, re-verified under the current team's account):
+    a row renders two `.note` groups sharing the same "Note outsource" label —
+    one for the regular design-job flow (`aria-hidden="false"`), one for the
+    separate "find-design" sub-workflow (`aria-hidden="true"`, out of scope
+    here). `[aria-hidden='false']` disambiguates them. This field is an
+    Angular double-click-to-edit control: the textarea (`ng-model=
+    "item.attributes.outsource_note"`) is hidden until the group is
+    double-clicked, and a "Save" button (`ng-click="saveAttribute(item,
+    'outsource_note')"`) persists it. Confirmed live: across 8 sampled real
+    `Done` orders, this field already holds a human-pasted Google Drive
+    result-link URL in every case — this is the real, in-use mechanism for
+    attaching a designer's result link, not the file-upload widget.
+    """
+    return row.locator(".note[aria-hidden='false']").first
 
 
 def _search_and_get_row(page: Page, external_order_id: str):
@@ -259,4 +286,36 @@ class PlaywrightPrintervalAdapter:
         return WriteResult(
             success=True, external_order_id=external_order_id,
             observed_state={"status": observed},
+        )
+
+    def attach_result_link(self, external_order_id: str, drive_url: str) -> WriteResult:
+        page = self.page
+        try:
+            row = _search_and_get_row(page, external_order_id)
+            note_group = _note_outsource_group(row)
+            note_group.dblclick()
+            textarea = note_group.locator("textarea")
+            textarea.fill(drive_url)
+            with page.expect_response(
+                lambda r: "/design-job-meta" in r.url and r.request.method == "POST"
+            ):
+                note_group.get_by_role("button", name="Save").click()
+            observed = textarea.input_value()
+        except Exception as exc:
+            error_class, retryable = _classify_exception(exc)
+            evidence = capture_evidence(page, f"attach_result_link_failed_{external_order_id}")
+            return WriteResult(
+                success=False, external_order_id=external_order_id,
+                error_class=error_class, retryable=retryable, evidence=evidence,
+            )
+        if observed != drive_url:
+            evidence = capture_evidence(page, f"attach_result_link_unverified_{external_order_id}")
+            return WriteResult(
+                success=False, external_order_id=external_order_id,
+                error_class="UNKNOWN_OUTCOME", retryable=False, evidence=evidence,
+                observed_state={"result_link": observed},
+            )
+        return WriteResult(
+            success=True, external_order_id=external_order_id,
+            observed_state={"result_link": observed},
         )
