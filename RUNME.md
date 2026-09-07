@@ -1,146 +1,118 @@
-# RUNME — Chạy toàn bộ Pinterval Ops (Phase 1-4)
+# RUNME — Hướng Dẫn Khởi Chạy Pinterval Ops Dashboard (Nhánh `main`)
 
-Đã có: Postgres schema + state machine (P1), Printerval/Google adapter (P2), crawl job
-tự động (P3), web dashboard login + danh sách/chi tiết đơn (P4). **Chưa có**: phân bổ
-đơn, QC, submit-to-site (Phase 5 trở đi) — nên web hiện chỉ hiển thị, chưa có nút thao
-tác.
+Tài liệu hướng dẫn khởi chạy toàn bộ hệ thống **Pinterval Ops Dashboard** trên nhánh `main`, bao gồm Backend (FastAPI + SQLAlchemy + Postgres), Frontend (React + Vite + TailwindCSS), và Hệ thống Crawl Đơn hàng API-First từ Printerval.
 
-## 1. Cài đặt lần đầu
+---
 
+## 1. Cài Đặt Ban Đầu (Setup)
+
+### Bước 1: Clone & Chuyển sang nhánh `main`
 ```bash
 cd /Users/hongphuc/Documents/01_congViec/pinterval
-
-cp .env.example .env
-# Sửa COOKIE_SECURE=true -> false trong .env (test local http, không có https)
-
-python3.12 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-playwright install chrome        # chỉ cần nếu sẽ chạy crawl job thật (mục 4)
-
-docker compose up -d db redis    # Postgres 16 + Redis
-alembic upgrade head             # tạo toàn bộ bảng
+git checkout main
 ```
 
-Tạo user để đăng nhập (chưa có API tự đăng ký — tạo tay):
-
+### Bước 2: Tạo môi trường Virtualenv & Cài đặt thư viện Python
 ```bash
-python -c "
+# Tạo .env từ file mẫu nếu chưa có
+cp -n .env.example .env
+
+# Tạo Virtual Environment & Activate
+python3.12 -m venv .venv
+source .venv/bin/activate
+
+# Cài đặt toàn bộ dependencies
+pip install -e ".[dev]"
+```
+
+### Bước 3: Khởi chạy Database (Postgres 16 + Redis) & Migration
+```bash
+# Khởi chạy Docker Postgres & Redis
+docker compose up -d db redis
+
+# Chạy Alembic Migration để cập nhật bảng mới nhất (Bao gồm Multi-Platform & Templates)
+alembic upgrade head
+```
+
+### Bước 4: Tạo Tài Khoản Quản Trị Viên (Admin)
+Chạy script tạo sẵn tài khoản Admin và Designer thử nghiệm:
+```bash
+./.venv/bin/python -c "
 from app.adapters.db.session import SessionLocal
 from app.adapters.db.models import User
 from app.application.auth import hash_password
 
 db = SessionLocal()
-db.add(User(username='admin', full_name='Admin Test', role='admin',
-            password_hash=hash_password('admin123')))
-db.add(User(username='designer1', full_name='Designer Test', role='designer',
-            password_hash=hash_password('designer123')))
+if not db.query(User).filter_by(username='admin').first():
+    db.add(User(username='admin', full_name='Admin Test', role='admin', password_hash=hash_password('admin123')))
+if not db.query(User).filter_by(username='designer1').first():
+    db.add(User(username='designer1', full_name='Designer Test', role='designer', password_hash=hash_password('designer123')))
 db.commit()
-print('Đã tạo: admin/admin123 (role admin), designer1/designer123 (role designer)')
+print('Đã tạo tài khoản: admin/admin123 (Admin), designer1/designer123 (Designer)')
 "
 ```
 
-## 2. Chạy web dashboard
+---
 
-Giao diện là React SPA (FastAPI chỉ expose JSON API + serve file tĩnh). Có 2 chế độ:
+## 2. Khởi Chạy Web Dashboard
 
-**Dev (2 tiến trình, có hot-reload):**
+Hệ thống hoạt động ở 2 tiến trình độc lập (Backend API & Frontend Dev Server):
 
+### Tiến trình 1: Khởi chạy Backend (FastAPI Server)
 ```bash
-uvicorn app.api.main:app --reload --port 8000     # tiến trình 1: backend JSON API
-cd frontend && npm run dev                        # tiến trình 2: Vite dev server
+cd /Users/hongphuc/Documents/01_congViec/pinterval
+source .venv/bin/activate
+uvicorn app.api.main:app --reload --port 8000
 ```
+*(Backend JSON API lắng nghe tại `http://localhost:8000`, API Docs Swagger tại `http://localhost:8000/docs`)*
 
-Mở **http://localhost:5173** (Vite proxy `/api` sang cổng 8000) — đăng nhập
-`admin`/`admin123`. Sẽ vào `/orders` (hiện rỗng nếu chưa chạy crawl job ở mục 4 — DB
-chưa có đơn nào là bình thường).
-
-**Prod-like (1 tiến trình):**
-
+### Tiến trình 2: Khởi chạy Frontend (Vite Dev Server)
+Mở một cửa sổ Terminal mới:
 ```bash
-cd frontend && npm run build   # build 1 lần, tạo frontend/dist/
-cd ..
-uvicorn app.api.main:app --port 8000
+cd /Users/hongphuc/Documents/01_congViec/pinterval/frontend
+npm install
+npm run dev
 ```
+*(Frontend Dev Server chạy tại `http://localhost:5173` — tự động proxy mọi API `/api` sang cổng 8000)*
 
-Mở **http://localhost:8000** — uvicorn serve luôn SPA đã build từ `/`.
+---
 
-Trang có: danh sách đơn lọc theo status (mọi role) và batch ID (chỉ admin thấy ô lọc),
-nút **Refresh** (chỉ admin thấy) chạy
-crawl thật ngay từ trình duyệt, link **"Đăng nhập Printerval"** trên thanh nav (chỉ
-admin) mở Chrome thật để đăng nhập tay — xem mục 4 — và trang chi tiết đơn kèm lịch sử
-chuyển trạng thái. `admin` thấy mọi đơn; `designer` chỉ thấy đơn được giao (luôn rỗng
-cho tới khi Phase 5 xong).
+## 3. Hướng Dẫn Sử Dụng & Thao Tác Web Dashboard
 
-Sau khi bấm Refresh, thông báo phân biệt rõ 3 trường hợp: thành công (kèm số đơn mới/
-nhập/lỗi), lỗi tìm đơn (site đổi giao diện/bộ lọc sai — xem `dead_letters` để biết chi
-tiết), hoặc lỗi mở phiên trình duyệt (thường do Chrome profile chưa/hết đăng nhập).
+1. Mở trình duyệt truy cập: **`http://localhost:5173`**
+2. Đăng nhập với tài khoản:
+   - **Tài khoản:** `admin`
+   - **Mật khẩu:** `admin123`
 
-API JSON thuần (Swagger) vẫn còn ở **http://127.0.0.1:8000/docs** nếu cần test qua
-Postman/curl thay vì trình duyệt.
+### Chức Năng Chính:
+- **Quản Lý Workspace Acc Mẹ Printerval:** 
+  - Nhấp vào nút **`Acc Mẹ Printerval: ...`** trên góc phải Topbar để xem danh sách hoặc đăng nhập tài khoản mẹ Printerval mới.
+  - Khi chuyển đổi Workspace Acc Mẹ, toàn bộ dữ liệu đơn hàng, phân công và tiến độ được cô lập và tải riêng theo từng tài khoản mẹ.
+- **Quét Đơn Printerval (API HTTP Crawl):**
+  - Nhấp nút **`Quét Đơn Printerval`** ở góc trên bên phải.
+  - Hệ thống sử dụng HTTP API tự động quét và nhập hàng chục đơn hàng từ Printerval về CSDL chỉ trong vài giây mà không cần mở trình duyệt Chromium ngầm.
+- **Phân Bổ Kéo-Thả (Allocation Board):**
+  - Giao diện trực quan hỗ trợ phân công đơn hàng cho Designer.
+- **Bảng Tiến Độ Kanban:**
+  - Theo dõi trạng thái quy trình xử lý đơn hàng từ DISCOVERED, ASSIGNED, CLAIMED_IMPORTED đến SUBMITTED, PASSED_QC.
+- **Quản Lý Tài Khoản (User Management):**
+  - Thêm, sửa, cấp quyền Admin / Designer cho nhân sự trong team.
 
-## 3. (Tuỳ chọn) Nạp dữ liệu mẫu để xem giao diện ngay, không cần crawl thật
+---
 
-```bash
-python -c "
-from app.adapters.db.session import SessionLocal
-from app.adapters.db.models import Order, WorkflowEvent
-from app.domain.models import OrderState
+## 4. Chạy Kiểm Thử Tự Động (Pytest)
 
-db = SessionLocal()
-o = Order(external_order_id='DJ0000001', state=OrderState.CLAIMED_IMPORTED.value)
-db.add(o); db.commit()
-db.add(WorkflowEvent(order_id=o.id, from_state='DISCOVERED', to_state='CLAIMED_IMPORTED'))
-db.commit()
-print('Đã tạo đơn mẫu DJ0000001')
-"
-```
-
-## 4. Chạy crawl job thật (đụng site Printerval thật — cẩn thận)
-
-Cần Chrome profile (`chrome-profile/`) đã login **đúng tài khoản công ty/admin** —
-**không phải tài khoản cá nhân của 1 designer** (site giới hạn kết quả tìm kiếm theo
-`team_outsource` của tài khoản đang login; tài khoản cá nhân không thấy đơn `Waiting`
-chưa ai claim). Đăng nhập/đổi tài khoản qua chính web dashboard: vào **"Đăng nhập
-Printerval"** trên thanh nav (chỉ admin thấy) → bấm "Mở Chrome để đăng nhập" → cửa sổ
-Chrome thật mở ra, đăng nhập/đổi tài khoản trên đó bình thường → quay lại trang web,
-bấm "Done" để đóng cửa sổ.
-
-Sau khi đã login đúng tài khoản, có 2 cách chạy crawl:
-
-**a) Bấm nút Refresh trên web** (`/orders`, chỉ admin thấy nút) — chạy ngay, đứng chờ
-kết quả (vài chục giây tới vài phút tùy số đơn), không cần Celery. Lưu ý: đừng bấm
-đúng lúc Celery Beat (cách b) đang chạy nền cùng lúc — 2 phiên Chrome cùng lúc trên
-cùng 1 profile có thể xung đột (giới hạn "1 session/site", chưa xử lý khoá).
-
-**b) Chạy định kỳ nền qua Celery** (không cần mở trình duyệt):
+Để đảm bảo toàn bộ hệ thống hoạt động chính xác (190 test cases):
 
 ```bash
-celery -A app.workers.celery_app worker --beat --loglevel=info
-```
-
-Job `crawl_and_claim` tự chạy mỗi `CRAWL_INTERVAL_SECONDS` (mặc định 300s = 5 phút).
-Gọi tay ngay lập tức thay vì chờ:
-
-```bash
-python -c "from app.workers.crawl_tasks import crawl_and_claim; crawl_and_claim()"
-```
-
-## 5. Chạy test tự động
-
-```bash
+cd /Users/hongphuc/Documents/01_congViec/pinterval
 createdb -h localhost -U postgres pinterval_test 2>/dev/null || true
-DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/pinterval_test pytest -v
-ruff check .   # phải sạch (exit 0)
+DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/pinterval_test ./.venv/bin/pytest
 ```
 
-126 test, không đụng site/Redis/Celery/Google thật (trừ 2 test Google bị deselect mặc
-định — chạy riêng bằng `pytest -m integration` nếu có
-`credentials/google-service-account.json`).
+---
 
-## 6. Nếu có lỗi
+## 5. Cấu Trúc Nhánh & Ghi Chú Phát Triển
 
-- `ModuleNotFoundError`: quên `source .venv/bin/activate` hoặc `pip install -e ".[dev]"`.
-- Lỗi kết nối Postgres/Redis: `docker compose ps` xem `db`/`redis` đã `Up` chưa.
-- Login trên web không giữ session: kiểm tra `.env` có `COOKIE_SECURE=false` (test qua
-  http, không phải https).
-- `docker compose down` giữ data (volume); `docker compose down -v` mới xoá sạch.
+- **Nhánh hiện tại:** `main` (Đã được merge đầy đủ toàn bộ tính năng Phase 1-4, Multi-Tenant Workspace & HTTP API Crawl).
+- **Quy tắc Commit:** Mọi thay đổi mới nên được kiểm thử qua `pytest` trước khi commit trực tiếp lên `main`.
