@@ -22,13 +22,13 @@ def client(db_session):
 
 @pytest.fixture(autouse=True)
 def _reset_login_session():
-    """The route module holds one process-wide `_login_session` global — reset it
-    around every test in this file so state never leaks between tests."""
-    from app.api.routes import web
+    """The login_session module holds one process-wide `_login_session` global —
+    reset it around every test in this file so state never leaks between tests."""
+    from app.adapters.printerval import login_session
 
-    web._login_session = None
+    login_session._login_session = None
     yield
-    web._login_session = None
+    login_session._login_session = None
 
 
 def _login(client, db_session, role, username="user1"):
@@ -84,7 +84,7 @@ def test_printerval_login_start_requires_admin(client, db_session):
 
 
 def test_printerval_login_start_opens_a_session_and_redirects(client, db_session, monkeypatch):
-    from app.api.routes import web
+    from app.adapters.printerval import login_session
 
     fake_page = _FakePage()
     fake_context = _FakeContext()
@@ -93,22 +93,22 @@ def test_printerval_login_start_opens_a_session_and_redirects(client, db_session
     def _fake_open(*args, **kwargs):
         return fake_cm, fake_context, fake_page
 
-    monkeypatch.setattr(web, "open_playwright_session", _fake_open)
+    monkeypatch.setattr(login_session, "open_playwright_session", _fake_open)
 
     _login(client, db_session, "admin")
     resp = client.post("/printerval-login/start", follow_redirects=False)
 
     assert resp.status_code == 303
     assert resp.headers["location"] == "/printerval-login"
-    assert web._login_session is not None
-    assert web._login_session["context"] is fake_context
-    assert fake_page.url == web.ADMIN_URL
+    assert login_session._login_session is not None
+    assert login_session._login_session["context"] is fake_context
+    assert fake_page.url == login_session.ADMIN_URL
 
 
 def test_printerval_login_start_reuses_an_already_open_session(client, db_session, monkeypatch):
     """A second click on "start" while a window is already open must not open a
     second browser — reuse the existing one."""
-    from app.api.routes import web
+    from app.adapters.printerval import login_session
 
     calls = {"n": 0}
 
@@ -116,7 +116,7 @@ def test_printerval_login_start_reuses_an_already_open_session(client, db_sessio
         calls["n"] += 1
         return _FakePlaywrightCM(), _FakeContext(), _FakePage()
 
-    monkeypatch.setattr(web, "open_playwright_session", _fake_open)
+    monkeypatch.setattr(login_session, "open_playwright_session", _fake_open)
 
     _login(client, db_session, "admin")
     client.post("/printerval-login/start")
@@ -130,14 +130,16 @@ def test_printerval_login_start_opens_fresh_session_if_previous_one_is_stale(
 ):
     """If the human closed the Chrome window by hand (not via Done), the stored
     context is dead — accessing it raises, and start must recover by opening fresh."""
-    from app.api.routes import web
+    from app.adapters.printerval import login_session
 
     class _DeadContext:
         @property
         def pages(self):
             raise RuntimeError("Target page, context or browser has been closed")
 
-    web._login_session = {"playwright_cm": _FakePlaywrightCM(), "context": _DeadContext()}
+    login_session._login_session = {
+        "playwright_cm": _FakePlaywrightCM(), "context": _DeadContext()
+    }
 
     calls = {"n": 0}
 
@@ -145,20 +147,22 @@ def test_printerval_login_start_opens_fresh_session_if_previous_one_is_stale(
         calls["n"] += 1
         return _FakePlaywrightCM(), _FakeContext(), _FakePage()
 
-    monkeypatch.setattr(web, "open_playwright_session", _fake_open)
+    monkeypatch.setattr(login_session, "open_playwright_session", _fake_open)
 
     _login(client, db_session, "admin")
     resp = client.post("/printerval-login/start", follow_redirects=False)
 
     assert resp.status_code == 303
     assert calls["n"] == 1
-    assert isinstance(web._login_session["context"], _FakeContext)
+    assert isinstance(login_session._login_session["context"], _FakeContext)
 
 
 def test_printerval_login_page_reflects_open_state(client, db_session):
-    from app.api.routes import web
+    from app.adapters.printerval import login_session
 
-    web._login_session = {"playwright_cm": _FakePlaywrightCM(), "context": _FakeContext()}
+    login_session._login_session = {
+        "playwright_cm": _FakePlaywrightCM(), "context": _FakeContext()
+    }
 
     _login(client, db_session, "admin")
     resp = client.get("/printerval-login")
@@ -185,7 +189,7 @@ def test_printerval_login_done_requires_admin(client, db_session):
 
 
 def test_printerval_login_done_closes_the_session_and_redirects(client, db_session, monkeypatch):
-    from app.api.routes import web
+    from app.adapters.printerval import login_session
 
     closed = {"context": False, "cm_exited": False}
 
@@ -201,8 +205,10 @@ def test_printerval_login_done_closes_the_session_and_redirects(client, db_sessi
         context.close()
         playwright_cm.__exit__(None, None, None)
 
-    monkeypatch.setattr(web, "close_playwright_session", _fake_close)
-    web._login_session = {"playwright_cm": _TrackingCM(), "context": _TrackingContext()}
+    monkeypatch.setattr(login_session, "close_playwright_session", _fake_close)
+    login_session._login_session = {
+        "playwright_cm": _TrackingCM(), "context": _TrackingContext()
+    }
 
     _login(client, db_session, "admin")
     resp = client.post("/printerval-login/done", follow_redirects=False)
@@ -211,7 +217,7 @@ def test_printerval_login_done_closes_the_session_and_redirects(client, db_sessi
     assert resp.headers["location"] == "/orders"
     assert closed["context"] is True
     assert closed["cm_exited"] is True
-    assert web._login_session is None
+    assert login_session._login_session is None
 
 
 def test_printerval_login_done_is_a_no_op_when_nothing_is_open(client, db_session):
