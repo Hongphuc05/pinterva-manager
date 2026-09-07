@@ -13,6 +13,7 @@ from app.adapters.printerval.models import (
     DiscoverResult,
     OrderDetailResult,
     OrderSummary,
+    WriteResult,
 )
 
 ADMIN_URL = "https://printerval.com/central/outsource/pod/design-job/admin"
@@ -206,4 +207,56 @@ class PlaywrightPrintervalAdapter:
             external_order_id=external_order_id,
             local_path=str(local_path),
             checksum=checksum,
+        )
+
+    def set_designer(self, external_order_id: str, designer_option: str) -> WriteResult:
+        page = self.page
+        try:
+            row = _search_and_get_row(page, external_order_id)
+            designer_select = row.locator("select").nth(0)
+            designer_select.select_option(label=designer_option, force=True)
+            observed = _selected_option_text(designer_select)
+        except Exception as exc:
+            error_class, retryable = _classify_exception(exc)
+            evidence = capture_evidence(page, f"set_designer_failed_{external_order_id}")
+            return WriteResult(
+                success=False, external_order_id=external_order_id,
+                error_class=error_class, retryable=retryable, evidence=evidence,
+            )
+        if observed != designer_option:
+            evidence = capture_evidence(page, f"set_designer_unverified_{external_order_id}")
+            return WriteResult(
+                success=False, external_order_id=external_order_id,
+                error_class="UNKNOWN_OUTCOME", retryable=False, evidence=evidence,
+                observed_state={"designer": observed},
+            )
+        return WriteResult(
+            success=True, external_order_id=external_order_id,
+            observed_state={"designer": observed},
+        )
+
+    def set_status(self, external_order_id: str, target_status: str) -> WriteResult:
+        page = self.page
+        try:
+            row = _search_and_get_row(page, external_order_id)
+            status_select = row.locator("select").nth(1)
+            status_select.select_option(label=target_status, force=True)
+            observed = _selected_option_text(status_select)
+        except Exception as exc:
+            error_class, retryable = _classify_exception(exc)
+            evidence = capture_evidence(page, f"set_status_failed_{external_order_id}")
+            return WriteResult(
+                success=False, external_order_id=external_order_id,
+                error_class=error_class, retryable=retryable, evidence=evidence,
+            )
+        if observed != target_status:
+            evidence = capture_evidence(page, f"set_status_unverified_{external_order_id}")
+            return WriteResult(
+                success=False, external_order_id=external_order_id,
+                error_class="UNKNOWN_OUTCOME", retryable=False, evidence=evidence,
+                observed_state={"status": observed},
+            )
+        return WriteResult(
+            success=True, external_order_id=external_order_id,
+            observed_state={"status": observed},
         )
