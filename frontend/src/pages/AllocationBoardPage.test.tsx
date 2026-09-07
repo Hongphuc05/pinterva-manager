@@ -44,4 +44,46 @@ describe('AllocationBoardPage', () => {
     await waitFor(() => expect(screen.getByText('DJ1')).toBeInTheDocument())
     expect(screen.getByText(/Nam/)).toBeInTheDocument()
   })
+
+  it('lets the logged-in designer offer a quantity', async () => {
+    ;(fetch as ReturnType<typeof vi.fn>).mockImplementation((url: string, init?: RequestInit) => {
+      if (url.includes('/api/me')) {
+        return Promise.resolve({
+          ok: true, status: 200,
+          json: async () => ({ id: 'd1', role: 'designer', full_name: 'Nam' }),
+        })
+      }
+      if (url.includes('/api/allocation/offer')) {
+        return Promise.resolve({
+          ok: true, status: 200,
+          json: async () => ({ granted_order_ids: ['DJ1'], assignment_ids: ['a1'] }),
+        })
+      }
+      if (url.includes('/api/allocation/board')) {
+        return Promise.resolve({
+          ok: true, status: 200,
+          json: async () => ({
+            unassigned: [],
+            designers: [{ id: 'd1', full_name: 'Nam', capacity: 5, held: 0, pending_approvals: [] }],
+          }),
+        })
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url} ${init?.method}`))
+    })
+
+    render(
+      <BrowserRouter>
+        <AuthProvider>
+          <AllocationBoardPage />
+        </AuthProvider>
+      </BrowserRouter>
+    )
+    fireEvent.change(screen.getByPlaceholderText('Batch ID'), { target: { value: 'b1' } })
+    fireEvent.click(screen.getByText('Tải'))
+    await waitFor(() => expect(screen.getByText('Nhận')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('Nhận'))
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith('/api/allocation/offer', expect.anything())
+    )
+  })
 })

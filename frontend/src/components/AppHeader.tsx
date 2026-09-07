@@ -18,6 +18,11 @@ export function AppHeader() {
         Pinterval Ops
       </Link>
       <div className="flex items-center gap-4 text-sm">
+        {user.role === 'admin' && (
+          <Link to="/allocation" className="underline">
+            Phân bổ
+          </Link>
+        )}
         <span>
           {user.full_name} ({user.role})
         </span>
