@@ -1,6 +1,10 @@
 # Phase 3 — Crawl & Claim (C1) Design
 
-**Status:** Approved by user 2026-09-07.
+**Status:** Approved by user 2026-09-07. **Revised 2026-09-07** after the final
+whole-branch review found the original §3/§4 retry claim was wrong and a real
+invariant-violation gap (a claim-failed order could reach `CLAIMED_IMPORTED` without
+the site ever confirming the claim) — see the corrected §3/§4 below and the SDD
+ledger's ruling for the full reasoning.
 
 ## 1. Scope
 
@@ -33,10 +37,10 @@ app/application/crawl.py
   1. discover_waiting_orders(adapter, limit)   -> new external_order_ids not in DB yet
   2. claim_batch(session, adapter, order_ids)  -> Batch + Order(DISCOVERED) rows,
                                                    adapter.set_designer("ntth") per order
-  3. import_claimed_batch(session, adapter, batch_id)
-                                                -> adapter.download_asset per order still
-                                                   missing a verified OrderAsset;
-                                                   on success: OrderAsset row +
+  3. import_claimed_orders(session, adapter)   -> scans ALL orders (any batch/cycle)
+                                                   that are DISCOVERED + have a confirmed
+                                                   claim; adapter.download_asset per
+                                                   order; on success: OrderAsset row +
                                                    apply_transition(DISCOVERED -> CLAIMED_IMPORTED)
         │
         ▼
@@ -49,14 +53,36 @@ Each of the 3 application functions is wrapped in `run_idempotent` (already exis
 batch/order id and the function name, so a crashed/retried Celery task resumes rather
 than redoing already-completed work.
 
-## 3. Why no new state or schema
+## 3. Why no new state or schema — and how retry is actually scoped
 
 The state model (`app/domain/state_machine.py`) already allows `DISCOVERED ->
 CLAIMED_IMPORTED` directly. An order that has been claimed on the site but whose asset
-import hasn't succeeded yet simply stays at `DISCOVERED` in the DB — the next crawl
-cycle's `import_claimed_batch` naturally retries it (any order in the batch missing an
-`OrderAsset` row is still "pending import"). This satisfies the roadmap's acceptance
-criterion "rerun chỉ tiếp tục phần dang dở" with zero new state or columns.
+import hasn't succeeded yet simply stays at `DISCOVERED` in the DB.
+
+**Two kinds of "not yet imported" need different treatment, and the original version of
+this spec conflated them (fixed here):**
+
+- **Crashed/interrupted** (the process died mid-`import_claimed_orders`, before that
+  order's per-order operation recorded any outcome): this must resume automatically on
+  the next crawl cycle — claude.md §18 requires "Batch/resume/retry idempotent." Fixed
+  by making `import_claimed_orders` scan across ALL batches/cycles (not just the one a
+  caller just created) and giving each order its own idempotency key
+  (`import_order:<external_order_id>`) — `run_idempotent`'s existing pending-lease
+  reclaim then genuinely retries a crashed order on the next cycle.
+- **Confirmed failure** (`with_retry` already exhausted its attempts on
+  `download_asset` for this order, and it was dead-lettered): per claude.md §11,
+  "Hết retry đưa vào dead_letters kèm recovery action cho operator" — an exhausted
+  retry is an operator-recovery case, NOT something the crawl job should silently
+  retry forever on its own. This is correct, intended behavior, not a gap: a
+  dead-lettered order's per-order operation records `{"imported": False}` and
+  completes (doesn't raise), so future scans see it as already-attempted and don't
+  re-download — it stays visible via `dead_letters` until an operator's recovery
+  action (not yet built — a Phase 4/5 follow-up, see §7) does something about it.
+
+This satisfies the roadmap's acceptance criterion "rerun chỉ tiếp tục phần dang dở" for
+the crash-recovery case, which is the case that criterion actually describes — the
+original draft of this spec incorrectly implied ordinary business-failure retries too,
+which would have violated claude.md §11.
 
 `Order.external_order_id`'s existing unique constraint (Phase 1) is the dedupe
 mechanism: `discover_waiting_orders` filters out any external ID already present in the
@@ -89,19 +115,36 @@ created (`DISCOVERED`, unclaimed on-site) — the batch's other orders still pro
 independently; one order's claim failure never aborts the whole batch (partial success
 tracked in `BatchResult.claimed`/`failed` lists).
 
-### `import_claimed_batch(session, adapter, batch_id) -> BatchResult`
-Idempotency key: `f"import_claimed_batch:{batch_id}"`. Queries the batch's `Order` rows
-still at state `DISCOVERED` (these are "claimed but not yet imported" — the design
-decision in §3). For each: calls `adapter.download_asset(order_id)` via `with_retry`.
-On success (`AssetResult.success is True`): creates an `OrderAsset` row
-(`source_image_ref` = the adapter's returned `local_path`, `checksum` = the adapter's
-`checksum`, `storage_location` = same local path — matches tech debt #3's "local disk
-for pilot" decision) inside the same transaction as
-`apply_transition(session, order, OrderState.CLAIMED_IMPORTED, actor_id=None,
-evidence={"source": "crawl_job"})` — both commit together or neither does, so an order
-is never left with a verified asset row but the old state, or vice versa. On failure:
-writes a `DeadLetter` row (`source="crawl.import_claimed_batch"`) and leaves the order
-at `DISCOVERED` for the next cycle to retry — never partially transitions.
+### `import_claimed_orders(session, adapter) -> dict`
+No `batch_id` parameter — scans every `Order` at state `DISCOVERED` that also has a
+confirmed claim, i.e. joins against `ExternalObservation(source="printerval")`
+(written only by `claim_batch` on a *successful* `set_designer` call, never on a
+dead-lettered failure). This join is what makes a claim-failed order structurally
+ineligible for import — it can never reach `CLAIMED_IMPORTED` without the join
+condition being satisfied, closing the gap the original spec missed (a claim-failed
+order used to be indistinguishable from a claim-succeeded one by `state` alone).
+
+Idempotency key: `f"import_order:{external_order_id}"`, one per order, not one per
+batch (see §3 for why this scoping is what makes crash-recovery retry actually work).
+For each eligible order: calls `adapter.download_asset(order_id)` via `with_retry`
+inside that order's own `run_idempotent` call. On success (`AssetResult.success is
+True`): creates an `OrderAsset` row (`source_image_ref` = the adapter's returned
+`local_path`, `checksum` = the adapter's `checksum`, `storage_location` = same local
+path — matches tech debt #3's "local disk for pilot" decision) inside the same
+transaction as `apply_transition(session, order, OrderState.CLAIMED_IMPORTED,
+actor_id=None, evidence={"source": "crawl_job"})` — both commit together or neither
+does, so an order is never left with a verified asset row but the old state, or vice
+versa. On failure: writes a `DeadLetter` row (`source="crawl.import_claimed_orders"`)
+and leaves the order at `DISCOVERED`, permanently ineligible for silent re-download
+(the per-order operation is "completed", not "pending") until an operator recovers it.
+A per-order `OperationInProgressError` (another process mid-attempt on that exact
+order right now) is caught and that order is skipped for this cycle, not treated as a
+cycle-wide failure.
+
+`run_crawl_cycle` (in `app/workers/crawl_tasks.py`) calls `import_claimed_orders`
+**unconditionally every cycle** — not gated on the current cycle having claimed
+anything new — so orders stranded by a prior cycle's crash are swept even when a
+cycle discovers zero new waiting orders.
 
 ## 5. Celery task
 
@@ -134,11 +177,17 @@ All automated tests use `FakePrintervalAdapter` (Phase 2) and a real test DB ses
   is dead-lettered and the rest of the batch still succeeds; re-running with the same
   order_ids (crash-resume) doesn't create duplicate Order/Batch rows (idempotency key
   reuse returns the cached result).
-- `import_claimed_batch`: successful download creates OrderAsset + transitions state
-  atomically; failed download dead-letters and leaves state at DISCOVERED; re-running
-  only retries orders still missing an OrderAsset (already-imported orders are
-  untouched — no duplicate OrderAsset rows, no duplicate transition attempt, which the
-  state machine would reject anyway since CLAIMED_IMPORTED has no self-transition).
+- `import_claimed_orders`: successful download creates OrderAsset + transitions state
+  atomically; failed download dead-letters and leaves state at DISCOVERED, and does
+  NOT get silently retried on the next scan (confirmed-failure case, §3); a crashed
+  (never-completed) attempt DOES get retried on the next scan (pending-lease reclaim);
+  a claim-failed order (no confirmed-claim observation) is never selected at all, even
+  if it's sitting at DISCOVERED; already-imported orders are untouched (no duplicate
+  OrderAsset rows, no duplicate transition attempt — the state machine would reject a
+  repeat transition anyway since CLAIMED_IMPORTED has no self-transition).
+- `discover_waiting_orders`: an adapter failure (not "zero orders", an actual error)
+  goes through `with_retry` and, once exhausted, is dead-lettered and logged — not
+  silently treated as "nothing new."
 - Celery task wiring itself (`crawl_tasks.py`) gets a thin integration test using
   Celery's `task_always_eager` test mode with the fake adapter injected — proving the
   task calls the three functions in the right order and handles a Playwright-session
@@ -150,3 +199,9 @@ All automated tests use `FakePrintervalAdapter` (Phase 2) and a real test DB ses
 - Production Celery/Redis hosting: tech debt #5, unresolved, doesn't block this phase.
 - Concurrency tuning beyond "1 session/site": tech debt #4, still needs real
   measurement later.
+- **New follow-up (added in the 2026-09-07 revision):** an operator-facing "recover
+  this dead-lettered order" action doesn't exist yet — dead-lettered claim/import
+  failures are visible (in the `dead_letters` table, and eventually its web view) but
+  nothing lets an operator explicitly re-trigger a specific order's claim or import.
+  Natural fit for whichever phase builds the exception-queue UI (Phase 4 shows the
+  data; a later phase likely adds the recovery action itself).
