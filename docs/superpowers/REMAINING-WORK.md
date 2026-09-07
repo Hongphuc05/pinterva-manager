@@ -21,7 +21,9 @@ thiếu Python 3.12). Frontend ở `frontend/` (đã cài `node_modules`, dùng 
 ## 0. Sub-project 1-3/6 — ĐÃ XONG HOÀN TOÀN (không cần động vào)
 
 Order detail mirror, frontend migration (React), và allocation board (C2+C3) đều đã
-qua đủ final review + 1 vòng fix + scoped re-review sạch, ledger đã đóng, workspace
+qua đủ final review + 1 vòng fix + scoped re-review sạch. Allocation board còn được
+kiểm tra bổ sung race capacity xuyên batch sau khi đóng ledger và đã có regression fix;
+ledger đã đóng, workspace
 `.superpowers/sdd/` của cả 3 đã bị xoá (đúng quy trình). Toàn bộ đã commit trên
 `worktree-phase1-foundation` tới commit `7343a9a`. Chi tiết đầy đủ (kể cả các bug thật
 đã tự phát hiện/sửa giữa chừng) nằm ở `docs/superpowers/SESSION-SUMMARY-2026-09-07.md`

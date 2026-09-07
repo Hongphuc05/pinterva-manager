@@ -121,6 +121,14 @@ tham số `commit=False` mới (mặc định giữ nguyên hành vi cũ). 1 min
 chính fix (chưa bắt `IdempotencyKeyReusedError` ở route) được park có chủ đích, không
 mở thêm vòng fix. Ledger đã đóng, workspace đã xoá — **sub-project 3/6 xong hoàn toàn.**
 
+Kiểm tra độc lập bổ sung sau khi đóng ledger đã tìm ra một race nằm ngoài ma trận review
+ban đầu: cùng **một** designer có thể gửi hai offer đồng thời vào hai batch khác nhau,
+và cả hai cùng đọc capacity trước khi tạo assignment. Đã tái hiện bằng hai transaction
+Postgres thật (capacity 2 nhưng giữ 4 assignment), rồi sửa bằng `FOR UPDATE` trên hàng
+designer trước khi đếm capacity; regression test hiện đảm bảo một request bị từ chối và
+tổng assignment không vượt capacity. UI cũng hiển thị tên và thời điểm admin đầu tiên
+xử lý một approval thay vì bỏ mất chi tiết đó khi refresh board.
+
 ## 5. Vấn đề/rủi ro cần biết khi tiếp tục
 
 1. **`worktree-phase1-foundation` CHƯA merge vào `main`** kể từ đầu phiên này. Main

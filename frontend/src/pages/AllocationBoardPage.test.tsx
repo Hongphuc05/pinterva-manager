@@ -86,4 +86,56 @@ describe('AllocationBoardPage', () => {
       expect(fetch).toHaveBeenCalledWith('/api/allocation/offer', expect.anything())
     )
   })
+
+  it('names the admin and time when a decision was already made', async () => {
+    ;(fetch as ReturnType<typeof vi.fn>).mockImplementation((url: string) => {
+      if (url.includes('/api/me')) {
+        return Promise.resolve({
+          ok: true, status: 200,
+          json: async () => ({ id: 'a2', role: 'admin', full_name: 'Second admin' }),
+        })
+      }
+      if (url.includes('/api/approvals/ap1/decide')) {
+        return Promise.resolve({
+          ok: true, status: 200,
+          json: async () => ({
+            decided_by_me: false, decided_by_name: 'First admin',
+            decided_at: '2026-09-07T16:00:00Z',
+          }),
+        })
+      }
+      if (url.includes('/api/allocation/board')) {
+        return Promise.resolve({
+          ok: true, status: 200,
+          json: async () => ({
+            unassigned: [],
+            designers: [{
+              id: 'd1', full_name: 'Nam', capacity: 5, held: 1,
+              pending_approvals: [{
+                approval_id: 'ap1',
+                order: {
+                  id: 'o1', external_order_id: 'DJ1', thumbnail_url: null,
+                  sku: 'SKU1', deadline_at_ext: null,
+                },
+              }],
+            }],
+          }),
+        })
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`))
+    })
+
+    render(
+      <BrowserRouter>
+        <AuthProvider>
+          <AllocationBoardPage />
+        </AuthProvider>
+      </BrowserRouter>
+    )
+    fireEvent.change(screen.getByPlaceholderText('Batch ID'), { target: { value: 'b1' } })
+    fireEvent.click(screen.getByText('Tải'))
+    await waitFor(() => expect(screen.getByText('Approve')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('Approve'))
+    await waitFor(() => expect(screen.getByText(/First admin/)).toBeInTheDocument())
+  })
 })

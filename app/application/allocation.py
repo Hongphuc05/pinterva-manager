@@ -90,7 +90,17 @@ def _grant_orders(
 
 
 def _check_capacity(session: Session, designer_id: uuid.UUID, quantity: int) -> None:
-    designer = session.get(User, designer_id)
+    # Capacity spans every batch.  Locking only candidate Order rows protects one
+    # batch, but two offers for the same designer in different batches could both
+    # count zero held assignments and over-grant.  The designer row is the shared
+    # mutex: all paths that create an assignment acquire it before counting, and
+    # run_idempotent keeps it locked until the operation commits.
+    designer = (
+        session.query(User)
+        .filter(User.id == designer_id)
+        .with_for_update()
+        .one_or_none()
+    )
     if designer is None:
         raise ValueError(f"designer {designer_id} not found")
     if designer.capacity is None:
@@ -176,10 +186,21 @@ def create_assignment_draft(
     request_fingerprint: str | None = None,
 ) -> dict:
     def _do() -> dict:
+        # Preserve the lock order used by request_quantity: designer capacity
+        # first, then the order.  A preliminary read retains the useful 400 for
+        # an invalid order without adding a reverse Order -> User lock order.
         order = session.query(Order).filter_by(external_order_id=order_id).one_or_none()
         if order is None or order.state != OrderState.OPEN_FOR_ALLOCATION.value:
             raise ValueError(f"order {order_id} is not open for allocation")
         _check_capacity(session, designer_id, 1)
+        order = (
+            session.query(Order)
+            .filter_by(external_order_id=order_id)
+            .with_for_update()
+            .one_or_none()
+        )
+        if order is None or order.state != OrderState.OPEN_FOR_ALLOCATION.value:
+            raise ValueError(f"order {order_id} is not open for allocation")
         assignments = _grant_orders(session, [order], designer_id, actor_id=actor_id)
         return {"assignment_id": str(assignments[0].id)}
 

@@ -350,3 +350,76 @@ def test_request_quantity_concurrent_offers_on_same_batch_do_not_double_grant(en
     all_granted = results["A"]["granted_order_ids"] + results["B"]["granted_order_ids"]
     assert len(all_granted) == 2  # only 2 orders exist in the batch
     assert len(set(all_granted)) == 2  # no order granted to both designers
+
+
+def test_request_quantity_concurrent_offers_for_one_designer_do_not_exceed_capacity(
+    engine,
+):
+    """Capacity is global to a designer, including concurrent offers to
+    different batches.  Both requests start together; the designer-row lock
+    makes one complete before the other rechecks its held count."""
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    setup = session_factory()
+    batches = [
+        Batch(source="printerval_crawl", owner="ntth", count=2),
+        Batch(source="printerval_crawl", owner="ntth", count=2),
+    ]
+    setup.add_all(batches)
+    setup.flush()
+    for prefix, batch in (("CA", batches[0]), ("CB", batches[1])):
+        for i in range(2):
+            setup.add(
+                Order(
+                    external_order_id=f"{prefix}{i:07d}",
+                    batch_id=batch.id,
+                    state=OrderState.OPEN_FOR_ALLOCATION.value,
+                )
+            )
+    designer = User(
+        username="capacity-race", full_name="capacity-race", role="designer",
+        password_hash=hash_password("s3cret!"), capacity=2,
+    )
+    setup.add(designer)
+    setup.commit()
+    batch_ids, designer_id = [batch.id for batch in batches], designer.id
+    setup.close()
+
+    start_barrier = threading.Barrier(2)
+    errors: dict[str, Exception] = {}
+
+    def worker(name: str, batch_id: uuid.UUID) -> None:
+        session = session_factory()
+        try:
+            start_barrier.wait(timeout=10)
+            request_quantity(
+                session, ReferenceAllocationTool(), designer_id, batch_id, 2, f"capacity:{name}"
+            )
+        except Exception as exc:  # noqa: BLE001 - captured for the assertion below
+            errors[name] = exc
+        finally:
+            session.close()
+
+    threads = [
+        threading.Thread(target=worker, args=("A", batch_ids[0])),
+        threading.Thread(target=worker, args=("B", batch_ids[1])),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=15)
+
+    assert len(errors) == 1
+    assert isinstance(next(iter(errors.values())), CapacityExceededError)
+    verifier = session_factory()
+    try:
+        held = (
+            verifier.query(Assignment)
+            .filter(
+                Assignment.designer_id == designer_id,
+                Assignment.status.in_(["draft", "approved"]),
+            )
+            .count()
+        )
+    finally:
+        verifier.close()
+    assert held <= 2

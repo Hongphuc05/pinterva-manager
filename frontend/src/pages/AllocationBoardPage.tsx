@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { DndContext, type DragEndEvent, useDraggable, useDroppable } from '@dnd-kit/core'
-import { apiFetch } from '../api/client'
+import { ApiError, apiFetch } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 
 type BoardOrder = {
@@ -20,6 +20,11 @@ type BoardDesigner = {
 }
 
 type BoardData = { unassigned: BoardOrder[]; designers: BoardDesigner[] }
+type DecideResult = {
+  decided_by_me: boolean
+  decided_by_name: string
+  decided_at: string
+}
 
 function OrderCard({ order }: { order: BoardOrder }) {
   const { attributes, listeners, setNodeRef, transform } = useDraggable({ id: order.id })
@@ -121,12 +126,12 @@ export function AllocationBoardPage() {
   const [board, setBoard] = useState<BoardData | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  async function loadBoard(id: string) {
+  async function loadBoard(id: string, clearError = true) {
     if (!id) return
     try {
-      const data = await apiFetch<BoardData>(`/allocation/board?batch_id=${id}`)
+      const data = await apiFetch<BoardData>(`/allocation/board?batch_id=${encodeURIComponent(id)}`)
       setBoard(data)
-      setError(null)
+      if (clearError) setError(null)
     } catch {
       setError('Không tải được board — kiểm tra batch ID.')
     }
@@ -168,16 +173,19 @@ export function AllocationBoardPage() {
 
   async function handleDecide(approvalId: string, decision: 'approve' | 'cancel', reason?: string) {
     try {
-      const result = await apiFetch<{ decided_by_me: boolean }>(`/approvals/${approvalId}/decide`, {
+      const result = await apiFetch<DecideResult>(`/approvals/${approvalId}/decide`, {
         method: 'POST',
         body: JSON.stringify({ decision, reason }),
       })
       if (!result.decided_by_me) {
-        setError('Đơn này đã được admin khác xử lý trước đó.')
+        const decidedAt = new Intl.DateTimeFormat('vi-VN', {
+          dateStyle: 'short', timeStyle: 'medium',
+        }).format(new Date(result.decided_at))
+        setError(`Đơn này đã được ${result.decided_by_name} xử lý lúc ${decidedAt}.`)
       }
-      await loadBoard(batchId)
-    } catch {
-      setError('Quyết định thất bại.')
+      await loadBoard(batchId, result.decided_by_me)
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'Quyết định thất bại.')
     }
   }
 
