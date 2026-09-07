@@ -178,7 +178,7 @@ def test_decide_assignment_cancel_releases_order_and_grants_a_replacement(db_ses
     assert assignment.status == "cancelled"
     assert assignment.cancel_reason == "đã làm rồi"
     cancelled_order = db_session.query(Order).filter_by(id=assignment.order_id).one()
-    assert cancelled_order.state == OrderState.OPEN_FOR_ALLOCATION.value
+    assert cancelled_order.state == OrderState.EXCEPTION.value
 
     assert len(result["replacement_assignment_ids"]) == 1
     replacement = db_session.get(Assignment, uuid.UUID(result["replacement_assignment_ids"][0]))
@@ -187,12 +187,10 @@ def test_decide_assignment_cancel_releases_order_and_grants_a_replacement(db_ses
     assert replacement.order_id == orders[0].id  # earliest available, not the cancelled order
 
 
-def test_remaining_order_ids_includes_an_order_whose_assignment_was_cancelled(db_session):
-    """Regression: _remaining_order_ids used to exclude any order with an
-    Assignment row at all, even a cancelled one — permanently locking it out of
-    the pool. Prove the pool sees it again by checking that decide_assignment's
-    own auto-replacement (which depends on _remaining_order_ids) is able to
-    re-grant the very order it just released."""
+def test_decide_assignment_cancel_sends_order_to_exception_not_back_to_pool(db_session):
+    """Cancel must not let the released order re-enter the pool at all — moving
+    it to EXCEPTION (not OPEN_FOR_ALLOCATION) is what stops FIFO from re-granting
+    the very order just cancelled back to the same designer."""
     from app.application.allocation import _remaining_order_ids
 
     batch, orders = _seed_batch_with_orders(db_session, n=1)
@@ -211,27 +209,14 @@ def test_remaining_order_ids_includes_an_order_whose_assignment_was_cancelled(db
     assignment = db_session.query(Assignment).filter_by(order_id=order.id).one()
     approval = db_session.query(ApprovalRequest).filter_by(target_id=assignment.id).one()
 
-    # held by the active draft assignment — pool is empty until it's cancelled
-    assert _remaining_order_ids(db_session, batch.id) == []
-
-    decide_assignment(
+    result = decide_assignment(
         db_session, tool, approval.id, "cancel", admin.id, f"decide:{uuid.uuid4()}", reason="test"
     )
 
-    # decide_assignment's own auto-replacement already re-grants it (to the same
-    # designer, since it's the only order in the batch) — that's only possible if
-    # _remaining_order_ids saw the released order.
-    new_assignment = (
-        db_session.query(Assignment)
-        .filter_by(order_id=order.id, status="draft")
-        .one_or_none()
-    )
-    assert new_assignment is not None, (
-        "the cancelled order's replacement must have been able to see it as "
-        "available again — _remaining_order_ids must not permanently exclude "
-        "orders with only a cancelled Assignment"
-    )
-    assert new_assignment.replacement_of_id == assignment.id
+    db_session.refresh(order)
+    assert order.state == OrderState.EXCEPTION.value
+    assert result["replacement_assignment_ids"] == []  # batch had only this one order
+    assert order.id not in {o.id for o in _remaining_order_ids(db_session, batch.id)}
 
 
 def test_decide_assignment_cancel_with_no_reason_raises(db_session):

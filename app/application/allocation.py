@@ -14,12 +14,12 @@ from app.domain.models import OrderState
 
 def _remaining_order_ids(session: Session, batch_id: uuid.UUID) -> list[Order]:
     """Orders of this batch still open for allocation with no ACTIVE Assignment
-    (draft/approved) — a cancelled Assignment must not permanently exclude its
-    order, since decide_assignment's cancel path releases the order back to
-    OPEN_FOR_ALLOCATION expecting it to be re-grantable. Locked FOR UPDATE so two
-    concurrent callers serialize on this batch instead of double-granting an
-    order. Returns Order objects (not just ids) since callers need more than the
-    id."""
+    (draft/approved). A cancelled Assignment's order moves to EXCEPTION (not back
+    to OPEN_FOR_ALLOCATION), so it is excluded here by the state filter alone —
+    it never re-enters the pool for the designer who was just cancelled. Locked
+    FOR UPDATE so two concurrent callers serialize on this batch instead of
+    double-granting an order. Returns Order objects (not just ids) since callers
+    need more than the id."""
     active_assignment_order_ids = (
         session.query(Assignment.order_id)
         .filter(Assignment.status.in_(["draft", "approved"]))
@@ -200,8 +200,8 @@ def decide_assignment(
             if not reason:
                 raise ValueError("cancel requires a reason")
             apply_transition(
-                session, order, OrderState.OPEN_FOR_ALLOCATION, actor_id=actor_id,
-                evidence={"source": "decide_assignment"},
+                session, order, OrderState.EXCEPTION, actor_id=actor_id,
+                evidence={"source": "decide_assignment", "reason": "cancel"},
             )
             assignment.status = "cancelled"
             assignment.cancel_reason = reason
