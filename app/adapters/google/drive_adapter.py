@@ -40,5 +40,11 @@ class GoogleDriveAdapter:
                 return DriveVerifyResult(success=True, exists=False, accessible=False)
             if exc.resp.status == 403:
                 return DriveVerifyResult(success=True, exists=True, accessible=False)
+            if exc.resp.status == 401:
+                return DriveVerifyResult(success=False, error_class="AUTH")
+            if exc.resp.status == 400:
+                return DriveVerifyResult(success=False, error_class="VALIDATION")
+            return DriveVerifyResult(success=False, error_class="TRANSIENT_NETWORK")
+        except Exception:
             return DriveVerifyResult(success=False, error_class="TRANSIENT_NETWORK")
         return DriveVerifyResult(success=True, exists=True, accessible=True)

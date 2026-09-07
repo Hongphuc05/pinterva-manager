@@ -34,6 +34,10 @@ include = ["app*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "integration: hits a real external service (Google API); requires credentials and explicit opt-in",
+]
+addopts = "-m 'not integration'"
 
 [tool.ruff]
 line-length = 100

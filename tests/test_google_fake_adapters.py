@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.adapters.google.fake_drive_adapter import FakeDriveAdapter
 from app.adapters.google.fake_sheets_adapter import FakeSheetsAdapter
@@ -9,7 +9,7 @@ def test_export_snapshot_appends_rows():
     result = adapter.export_snapshot(
         rows=[{"order_id": "DJ0000001", "status": "Done"}],
         sheet_id="sheet-abc",
-        exported_at=datetime.now(timezone.utc),
+        exported_at=datetime.now(UTC),
     )
     assert result.success is True
     assert result.rows_written == 1
@@ -18,14 +18,14 @@ def test_export_snapshot_appends_rows():
 
 def test_export_snapshot_accumulates_across_calls():
     adapter = FakeSheetsAdapter()
-    adapter.export_snapshot(rows=[{"a": 1}], sheet_id="s1", exported_at=datetime.now(timezone.utc))
-    adapter.export_snapshot(rows=[{"a": 2}], sheet_id="s1", exported_at=datetime.now(timezone.utc))
+    adapter.export_snapshot(rows=[{"a": 1}], sheet_id="s1", exported_at=datetime.now(UTC))
+    adapter.export_snapshot(rows=[{"a": 2}], sheet_id="s1", exported_at=datetime.now(UTC))
     assert len(adapter.rows_by_sheet["s1"]) == 2
 
 
 def test_export_snapshot_handles_empty_rows():
     adapter = FakeSheetsAdapter()
-    result = adapter.export_snapshot(rows=[], sheet_id="s1", exported_at=datetime.now(timezone.utc))
+    result = adapter.export_snapshot(rows=[], sheet_id="s1", exported_at=datetime.now(UTC))
     assert result.success is True
     assert result.rows_written == 0
 
@@ -50,3 +50,13 @@ def test_verify_url_rejects_malformed_url():
     result = adapter.verify_url("not-a-drive-url")
     assert result.success is False
     assert result.error_class == "VALIDATION"
+
+
+def test_verify_url_recognizes_legacy_id_query_param_url():
+    # Matches GoogleDriveAdapter._extract_file_id, which also accepts the older
+    # ?id=<id> sharing format, not just /d/<id> — regression test for fake/real drift.
+    adapter = FakeDriveAdapter(known_file_ids={"abc123"})
+    result = adapter.verify_url("https://drive.google.com/open?id=abc123")
+    assert result.success is True
+    assert result.exists is True
+    assert result.accessible is True

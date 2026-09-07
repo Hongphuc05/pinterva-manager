@@ -1,18 +1,12 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
-
-from app.adapters.errors import ErrorClass
+from app.adapters.base_models import AdapterResult
 
 
-class ExportResult(BaseModel):
-    success: bool
+class ExportResult(AdapterResult):
     rows_written: int = 0
-    error_class: ErrorClass | None = None
 
 
-class DriveVerifyResult(BaseModel):
-    success: bool
+class DriveVerifyResult(AdapterResult):
     exists: bool = False
     accessible: bool = False
-    error_class: ErrorClass | None = None

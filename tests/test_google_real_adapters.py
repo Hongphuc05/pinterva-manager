@@ -17,10 +17,13 @@ CREDENTIALS_PATH = "credentials/google-service-account.json"
 FIXTURE_SHEET_ID = "1sYAXViNT8QwuHZHEvN013PUr4ex5ASsx4PEuzsCGBoA"
 _CLEAR_RANGE = "A1:Z100"
 
-pytestmark = pytest.mark.skipif(
-    not os.path.exists(CREDENTIALS_PATH),
-    reason="No Google service account credential present (expected on CI)",
-)
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        not os.path.exists(CREDENTIALS_PATH),
+        reason="No Google service account credential present (expected on CI)",
+    ),
+]
 
 
 @pytest.fixture()
