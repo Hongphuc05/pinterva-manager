@@ -18,32 +18,19 @@ thiếu Python 3.12). Frontend ở `frontend/` (đã cài `node_modules`, dùng 
 
 ---
 
-## 0. Việc dở dang cần hoàn tất trước (ưu tiên cao nhất)
+## 0. Sub-project 1-3/6 — ĐÃ XONG HOÀN TOÀN (không cần động vào)
 
-**Sub-project 3/6 — Allocation board (C2+C3)** đang ở giữa vòng fix sau final review.
+Order detail mirror, frontend migration (React), và allocation board (C2+C3) đều đã
+qua đủ final review + 1 vòng fix + scoped re-review sạch, ledger đã đóng, workspace
+`.superpowers/sdd/` của cả 3 đã bị xoá (đúng quy trình). Toàn bộ đã commit trên
+`worktree-phase1-foundation` tới commit `7343a9a`. Chi tiết đầy đủ (kể cả các bug thật
+đã tự phát hiện/sửa giữa chừng) nằm ở `docs/superpowers/SESSION-SUMMARY-2026-09-07.md`
+§4. Một minor còn "parked" có chủ đích (không phải bug bỏ sót): `offer`/`assign` chưa
+bắt `IdempotencyKeyReusedError` (sẽ raise 500 thay vì 409 nếu client gửi lại
+`request_id` với payload khác — kịch bản hiếm, chưa có test/scenario nào chạm tới, ghi
+lại để theo dõi chứ không bắt buộc sửa ngay).
 
-1. Kiểm tra agent fix đã dispatch (nếu đã xong khi bạn đọc file này, `git log --oneline`
-   trên worktree sẽ thấy commit fix mới nhất sau `5b92d7e`; nếu chưa có, agent có thể
-   vẫn đang chạy — dùng `ListAgents` hoặc chờ task-notification). Nội dung fix đã yêu
-   cầu: sửa 2 Critical + 6 Important từ
-   `.superpowers/sdd/2026-09-07-allocation-board-plan/final-review-report.md`
-   (file này có thể đã bị xoá nếu sub-project đã đóng xong — nếu vậy nghĩa là đã xong,
-   bỏ qua bước này).
-2. Nếu fix đã xong: tự review diff (đọc `final-review-fix-report.md` trong cùng thư mục
-   `.superpowers/sdd/2026-09-07-allocation-board-plan/` nếu còn), rồi dispatch **1 scoped
-   re-review** (không phải review toàn bộ lại) xác nhận cả 8 finding bắt buộc
-   (C1/C2/I1/I2/I3/I4/I5/I6) đã ADDRESSED và không phát sinh lỗi mới — dùng
-   `scripts/review-package PLAN_FILE FIX_BASE HEAD` của skill
-   `subagent-driven-development` (`FIX_BASE` = commit `5b92d7e`, HEAD = commit fix mới
-   nhất).
-3. Nếu re-review sạch: ghi `Task ...: complete` + `SUB-PROJECT 3/6 COMPLETE` vào
-   `.superpowers/sdd/2026-09-07-allocation-board-plan/progress.md`, chép các dòng
-   `Ruling:` sang ghi chú tổng kết riêng nếu cần, rồi `rm -rf
-   .superpowers/sdd/2026-09-07-allocation-board-plan`.
-4. Nếu re-review còn finding mở: đây là **breaker đã trip** (đã qua 1 vòng fix) — tự
-   adjudicate theo đúng luật `subagent-driven-development`'s breaker (park với ruling
-   nếu không load-bearing, hoặc rule + sửa tiếp nếu load-bearing cho sub-project 4+),
-   KHÔNG dispatch vòng fix thứ 2 tràn lan.
+**Việc còn lại thật sự bắt đầu từ sub-project 4 dưới đây.**
 
 ---
 

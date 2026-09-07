@@ -49,7 +49,7 @@ re-review → đóng sub-project.
 |---|---|---|
 | 1 | **Order detail mirror** — mở rộng `orders` với đầy đủ field thật từ Printerval (SKU, ảnh, category, variants, custom config, 3 mốc thời gian, note...), khảo sát DOM thật (không đoán) | ✅ **Xong hoàn toàn** — final review tìm 2 Critical + 3 Important (selector Playwright có thể raise và treo cả crawl cycle, sai lệch selector so với spec, thiếu test offline), đã sửa hết, re-review sạch. |
 | 2 | **Frontend platform migration** — thay Jinja2/HTMX/Alpine bằng React+TS+Vite+Tailwind, JSON API mới, xoá UI cũ hoàn toàn | ✅ **Xong hoàn toàn** — final review tìm 0 Critical + 5 Important (thiếu nút logout, không xử lý lỗi fetch/401 ở đâu cả, filter thụt lùi 2/15 state + mất filter batch, file `public/` bị SPA catch-all che ở prod, code rủi ro nhất không có test), đã sửa hết + xác nhận độc lập bằng probe thật kể cả path-traversal. |
-| 3 | **Allocation board (C2+C3)** — thuật toán FIFO contiguous-block, offer/gán tay, duyệt/huỷ assignment, UI kéo-thả `dnd-kit` | 🔄 **6/6 task code xong, final review đã chạy, đang chạy vòng fix cho 2 Critical + 6 Important** — xem chi tiết §4 dưới. Đây là task đang dang dở lúc nhận yêu cầu này. |
+| 3 | **Allocation board (C2+C3)** — thuật toán FIFO contiguous-block, offer/gán tay, duyệt/huỷ assignment, UI kéo-thả `dnd-kit` | ✅ **Xong hoàn toàn** — final review tìm 2 Critical + 6 Important (xem §4), đã sửa hết, scoped re-review xác nhận độc lập cả 8 finding (chạy lại concurrency test 5 lần, không flaky). Sub-project review-intensive nhất (2 bug tự phát hiện giữa chừng + 1 vòng fix final review đầy đủ). |
 | 4 | **Designer task view (C4)** | ⏳ Chưa bắt đầu — chỉ có trong roadmap, chưa brainstorm/spec. |
 | 5 | **Kanban ops board** | ⏳ Chưa bắt đầu. |
 | 6 | **QC inspection screen (C5)** | ⏳ Chưa bắt đầu. |
@@ -107,12 +107,19 @@ re-review → đóng sub-project.
 **Điểm được khen:** hướng thiết kế EXCEPTION (mục tự sửa ở trên) được xác nhận là **đúng
 và test tốt** — không phải finding mới, reviewer chủ động xác nhận lại.
 
-### Đang làm dở khi nhận yêu cầu này
-Đã dispatch **1 subagent fix toàn diện** (đúng luật "no second fix wave" của SDD) sửa
-C1, C2, I1, I2, I3, I4, I5, I6 + vài minor rẻ (m3, m5, m6, m9) cùng lúc — bao gồm cả sửa
-frontend (`AllocationBoardPage.tsx` cần sinh `request_id` phía client cho offer/assign
-để idempotency key có tác dụng thật). Agent này **đang chạy nền lúc viết file này** —
-xem `docs/superpowers/REMAINING-WORK.md` để biết bước tiếp theo chính xác.
+### Kết quả vòng fix (đã xong, đã đóng sub-project)
+1 subagent fix toàn diện (đúng luật "no second fix wave" của SDD) đã sửa C1, C2, I1,
+I2, I3, I4, I5, I6 + minor m3/m5/m6/m9 — bao gồm sửa cả frontend
+(`AllocationBoardPage.tsx` sinh `request_id` phía client cho offer/assign để
+idempotency key có tác dụng thật, disable nút "Nhận" trong lúc gửi). Điểm đáng chú ý:
+viết **1 test concurrency thật** (2 thread, 2 session Postgres riêng trỏ cùng
+`engine`) chứng minh không double-grant khi 2 designer tranh cùng batch — không phải
+mock. Scoped re-review chạy sau đó xác nhận độc lập cả 8 finding đều ADDRESSED (chạy
+lại chính test concurrency 5 lần liên tiếp, ổn định), full suite 160/160, ruff/frontend
+sạch, xác nhận `apply_transition`'s caller khác (`crawl.py`) không bị ảnh hưởng bởi
+tham số `commit=False` mới (mặc định giữ nguyên hành vi cũ). 1 minor mới phát sinh từ
+chính fix (chưa bắt `IdempotencyKeyReusedError` ở route) được park có chủ đích, không
+mở thêm vòng fix. Ledger đã đóng, workspace đã xoá — **sub-project 3/6 xong hoàn toàn.**
 
 ## 5. Vấn đề/rủi ro cần biết khi tiếp tục
 
