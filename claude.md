@@ -111,11 +111,10 @@ Approve mới bao giờ chạm tới Printerval.
 ## 4. Kiến trúc và boundary
 
 ```text
-                 ┌─────────────────────────────┐
-                 │   Web Dashboard (FastAPI)    │
-                 │  Jinja2 + HTMX + Alpine.js   │
-                 │  role: admin | designer      │
-                 └───────────────┬─────────────┘
+                 ┌─────────────────────────────┐      ┌─────────────────────┐
+                 │  FastAPI JSON API (backend)  │◄─────┤  React SPA (Vite)   │
+                 │  role: admin | designer      │      │  TypeScript+Tailwind│
+                 └───────────────┬─────────────┘      └─────────────────────┘
                                  │
                  Application service + state machine (domain/)
                                  │
@@ -138,11 +137,19 @@ Approve mới bao giờ chạm tới Printerval.
 - Optional local LLM agent (nếu làm ở V2) chỉ gọi business tool được whitelist, ngồi trên
   cùng lớp MCP façade — không có quyền gì hơn web dashboard.
 
-Stack: Python 3.12, FastAPI, Jinja2 + HTMX + Alpine.js (server-rendered, không SPA riêng),
-Pydantic v2, SQLAlchemy 2, Alembic, PostgreSQL 16, Redis + Celery/Dramatiq, **Playwright**
-(không dùng Selenium — đã xác nhận Playwright + Chrome thật vượt được chặn Cloudflare của
-Printerval, Chromium headless bị chặn 403), Google Sheets/Drive API. Auth: bảng `users`
-(role `admin`/`designer`, password hash), session cookie — không OAuth trong V1.
+Stack backend: Python 3.12, FastAPI (JSON API thuần), Pydantic v2, SQLAlchemy 2, Alembic,
+PostgreSQL 16, Redis + Celery/Dramatiq, **Playwright** (không dùng Selenium — đã xác nhận
+Playwright + Chrome thật vượt được chặn Cloudflare của Printerval, Chromium headless bị
+chặn 403), Google Sheets/Drive API. Auth: bảng `users` (role `admin`/`designer`, password
+hash), session cookie (httponly, same-origin, SPA build được FastAPI serve như static —
+không đổi sang JWT/OAuth) — không OAuth trong V1.
+
+Stack frontend: **React + TypeScript + Vite + Tailwind CSS** (quyết định lại 2026-09-07,
+thay cho Jinja2+HTMX+Alpine của Phase 4 — xem
+`docs/superpowers/specs/2026-09-07-frontend-platform-migration-design.md`). SPA gọi thẳng
+FastAPI JSON API; kéo-thả dùng `dnd-kit`. Business logic vẫn luôn nằm ở backend
+(application service/state machine) — SPA chỉ là lớp trình bày/tương tác, không tự
+validate/đổi state.
 
 Correctness của hệ thống không được phụ thuộc LLM (áp dụng nếu/khi thêm agent ở V2).
 
@@ -342,7 +349,9 @@ coi là nhóm phải hỏi (nhóm 1–4).
   adapter fake, allocation tool interface fake).
 - Mọi schema change có migration; không sửa DB production ad hoc.
 - Không thêm dependency, multi-agent hoặc framework nếu không phục vụ acceptance
-  criterion V1 (không dựng SPA riêng, không thêm OAuth trong V1).
+  criterion V1 (không thêm OAuth trong V1). Frontend là SPA React+TS+Vite+Tailwind
+  (quyết định 2026-09-07) — Jinja2/HTMX/Alpine của Phase 4 sẽ được thay thế hoàn toàn,
+  không giữ song song 2 bộ UI.
 - Test tối thiểu: transition, permission, idempotency, allocation/replacement; contract
   adapter; integration fake adapter; E2E happy path, duplicate request, timeout-after-write,
   order already completed, link lỗi, stale QC, result version revision, reconciliation
@@ -370,12 +379,19 @@ coi là nhóm phải hỏi (nhóm 1–4).
 3. Adapter Playwright read-only cho Printerval (crawl), Sheets/Drive adapter, tài liệu
    field map (đã có ở `docs/phase0-field-map.md`).
 4. C1 crawl & claim workflow, dry-run rồi pilot.
-5. Web dashboard khung: auth, danh sách đơn (đọc), role admin/designer.
-6. C2 phân bổ (offer + admin gán tay, bản tham chiếu thuật toán FIFO), C3 validation/
-   approval trên web.
+5. Web dashboard khung: auth, danh sách đơn (đọc), role admin/designer. (Ban đầu làm bằng
+   Jinja2+HTMX+Alpine — đã thay thế hoàn toàn bằng React SPA từ bước 5b.)
+5b. Order detail mirror: mở rộng `orders` với field-map thật từ Printerval (product info,
+    SKU, custom config, 3 mốc thời gian, note...) để designer/admin làm việc hoàn toàn
+    trên web mình, không cần mở Printerval.
+5c. Frontend platform migration: React + TypeScript + Vite + Tailwind thay thế Jinja2 —
+    scaffold, auth flow, order list/detail port sang SPA.
+6. C2 phân bổ (offer + admin gán tay, bản tham chiếu thuật toán FIFO) với UI kéo-thả
+   (Allocation Board, `dnd-kit`), C3 validation/approval trên web.
 7. Task view cho designer (nhận task, sub-status, nộp kết quả) — C4.
-8. C5 QC trên web + job tự động submit-to-site sau Approve, revision loop, skipped
-   reconciliation.
+7b. Kanban ops board: theo dõi tiến độ toàn bộ đơn qua các state, kéo-thả đổi sub-status.
+8. C5 QC trên web (màn hình so sánh mẫu gốc/kết quả cạnh nhau) + job tự động submit-to-site
+   sau Approve, revision loop, skipped reconciliation.
 9. Sheet export job (archive một chiều).
 10. Monitoring, runbook, backup, kill switch, recovery commands/UI.
 11. (V2, ngoài phạm vi bây giờ) optional local LLM agent, kênh thông báo Telegram phụ.
