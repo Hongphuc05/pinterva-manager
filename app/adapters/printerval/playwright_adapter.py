@@ -5,6 +5,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from playwright.sync_api import Page
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from app.adapters.playwright_support import capture_evidence
 from app.adapters.printerval.models import (
@@ -15,6 +16,32 @@ from app.adapters.printerval.models import (
 )
 
 ADMIN_URL = "https://printerval.com/central/outsource/pod/design-job/admin"
+
+
+class _OrderNotFoundError(Exception):
+    """Search completed successfully but no row matched the order id — a
+    business validation failure, not adapter/site breakage."""
+
+
+def _classify_exception(exc: Exception) -> tuple[str, bool]:
+    """Map an exception from a read method to (error_class, retryable).
+
+    - PlaywrightTimeoutError: a wait for a selector/response never resolved —
+      could just be a slow network, so it's worth a retry.
+    - _OrderNotFoundError: the search succeeded but no row matched — not
+      retryable, the order genuinely isn't there.
+    - LookupError (raised by _find_select_by_option_text): an expected
+      <select>/option is genuinely missing — the site's structure changed,
+      retrying won't help.
+    - anything else: unexpected — treat as a bug rather than guess.
+    """
+    if isinstance(exc, PlaywrightTimeoutError):
+        return "TRANSIENT_NETWORK", True
+    if isinstance(exc, _OrderNotFoundError):
+        return "VALIDATION", False
+    if isinstance(exc, LookupError):
+        return "EXTERNAL_CHANGED", False
+    return "BUG", False
 
 
 def _find_select_by_option_text(page: Page, expected_option_substring: str):
@@ -60,6 +87,8 @@ def _search_and_get_row(page: Page, external_order_id: str):
     with page.expect_response(lambda r: "/design-job/find" in r.url):
         page.get_by_role("button", name="Search").click()
     row = page.locator(f"tr:has-text('{external_order_id}')").first
+    if row.count() == 0:
+        raise _OrderNotFoundError(f"No row found for order {external_order_id} after search")
     row.wait_for(state="visible", timeout=10_000)
     return row
 
@@ -86,9 +115,12 @@ class PlaywrightPrintervalAdapter:
             with page.expect_response(lambda r: "/design-job/find" in r.url):
                 page.get_by_role("button", name="Search").click()
             page.wait_for_timeout(500)
-        except Exception:
+        except Exception as exc:
+            error_class, retryable = _classify_exception(exc)
             evidence = capture_evidence(page, "discover_orders_filter_failed")
-            return DiscoverResult(success=False, error_class="EXTERNAL_CHANGED", evidence=evidence)
+            return DiscoverResult(
+                success=False, error_class=error_class, retryable=retryable, evidence=evidence
+            )
 
         rows = page.locator("tbody.list-order-contain tr").all()
         orders: list[OrderSummary] = []
@@ -116,9 +148,12 @@ class PlaywrightPrintervalAdapter:
         page = self.page
         try:
             row = _search_and_get_row(page, external_order_id)
-        except Exception:
+        except Exception as exc:
+            error_class, retryable = _classify_exception(exc)
             evidence = capture_evidence(page, f"get_order_detail_missing_{external_order_id}")
-            return OrderDetailResult(success=False, error_class="VALIDATION", evidence=evidence)
+            return OrderDetailResult(
+                success=False, error_class=error_class, retryable=retryable, evidence=evidence
+            )
 
         selects = row.locator("select")
         designer = _selected_option_text(selects.nth(0)) if selects.count() >= 1 else None
@@ -133,7 +168,19 @@ class PlaywrightPrintervalAdapter:
 
     def download_asset(self, external_order_id: str) -> AssetResult:
         page = self.page
-        row = _search_and_get_row(page, external_order_id)
+        try:
+            row = _search_and_get_row(page, external_order_id)
+        except Exception as exc:
+            error_class, retryable = _classify_exception(exc)
+            evidence = capture_evidence(page, f"download_asset_missing_{external_order_id}")
+            return AssetResult(
+                success=False,
+                external_order_id=external_order_id,
+                error_class=error_class,
+                retryable=retryable,
+                evidence=evidence,
+            )
+
         link = row.locator("a.djcfg-src-link").first
         if link.count() == 0:
             return AssetResult(
