@@ -6,8 +6,12 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import User
-from app.adapters.playwright_support import playwright_session
-from app.adapters.printerval.playwright_adapter import PlaywrightPrintervalAdapter
+from app.adapters.playwright_support import (
+    close_playwright_session,
+    open_playwright_session,
+    playwright_session,
+)
+from app.adapters.printerval.playwright_adapter import ADMIN_URL, PlaywrightPrintervalAdapter
 from app.api.deps import SESSION_COOKIE_NAME, get_current_user_web, get_db
 from app.application.auth import create_session_token, verify_password
 from app.application.crawl import DiscoverFailedError
@@ -22,6 +26,13 @@ from app.workers.crawl_tasks import run_crawl_cycle
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/api/templates")
+
+# Module-level state for the interactive "log in to Printerval" flow: one admin, one
+# browser window, opened by one request and closed by a later one — a plain global is
+# enough for this single-operator, rare, admin-only action (matches the same "1
+# session/site, no real concurrency handling" acceptance already made for the Refresh
+# button). None means no interactive login window is currently open.
+_login_session: dict | None = None
 
 
 @router.get("/login")
@@ -167,6 +178,58 @@ def orders_table(
     return templates.TemplateResponse(
         request, "orders_table.html", {"orders": orders}
     )
+
+
+@router.get("/printerval-login")
+def printerval_login_page(request: Request, user: User = Depends(get_current_user_web)):
+    if user.role != "admin":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Chỉ admin mới thao tác được")
+    return templates.TemplateResponse(
+        request,
+        "printerval_login.html",
+        {"user": user, "session_open": _login_session is not None},
+    )
+
+
+@router.post("/printerval-login/start")
+def printerval_login_start(user: User = Depends(get_current_user_web)):
+    """Open a real, visible Chrome window on the shared persistent profile and
+    navigate to Printerval's admin page, so a human can log in by hand. Stays open
+    across this request's return — a second request (`/printerval-login/done`) closes
+    it once the human is done. Admin-only, one window at a time.
+    """
+    global _login_session
+    if user.role != "admin":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Chỉ admin mới thao tác được")
+
+    if _login_session is not None:
+        try:
+            _ = _login_session["context"].pages  # cheap liveness check
+        except Exception:
+            # Stale — e.g. the human closed the Chrome window by hand instead of
+            # clicking Done. Drop it and open a fresh one below.
+            _login_session = None
+
+    if _login_session is None:
+        playwright_cm, context, page = open_playwright_session()
+        page.goto(ADMIN_URL)
+        _login_session = {"playwright_cm": playwright_cm, "context": context}
+
+    return RedirectResponse("/printerval-login", status_code=303)
+
+
+@router.post("/printerval-login/done")
+def printerval_login_done(user: User = Depends(get_current_user_web)):
+    """Close the Chrome window opened by /printerval-login/start."""
+    global _login_session
+    if user.role != "admin":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Chỉ admin mới thao tác được")
+
+    if _login_session is not None:
+        close_playwright_session(_login_session["playwright_cm"], _login_session["context"])
+        _login_session = None
+
+    return RedirectResponse("/orders", status_code=303)
 
 
 @router.get("/orders/{order_id}")

@@ -49,10 +49,10 @@ Mở **http://127.0.0.1:8000/login** — đăng nhập `admin`/`admin123`. Sẽ 
 (hiện rỗng nếu chưa chạy crawl job ở mục 4 — DB chưa có đơn nào là bình thường).
 
 Trang có: danh sách đơn lọc theo status/batch (HTMX, không reload trang), nút
-**Refresh** (chỉ admin thấy) chạy crawl thật ngay từ trình duyệt — xem mục 4 để chuẩn
-bị Chrome profile trước khi bấm — và trang chi tiết đơn kèm lịch sử chuyển trạng thái.
-`admin` thấy mọi đơn; `designer` chỉ thấy đơn được giao (luôn rỗng cho tới khi Phase 5
-xong).
+**Refresh** (chỉ admin thấy) chạy crawl thật ngay từ trình duyệt, link **"Đăng nhập
+Printerval"** trên thanh nav (chỉ admin) mở Chrome thật để đăng nhập tay — xem mục 4 —
+và trang chi tiết đơn kèm lịch sử chuyển trạng thái. `admin` thấy mọi đơn; `designer`
+chỉ thấy đơn được giao (luôn rỗng cho tới khi Phase 5 xong).
 
 Sau khi bấm Refresh, thông báo phân biệt rõ 3 trường hợp: thành công (kèm số đơn mới/
 nhập/lỗi), lỗi tìm đơn (site đổi giao diện/bộ lọc sai — xem `dead_letters` để biết chi
@@ -80,9 +80,15 @@ print('Đã tạo đơn mẫu DJ0000001')
 
 ## 4. Chạy crawl job thật (đụng site Printerval thật — cẩn thận)
 
-Cần Chrome profile đã login Printerval (`chrome-profile/`, làm 1 lần thủ công qua
-Playwright — xem `docs/superpowers/specs/2026-09-07-phase2-adapter-design.md` nếu chưa
-setup). Có 2 cách chạy:
+Cần Chrome profile (`chrome-profile/`) đã login **đúng tài khoản công ty/admin** —
+**không phải tài khoản cá nhân của 1 designer** (site giới hạn kết quả tìm kiếm theo
+`team_outsource` của tài khoản đang login; tài khoản cá nhân không thấy đơn `Waiting`
+chưa ai claim). Đăng nhập/đổi tài khoản qua chính web dashboard: vào **"Đăng nhập
+Printerval"** trên thanh nav (chỉ admin thấy) → bấm "Mở Chrome để đăng nhập" → cửa sổ
+Chrome thật mở ra, đăng nhập/đổi tài khoản trên đó bình thường → quay lại trang web,
+bấm "Done" để đóng cửa sổ.
+
+Sau khi đã login đúng tài khoản, có 2 cách chạy crawl:
 
 **a) Bấm nút Refresh trên web** (`/orders`, chỉ admin thấy nút) — chạy ngay, đứng chờ
 kết quả (vài chục giây tới vài phút tùy số đơn), không cần Celery. Lưu ý: đừng bấm

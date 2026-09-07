@@ -12,27 +12,58 @@ from playwright.sync_api import Page, sync_playwright
 EVIDENCE_DIR = Path("playwright-evidence")
 
 
+def open_playwright_session(profile_dir: str = "chrome-profile", headless: bool = False):
+    """Low-level open: launch the persistent Chrome profile and return
+    `(playwright_cm, context, page)` WITHOUT closing anything — the caller owns
+    cleanup via `close_playwright_session(playwright_cm, context)`.
+
+    Prefer the `playwright_session()` context manager below for the common case
+    (auto-closes on exit). This lower-level function exists only for flows that must
+    keep the browser open across multiple separate requests — e.g. the web
+    dashboard's interactive "log in to Printerval" flow, where a human needs an
+    unpredictable amount of time to type credentials between one HTTP request opening
+    the browser and a second, later one closing it; a single `with` block can't span
+    two separate request/response cycles.
+    """
+    playwright_cm = sync_playwright()
+    p = playwright_cm.__enter__()
+    context = p.chromium.launch_persistent_context(
+        profile_dir,
+        channel="chrome",
+        headless=headless,
+        args=["--disable-blink-features=AutomationControlled"],
+    )
+    page = context.pages[0] if context.pages else context.new_page()
+    return playwright_cm, context, page
+
+
+def close_playwright_session(playwright_cm, context) -> None:
+    """Counterpart to `open_playwright_session` — closes the browser context, then
+    tears down the underlying Playwright driver process. Safe to call even if the
+    context was already closed manually (e.g. the user closed the window themselves).
+    """
+    try:
+        context.close()
+    finally:
+        playwright_cm.__exit__(None, None, None)
+
+
 @contextmanager
 def playwright_session(profile_dir: str = "chrome-profile", headless: bool = False):
     """Launch a persistent Chrome profile, yield the Page to use.
 
     The profile directory must already be logged into Printerval (done once,
     interactively, by a human — Cloudflare + the site's login flow are not
-    automated here). Reusing the persistent profile avoids re-login on every
-    run, matching how Phase 0's exploration worked.
+    automated here; the web dashboard's "Đăng nhập Printerval" page drives this same
+    profile through `open_playwright_session`/`close_playwright_session` for that
+    one-time interactive step). Reusing the persistent profile avoids re-login on
+    every run, matching how Phase 0's exploration worked.
     """
-    with sync_playwright() as p:
-        context = p.chromium.launch_persistent_context(
-            profile_dir,
-            channel="chrome",
-            headless=headless,
-            args=["--disable-blink-features=AutomationControlled"],
-        )
-        try:
-            page = context.pages[0] if context.pages else context.new_page()
-            yield page
-        finally:
-            context.close()
+    playwright_cm, context, page = open_playwright_session(profile_dir, headless)
+    try:
+        yield page
+    finally:
+        close_playwright_session(playwright_cm, context)
 
 
 def with_retry[T](fn: Callable[[], T], max_attempts: int = 3, base_delay: float = 0.5) -> T:

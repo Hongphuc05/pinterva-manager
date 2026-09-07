@@ -14,6 +14,9 @@
       {% if user %}
         <li>{{ user.full_name }} ({{ user.role }})</li>
         <li><a href="/orders">Đơn hàng</a></li>
+        {% if user.role == "admin" %}
+        <li><a href="/printerval-login">Đăng nhập Printerval</a></li>
+        {% endif %}
         <li>
           <form method="post" action="/logout" style="display:inline">
             <button type="submit" class="secondary">Đăng xuất</button>

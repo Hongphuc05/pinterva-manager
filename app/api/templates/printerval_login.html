@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Đăng nhập Printerval{% endblock %}
+{% block content %}
+<h1>Đăng nhập Printerval</h1>
+{% if session_open %}
+<p>Một cửa sổ Chrome đã mở sẵn trang Printerval. Đăng nhập xong trên cửa sổ đó (đúng
+tài khoản công ty/admin, không phải tài khoản cá nhân), rồi quay lại đây bấm nút dưới
+để đóng cửa sổ.</p>
+<form method="post" action="/printerval-login/done">
+  <button type="submit">Done — đã đăng nhập xong</button>
+</form>
+{% else %}
+<p>Bấm nút dưới để mở một cửa sổ Chrome thật tới trang Printerval. Đăng nhập xong thì
+quay lại trang này (sẽ tự có nút Done) để đóng cửa sổ.</p>
+<form method="post" action="/printerval-login/start">
+  <button type="submit">Mở Chrome để đăng nhập</button>
+</form>
+{% endif %}
+<p><a href="/orders">← Quay lại danh sách đơn</a></p>
+{% endblock %}
