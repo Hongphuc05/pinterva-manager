@@ -169,31 +169,62 @@ def import_claimed_orders(session: Session, adapter: PrintervalAdapter) -> dict:
 
         def _do(order=order) -> dict:
             result = with_retry(lambda: adapter.download_asset(order.external_order_id))
-            if result.success:
+            if not result.success:
                 session.add(
-                    OrderAsset(
-                        order_id=order.id,
-                        source_image_ref=result.local_path,
-                        checksum=result.checksum,
-                        storage_location=result.local_path,
+                    DeadLetter(
+                        source="crawl.import_claimed_orders",
+                        payload={"order_id": order.external_order_id, "stage": "download_asset"},
+                        error_class=result.error_class or "BUG",
                     )
                 )
-                apply_transition(
-                    session,
-                    order,
-                    OrderState.CLAIMED_IMPORTED,
-                    actor_id=None,
-                    evidence={"source": "crawl_job"},
-                )
-                return {"imported": True}
+                return {"imported": False}
             session.add(
-                DeadLetter(
-                    source="crawl.import_claimed_orders",
-                    payload={"order_id": order.external_order_id},
-                    error_class=result.error_class or "BUG",
+                OrderAsset(
+                    order_id=order.id,
+                    source_image_ref=result.local_path,
+                    checksum=result.checksum,
+                    storage_location=result.local_path,
                 )
             )
-            return {"imported": False}
+
+            detail_result = with_retry(lambda: adapter.get_order_detail(order.external_order_id))
+            if not detail_result.success:
+                session.add(
+                    DeadLetter(
+                        source="crawl.import_claimed_orders",
+                        payload={"order_id": order.external_order_id, "stage": "get_order_detail"},
+                        error_class=detail_result.error_class or "BUG",
+                    )
+                )
+                return {"imported": False}
+
+            order.product_name = detail_result.product_name or ""
+            order.thumbnail_url = detail_result.thumbnail_url
+            order.sku = detail_result.sku
+            order.product_category = detail_result.product_category
+            order.product_variants = [v.model_dump() for v in detail_result.product_variants]
+            order.has_template = detail_result.has_template
+            order.multiple_design = detail_result.multiple_design
+            order.double_sided = detail_result.double_sided
+            order.priority_label = detail_result.priority_label
+            order.created_at_ext = detail_result.created_at
+            order.order_created_at_ext = detail_result.order_created_at
+            order.deadline_at_ext = detail_result.deadline_at
+            order.note_outsource = detail_result.note_outsource
+            order.order_note = detail_result.order_note
+            order.custom_config = (
+                detail_result.custom_config.model_dump() if detail_result.custom_config else None
+            )
+            order.design_tool_url = detail_result.design_tool_url
+
+            apply_transition(
+                session,
+                order,
+                OrderState.CLAIMED_IMPORTED,
+                actor_id=None,
+                evidence={"source": "crawl_job"},
+            )
+            return {"imported": True}
 
         try:
             outcome = run_idempotent(

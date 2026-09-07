@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
 
 from app.adapters.printerval.interface import ALL_JOB_TYPES
 from app.adapters.printerval.models import (
     AssetResult,
+    CustomConfig,
     DiscoverResult,
     OrderDetailResult,
     OrderSummary,
+    ProductVariant,
     WriteResult,
 )
 
@@ -20,10 +23,20 @@ class _FakeOrder:
     status: str
     note_outsource: str = ""
     order_note: str = ""
-    created_at: str = "2026-01-01T00:00:00"
-    order_created_at: str = "2026-01-01T00:00:00"
-    deadline_at: str = "2026-01-10T00:00:00"
+    created_at: datetime | None = None
+    order_created_at: datetime | None = None
+    deadline_at: datetime | None = None
     has_uploaded_design: bool = False
+    thumbnail_url: str | None = None
+    sku: str | None = None
+    product_category: str | None = None
+    product_variants: list[ProductVariant] = field(default_factory=list)
+    has_template: bool = False
+    multiple_design: bool = False
+    double_sided: bool = False
+    priority_label: str | None = None
+    custom_config: CustomConfig | None = None
+    design_tool_url: str | None = None
 
 
 class FakePrintervalAdapter:
@@ -67,6 +80,17 @@ class FakePrintervalAdapter:
             order_created_at=order.order_created_at,
             deadline_at=order.deadline_at,
             has_uploaded_design=order.has_uploaded_design,
+            product_name=order.product_name,
+            thumbnail_url=order.thumbnail_url,
+            sku=order.sku,
+            product_category=order.product_category,
+            product_variants=order.product_variants,
+            has_template=order.has_template,
+            multiple_design=order.multiple_design,
+            double_sided=order.double_sided,
+            priority_label=order.priority_label,
+            custom_config=order.custom_config,
+            design_tool_url=order.design_tool_url,
         )
 
     def set_designer(self, external_order_id: str, designer_option: str) -> WriteResult:

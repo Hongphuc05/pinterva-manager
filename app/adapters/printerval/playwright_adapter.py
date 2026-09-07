@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -11,9 +12,12 @@ from app.adapters.playwright_support import capture_evidence
 from app.adapters.printerval.interface import ALL_JOB_TYPES
 from app.adapters.printerval.models import (
     AssetResult,
+    CustomConfig,
+    CustomConfigEntry,
     DiscoverResult,
     OrderDetailResult,
     OrderSummary,
+    ProductVariant,
     WriteResult,
 )
 
@@ -175,6 +179,66 @@ def _search_and_get_row(page: Page, external_order_id: str):
     return row
 
 
+def _parse_short_datetime(raw: str) -> datetime | None:
+    """Parse the "Created at"/"Order created at" format confirmed live 2026-09-07:
+    "HH:MM' DD/MM/YYYY" rendered across two lines (e.g. "03:46'\n07/09/2026"). Returns
+    None on any mismatch — never guess a different format."""
+    tokens = raw.split()
+    if len(tokens) != 2:
+        return None
+    time_part, date_part = tokens
+    time_part = time_part.rstrip("'")
+    try:
+        return datetime.strptime(f"{date_part} {time_part}", "%d/%m/%Y %H:%M")
+    except ValueError:
+        return None
+
+
+def _parse_deadline_datetime(raw: str) -> datetime | None:
+    """Parse the "Deadline at" format confirmed live 2026-09-07:
+    "YYYY-MM-DD HH:MM:SS" — a different format from Created/Order created at on the
+    same page."""
+    try:
+        return datetime.strptime(raw.strip(), "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+
+
+def _timestamp_label_text(row, label: str) -> str | None:
+    """Text of the <span> next to a `<strong>{label}</strong>` block in a row — used
+    for the 3 timestamp fields, which share this exact markup shape."""
+    block = row.locator(f"div:has(strong:has-text('{label}'))")
+    if block.count() == 0:
+        return None
+    return block.first.locator("span").first.inner_text()
+
+
+def _extract_custom_config(row) -> CustomConfig | None:
+    """Live-confirmed structure (2026-09-07): a `.djcfg-card` block (original values)
+    and a sibling `.djcfg-card.djcfg-vn` block (Vietnamese translation), each holding
+    `.djcfg-row` entries with a `.djcfg-key` label and `.djcfg-val-text` value. Only
+    personalized orders have these — absent entirely otherwise."""
+    original_rows = row.locator(".djcfg-card:not(.djcfg-vn) .djcfg-row").all()
+    if not original_rows:
+        return None
+    original = [
+        CustomConfigEntry(
+            key=r.locator(".djcfg-key").inner_text().strip(),
+            value=r.locator(".djcfg-val-text").inner_text().strip(),
+        )
+        for r in original_rows
+    ]
+    translated_rows = row.locator(".djcfg-card.djcfg-vn .djcfg-row").all()
+    translated = [
+        CustomConfigEntry(
+            key=r.locator(".djcfg-key").inner_text().strip(),
+            value=r.locator(".djcfg-val-text").inner_text().strip(),
+        )
+        for r in translated_rows
+    ]
+    return CustomConfig(original=original, translated_vn=translated)
+
+
 class PlaywrightPrintervalAdapter:
     def __init__(self, page: Page):
         self.page = page
@@ -248,13 +312,80 @@ class PlaywrightPrintervalAdapter:
         note_outsource = (
             note_group.locator("textarea").input_value() if note_group.count() > 0 else ""
         )
+
+        headings = row.locator("h5")
+        product_name = headings.first.inner_text().strip() if headings.count() > 0 else None
+
+        sku_item = row.locator(".product-sku-item").first
+        thumbnail_url = None
+        sku = None
+        product_category = None
+        product_variants: list[ProductVariant] = []
+        if sku_item.count() > 0:
+            img = sku_item.locator("img").first
+            if img.count() > 0:
+                thumbnail_url = img.get_attribute("src")
+            sku_span = sku_item.locator("[ng-bind='productSku.product_sku']")
+            if sku_span.count() > 0:
+                sku = sku_span.inner_text().strip()
+            for line in sku_item.inner_text().splitlines():
+                line = line.strip()
+                if line.startswith("Category:"):
+                    product_category = line[len("Category:") :].strip()
+                    break
+            for vdiv in sku_item.locator("div[ng-repeat^='variant in productSku.variants']").all():
+                line = vdiv.inner_text().strip()
+                if " : " in line:
+                    name, _, value = line.partition(" : ")
+                    product_variants.append(ProductVariant(name=name.strip(), value=value.strip()))
+
+        has_template = row.locator(".label.label-success").count() > 0
+        multiple_design = row.locator("#multiple-design").is_checked()
+        double_sided = row.locator("#double-sided").is_checked()
+
+        priority_span = row.locator("span.label.label-default")
+        priority_label = priority_span.get_attribute("class") if priority_span.count() > 0 else None
+
+        created_at_text = _timestamp_label_text(row, "Created at:")
+        order_created_at_text = _timestamp_label_text(row, "Order created at:")
+        deadline_text = _timestamp_label_text(row, "Deadline at:")
+
+        order_note_block = row.locator("div.note:has-text('Order note:')")
+        order_note = (
+            order_note_block.locator(".pre-note").inner_text()
+            if order_note_block.count() > 0
+            else ""
+        )
+
+        design_tool_link = row.locator("a[href*='design-tool.printerval.com']")
+        design_tool_url = (
+            design_tool_link.get_attribute("href") if design_tool_link.count() > 0 else None
+        )
+
         return OrderDetailResult(
             success=True,
             external_order_id=external_order_id,
             designer=designer,
             status=status,
             note_outsource=note_outsource,
+            order_note=order_note,
+            created_at=_parse_short_datetime(created_at_text) if created_at_text else None,
+            order_created_at=(
+                _parse_short_datetime(order_created_at_text) if order_created_at_text else None
+            ),
+            deadline_at=_parse_deadline_datetime(deadline_text) if deadline_text else None,
             has_uploaded_design=row.locator(".thumbnail-design-container img").count() > 0,
+            product_name=product_name,
+            thumbnail_url=thumbnail_url,
+            sku=sku,
+            product_category=product_category,
+            product_variants=product_variants,
+            has_template=has_template,
+            multiple_design=multiple_design,
+            double_sided=double_sided,
+            priority_label=priority_label,
+            custom_config=_extract_custom_config(row),
+            design_tool_url=design_tool_url,
         )
 
     def download_asset(self, external_order_id: str) -> AssetResult:

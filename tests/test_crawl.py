@@ -4,6 +4,7 @@ import pytest
 
 from app.adapters.db.models import Batch, DeadLetter, Operation, Order, OrderAsset
 from app.adapters.printerval.fake_adapter import FakePrintervalAdapter
+from app.adapters.printerval.models import OrderDetailResult
 from app.application.crawl import (
     DiscoverFailedError,
     claim_batch,
@@ -252,3 +253,83 @@ def test_claim_batch_idempotency_key_stays_within_column_limit_for_large_batches
 
     op = db_session.query(Operation).filter_by(command_name="claim_batch").one()
     assert len(op.idempotency_key) <= 255
+
+
+def test_import_claimed_orders_persists_order_detail_fields(db_session):
+    from datetime import datetime
+
+    from app.adapters.printerval.models import CustomConfig, CustomConfigEntry, ProductVariant
+
+    adapter = FakePrintervalAdapter()
+    _seed_waiting_order(
+        adapter,
+        "DJ0000001",
+        thumbnail_url="https://assets.printerval.com/thumb.webp",
+        sku="P123-XL",
+        product_category="Baseball Jerseys",
+        product_variants=[ProductVariant(name="Size", value="XL")],
+        has_template=True,
+        multiple_design=True,
+        double_sided=False,
+        priority_label="label label-default label-danger",
+        created_at=datetime(2026, 9, 7, 3, 46),
+        order_created_at=datetime(2026, 9, 7, 3, 38),
+        deadline_at=datetime(2026, 9, 8, 3, 38, 52),
+        note_outsource="some note",
+        order_note="ebay url: https://example.com",
+        custom_config=CustomConfig(
+            original=[CustomConfigEntry(key="Your Name Here", value="Machado")],
+            translated_vn=[CustomConfigEntry(key="Tên của Bạn", value="Machado")],
+        ),
+        design_tool_url="https://design-tool.printerval.com/?tab=design-job&code=Printerval-DJ0000001",
+    )
+    claim_batch(db_session, adapter, ["DJ0000001"], owner="ntth")
+
+    result = import_claimed_orders(db_session, adapter)
+
+    assert result["imported"] == ["DJ0000001"]
+    order = db_session.query(Order).filter_by(external_order_id="DJ0000001").one()
+    assert order.state == OrderState.CLAIMED_IMPORTED.value
+    assert order.thumbnail_url == "https://assets.printerval.com/thumb.webp"
+    assert order.sku == "P123-XL"
+    assert order.product_category == "Baseball Jerseys"
+    assert order.product_variants == [{"name": "Size", "value": "XL"}]
+    assert order.has_template is True
+    assert order.multiple_design is True
+    assert order.double_sided is False
+    assert order.priority_label == "label label-default label-danger"
+    assert order.created_at_ext == datetime(2026, 9, 7, 3, 46)
+    assert order.deadline_at_ext == datetime(2026, 9, 8, 3, 38, 52)
+    assert order.note_outsource == "some note"
+    assert order.custom_config == {
+        "original": [{"key": "Your Name Here", "value": "Machado"}],
+        "translated_vn": [{"key": "Tên của Bạn", "value": "Machado"}],
+    }
+    assert order.design_tool_url.startswith("https://design-tool.printerval.com")
+
+
+def test_import_claimed_orders_dead_letters_on_get_order_detail_failure(db_session, monkeypatch):
+    adapter = FakePrintervalAdapter()
+    _seed_waiting_order(adapter, "DJ0000001")
+    claim_batch(db_session, adapter, ["DJ0000001"], owner="ntth")
+
+    def _fail(external_order_id):
+        return OrderDetailResult(success=False, error_class="EXTERNAL_CHANGED")
+
+    monkeypatch.setattr(adapter, "get_order_detail", _fail)
+
+    result = import_claimed_orders(db_session, adapter)
+
+    assert result["imported"] == []
+    assert result["failed"] == ["DJ0000001"]
+    order = db_session.query(Order).filter_by(external_order_id="DJ0000001").one()
+    assert order.state == OrderState.DISCOVERED.value, (
+        "asset downloaded but detail missing must not reach CLAIMED_IMPORTED"
+    )
+    dead_letters = (
+        db_session.query(DeadLetter)
+        .filter_by(source="crawl.import_claimed_orders")
+        .filter(DeadLetter.payload["stage"].astext == "get_order_detail")
+        .all()
+    )
+    assert len(dead_letters) == 1
