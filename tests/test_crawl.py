@@ -2,7 +2,7 @@ import uuid
 
 import pytest
 
-from app.adapters.db.models import Batch, DeadLetter, Order, OrderAsset
+from app.adapters.db.models import Batch, DeadLetter, Operation, Order, OrderAsset
 from app.adapters.printerval.fake_adapter import FakePrintervalAdapter
 from app.application.crawl import (
     DiscoverFailedError,
@@ -236,3 +236,19 @@ def test_discover_waiting_orders_dead_letters_and_raises_on_failure(db_session, 
         db_session.query(DeadLetter).filter_by(source="crawl.discover_waiting_orders").all()
     )
     assert len(dead_letters) == 1
+
+
+def test_claim_batch_idempotency_key_stays_within_column_limit_for_large_batches(db_session):
+    """Regression test for a real production crash: a raw
+    'claim_batch:DJ1,DJ2,...' key overflows operations.idempotency_key
+    (VARCHAR(255)) once a real crawl discovers more than ~20 new orders at once
+    (claude.md §16 notes up to 529 observed backlogged at one time)."""
+    adapter = FakePrintervalAdapter()
+    order_ids = [f"DJ{i:07d}" for i in range(1, 51)]  # 50 ids, well past the old overflow point
+    for oid in order_ids:
+        _seed_waiting_order(adapter, oid)
+
+    claim_batch(db_session, adapter, order_ids, owner="ntth")
+
+    op = db_session.query(Operation).filter_by(command_name="claim_batch").one()
+    assert len(op.idempotency_key) <= 255

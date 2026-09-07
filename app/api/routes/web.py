@@ -134,6 +134,12 @@ def orders_refresh(
             flash += f", {failed_total} lỗi (xem dead_letters)"
         flash += "."
     except DiscoverFailedError:
+        # ponytail: rollback first — a failed statement anywhere in the crawl leaves
+        # this session's transaction aborted; Postgres then rejects every further
+        # query on it (including the list_orders_for_user call right below) until
+        # rolled back. A real incident: this exact gap turned one crawl-time DataError
+        # into an unrelated 500 on this route's own read-only re-render afterward.
+        db.rollback()
         # Distinct from the generic Playwright-session-failure case below: the
         # session opened fine, but the site's "find waiting orders" step itself
         # failed (e.g. a filter dropdown's option text changed) — already
@@ -146,6 +152,7 @@ def orders_refresh(
             "biết chi tiết lỗi thật."
         )
     except Exception:
+        db.rollback()
         flash = "Crawl thất bại — kiểm tra Chrome profile đã đăng nhập Printerval chưa."
 
     orders = list_orders_for_user(db, user)

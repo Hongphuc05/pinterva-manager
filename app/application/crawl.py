@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import Batch, DeadLetter, ExternalObservation, Order, OrderAsset
@@ -77,7 +79,14 @@ def claim_batch(
     claim), then claim each on the site via `adapter.set_designer`. One order's claim
     failure dead-letters that order and continues the rest of the batch.
     """
-    idempotency_key = f"claim_batch:{','.join(sorted(order_ids))}"
+    # ponytail: hashed, not the raw joined IDs — `operations.idempotency_key` is
+    # VARCHAR(255), and a real crawl can discover far more than ~20 new orders in one
+    # batch (claude.md §16: up to 529 observed backlogged at once), which overflows a
+    # raw "claim_batch:DJ1,DJ2,DJ3,..." key and crashes the whole request. A SHA-256
+    # hex digest is fixed-length (64 chars) and still deterministic per exact
+    # order_ids set, preserving the idempotency guarantee.
+    ids_key = hashlib.sha256(",".join(sorted(order_ids)).encode("utf-8")).hexdigest()
+    idempotency_key = f"claim_batch:{ids_key}"
 
     def _do() -> dict:
         batch = Batch(source="printerval_crawl", owner=owner, count=len(order_ids))

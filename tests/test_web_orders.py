@@ -160,3 +160,33 @@ def test_orders_refresh_shows_distinct_message_on_discover_failure(client, db_se
     assert "tìm đơn mới" in resp.text
     assert "kiểm tra Chrome profile" not in resp.text
     assert "Đã crawl xong" not in resp.text
+
+
+def test_orders_refresh_recovers_from_a_mid_crawl_db_error(client, db_session, monkeypatch):
+    """Regression test for a real production crash: a failed statement mid-crawl
+    (e.g. an idempotency-key length overflow) aborts the session's transaction: any
+    further query on that same session — including this route's own re-render of the
+    order list right after — fails too unless rolled back first. Without db.rollback()
+    in the except block, this whole request would raise instead of returning 200 with
+    a graceful error message."""
+    from contextlib import contextmanager
+
+    from sqlalchemy import text
+
+    from app.api.routes import web
+
+    @contextmanager
+    def _fake_session():
+        yield object()
+
+    def _fake_run_crawl_cycle(session, adapter, limit=40):
+        session.execute(text("SELECT this_column_does_not_exist_anywhere"))
+
+    monkeypatch.setattr(web, "playwright_session", _fake_session)
+    monkeypatch.setattr(web, "run_crawl_cycle", _fake_run_crawl_cycle)
+
+    _login(client, db_session, "admin")
+    resp = client.post("/orders/refresh")
+
+    assert resp.status_code == 200
+    assert "Crawl thất bại" in resp.text
