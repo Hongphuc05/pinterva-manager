@@ -205,12 +205,20 @@ def _parse_deadline_datetime(raw: str) -> datetime | None:
 
 
 def _timestamp_label_text(row, label: str) -> str | None:
-    """Text of the <span> next to a `<strong>{label}</strong>` block in a row — used
-    for the 3 timestamp fields, which share this exact markup shape."""
-    block = row.locator(f"div:has(strong:has-text('{label}'))")
-    if block.count() == 0:
+    """Text of the <span> next to an exact `<strong>{label}</strong>` block. Uses
+    exact text matching (get_by_text(..., exact=True)) — not substring `:has-text` —
+    to distinguish "Created at:" from "Order created at:" (a substring match makes
+    the shorter label match both), and scopes to the label's own immediate parent
+    (not `div:has(...)`, which matches every ancestor and returns the outermost one)
+    to avoid grabbing an unrelated span elsewhere in the row."""
+    strong = row.get_by_text(label, exact=True)
+    if strong.count() == 0:
         return None
-    return block.first.locator("span").first.inner_text()
+    parent = strong.first.locator("xpath=..")
+    span = parent.locator("span").first
+    if span.count() == 0:
+        return None
+    return span.inner_text()
 
 
 def _extract_custom_config(row) -> CustomConfig | None:
@@ -290,17 +298,18 @@ class PlaywrightPrintervalAdapter:
             )
         return DiscoverResult(success=True, orders=orders, cursor=None)
 
-    def get_order_detail(self, external_order_id: str) -> OrderDetailResult:
-        page = self.page
-        try:
-            row = _search_and_get_row(page, external_order_id)
-        except Exception as exc:
-            error_class, retryable = _classify_exception(exc)
-            evidence = capture_evidence(page, f"get_order_detail_missing_{external_order_id}")
-            return OrderDetailResult(
-                success=False, error_class=error_class, retryable=retryable, evidence=evidence
-            )
+    def _extract_order_detail_from_row(self, row, external_order_id: str) -> OrderDetailResult:
+        """Extract every OrderDetailResult field from an already-located row.
 
+        Split out from get_order_detail so this pure extraction can be exercised
+        offline against a static HTML fixture (page.set_content(), no live site/
+        Cloudflare needed) — see tests/test_playwright_adapter_extraction.py. Every
+        read here must be non-raising per claude.md §8 / spec §4: an absent or
+        multiple-matching field yields None/False/"" for that field, never a
+        Playwright TimeoutError or strict-mode violation escaping this method. The
+        caller (get_order_detail) additionally wraps the call in try/except as a
+        backstop in case a future field read is added without following this rule.
+        """
         selects = row.locator("select")
         designer = _selected_option_text(selects.nth(0)) if selects.count() >= 1 else None
         status = _selected_option_text(selects.nth(1)) if selects.count() >= 2 else None
@@ -322,12 +331,15 @@ class PlaywrightPrintervalAdapter:
         product_category = None
         product_variants: list[ProductVariant] = []
         if sku_item.count() > 0:
-            img = sku_item.locator("img").first
+            # Spec §3: "img trong .sb-design-thumbnail" — not just any <img> under
+            # .product-sku-item (that would be a different, non-thumbnail image).
+            img = sku_item.locator(".sb-design-thumbnail img").first
             if img.count() > 0:
                 thumbnail_url = img.get_attribute("src")
             sku_span = sku_item.locator("[ng-bind='productSku.product_sku']")
             if sku_span.count() > 0:
-                sku = sku_span.inner_text().strip()
+                # Spec §3: take the first SKU if more than one is present.
+                sku = sku_span.first.inner_text().strip()
             for line in sku_item.inner_text().splitlines():
                 line = line.strip()
                 if line.startswith("Category:"):
@@ -339,12 +351,30 @@ class PlaywrightPrintervalAdapter:
                     name, _, value = line.partition(" : ")
                     product_variants.append(ProductVariant(name=name.strip(), value=value.strip()))
 
-        has_template = row.locator(".label.label-success").count() > 0
-        multiple_design = row.locator("#multiple-design").is_checked()
-        double_sided = row.locator("#double-sided").is_checked()
+        # `:has-text('template')` narrows to the actual "has template" badge —
+        # `.label.label-success` alone would false-positive on any other success
+        # badge in the row.
+        has_template = row.locator(".label.label-success:has-text('template')").count() > 0
 
-        priority_span = row.locator("span.label.label-default")
-        priority_label = priority_span.get_attribute("class") if priority_span.count() > 0 else None
+        multiple_design_checkbox = row.locator("#multiple-design")
+        multiple_design = (
+            multiple_design_checkbox.is_checked() if multiple_design_checkbox.count() > 0 else False
+        )
+        double_sided_checkbox = row.locator("#double-sided")
+        double_sided = (
+            double_sided_checkbox.is_checked() if double_sided_checkbox.count() > 0 else False
+        )
+
+        # Live DOM: <div class="mt-2" ...><strong>Độ ưu tiên: </strong>
+        # <span class="label" ng-class="...">Ưu tiên</span></div>. Scoping by the
+        # `.mt-2` container (not `:has-text`/`div:has(...)`) avoids the C2 bug of
+        # substring/ancestor matching, and doesn't require a specific label-* class
+        # to be present (spec: any class on that span).
+        priority_container = row.locator("div.mt-2")
+        priority_span = priority_container.locator("span.label")
+        priority_label = (
+            priority_span.first.get_attribute("class") if priority_span.count() > 0 else None
+        )
 
         created_at_text = _timestamp_label_text(row, "Created at:")
         order_created_at_text = _timestamp_label_text(row, "Order created at:")
@@ -352,14 +382,14 @@ class PlaywrightPrintervalAdapter:
 
         order_note_block = row.locator("div.note:has-text('Order note:')")
         order_note = (
-            order_note_block.locator(".pre-note").inner_text()
+            order_note_block.locator(".pre-note").first.inner_text()
             if order_note_block.count() > 0
             else ""
         )
 
         design_tool_link = row.locator("a[href*='design-tool.printerval.com']")
         design_tool_url = (
-            design_tool_link.get_attribute("href") if design_tool_link.count() > 0 else None
+            design_tool_link.first.get_attribute("href") if design_tool_link.count() > 0 else None
         )
 
         return OrderDetailResult(
@@ -387,6 +417,28 @@ class PlaywrightPrintervalAdapter:
             custom_config=_extract_custom_config(row),
             design_tool_url=design_tool_url,
         )
+
+    def get_order_detail(self, external_order_id: str) -> OrderDetailResult:
+        page = self.page
+        try:
+            row = _search_and_get_row(page, external_order_id)
+        except Exception as exc:
+            error_class, retryable = _classify_exception(exc)
+            evidence = capture_evidence(page, f"get_order_detail_missing_{external_order_id}")
+            return OrderDetailResult(
+                success=False, error_class=error_class, retryable=retryable, evidence=evidence
+            )
+
+        try:
+            return self._extract_order_detail_from_row(row, external_order_id)
+        except Exception as exc:
+            error_class, retryable = _classify_exception(exc)
+            evidence = capture_evidence(
+                page, f"get_order_detail_extract_failed_{external_order_id}"
+            )
+            return OrderDetailResult(
+                success=False, error_class=error_class, retryable=retryable, evidence=evidence
+            )
 
     def download_asset(self, external_order_id: str) -> AssetResult:
         page = self.page

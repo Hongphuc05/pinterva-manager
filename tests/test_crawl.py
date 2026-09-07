@@ -326,6 +326,9 @@ def test_import_claimed_orders_dead_letters_on_get_order_detail_failure(db_sessi
     assert order.state == OrderState.DISCOVERED.value, (
         "asset downloaded but detail missing must not reach CLAIMED_IMPORTED"
     )
+    assert db_session.query(OrderAsset).filter_by(order_id=order.id).count() == 0, (
+        "OrderAsset must not be written when detail extraction fails after it"
+    )
     dead_letters = (
         db_session.query(DeadLetter)
         .filter_by(source="crawl.import_claimed_orders")

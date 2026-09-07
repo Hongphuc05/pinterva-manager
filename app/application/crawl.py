@@ -178,14 +178,6 @@ def import_claimed_orders(session: Session, adapter: PrintervalAdapter) -> dict:
                     )
                 )
                 return {"imported": False}
-            session.add(
-                OrderAsset(
-                    order_id=order.id,
-                    source_image_ref=result.local_path,
-                    checksum=result.checksum,
-                    storage_location=result.local_path,
-                )
-            )
 
             detail_result = with_retry(lambda: adapter.get_order_detail(order.external_order_id))
             if not detail_result.success:
@@ -198,7 +190,21 @@ def import_claimed_orders(session: Session, adapter: PrintervalAdapter) -> dict:
                 )
                 return {"imported": False}
 
-            order.product_name = detail_result.product_name or ""
+            # Written only once the detail call has also succeeded (moved from
+            # right after download_asset) — otherwise a detail failure below would
+            # still leave a committed OrderAsset row for an order stuck at
+            # DISCOVERED, which then double-inserts on operator recovery/retry
+            # (claude.md §18: batch/resume/retry must be idempotent).
+            session.add(
+                OrderAsset(
+                    order_id=order.id,
+                    source_image_ref=result.local_path,
+                    checksum=result.checksum,
+                    storage_location=result.local_path,
+                )
+            )
+
+            order.product_name = detail_result.product_name
             order.thumbnail_url = detail_result.thumbnail_url
             order.sku = detail_result.sku
             order.product_category = detail_result.product_category
