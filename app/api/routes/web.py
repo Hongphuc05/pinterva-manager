@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -8,7 +8,11 @@ from sqlalchemy.orm import Session
 from app.adapters.db.models import User
 from app.api.deps import SESSION_COOKIE_NAME, get_current_user_web, get_db
 from app.application.auth import create_session_token, verify_password
-from app.application.order_queries import list_orders_for_user
+from app.application.order_queries import (
+    get_order_detail_for_user,
+    get_order_history,
+    list_orders_for_user,
+)
 from app.config import get_settings
 from app.domain.models import OrderState
 
@@ -101,4 +105,22 @@ def orders_table(
     )
     return templates.TemplateResponse(
         request, "orders_table.html", {"orders": orders}
+    )
+
+
+@router.get("/orders/{order_id}")
+def order_detail(
+    request: Request,
+    order_id: str,
+    user: User = Depends(get_current_user_web),
+    db: Session = Depends(get_db),
+):
+    order = get_order_detail_for_user(db, user, order_id)
+    if order is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Order not found")
+    history = get_order_history(db, order_id)
+    return templates.TemplateResponse(
+        request,
+        "order_detail.html",
+        {"user": user, "order": order, "history": history},
     )

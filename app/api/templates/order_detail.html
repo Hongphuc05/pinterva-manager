@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Đơn {{ order.external_order_id }}{% endblock %}
+{% block content %}
+<h1>Đơn {{ order.external_order_id }}</h1>
+<p>Trạng thái hiện tại: <strong>{{ order.state }}</strong></p>
+<p>Batch: {{ order.batch_id or "-" }}</p>
+<p>Tạo lúc: {{ order.created_at }}</p>
+
+<h2>Lịch sử</h2>
+<table>
+  <thead><tr><th>Thời gian</th><th>Từ</th><th>Đến</th></tr></thead>
+  <tbody>
+    {% for event in history %}
+    <tr><td>{{ event.created_at }}</td><td>{{ event.from_state or "-" }}</td><td>{{ event.to_state }}</td></tr>
+    {% else %}
+    <tr><td colspan="3">Chưa có lịch sử.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+<p><a href="/orders">← Quay lại danh sách</a></p>
+{% endblock %}
