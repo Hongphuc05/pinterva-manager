@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import allocation_api as allocation_api_routes
 from app.api.routes import auth as auth_routes
+from app.api.routes import designer_tasks_api as designer_tasks_api_routes
 from app.api.routes import health as health_routes
 from app.api.routes import orders_api as orders_api_routes
 from app.api.routes import protected_example
@@ -19,6 +20,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_routes.router, prefix="/api")
     app.include_router(orders_api_routes.router, prefix="/api")
     app.include_router(allocation_api_routes.router, prefix="/api")
+    app.include_router(designer_tasks_api_routes.router, prefix="/api")
     app.include_router(protected_example.router, prefix="/api")
 
     if FRONTEND_DIST.exists():

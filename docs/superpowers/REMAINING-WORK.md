@@ -18,29 +18,35 @@ thiếu Python 3.12). Frontend ở `frontend/` (đã cài `node_modules`, dùng 
 
 ---
 
-## 0. Sub-project 1-3/6 — ĐÃ XONG HOÀN TOÀN (không cần động vào)
+## 0. Sub-project 1-4/6 — ĐÃ XONG HOÀN TOÀN (không cần động vào)
 
-Order detail mirror, frontend migration (React), và allocation board (C2+C3) đều đã
+Order detail mirror, frontend migration (React), allocation board (C2+C3), và designer
+task view (C4) đều đã
 qua đủ final review + 1 vòng fix + scoped re-review sạch. Allocation board còn được
 kiểm tra bổ sung race capacity xuyên batch sau khi đóng ledger và đã có regression fix;
 ledger đã đóng, workspace
-`.superpowers/sdd/` của cả 3 đã bị xoá (đúng quy trình). Toàn bộ đã commit trên
-`worktree-phase1-foundation` tới commit `7343a9a`. Chi tiết đầy đủ (kể cả các bug thật
+`.superpowers/sdd/` của 3 sub-project đầu đã bị xoá (đúng quy trình). Toàn bộ đã commit
+trên `worktree-phase1-foundation`. Chi tiết đầy đủ (kể cả các bug thật
 đã tự phát hiện/sửa giữa chừng) nằm ở `docs/superpowers/SESSION-SUMMARY-2026-09-07.md`
 §4. Một minor còn "parked" có chủ đích (không phải bug bỏ sót): `offer`/`assign` chưa
 bắt `IdempotencyKeyReusedError` (sẽ raise 500 thay vì 409 nếu client gửi lại
 `request_id` với payload khác — kịch bản hiếm, chưa có test/scenario nào chạm tới, ghi
 lại để theo dõi chứ không bắt buộc sửa ngay).
 
-**Việc còn lại thật sự bắt đầu từ sub-project 4 dưới đây.**
+**Việc còn lại thật sự bắt đầu từ sub-project 5 dưới đây.**
 
 ---
 
-## 1. Sub-project 4/6 — Designer task view (C4)
+## 1. Sub-project 4/6 — Designer task view (C4) — ĐÃ XONG
 
-**Chưa brainstorm.** Bắt đầu bằng `superpowers:brainstorming` (phân loại: architectural
-— subsystem UI mới + có thể cần thêm bảng/cột `result_versions` chưa dùng tới). Tự quyết
-định, không dừng hỏi.
+Trang `/my-tasks`, service/API và tests đã hoàn tất. Designer chỉ thấy assignment
+`approved` của chính họ trong state active; Start là action state-machine riêng,
+sub-status chỉ hiển thị, và submit chỉ tạo `ResultVersion`/QC request sau khi adapter
+Drive xác nhận URL, file tồn tại và truy cập được. Query Orders/Detail chung cũng đã
+được giới hạn về assignment `approved`, nên assignment cancelled không còn lộ dữ liệu.
+Không có thao tác Printerval trong C4.
+
+Phần bối cảnh bên dưới được giữ lại làm tài liệu cho C5 và revision loop.
 
 ### Bối cảnh đã có sẵn (đọc trước khi thiết kế)
 

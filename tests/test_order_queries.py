@@ -36,8 +36,8 @@ def test_list_orders_for_user_designer_sees_only_assigned(db_session):
     o2 = Order(external_order_id="DJ2", state=OrderState.DISCOVERED.value)
     db_session.add_all([o1, o2])
     db_session.commit()
-    db_session.add(Assignment(order_id=o1.id, designer_id=designer.id, status="active"))
-    db_session.add(Assignment(order_id=o2.id, designer_id=other_designer.id, status="active"))
+    db_session.add(Assignment(order_id=o1.id, designer_id=designer.id, status="approved"))
+    db_session.add(Assignment(order_id=o2.id, designer_id=other_designer.id, status="approved"))
     db_session.commit()
 
     orders = list_orders_for_user(db_session, designer)
@@ -61,7 +61,7 @@ def test_list_orders_for_user_designer_ignores_supplied_designer_id(db_session):
     order = Order(external_order_id="DJ1", state=OrderState.DISCOVERED.value)
     db_session.add(order)
     db_session.commit()
-    db_session.add(Assignment(order_id=order.id, designer_id=designer.id, status="active"))
+    db_session.add(Assignment(order_id=order.id, designer_id=designer.id, status="approved"))
     db_session.commit()
 
     # designer1 tries to view designer2's queue by passing designer_id — must be ignored.
@@ -112,6 +112,18 @@ def test_get_order_detail_for_user_designer_without_assignment_gets_none(db_sess
     result = get_order_detail_for_user(db_session, designer, str(order.id))
 
     assert result is None
+
+
+def test_cancelled_assignment_does_not_grant_designer_list_or_detail_access(db_session):
+    designer = _make_user(db_session, "designer", "designer1")
+    order = Order(external_order_id="DJ1", state=OrderState.EXCEPTION.value)
+    db_session.add(order)
+    db_session.commit()
+    db_session.add(Assignment(order_id=order.id, designer_id=designer.id, status="cancelled"))
+    db_session.commit()
+
+    assert list_orders_for_user(db_session, designer) == []
+    assert get_order_detail_for_user(db_session, designer, str(order.id)) is None
 
 
 def test_get_order_detail_for_user_invalid_uuid_returns_none(db_session):

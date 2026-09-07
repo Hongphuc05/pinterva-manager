@@ -18,21 +18,14 @@ def list_orders_for_user(
     assigned orders (any designer_id param is ignored, never trusted for a designer's
     own view) — status/batch_id filters still apply on top of that.
     """
-    # ponytail: joins on ANY Assignment row for this designer, not just a currently
-    # active one, and has no .distinct() — harmless today (no code anywhere sets/uses
-    # a non-"draft" Assignment.status yet, no order has more than one Assignment row).
-    # Once Phase 5/C3's cancel-and-reassign flow ships (Assignment.status /
-    # cancel_reason / replacement_of_id start actually being used), a designer whose
-    # assignment was cancelled would still see the order here. Fix then: add
-    # `.filter(Assignment.status == <whatever "current" means>)` and `.distinct()` to
-    # both joins in this function and to get_order_detail_for_user's designer check
-    # below. Flagged in Phase 4's final review (see git history) — not fixed now
-    # because the real status semantics don't exist in the codebase yet to test against.
+    # An approved assignment remains the designer's active ownership through work,
+    # result submission, and QC. Draft assignments have not been approved and cancelled
+    # assignments must never grant visibility after a replacement is issued.
     query = session.query(Order)
 
     if user.role == "designer":
         query = query.join(Assignment, Assignment.order_id == Order.id).filter(
-            Assignment.designer_id == user.id
+            Assignment.designer_id == user.id, Assignment.status == "approved"
         )
     elif designer_id:
         try:
@@ -40,7 +33,7 @@ def list_orders_for_user(
         except ValueError:
             return []
         query = query.join(Assignment, Assignment.order_id == Order.id).filter(
-            Assignment.designer_id == designer_uuid
+            Assignment.designer_id == designer_uuid, Assignment.status == "approved"
         )
 
     if status:
@@ -53,7 +46,7 @@ def list_orders_for_user(
             return []
         query = query.filter(Order.batch_id == batch_uuid)
 
-    return query.order_by(Order.created_at.desc()).all()
+    return query.distinct().order_by(Order.created_at.desc()).all()
 
 
 def get_order_detail_for_user(session: Session, user: User, order_id: str) -> Order | None:
@@ -71,11 +64,9 @@ def get_order_detail_for_user(session: Session, user: User, order_id: str) -> Or
         return None
 
     if user.role == "designer":
-        # ponytail: same "any Assignment row, not just an active one" gap as
-        # list_orders_for_user above — see that function's comment.
         has_assignment = (
             session.query(Assignment)
-            .filter_by(order_id=order.id, designer_id=user.id)
+            .filter_by(order_id=order.id, designer_id=user.id, status="approved")
             .first()
             is not None
         )

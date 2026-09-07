@@ -23,6 +23,11 @@ export function AppHeader() {
             Phân bổ
           </Link>
         )}
+        {user.role === 'designer' && (
+          <Link to="/my-tasks" className="underline">
+            Task của tôi
+          </Link>
+        )}
         <span>
           {user.full_name} ({user.role})
         </span>

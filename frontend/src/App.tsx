@@ -6,6 +6,7 @@ import { OrdersListPage } from './pages/OrdersListPage'
 import { OrderDetailPage } from './pages/OrderDetailPage'
 import { PrintervalLoginPage } from './pages/PrintervalLoginPage'
 import { AllocationBoardPage } from './pages/AllocationBoardPage'
+import { MyTasksPage } from './pages/MyTasksPage'
 
 function App() {
   return (
@@ -42,6 +43,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <AllocationBoardPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/my-tasks"
+            element={
+              <ProtectedRoute>
+                <MyTasksPage />
               </ProtectedRoute>
             }
           />

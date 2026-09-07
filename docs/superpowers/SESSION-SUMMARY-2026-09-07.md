@@ -50,7 +50,7 @@ re-review → đóng sub-project.
 | 1 | **Order detail mirror** — mở rộng `orders` với đầy đủ field thật từ Printerval (SKU, ảnh, category, variants, custom config, 3 mốc thời gian, note...), khảo sát DOM thật (không đoán) | ✅ **Xong hoàn toàn** — final review tìm 2 Critical + 3 Important (selector Playwright có thể raise và treo cả crawl cycle, sai lệch selector so với spec, thiếu test offline), đã sửa hết, re-review sạch. |
 | 2 | **Frontend platform migration** — thay Jinja2/HTMX/Alpine bằng React+TS+Vite+Tailwind, JSON API mới, xoá UI cũ hoàn toàn | ✅ **Xong hoàn toàn** — final review tìm 0 Critical + 5 Important (thiếu nút logout, không xử lý lỗi fetch/401 ở đâu cả, filter thụt lùi 2/15 state + mất filter batch, file `public/` bị SPA catch-all che ở prod, code rủi ro nhất không có test), đã sửa hết + xác nhận độc lập bằng probe thật kể cả path-traversal. |
 | 3 | **Allocation board (C2+C3)** — thuật toán FIFO contiguous-block, offer/gán tay, duyệt/huỷ assignment, UI kéo-thả `dnd-kit` | ✅ **Xong hoàn toàn** — final review tìm 2 Critical + 6 Important (xem §4), đã sửa hết, scoped re-review xác nhận độc lập cả 8 finding (chạy lại concurrency test 5 lần, không flaky). Sub-project review-intensive nhất (2 bug tự phát hiện giữa chừng + 1 vòng fix final review đầy đủ). |
-| 4 | **Designer task view (C4)** | ⏳ Chưa bắt đầu — chỉ có trong roadmap, chưa brainstorm/spec. |
+| 4 | **Designer task view (C4)** | ✅ **Xong hoàn toàn** — task chỉ hiện cho owner của assignment `approved`; Start và submit đi qua state machine/idempotency, Drive được adapter xác minh trước khi tạo result/QC request; UI React `/my-tasks` có lịch sử bản nộp và feedback QC. |
 | 5 | **Kanban ops board** | ⏳ Chưa bắt đầu. |
 | 6 | **QC inspection screen (C5)** | ⏳ Chưa bắt đầu. |
 
