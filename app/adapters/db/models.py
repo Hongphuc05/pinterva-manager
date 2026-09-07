@@ -55,7 +55,7 @@ class Order(Base):
     product_variants: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     # Loại design job (2D/3D/ART/...) — chưa xác nhận được vị trí hiển thị per-order
     # trong DOM (chỉ là tiêu chí filter, không phải field hiển thị). Cột giữ chỗ, không
-    # ai ghi vào cột này ở V1 — xem docs/superpowers/specs/2026-09-07-order-detail-mirror-design.md §3.
+    # ai ghi vào cột này ở V1 — xem 2026-09-07-order-detail-mirror-design.md §3.
     job_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
     has_template: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     multiple_design: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -63,9 +63,15 @@ class Order(Base):
     priority_label: Mapped[str | None] = mapped_column(String(128), nullable=True)
     # Naive datetime — site's display timezone chưa xác nhận (claude.md §17 #8), không
     # đoán UTC/local. Không dùng DateTime(timezone=True) như các cột audit khác.
-    created_at_ext: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
-    order_created_at_ext: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
-    deadline_at_ext: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
+    created_at_ext: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=False), nullable=True
+    )
+    order_created_at_ext: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=False), nullable=True
+    )
+    deadline_at_ext: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=False), nullable=True
+    )
     note_outsource: Mapped[str] = mapped_column(Text, nullable=False, default="")
     order_note: Mapped[str] = mapped_column(Text, nullable=False, default="")
     custom_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
