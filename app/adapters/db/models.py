@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, func
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -48,6 +48,28 @@ class Order(Base):
     state: Mapped[str] = mapped_column(String(32), nullable=False, default="DISCOVERED")
     version: Mapped[int] = mapped_column(nullable=False, default=1)
     external_observation: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    product_name: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    thumbnail_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    sku: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    product_category: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    product_variants: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # Loại design job (2D/3D/ART/...) — chưa xác nhận được vị trí hiển thị per-order
+    # trong DOM (chỉ là tiêu chí filter, không phải field hiển thị). Cột giữ chỗ, không
+    # ai ghi vào cột này ở V1 — xem docs/superpowers/specs/2026-09-07-order-detail-mirror-design.md §3.
+    job_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    has_template: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    multiple_design: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    double_sided: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    priority_label: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Naive datetime — site's display timezone chưa xác nhận (claude.md §17 #8), không
+    # đoán UTC/local. Không dùng DateTime(timezone=True) như các cột audit khác.
+    created_at_ext: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
+    order_created_at_ext: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
+    deadline_at_ext: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
+    note_outsource: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    order_note: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    custom_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    design_tool_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
