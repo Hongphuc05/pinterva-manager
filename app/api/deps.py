@@ -33,26 +33,6 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     return user
 
 
-class WebAuthRedirect(Exception):
-    """Raised by get_current_user_web when a browser request has no valid session.
-    Caught by an app-level exception handler (app/api/main.py) that redirects to
-    /login — unlike get_current_user's HTTPException (401 JSON, for the /api/* routes).
-    """
-
-
-def get_current_user_web(request: Request, db: Session = Depends(get_db)) -> User:
-    token = request.cookies.get(SESSION_COOKIE_NAME)
-    if not token:
-        raise WebAuthRedirect()
-    data = read_session_token(token)
-    if data is None:
-        raise WebAuthRedirect()
-    user = db.get(User, uuid.UUID(data["user_id"]))
-    if user is None or not user.active:
-        raise WebAuthRedirect()
-    return user
-
-
 def require_role(role: str):
     def _check(user: User = Depends(get_current_user)) -> User:
         if user.role != role:

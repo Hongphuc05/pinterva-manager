@@ -8,7 +8,7 @@ import { PrintervalLoginPage } from './pages/PrintervalLoginPage'
 
 function App() {
   return (
-    <BrowserRouter basename="/spa">
+    <BrowserRouter>
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<LoginPage />} />

@@ -41,18 +41,34 @@ print('Đã tạo: admin/admin123 (role admin), designer1/designer123 (role desi
 
 ## 2. Chạy web dashboard
 
+Giao diện là React SPA (FastAPI chỉ expose JSON API + serve file tĩnh). Có 2 chế độ:
+
+**Dev (2 tiến trình, có hot-reload):**
+
 ```bash
-uvicorn app.api.main:app --reload
+uvicorn app.api.main:app --reload --port 8000     # tiến trình 1: backend JSON API
+cd frontend && npm run dev                        # tiến trình 2: Vite dev server
 ```
 
-Mở **http://127.0.0.1:8000/login** — đăng nhập `admin`/`admin123`. Sẽ vào `/orders`
-(hiện rỗng nếu chưa chạy crawl job ở mục 4 — DB chưa có đơn nào là bình thường).
+Mở **http://localhost:5173** (Vite proxy `/api` sang cổng 8000) — đăng nhập
+`admin`/`admin123`. Sẽ vào `/orders` (hiện rỗng nếu chưa chạy crawl job ở mục 4 — DB
+chưa có đơn nào là bình thường).
 
-Trang có: danh sách đơn lọc theo status/batch (HTMX, không reload trang), nút
-**Refresh** (chỉ admin thấy) chạy crawl thật ngay từ trình duyệt, link **"Đăng nhập
-Printerval"** trên thanh nav (chỉ admin) mở Chrome thật để đăng nhập tay — xem mục 4 —
-và trang chi tiết đơn kèm lịch sử chuyển trạng thái. `admin` thấy mọi đơn; `designer`
-chỉ thấy đơn được giao (luôn rỗng cho tới khi Phase 5 xong).
+**Prod-like (1 tiến trình):**
+
+```bash
+cd frontend && npm run build   # build 1 lần, tạo frontend/dist/
+cd ..
+uvicorn app.api.main:app --port 8000
+```
+
+Mở **http://localhost:8000** — uvicorn serve luôn SPA đã build từ `/`.
+
+Trang có: danh sách đơn lọc theo status/batch, nút **Refresh** (chỉ admin thấy) chạy
+crawl thật ngay từ trình duyệt, link **"Đăng nhập Printerval"** trên thanh nav (chỉ
+admin) mở Chrome thật để đăng nhập tay — xem mục 4 — và trang chi tiết đơn kèm lịch sử
+chuyển trạng thái. `admin` thấy mọi đơn; `designer` chỉ thấy đơn được giao (luôn rỗng
+cho tới khi Phase 5 xong).
 
 Sau khi bấm Refresh, thông báo phân biệt rõ 3 trường hợp: thành công (kèm số đơn mới/
 nhập/lỗi), lỗi tìm đơn (site đổi giao diện/bộ lọc sai — xem `dead_letters` để biết chi
