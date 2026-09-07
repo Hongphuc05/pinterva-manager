@@ -18,6 +18,16 @@ def list_orders_for_user(
     assigned orders (any designer_id param is ignored, never trusted for a designer's
     own view) — status/batch_id filters still apply on top of that.
     """
+    # ponytail: joins on ANY Assignment row for this designer, not just a currently
+    # active one, and has no .distinct() — harmless today (no code anywhere sets/uses
+    # a non-"draft" Assignment.status yet, no order has more than one Assignment row).
+    # Once Phase 5/C3's cancel-and-reassign flow ships (Assignment.status /
+    # cancel_reason / replacement_of_id start actually being used), a designer whose
+    # assignment was cancelled would still see the order here. Fix then: add
+    # `.filter(Assignment.status == <whatever "current" means>)` and `.distinct()` to
+    # both joins in this function and to get_order_detail_for_user's designer check
+    # below. Flagged in Phase 4's final review (see git history) — not fixed now
+    # because the real status semantics don't exist in the codebase yet to test against.
     query = session.query(Order)
 
     if user.role == "designer":
@@ -61,6 +71,8 @@ def get_order_detail_for_user(session: Session, user: User, order_id: str) -> Or
         return None
 
     if user.role == "designer":
+        # ponytail: same "any Assignment row, not just an active one" gap as
+        # list_orders_for_user above — see that function's comment.
         has_assignment = (
             session.query(Assignment)
             .filter_by(order_id=order.id, designer_id=user.id)

@@ -1,6 +1,13 @@
 # Phase 4 — Web Dashboard Skeleton Design
 
-**Status:** Approved by user 2026-09-07.
+**Status:** Approved by user 2026-09-07. **Revised 2026-09-07** after the final
+whole-branch review: (a) §4's "relationships available for the template to walk:
+`order.batch`" was inaccurate — `Order` has no `relationship()` declared, only the raw
+`batch_id` FK column; the shipped templates correctly use `order.batch_id` and were
+never affected, this just corrects the spec text. (b) §5's table column list ("state,
+batch, designer if assigned, created_at") is retroactively marked as deferred for the
+designer column, matching the already-documented deferral of the admin `designer_id`
+filter dropdown — see the note below §5.
 
 ## 1. Scope
 
@@ -79,8 +86,9 @@ an `Assignment` on that order (this **is** the access-control check for the deta
 page — the route returns 404 either way, so a designer can't distinguish "doesn't
 exist" from "not yours" by probing IDs).
 
-Both functions return plain `Order` ORM objects (with relationships available for the
-template to walk: `order.batch`, and the route separately queries
+Both functions return plain `Order` ORM objects (`Order` has no `relationship()`
+declared, only the raw `batch_id` FK column — templates walk `order.batch_id`
+directly, not `order.batch`), and the route separately queries
 `WorkflowEvent.filter_by(order_id=...).order_by(created_at)` for the detail page's
 history — kept as a third small function
 `get_order_history(session, order_id) -> list[WorkflowEvent]` in the same module for
@@ -102,10 +110,13 @@ symmetry, rather than inlined in the route).
   `orders_table.html` for the initial render so the page isn't empty before any HTMX
   interaction fires.
 - `orders_table.html` — just the `<table id="orders-table">...</table>` fragment
-  (columns: external_order_id linking to the detail page, state, batch, designer if
-  assigned, created_at). This exact same template renders both the full page's initial
-  table AND the `/orders/table` partial response — one template, two call sites,
-  matching DRY.
+  (columns: external_order_id linking to the detail page, state, batch, created_at).
+  This exact same template renders both the full page's initial table AND the
+  `/orders/table` partial response — one template, two call sites, matching DRY.
+  **Deferred (retroactively documented after the final review, matching the
+  already-deferred `designer_id` filter dropdown below):** no "designer" column yet —
+  no `Assignment` rows exist anywhere until Phase 5/C2 ships, so the column would be
+  empty for every row today; add it once assignments exist and are worth showing.
 - `order_detail.html` — extends base; order fields, then a chronological list of
   `WorkflowEvent` rows (`from_state -> to_state`, `created_at`, `actor` if present).
 
@@ -135,3 +146,15 @@ server-rendered HTML.
   this phase without a dedicated separate screen; a richer exception-queue view (with
   recovery actions) is a natural Phase 5+ follow-up once `dead_letters` needs an
   operator-facing recovery action (already tracked as a Phase 3 follow-up).
+- **New follow-up (final review, 2026-09-07):** `order_queries.py`'s designer-access
+  checks (`list_orders_for_user`, `get_order_detail_for_user`) join on ANY `Assignment`
+  row for the designer, not a currently-active one, and have no `.distinct()` —
+  harmless today (no code sets/uses a non-default `Assignment.status` yet, no order has
+  more than one `Assignment` row), but once Phase 5/C3's cancel-and-reassign flow
+  ships, a designer whose assignment was cancelled would still see that order. Marked
+  with `ponytail:` comments at both call sites in the code itself; whoever implements
+  C3 should add the real "active assignment" filter + `.distinct()` once the actual
+  status semantics exist to test against.
+- **New follow-up (final review, 2026-09-07):** the order list's "designer" column
+  (§5) is deferred for the same reason as the filter dropdown — add both once Phase 5
+  gives them real data to show.
