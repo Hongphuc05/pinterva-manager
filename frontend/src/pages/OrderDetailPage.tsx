@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { apiFetch } from '../api/client'
+import { apiFetch, ApiError } from '../api/client'
 
 type OrderDetail = {
   id: string
@@ -24,20 +24,33 @@ type OrderDetail = {
 
 type WorkflowEvent = { created_at: string; from_state: string | null; to_state: string }
 
+type LoadState = 'loading' | 'loaded' | 'not-found' | 'error'
+
 export function OrderDetailPage() {
   const { id } = useParams<{ id: string }>()
   const [order, setOrder] = useState<OrderDetail | null>(null)
   const [history, setHistory] = useState<WorkflowEvent[]>([])
+  const [status, setStatus] = useState<LoadState>('loading')
 
   useEffect(() => {
     if (!id) return
-    apiFetch<{ order: OrderDetail; history: WorkflowEvent[] }>(`/orders/${id}`).then((data) => {
-      setOrder(data.order)
-      setHistory(data.history)
-    })
+    setStatus('loading')
+    apiFetch<{ order: OrderDetail; history: WorkflowEvent[] }>(`/orders/${id}`)
+      .then((data) => {
+        setOrder(data.order)
+        setHistory(data.history)
+        setStatus('loaded')
+      })
+      .catch((e) => {
+        setStatus(e instanceof ApiError && e.status === 404 ? 'not-found' : 'error')
+      })
   }, [id])
 
-  if (!order) return <div className="p-6">Đang tải...</div>
+  if (status === 'loading') return <div className="p-6">Đang tải...</div>
+  if (status === 'not-found') return <div className="p-6">Không tìm thấy đơn.</div>
+  if (status === 'error' || !order) {
+    return <div className="p-6 text-red-600">Lỗi tải đơn hàng — thử tải lại trang.</div>
+  }
 
   return (
     <div className="p-6">

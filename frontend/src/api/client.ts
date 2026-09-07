@@ -15,6 +15,12 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
       ...(init?.headers ?? {}),
     },
   })
+  if (resp.status === 401 && !path.startsWith('/me') && !path.startsWith('/login')) {
+    window.location.assign('/login')
+    // Never resolves — the redirect is already in flight; the caller doesn't need
+    // a value it won't render before the navigation completes.
+    return new Promise<T>(() => {})
+  }
   if (!resp.ok) {
     let message = resp.statusText
     try {
