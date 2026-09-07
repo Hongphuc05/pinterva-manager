@@ -5,6 +5,7 @@ import { LoginPage } from './pages/LoginPage'
 import { OrdersListPage } from './pages/OrdersListPage'
 import { OrderDetailPage } from './pages/OrderDetailPage'
 import { PrintervalLoginPage } from './pages/PrintervalLoginPage'
+import { AllocationBoardPage } from './pages/AllocationBoardPage'
 
 function App() {
   return (
@@ -33,6 +34,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <PrintervalLoginPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/allocation"
+            element={
+              <ProtectedRoute>
+                <AllocationBoardPage />
               </ProtectedRoute>
             }
           />
