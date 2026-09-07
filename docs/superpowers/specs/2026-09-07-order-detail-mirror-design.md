@@ -26,50 +26,64 @@ import (C1), ngay sau `download_asset` thành công, trước khi chuyển `CLAI
 
 ## 3. Data model — migration mới trên `orders`
 
+**Đã khảo sát DOM thật (2026-09-07, đọc HTML thô của 3 đơn thật `DJ3967568`,
+`DJ3967572`, `DJ3967595` qua Playwright read-only, dump lưu ở scratchpad, không commit)
+— các điểm dưới đây khác so với suy đoán ban đầu từ field-map, đã sửa theo thực tế:**
+
+- **Không có** `product_size`/`product_type`/`product_style` cố định. Thực tế mỗi SKU có
+  danh sách "variant" tên khác nhau tuỳ sản phẩm (`Size`+`Type`, hoặc `Size`+`Hole`, v.v.
+  — không phải schema cố định) → dùng `product_variants: JSONB` (list `{name, value}`).
+- `template_tag` đổi thành **`has_template: Boolean`** — DOM thật chỉ render
+  `<span class="label label-success">Đã có template</span>` khi có; trường hợp chưa có
+  **không render tag đỏ nào cả** (khác giả định field-map §5) — suy ra từ việc tag vắng
+  mặt, không tìm span nào khác.
+- `job_type` **bỏ khỏi phạm vi task này** — khảo sát xác nhận loại design job không xuất
+  hiện ở bất kỳ đâu trong row DOM (chỉ là tiêu chí filter, không phải field hiển thị per
+  order). Giữ cột placeholder `nullable=True`, không populate ở migration này — nợ kỹ
+  thuật mới, ghi vào claude.md §17 nếu cần sau.
+- `custom_config` cấu trúc thật: `{"original": [{"key": str, "value": str}, ...],
+  "translated_vn": [{"key": str, "value": str}, ...]}` — lấy từ `.djcfg-card` (bản gốc)
+  và `.djcfg-card.djcfg-vn` (bản dịch), mỗi row `.djcfg-row` có `.djcfg-key`/`.djcfg-val-text`.
+- 3 mốc thời gian có **2 format khác nhau** trên cùng 1 trang (xác nhận thật, không đoán):
+  `Created at`/`Order created at` dùng `"HH:MM' DD/MM/YYYY"` (vd `"03:46' 07/09/2026"`);
+  `Deadline at` dùng `"YYYY-MM-DD HH:MM:SS"` (vd `"2026-09-08 03:38:52"`).
+- `order_note` DOM thật có thể chứa text rác lặp lại (`"Order note: \nOrder note:"` sau
+  URL nguồn) — đây là artifact có sẵn trên site, lưu nguyên văn, không parse/làm sạch.
+- `design_tool_url` chỉ có khi `item.is_custom_design` — selector
+  `a[href*="design-tool.printerval.com"]`, lấy thẳng `href`.
+
 Cột mới, tất cả `nullable=True` (đơn ở state `DISCOVERED` chưa có, chỉ được điền sau khi
 import xong):
 
-| Cột | Kiểu SQLAlchemy | Nguồn field-map §5 |
+| Cột | Kiểu SQLAlchemy | Nguồn |
 |---|---|---|
-| `product_name` | `String(512)` | Product info |
-| `thumbnail_url` | `String(1024)` | Product info |
-| `sku` | `String(128)` | Mã sản phẩm |
-| `product_category` | `String(128)` | Product info |
-| `product_size` | `String(64)` | Product info |
-| `product_type` | `String(128)` | Product info |
-| `product_style` | `String(128)` | Product info |
-| `job_type` | `String(32)` | Loại design job |
-| `template_tag` | `String(32)` | "Đã/Chưa có template" |
-| `multiple_design` | `Boolean, default=False` | checkbox |
-| `double_sided` | `Boolean, default=False` | checkbox |
-| `priority_label` | `String(64)` | tag "Ưu tiên" — lưu text+màu thô, KHÔNG diễn giải ý nghĩa (field-map câu hỏi #7 chưa chốt) |
-| `created_at_ext` | `DateTime(timezone=True)` | "Created at" |
-| `order_created_at_ext` | `DateTime(timezone=True)` | "Order created at" |
-| `deadline_at_ext` | `DateTime(timezone=True)` | "Deadline at" |
-| `note_outsource` | `Text, default=""` | đã đọc được, chưa từng lưu |
-| `order_note` | `Text, default=""` | field-map có, adapter hiện chưa set |
-| `custom_config` | `JSONB, nullable=True` | chỉ đơn cá nhân hoá; cấu trúc list `{field, value, translated_value}` — biến đổi giữa các đơn, JSONB hợp lý ở đây (khác việc dùng JSONB né cột có kiểu cho field cố định) |
-| `design_tool_url` | `String(1024)` | link "Gen design custom" |
+| `product_name` | `String(512)` | `h5` trong ô sản phẩm |
+| `thumbnail_url` | `String(1024)` | `img` trong `.sb-design-thumbnail` |
+| `sku` | `String(128)` | `[ng-bind="productSku.product_sku"]`, lấy SKU đầu tiên nếu có nhiều |
+| `product_category` | `String(128)` | div có `item.product.category_name`, tách bỏ prefix "Category: " |
+| `product_variants` | `JSONB, nullable=True` | list `{name, value}` từ `ng-repeat="variant in productSku.variants..."` |
+| `job_type` | `String(32), nullable=True` | **chưa populate** — xem ghi chú trên |
+| `has_template` | `Boolean, default=False` | `.label.label-success` có mặt hay không |
+| `multiple_design` | `Boolean, default=False` | `#multiple-design` checkbox `.is_checked()` |
+| `double_sided` | `Boolean, default=False` | `#double-sided` checkbox `.is_checked()` |
+| `priority_label` | `String(128), nullable=True` | `class` attribute của `span.label` trong block "Độ ưu tiên" khi có mặt — lưu thô, KHÔNG diễn giải ý nghĩa (field-map câu hỏi #7 chưa chốt) |
+| `created_at_ext` | `DateTime(timezone=True)` | "Created at", format `HH:MM' DD/MM/YYYY` |
+| `order_created_at_ext` | `DateTime(timezone=True)` | "Order created at" (có thể vắng mặt), cùng format |
+| `deadline_at_ext` | `DateTime(timezone=True)` | "Deadline at", format `YYYY-MM-DD HH:MM:SS` |
+| `note_outsource` | `Text, default=""` | đã đọc được (existing), chưa từng lưu vào DB |
+| `order_note` | `Text, default=""` | div có `item.order_note`, lưu nguyên văn |
+| `custom_config` | `JSONB, nullable=True` | cấu trúc `{"original": [...], "translated_vn": [...]}` — xem trên |
+| `design_tool_url` | `String(1024), nullable=True` | `a[href*="design-tool.printerval.com"]` |
 
-Không đổi cột nào hiện có. Đây là additive migration (Alembic `op.add_column` x17,
+Không đổi cột nào hiện có. Đây là additive migration (Alembic `op.add_column` x16,
 `nullable=True`/`server_default` cho cột có default).
 
-## 4. Adapter — bắt buộc khảo sát DOM thật trước khi viết extraction code
-
-**Nguyên tắc bất di bất dịch của dự án này (rút ra từ 3 sự cố thật ở Phase 3):** không
-đoán selector/text từ tài liệu — field-map ghi tên field, không ghi DOM structure/class
-thật. Trước khi sửa `get_order_detail`, phải có 1 script chẩn đoán read-only (giống
-`diagnose_designer_options.py` đã dùng) chạy trên **≥2 đơn thật** (1 đơn thường + 1 đơn cá
-nhân hoá để thấy `custom_config` thật, không đoán cấu trúc) và log ra: SKU selector,
-category/size/type/style selector, template tag selector + 2 giá trị text thật, checkbox
-selector, priority tag selector + màu/text quan sát được, 3 timestamp selector + format
-thật, `order_note` selector, custom config DOM structure, `design_tool_url` href pattern.
-Kết quả khảo sát phải được ghi vào `docs/phase0-field-map.md` (nối thêm, không sửa đè)
-trước khi task viết `get_order_detail` bắt đầu.
+## 4. Adapter — selector đã xác nhận thật (2026-09-07), không đoán
 
 `get_order_detail` (đã tồn tại) mở rộng để trả về toàn bộ field ở bảng trên trong
-`OrderDetailResult` (model mới cần thêm field tương ứng). Field nào không tìm thấy trên
-DOM của 1 đơn cụ thể (ví dụ đơn không cá nhân hoá thì không có `custom_config`) trả về
+`OrderDetailResult` (model mới cần thêm field tương ứng), dùng đúng selector đã khảo sát
+ở §3. Field nào không tìm thấy trên DOM của 1 đơn cụ thể (ví dụ đơn không cá nhân hoá thì
+không có `custom_config`/`design_tool_url`; `Order created at` có thể vắng mặt) trả về
 `None`/rỗng — không raise lỗi, không coi là adapter failure.
 
 `import_claimed_orders` (C1, `app/application/crawl.py`) gọi `adapter.get_order_detail`
