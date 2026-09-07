@@ -1,4 +1,8 @@
+import threading
 import uuid
+
+import pytest
+from sqlalchemy.orm import sessionmaker
 
 from app.adapters.allocation.reference import ReferenceAllocationTool
 from app.adapters.db.models import ApprovalRequest, Assignment, Batch, Order, User
@@ -9,7 +13,7 @@ from app.application.allocation import (
     request_quantity,
 )
 from app.application.auth import hash_password
-from app.domain.exceptions import CapacityExceededError
+from app.domain.exceptions import ApprovalAlreadyDecidedError, CapacityExceededError
 from app.domain.models import OrderState
 
 
@@ -146,11 +150,14 @@ def test_decide_assignment_approve_moves_order_to_assigned(db_session):
     assert order.state == OrderState.ASSIGNED.value
 
 
-def test_decide_assignment_cancel_releases_order_and_grants_a_replacement(db_session):
+def test_decide_assignment_cancel_sends_cancelled_order_to_exception_and_grants_replacement(
+    db_session,
+):
     # Assign the SECOND order (not the earliest) so that after cancel, the
-    # released order goes back to the pool but a genuinely different order
-    # (the earliest still-available one, orders[0]) is what FIFO picks as the
-    # replacement — orders[0] was never touched, so it sorts first.
+    # cancelled order goes to EXCEPTION (never back to the pool — see the sibling
+    # test below) while a genuinely different order (the earliest still-available
+    # one, orders[0]) is what FIFO picks as the replacement — orders[0] was never
+    # touched, so it sorts first.
     batch, orders = _seed_batch_with_orders(db_session, n=3)
     open_allocation(db_session, batch.id, f"open:{uuid.uuid4()}")
     designer = _seed_designer(db_session, username=f"d-{uuid.uuid4()}")
@@ -253,3 +260,93 @@ def test_decide_assignment_second_call_on_same_approval_returns_first_result_unc
     assert second["actor_id"] == str(admin.id)  # the FIRST actor, not other_admin
     db_session.refresh(assignment)
     assert assignment.status == "approved"  # cancel from the second call never ran
+
+
+def test_decide_assignment_raises_when_approval_already_decided_under_a_different_key(db_session):
+    """`run_idempotent`'s cache only protects a *replayed* idempotency_key. A
+    second decide_assignment call on the SAME approval with a DIFFERENT key must
+    still be rejected — the state machine allows ASSIGNED -> EXCEPTION, so
+    without this check a second call would silently cancel an already-approved
+    assignment."""
+    _, _, _, admin, approval, assignment, tool = _draft_one_assignment(db_session)
+    other_admin = User(
+        username=f"admin3-{uuid.uuid4()}", full_name="Other Admin", role="admin",
+        password_hash=hash_password("s3cret!"),
+    )
+    db_session.add(other_admin)
+    db_session.commit()
+
+    decide_assignment(db_session, tool, approval.id, "approve", admin.id, f"decide:{uuid.uuid4()}")
+
+    with pytest.raises(ApprovalAlreadyDecidedError) as exc_info:
+        decide_assignment(
+            db_session, tool, approval.id, "cancel", other_admin.id, f"decide:{uuid.uuid4()}",
+            reason="different key entirely",
+        )
+
+    assert exc_info.value.status == "approved"
+    assert exc_info.value.actor_id == admin.id
+    db_session.refresh(assignment)
+    assert assignment.status == "approved"  # never cancelled by the second call
+    order = db_session.query(Order).filter_by(id=assignment.order_id).one()
+    assert order.state == OrderState.ASSIGNED.value  # never moved to EXCEPTION
+
+
+def test_request_quantity_concurrent_offers_on_same_batch_do_not_double_grant(engine):
+    """Real concurrency test for I1: two designers race to offer on a 2-order
+    batch. Each runs in its own thread with its own DB session/transaction. If
+    the FOR UPDATE lock in `_remaining_order_ids` were released mid-grant (the
+    bug: `apply_transition` used to commit per-order), the second thread could
+    read a stale snapshot and grant an order the first thread already holds.
+    With the fix (the whole grant runs in one transaction, committed once by
+    run_idempotent), the second thread instead blocks until the first commits,
+    then sees the updated state."""
+    session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+    setup = session_factory()
+    batch = Batch(source="printerval_crawl", owner="ntth", count=2)
+    setup.add(batch)
+    setup.flush()
+    for i in range(2):
+        setup.add(
+            Order(
+                external_order_id=f"CC{i:07d}", batch_id=batch.id,
+                state=OrderState.OPEN_FOR_ALLOCATION.value,
+            )
+        )
+    d1 = User(
+        username="cd1", full_name="cd1", role="designer", password_hash=hash_password("s3cret!")
+    )
+    d2 = User(
+        username="cd2", full_name="cd2", role="designer", password_hash=hash_password("s3cret!")
+    )
+    setup.add(d1)
+    setup.add(d2)
+    setup.commit()
+    batch_id, d1_id, d2_id = batch.id, d1.id, d2.id
+    setup.close()
+
+    results: dict[str, dict] = {}
+    errors: dict[str, Exception] = {}
+
+    def worker(name: str, designer_id: uuid.UUID) -> None:
+        session = session_factory()
+        try:
+            results[name] = request_quantity(
+                session, ReferenceAllocationTool(), designer_id, batch_id, 2, f"concurrent:{name}"
+            )
+        except Exception as exc:  # noqa: BLE001 - captured for the assertion below
+            errors[name] = exc
+        finally:
+            session.close()
+
+    t1 = threading.Thread(target=worker, args=("A", d1_id))
+    t2 = threading.Thread(target=worker, args=("B", d2_id))
+    t1.start()
+    t2.start()
+    t1.join(timeout=15)
+    t2.join(timeout=15)
+
+    assert not errors, errors
+    all_granted = results["A"]["granted_order_ids"] + results["B"]["granted_order_ids"]
+    assert len(all_granted) == 2  # only 2 orders exist in the batch
+    assert len(set(all_granted)) == 2  # no order granted to both designers
