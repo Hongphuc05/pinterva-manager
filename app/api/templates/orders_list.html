@@ -2,6 +2,12 @@
 {% block title %}Đơn hàng{% endblock %}
 {% block content %}
 <h1>Đơn hàng</h1>
+{% if flash %}<p><strong>{{ flash }}</strong></p>{% endif %}
+{% if user.role == "admin" %}
+<form method="post" action="/orders/refresh" style="display:inline; margin-bottom: 1rem;">
+  <button type="submit">Refresh</button>
+</form>
+{% endif %}
 <form hx-get="/orders/table" hx-target="#orders-table" hx-trigger="change" hx-include="this">
   <label>Trạng thái
     <select name="status">

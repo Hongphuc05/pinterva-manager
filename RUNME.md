@@ -48,9 +48,11 @@ uvicorn app.api.main:app --reload
 Mở **http://127.0.0.1:8000/login** — đăng nhập `admin`/`admin123`. Sẽ vào `/orders`
 (hiện rỗng nếu chưa chạy crawl job ở mục 4 — DB chưa có đơn nào là bình thường).
 
-Trang có: danh sách đơn lọc theo status/batch (HTMX, không reload trang), trang chi
-tiết đơn kèm lịch sử chuyển trạng thái. `admin` thấy mọi đơn; `designer` chỉ thấy đơn
-được giao (luôn rỗng cho tới khi Phase 5 xong).
+Trang có: danh sách đơn lọc theo status/batch (HTMX, không reload trang), nút
+**Refresh** (chỉ admin thấy) chạy crawl thật ngay từ trình duyệt — xem mục 4 để chuẩn
+bị Chrome profile trước khi bấm — và trang chi tiết đơn kèm lịch sử chuyển trạng thái.
+`admin` thấy mọi đơn; `designer` chỉ thấy đơn được giao (luôn rỗng cho tới khi Phase 5
+xong).
 
 API JSON thuần (Swagger) vẫn còn ở **http://127.0.0.1:8000/docs** nếu cần test qua
 Postman/curl thay vì trình duyệt.
@@ -76,7 +78,14 @@ print('Đã tạo đơn mẫu DJ0000001')
 
 Cần Chrome profile đã login Printerval (`chrome-profile/`, làm 1 lần thủ công qua
 Playwright — xem `docs/superpowers/specs/2026-09-07-phase2-adapter-design.md` nếu chưa
-setup). Sau đó:
+setup). Có 2 cách chạy:
+
+**a) Bấm nút Refresh trên web** (`/orders`, chỉ admin thấy nút) — chạy ngay, đứng chờ
+kết quả (vài chục giây tới vài phút tùy số đơn), không cần Celery. Lưu ý: đừng bấm
+đúng lúc Celery Beat (cách b) đang chạy nền cùng lúc — 2 phiên Chrome cùng lúc trên
+cùng 1 profile có thể xung đột (giới hạn "1 session/site", chưa xử lý khoá).
+
+**b) Chạy định kỳ nền qua Celery** (không cần mở trình duyệt):
 
 ```bash
 celery -A app.workers.celery_app worker --beat --loglevel=info

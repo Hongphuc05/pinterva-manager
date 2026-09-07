@@ -77,3 +77,56 @@ def test_orders_table_partial_returns_only_table_fragment(client, db_session):
     assert resp.status_code == 200
     assert "<table" in resp.text
     assert "<html" not in resp.text
+
+
+def test_orders_refresh_requires_admin_403_for_designer(client, db_session):
+    _login(client, db_session, "designer")
+
+    resp = client.post("/orders/refresh")
+
+    assert resp.status_code == 403
+
+
+def test_orders_refresh_runs_crawl_and_shows_summary(client, db_session, monkeypatch):
+    from contextlib import contextmanager
+
+    from app.api.routes import web
+
+    @contextmanager
+    def _fake_session():
+        yield object()
+
+    def _fake_run_crawl_cycle(session, adapter, limit=40):
+        return {
+            "discovered": 2,
+            "claimed": 2,
+            "failed_claim": 0,
+            "imported": 1,
+            "failed_import": 1,
+        }
+
+    monkeypatch.setattr(web, "playwright_session", _fake_session)
+    monkeypatch.setattr(web, "run_crawl_cycle", _fake_run_crawl_cycle)
+
+    _login(client, db_session, "admin")
+    resp = client.post("/orders/refresh")
+
+    assert resp.status_code == 200
+    assert "2 đơn mới" in resp.text
+    assert "1 đơn nhập thành công" in resp.text
+    assert "1 lỗi" in resp.text
+
+
+def test_orders_refresh_shows_error_message_on_playwright_failure(client, db_session, monkeypatch):
+    from app.api.routes import web
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("Cloudflare/login not ready")
+
+    monkeypatch.setattr(web, "playwright_session", _boom)
+
+    _login(client, db_session, "admin")
+    resp = client.post("/orders/refresh")
+
+    assert resp.status_code == 200
+    assert "Crawl thất bại" in resp.text
