@@ -87,9 +87,17 @@ def _search_and_get_row(page: Page, external_order_id: str):
     with page.expect_response(lambda r: "/design-job/find" in r.url):
         page.get_by_role("button", name="Search").click()
     row = page.locator(f"tr:has-text('{external_order_id}')").first
-    if row.count() == 0:
-        raise _OrderNotFoundError(f"No row found for order {external_order_id} after search")
-    row.wait_for(state="visible", timeout=10_000)
+    try:
+        row.wait_for(state="visible", timeout=10_000)
+    except PlaywrightTimeoutError:
+        # Same grace period the row always got — only now, after it has
+        # elapsed, do we check whether the row is genuinely absent (vs. some
+        # other rendering hiccup, which should stay a retryable timeout).
+        if row.count() == 0:
+            raise _OrderNotFoundError(
+                f"No row found for order {external_order_id} after search"
+            ) from None
+        raise
     return row
 
 
