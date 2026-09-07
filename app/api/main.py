@@ -28,6 +28,13 @@ def create_app() -> FastAPI:
         def spa_fallback(full_path: str):
             if full_path.startswith("api"):
                 raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+            candidate = FRONTEND_DIST / full_path
+            if (
+                full_path
+                and candidate.is_file()
+                and candidate.resolve().is_relative_to(FRONTEND_DIST.resolve())
+            ):
+                return FileResponse(candidate)
             return FileResponse(FRONTEND_DIST / "index.html")
 
     return app
