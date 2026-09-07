@@ -38,6 +38,13 @@ Dropdown Designer trên mỗi dòng đơn hiện chỉ có 2 lựa chọn ngoài
 
 Có một khu vực quản lý tài khoản khác trong DOM (`Email / Mật khẩu / Quyền`) — có thể là màn quản lý sub-account designer, nhưng **chưa xác định được cách mở nó** (không nằm trong luồng cuộn bình thường, có thể là tab/modal ẩn) và **chưa click thử** vì đây là khu vực hiển thị mật khẩu dạng plaintext — cần hỏi ý kiến trước khi khám phá thêm.
 
+→ **Sự cố thật (2026-09-07):** `app/application/crawl.py`'s `claim_batch` dùng literal
+`owner="ntth"` để chọn dropdown Designer trên site thật — không khớp option nào ở trên
+(chuỗi "ntth" chưa từng là option thật), nên mọi lần claim thật đều thất bại âm thầm
+(dead-lettered, không crash). Đã sửa: dùng đúng `"Nguyễn Thị Thuý Hường - 2D Prin"` làm
+giá trị claim mặc định (`NTTH_DESIGNER_OPTION` trong
+`app/adapters/printerval/interface.py`) — khớp tài liệu đã ghi đúng từ đầu ở trên.
+
 ## 4. Bộ lọc (filter bar)
 
 | Filter | Giá trị |

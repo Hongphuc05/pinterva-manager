@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.models import Batch, DeadLetter, ExternalObservation, Order, OrderAsset
 from app.adapters.playwright_support import with_retry
-from app.adapters.printerval.interface import ALL_JOB_TYPES, PrintervalAdapter
+from app.adapters.printerval.interface import ALL_JOB_TYPES, NTTH_DESIGNER_OPTION, PrintervalAdapter
 from app.application.operations import OperationInProgressError, run_idempotent
 from app.application.order_transitions import apply_transition
 from app.domain.models import OrderState
@@ -72,7 +72,7 @@ def claim_batch(
     session: Session,
     adapter: PrintervalAdapter,
     order_ids: list[str],
-    owner: str = "ntth",
+    owner: str = NTTH_DESIGNER_OPTION,
 ) -> dict:
     """Create a Batch + Order rows for order_ids (skipping any that already have an
     Order row — defensive re-entrancy if a prior crash happened between discover and

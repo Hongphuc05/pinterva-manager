@@ -22,6 +22,17 @@ from app.adapters.printerval.models import (
 # constraint.
 ALL_JOB_TYPES = "Tất cả 2D & 3D"
 
+# Real per-row Designer <select> option text for the "ntth" claim account, confirmed
+# live 2026-09-07 (docs/phase0-field-map.md §3: "ntth" = Nguyễn Thị Thuý Hường, the
+# team account used to claim/tag orders — NOT the literal string "ntth", which never
+# was and never will be an actual option on the real site). The account has two
+# selectable variants ("... - 2D Prin" and "... - Support"); "2D Prin" is the one used
+# for claiming design jobs (matches this constant's prior, never-corrected literal
+# "ntth" default, which silently failed to match anything on every real claim attempt
+# until this fix — every prior "successful" claim in this project was only ever
+# exercised against the fake adapter or as a mechanism-only proof in Phase 2).
+NTTH_DESIGNER_OPTION = "Nguyễn Thị Thuý Hường - 2D Prin"
+
 
 @runtime_checkable
 class PrintervalAdapter(Protocol):
