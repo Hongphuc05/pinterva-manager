@@ -82,3 +82,32 @@ def test_capture_evidence_writes_screenshot_and_html(tmp_path, monkeypatch):
     assert Path(evidence["html_path"]).read_text() == "<html>fake</html>"
     assert evidence["url"] == page.url
     assert "captured_at" in evidence
+
+
+class _FailingPage:
+    """Simulates a page that's already closed/mid-navigation when a failure
+    happens — the realistic scenario that's often why capture_evidence is
+    being called in the first place."""
+
+    def __init__(self, url="https://example.test/order/1"):
+        self.url = url
+
+    def screenshot(self, path):
+        raise RuntimeError("Target page, context or browser has been closed")
+
+    def content(self):
+        raise RuntimeError("Execution context was destroyed")
+
+
+def test_capture_evidence_never_raises_when_page_capture_fails(tmp_path, monkeypatch):
+    import app.adapters.playwright_support as ps
+
+    monkeypatch.setattr(ps, "EVIDENCE_DIR", tmp_path / "evidence")
+
+    page = _FailingPage()
+    evidence = capture_evidence(page, "test_label")
+
+    assert "screenshot_error" in evidence
+    assert "html_error" in evidence
+    assert evidence["url"] == page.url
+    assert "captured_at" in evidence

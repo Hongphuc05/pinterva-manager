@@ -58,17 +58,31 @@ def with_retry(fn: Callable[[], T], max_attempts: int = 3, base_delay: float = 0
 
 
 def capture_evidence(page: Page, label: str) -> dict:
-    """Screenshot + HTML dump + timestamp; returns paths for an `evidence` field."""
+    """Screenshot + HTML dump + timestamp; returns paths for an `evidence` field.
+
+    Never raises: if the page is already closed or mid-navigation (a common reason the
+    *original* failure happened), screenshot/content capture can itself fail — this
+    must not replace the caller's typed failure result with an unhandled exception, so
+    any capture failure here is recorded in the returned dict instead of propagating.
+    """
     EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
     base = f"{label}_{timestamp}"
     screenshot_path = EVIDENCE_DIR / f"{base}.png"
     html_path = EVIDENCE_DIR / f"{base}.html"
-    page.screenshot(path=str(screenshot_path))
-    html_path.write_text(page.content())
-    return {
-        "screenshot_path": str(screenshot_path),
-        "html_path": str(html_path),
-        "url": page.url,
-        "captured_at": timestamp,
-    }
+    evidence: dict = {"captured_at": timestamp}
+    try:
+        page.screenshot(path=str(screenshot_path))
+        evidence["screenshot_path"] = str(screenshot_path)
+    except Exception as exc:
+        evidence["screenshot_error"] = str(exc)
+    try:
+        html_path.write_text(page.content())
+        evidence["html_path"] = str(html_path)
+    except Exception as exc:
+        evidence["html_error"] = str(exc)
+    try:
+        evidence["url"] = page.url
+    except Exception as exc:
+        evidence["url_error"] = str(exc)
+    return evidence

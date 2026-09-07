@@ -277,12 +277,23 @@ class PlaywrightPrintervalAdapter:
                 success=False, external_order_id=external_order_id, error_class="VALIDATION"
             )
         src = link.get_attribute("href")
-        response = page.request.get(src)
+        try:
+            response = page.request.get(src)
+            if not response.ok:
+                raise _SaveRejectedError(f"HTTP {response.status}", response.status)
+            body = response.body()
+        except Exception as exc:
+            error_class, retryable = _classify_exception(exc)
+            evidence = capture_evidence(page, f"download_asset_failed_{external_order_id}")
+            return AssetResult(
+                success=False, external_order_id=external_order_id,
+                error_class=error_class, retryable=retryable, evidence=evidence,
+            )
         Path("order_assets").mkdir(exist_ok=True)
         suffix = Path(urlparse(src).path).suffix or ".bin"
         local_path = Path("order_assets") / f"{external_order_id}{suffix}"
-        local_path.write_bytes(response.body())
-        checksum = hashlib.sha256(response.body()).hexdigest()
+        local_path.write_bytes(body)
+        checksum = hashlib.sha256(body).hexdigest()
         return AssetResult(
             success=True,
             external_order_id=external_order_id,
@@ -312,7 +323,20 @@ class PlaywrightPrintervalAdapter:
                 ) as resp_info:
                     designer_select.select_option(label=designer_option, force=True)
                 _ensure_save_succeeded(resp_info.value)
+        except Exception as exc:
+            error_class, retryable = _classify_exception(exc)
+            evidence = capture_evidence(page, f"set_designer_failed_{external_order_id}")
+            return WriteResult(
+                success=False, external_order_id=external_order_id,
+                error_class=error_class, retryable=retryable, evidence=evidence,
+            )
 
+        # The save above already succeeded — a failure from here on is "did it
+        # really persist?", not "did the write fail?". Per claude.md §8, an
+        # unverifiable outcome after a possibly-successful write is
+        # UNKNOWN_OUTCOME, never a blind retry candidate and never "order not
+        # found".
+        try:
             # Genuine fresh-state check: re-navigate/re-search independently
             # rather than trusting the same in-page <select> we just changed
             # — a live incident proved a save can silently not persist while
@@ -322,12 +346,11 @@ class PlaywrightPrintervalAdapter:
             observed = (
                 _selected_option_text(fresh_selects.nth(0)) if fresh_selects.count() >= 1 else None
             )
-        except Exception as exc:
-            error_class, retryable = _classify_exception(exc)
-            evidence = capture_evidence(page, f"set_designer_failed_{external_order_id}")
+        except Exception:
+            evidence = capture_evidence(page, f"set_designer_verify_failed_{external_order_id}")
             return WriteResult(
                 success=False, external_order_id=external_order_id,
-                error_class=error_class, retryable=retryable, evidence=evidence,
+                error_class="UNKNOWN_OUTCOME", retryable=False, evidence=evidence,
             )
         if observed != designer_option:
             evidence = capture_evidence(page, f"set_designer_unverified_{external_order_id}")
@@ -359,19 +382,31 @@ class PlaywrightPrintervalAdapter:
                 ) as resp_info:
                     status_select.select_option(label=target_status, force=True)
                 _ensure_save_succeeded(resp_info.value)
-
-            # Genuine fresh-state check (see set_designer for why).
-            fresh_row = _search_and_get_row(page, external_order_id)
-            fresh_selects = fresh_row.locator("select")
-            observed = (
-                _selected_option_text(fresh_selects.nth(1)) if fresh_selects.count() >= 2 else None
-            )
         except Exception as exc:
             error_class, retryable = _classify_exception(exc)
             evidence = capture_evidence(page, f"set_status_failed_{external_order_id}")
             return WriteResult(
                 success=False, external_order_id=external_order_id,
                 error_class=error_class, retryable=retryable, evidence=evidence,
+            )
+
+        # The save above already succeeded — a failure from here on is "did it
+        # really persist?", not "did the write fail?". Per claude.md §8, an
+        # unverifiable outcome after a possibly-successful write is
+        # UNKNOWN_OUTCOME, never a blind retry candidate and never "order not
+        # found".
+        try:
+            # Genuine fresh-state check (see set_designer for why).
+            fresh_row = _search_and_get_row(page, external_order_id)
+            fresh_selects = fresh_row.locator("select")
+            observed = (
+                _selected_option_text(fresh_selects.nth(1)) if fresh_selects.count() >= 2 else None
+            )
+        except Exception:
+            evidence = capture_evidence(page, f"set_status_verify_failed_{external_order_id}")
+            return WriteResult(
+                success=False, external_order_id=external_order_id,
+                error_class="UNKNOWN_OUTCOME", retryable=False, evidence=evidence,
             )
         if observed != target_status:
             evidence = capture_evidence(page, f"set_status_unverified_{external_order_id}")
@@ -414,7 +449,20 @@ class PlaywrightPrintervalAdapter:
                 ) as resp_info:
                     note_group.get_by_role("button", name="Save").click()
                 _ensure_save_succeeded(resp_info.value)
+        except Exception as exc:
+            error_class, retryable = _classify_exception(exc)
+            evidence = capture_evidence(page, f"attach_result_link_failed_{external_order_id}")
+            return WriteResult(
+                success=False, external_order_id=external_order_id,
+                error_class=error_class, retryable=retryable, evidence=evidence,
+            )
 
+        # The save above already succeeded — a failure from here on is "did it
+        # really persist?", not "did the write fail?". Per claude.md §8, an
+        # unverifiable outcome after a possibly-successful write is
+        # UNKNOWN_OUTCOME, never a blind retry candidate and never "order not
+        # found".
+        try:
             # Genuine fresh-state check: re-navigate/re-search independently
             # instead of trusting the same in-page textarea we just filled —
             # this is exactly the check that caught the original incident,
@@ -422,12 +470,13 @@ class PlaywrightPrintervalAdapter:
             # textarea still showed the new value.
             fresh_row = _search_and_get_row(page, external_order_id)
             observed = _note_outsource_group(fresh_row).locator("textarea").input_value()
-        except Exception as exc:
-            error_class, retryable = _classify_exception(exc)
-            evidence = capture_evidence(page, f"attach_result_link_failed_{external_order_id}")
+        except Exception:
+            evidence = capture_evidence(
+                page, f"attach_result_link_verify_failed_{external_order_id}"
+            )
             return WriteResult(
                 success=False, external_order_id=external_order_id,
-                error_class=error_class, retryable=retryable, evidence=evidence,
+                error_class="UNKNOWN_OUTCOME", retryable=False, evidence=evidence,
             )
         if observed != drive_url:
             evidence = capture_evidence(page, f"attach_result_link_unverified_{external_order_id}")
