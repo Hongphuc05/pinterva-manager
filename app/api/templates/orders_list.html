@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Đơn hàng{% endblock %}
+{% block content %}
+<h1>Đơn hàng</h1>
+<form hx-get="/orders/table" hx-target="#orders-table" hx-trigger="change" hx-include="this">
+  <label>Trạng thái
+    <select name="status">
+      <option value="">Tất cả</option>
+      {% for s in order_states %}
+      <option value="{{ s }}" {% if status == s %}selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  {% if user.role == "admin" %}
+  <label>Batch ID
+    <input type="text" name="batch_id" value="{{ batch_id or '' }}">
+  </label>
+  {% endif %}
+</form>
+{% include "orders_table.html" %}
+{% endblock %}
