@@ -2,6 +2,34 @@
 {% block title %}Đơn {{ order.external_order_id }}{% endblock %}
 {% block content %}
 <h1>Đơn {{ order.external_order_id }}</h1>
+{% if order.thumbnail_url %}<img src="{{ order.thumbnail_url }}" alt="" style="max-height:200px;"><br>{% endif %}
+<p>Sản phẩm: {{ order.product_name or "-" }}</p>
+<p>SKU: {{ order.sku or "-" }}</p>
+<p>Category: {{ order.product_category or "-" }}</p>
+{% if order.product_variants %}
+<ul>
+  {% for v in order.product_variants %}
+  <li>{{ v.name }}: {{ v.value }}</li>
+  {% endfor %}
+</ul>
+{% endif %}
+<p>Deadline: {{ order.deadline_at_ext or "-" }}</p>
+<p>Template: {{ "Đã có" if order.has_template else "Chưa có" }}</p>
+<p>Multiple design: {{ "Có" if order.multiple_design else "Không" }} — Double sided: {{ "Có" if order.double_sided else "Không" }}</p>
+{% if order.custom_config %}
+<h2>Custom configuration</h2>
+<table>
+  <thead><tr><th>Field</th><th>Giá trị</th></tr></thead>
+  <tbody>
+    {% for entry in order.custom_config.original %}
+    <tr><td>{{ entry.key }}</td><td>{{ entry.value }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% if order.design_tool_url %}<p><a href="{{ order.design_tool_url }}" target="_blank">Gen design custom</a></p>{% endif %}
+<p>Note outsource: {{ order.note_outsource or "-" }}</p>
+<p>Order note: {{ order.order_note or "-" }}</p>
 <p>Trạng thái hiện tại: <strong>{{ order.state }}</strong></p>
 <p>Batch: {{ order.batch_id or "-" }}</p>
 <p>Tạo lúc: {{ order.created_at }}</p>

@@ -1,17 +1,20 @@
 <table id="orders-table">
   <thead>
-    <tr><th>Mã đơn</th><th>Trạng thái</th><th>Batch</th><th>Ngày tạo</th></tr>
+    <tr><th>Ảnh</th><th>Mã đơn</th><th>SKU</th><th>Trạng thái</th><th>Batch</th><th>Deadline</th><th>Ngày tạo</th></tr>
   </thead>
   <tbody>
     {% for order in orders %}
     <tr>
+      <td>{% if order.thumbnail_url %}<img src="{{ order.thumbnail_url }}" alt="" style="height:40px;">{% endif %}</td>
       <td><a href="/orders/{{ order.id }}">{{ order.external_order_id }}</a></td>
+      <td>{{ order.sku or "-" }}</td>
       <td>{{ order.state }}</td>
       <td>{{ order.batch_id or "-" }}</td>
+      <td>{{ order.deadline_at_ext or "-" }}</td>
       <td>{{ order.created_at }}</td>
     </tr>
     {% else %}
-    <tr><td colspan="4">Không có đơn nào.</td></tr>
+    <tr><td colspan="7">Không có đơn nào.</td></tr>
     {% endfor %}
   </tbody>
 </table>

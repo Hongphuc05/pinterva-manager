@@ -190,3 +190,44 @@ def test_orders_refresh_recovers_from_a_mid_crawl_db_error(client, db_session, m
 
     assert resp.status_code == 200
     assert "Crawl thất bại" in resp.text
+
+
+def test_order_detail_page_renders_product_fields(client, db_session):
+    _login(client, db_session, "admin")
+    order = Order(
+        external_order_id="DJ_DETAIL_1",
+        state=OrderState.CLAIMED_IMPORTED.value,
+        product_name="Test Mug",
+        sku="P999-XL",
+        thumbnail_url="https://assets.printerval.com/thumb.webp",
+        product_variants=[{"name": "Size", "value": "XL"}],
+        custom_config={"original": [{"key": "Name", "value": "Alice"}], "translated_vn": []},
+    )
+    db_session.add(order)
+    db_session.commit()
+
+    resp = client.get(f"/orders/{order.id}")
+
+    assert resp.status_code == 200
+    assert "Test Mug" in resp.text
+    assert "P999-XL" in resp.text
+    assert "assets.printerval.com/thumb.webp" in resp.text
+    assert "Alice" in resp.text
+
+
+def test_orders_table_renders_thumbnail_and_sku(client, db_session):
+    _login(client, db_session, "admin")
+    order = Order(
+        external_order_id="DJ_TABLE_1",
+        state=OrderState.CLAIMED_IMPORTED.value,
+        sku="P888-M",
+        thumbnail_url="https://assets.printerval.com/other-thumb.webp",
+    )
+    db_session.add(order)
+    db_session.commit()
+
+    resp = client.get("/orders/table")
+
+    assert resp.status_code == 200
+    assert "P888-M" in resp.text
+    assert "assets.printerval.com/other-thumb.webp" in resp.text
