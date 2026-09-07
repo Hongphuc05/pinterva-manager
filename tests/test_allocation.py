@@ -1,9 +1,10 @@
 import uuid
 
 from app.adapters.allocation.reference import ReferenceAllocationTool
-from app.adapters.db.models import Assignment, Batch, Order, User
+from app.adapters.db.models import ApprovalRequest, Assignment, Batch, Order, User
 from app.application.allocation import (
     create_assignment_draft,
+    decide_assignment,
     open_allocation,
     request_quantity,
 )
@@ -111,3 +112,92 @@ def test_create_assignment_draft_grants_a_single_named_order(db_session):
     assert assignment.order_id == orders[1].id
     db_session.refresh(orders[1])
     assert orders[1].state == OrderState.ASSIGNMENT_PENDING_APPROVAL.value
+
+
+def _draft_one_assignment(db_session):
+    batch, orders = _seed_batch_with_orders(db_session, n=3)
+    open_allocation(db_session, batch.id, f"open:{uuid.uuid4()}")
+    designer = _seed_designer(db_session, username=f"d-{uuid.uuid4()}")
+    admin = User(
+        username=f"admin-{uuid.uuid4()}", full_name="Admin", role="admin",
+        password_hash=hash_password("s3cret!"),
+    )
+    db_session.add(admin)
+    db_session.commit()
+    tool = ReferenceAllocationTool()
+    request_quantity(db_session, tool, designer.id, batch.id, 1, f"req:{uuid.uuid4()}")
+    order = db_session.query(Order).filter_by(external_order_id="DJ0000000").one()
+    assignment = db_session.query(Assignment).filter_by(order_id=order.id).one()
+    approval = db_session.query(ApprovalRequest).filter_by(target_id=assignment.id).one()
+    return batch, orders, designer, admin, approval, assignment, tool
+
+
+def test_decide_assignment_approve_moves_order_to_assigned(db_session):
+    _, _, _, admin, approval, assignment, tool = _draft_one_assignment(db_session)
+
+    result = decide_assignment(
+        db_session, tool, approval.id, "approve", admin.id, f"decide:{uuid.uuid4()}"
+    )
+
+    assert result["decision"] == "approve"
+    db_session.refresh(assignment)
+    assert assignment.status == "approved"
+    order = db_session.query(Order).filter_by(id=assignment.order_id).one()
+    assert order.state == OrderState.ASSIGNED.value
+
+
+def test_decide_assignment_cancel_releases_order_and_grants_a_replacement(db_session):
+    batch, orders, designer, admin, approval, assignment, tool = _draft_one_assignment(db_session)
+
+    result = decide_assignment(
+        db_session, tool, approval.id, "cancel", admin.id, f"decide:{uuid.uuid4()}",
+        reason="đã làm rồi",
+    )
+
+    assert result["decision"] == "cancel"
+    db_session.refresh(assignment)
+    assert assignment.status == "cancelled"
+    assert assignment.cancel_reason == "đã làm rồi"
+    cancelled_order = db_session.query(Order).filter_by(id=assignment.order_id).one()
+    assert cancelled_order.state == OrderState.OPEN_FOR_ALLOCATION.value
+
+    assert len(result["replacement_assignment_ids"]) == 1
+    replacement = db_session.get(Assignment, uuid.UUID(result["replacement_assignment_ids"][0]))
+    assert replacement.designer_id == designer.id
+    assert replacement.replacement_of_id == assignment.id
+
+
+def test_decide_assignment_cancel_with_no_reason_raises(db_session):
+    _, _, _, admin, approval, _, tool = _draft_one_assignment(db_session)
+
+    try:
+        decide_assignment(
+            db_session, tool, approval.id, "cancel", admin.id, f"decide:{uuid.uuid4()}"
+        )
+        assert False, "expected ValueError"
+    except ValueError:
+        pass
+
+
+def test_decide_assignment_second_call_on_same_approval_returns_first_result_unchanged(db_session):
+    """Multi-admin race, claude.md §10: the second admin's attempt must not
+    re-execute the decision — it gets the first admin's result back, letting the
+    API tell them it was already handled."""
+    _, _, _, admin, approval, assignment, tool = _draft_one_assignment(db_session)
+    other_admin = User(
+        username=f"admin2-{uuid.uuid4()}", full_name="Other Admin", role="admin",
+        password_hash=hash_password("s3cret!"),
+    )
+    db_session.add(other_admin)
+    db_session.commit()
+
+    key = f"decide:{approval.id}"  # same key both times, keyed by approval only
+    first = decide_assignment(db_session, tool, approval.id, "approve", admin.id, key)
+    second = decide_assignment(
+        db_session, tool, approval.id, "cancel", other_admin.id, key, reason="x"
+    )
+
+    assert second == first
+    assert second["actor_id"] == str(admin.id)  # the FIRST actor, not other_admin
+    db_session.refresh(assignment)
+    assert assignment.status == "approved"  # cancel from the second call never ran

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
-from app.adapters.db.models import ApprovalRequest, Assignment, Batch, Order, User
+from app.adapters.db.models import ApprovalDecision, ApprovalRequest, Assignment, Batch, Order, User
 from app.application.operations import run_idempotent
 from app.application.order_transitions import apply_transition
 from app.domain.exceptions import CapacityExceededError
@@ -148,3 +149,83 @@ def create_assignment_draft(
         return {"assignment_id": str(assignments[0].id)}
 
     return run_idempotent(session, idempotency_key, "create_assignment_draft", _do)
+
+
+def decide_assignment(
+    session: Session,
+    allocation_tool,
+    approval_id: uuid.UUID,
+    decision: str,
+    actor_id: uuid.UUID,
+    idempotency_key: str,
+    reason: str | None = None,
+) -> dict:
+    """decision is "approve" or "cancel". Multi-admin race (claude.md §10): keyed
+    only by approval_id (not actor/decision) so run_idempotent's own cache makes
+    the FIRST successful call the only one that ever runs _do() — every later call
+    on the same approval_id, from any actor, gets that first call's cached result
+    back unchanged. The API layer compares result["actor_id"] to the caller's own
+    id to phrase "you decided" vs "already decided by someone else"."""
+    if decision not in ("approve", "cancel"):
+        raise ValueError(f"unknown decision {decision!r}")
+
+    def _do() -> dict:
+        approval = session.get(ApprovalRequest, approval_id)
+        if approval is None or approval.kind != "assignment":
+            raise ValueError(f"assignment approval {approval_id} not found")
+        assignment = session.get(Assignment, approval.target_id)
+        order = session.get(Order, assignment.order_id)
+
+        if decision == "approve":
+            apply_transition(
+                session, order, OrderState.ASSIGNED, actor_id=actor_id,
+                evidence={"source": "decide_assignment"},
+            )
+            assignment.status = "approved"
+            approval.status = "approved"
+            session.add(
+                ApprovalDecision(
+                    approval_request_id=approval.id, actor_id=actor_id, decision="approve"
+                )
+            )
+            result = {"decision": "approve", "order_id": order.external_order_id}
+        else:
+            if not reason:
+                raise ValueError("cancel requires a reason")
+            apply_transition(
+                session, order, OrderState.OPEN_FOR_ALLOCATION, actor_id=actor_id,
+                evidence={"source": "decide_assignment"},
+            )
+            assignment.status = "cancelled"
+            assignment.cancel_reason = reason
+            approval.status = "cancelled"
+            session.add(
+                ApprovalDecision(
+                    approval_request_id=approval.id,
+                    actor_id=actor_id,
+                    decision="cancel",
+                    comment=reason,
+                )
+            )
+            replacement_ids: list[str] = []
+            remaining = _remaining_order_ids(session, order.batch_id)
+            if remaining:
+                by_ext_id = {o.external_order_id: o for o in remaining}
+                granted = allocation_tool.select_block(list(by_ext_id.keys()), 1)
+                ordered_objs = [by_ext_id[oid] for oid in granted]
+                new_assignments = _grant_orders(
+                    session, ordered_objs, assignment.designer_id, actor_id=actor_id,
+                    replacement_of_id=assignment.id,
+                )
+                replacement_ids = [str(a.id) for a in new_assignments]
+            result = {
+                "decision": "cancel",
+                "order_id": order.external_order_id,
+                "replacement_assignment_ids": replacement_ids,
+            }
+
+        result["actor_id"] = str(actor_id)
+        result["decided_at"] = datetime.now(UTC).isoformat()
+        return result
+
+    return run_idempotent(session, idempotency_key, "decide_assignment", _do)
