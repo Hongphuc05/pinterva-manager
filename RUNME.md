@@ -64,7 +64,8 @@ uvicorn app.api.main:app --port 8000
 
 Mở **http://localhost:8000** — uvicorn serve luôn SPA đã build từ `/`.
 
-Trang có: danh sách đơn lọc theo status/batch, nút **Refresh** (chỉ admin thấy) chạy
+Trang có: danh sách đơn lọc theo status (mọi role) và batch ID (chỉ admin thấy ô lọc),
+nút **Refresh** (chỉ admin thấy) chạy
 crawl thật ngay từ trình duyệt, link **"Đăng nhập Printerval"** trên thanh nav (chỉ
 admin) mở Chrome thật để đăng nhập tay — xem mục 4 — và trang chi tiết đơn kèm lịch sử
 chuyển trạng thái. `admin` thấy mọi đơn; `designer` chỉ thấy đơn được giao (luôn rỗng

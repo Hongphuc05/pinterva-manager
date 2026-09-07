@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { apiFetch } from '../api/client'
+import { apiFetch, ApiError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 
 type OrderSummary = {
@@ -17,27 +17,43 @@ type OrderSummary = {
 export function OrdersListPage() {
   const { user } = useAuth()
   const [orders, setOrders] = useState<OrderSummary[]>([])
+  const [statusOptions, setStatusOptions] = useState<string[]>([])
   const [statusFilter, setStatusFilter] = useState('')
+  const [batchFilter, setBatchFilter] = useState('')
   const [flash, setFlash] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
 
   async function loadOrders() {
-    const params = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : ''
-    const data = await apiFetch<{ orders: OrderSummary[] }>(`/orders${params}`)
+    const params = new URLSearchParams()
+    if (statusFilter) params.set('status', statusFilter)
+    if (batchFilter) params.set('batch_id', batchFilter)
+    const qs = params.toString()
+    const data = await apiFetch<{ orders: OrderSummary[] }>(`/orders${qs ? `?${qs}` : ''}`)
     setOrders(data.orders)
   }
 
   useEffect(() => {
-    loadOrders()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter])
+    apiFetch<{ states: string[] }>('/order-states')
+      .then((r) => setStatusOptions(r.states))
+      .catch(() => setStatusOptions([]))
+  }, [])
+
+  useEffect(() => {
+    loadOrders().catch((e) => {
+      setError(e instanceof ApiError ? e.message : 'Không tải được danh sách đơn.')
+    })
+  }, [statusFilter, batchFilter])
 
   async function handleRefresh() {
     setRefreshing(true)
+    setError(null)
     try {
       const result = await apiFetch<{ flash: string }>('/orders/refresh', { method: 'POST' })
       setFlash(result.flash)
       await loadOrders()
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Refresh thất bại.')
     } finally {
       setRefreshing(false)
     }
@@ -47,6 +63,7 @@ export function OrdersListPage() {
     <div className="p-6">
       <h1 className="text-xl font-bold mb-4">Đơn hàng</h1>
       {flash && <p className="mb-4 font-semibold">{flash}</p>}
+      {error && <p className="mb-4 text-red-600">{error}</p>}
       {user?.role === 'admin' && (
         <div className="mb-4 space-x-4">
           <button
@@ -61,15 +78,28 @@ export function OrdersListPage() {
           </Link>
         </div>
       )}
-      <select
-        className="border p-1 mb-4"
-        value={statusFilter}
-        onChange={(e) => setStatusFilter(e.target.value)}
-      >
-        <option value="">Tất cả</option>
-        <option value="DISCOVERED">DISCOVERED</option>
-        <option value="CLAIMED_IMPORTED">CLAIMED_IMPORTED</option>
-      </select>
+      <div className="mb-4 space-x-4">
+        <select
+          className="border p-1"
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+        >
+          <option value="">Tất cả</option>
+          {statusOptions.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
+        {user?.role === 'admin' && (
+          <input
+            className="border p-1"
+            placeholder="Batch ID"
+            value={batchFilter}
+            onChange={(e) => setBatchFilter(e.target.value)}
+          />
+        )}
+      </div>
       <table className="w-full border-collapse">
         <thead>
           <tr className="text-left border-b">
@@ -77,13 +107,15 @@ export function OrdersListPage() {
             <th>Mã đơn</th>
             <th>SKU</th>
             <th>Trạng thái</th>
+            <th>Batch</th>
             <th>Deadline</th>
+            <th>Ngày tạo</th>
           </tr>
         </thead>
         <tbody>
           {orders.length === 0 && (
             <tr>
-              <td colSpan={5}>Không có đơn nào.</td>
+              <td colSpan={7}>Không có đơn nào.</td>
             </tr>
           )}
           {orders.map((o) => (
@@ -96,7 +128,9 @@ export function OrdersListPage() {
               </td>
               <td>{o.sku ?? '-'}</td>
               <td>{o.state}</td>
+              <td>{o.batch_id ?? '-'}</td>
               <td>{o.deadline_at_ext ?? '-'}</td>
+              <td>{o.created_at}</td>
             </tr>
           ))}
         </tbody>
@@ -104,7 +138,3 @@ export function OrdersListPage() {
     </div>
   )
 }
-
-// ponytail: status filter dropdown hard-codes 2 of the 10 OrderState values as a starting
-// point (parity minimum) — a follow-up sub-project can fetch the full enum from the API if
-// the dropdown needs to cover every state; not needed for this migration's parity goal.

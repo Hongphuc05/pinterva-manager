@@ -18,6 +18,7 @@ from app.application.order_queries import (
     get_order_history,
     list_orders_for_user,
 )
+from app.domain.models import OrderState
 from app.workers.crawl_tasks import run_crawl_cycle
 
 router = APIRouter()
@@ -81,6 +82,15 @@ class RefreshResponse(BaseModel):
 
 class PrintervalLoginStatus(BaseModel):
     session_open: bool
+
+
+class OrderStatesResponse(BaseModel):
+    states: list[str]
+
+
+@router.get("/order-states", response_model=OrderStatesResponse)
+def api_order_states(user: User = Depends(get_current_user)):
+    return OrderStatesResponse(states=[s.value for s in OrderState])
 
 
 @router.get("/orders", response_model=OrdersListResponse)
