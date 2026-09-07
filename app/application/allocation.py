@@ -8,24 +8,32 @@ from sqlalchemy.orm import Session
 from app.adapters.db.models import ApprovalDecision, ApprovalRequest, Assignment, Batch, Order, User
 from app.application.operations import run_idempotent
 from app.application.order_transitions import apply_transition
-from app.domain.exceptions import CapacityExceededError
+from app.domain.exceptions import ApprovalAlreadyDecidedError, CapacityExceededError
 from app.domain.models import OrderState
 
 
-def _remaining_order_ids(session: Session, batch_id: uuid.UUID) -> list[Order]:
+def _remaining_order_ids(
+    session: Session, batch_id: uuid.UUID, for_update: bool = True
+) -> list[Order]:
     """Orders of this batch still open for allocation with no ACTIVE Assignment
     (draft/approved). A cancelled Assignment's order moves to EXCEPTION (not back
     to OPEN_FOR_ALLOCATION), so it is excluded here by the state filter alone —
-    it never re-enters the pool for the designer who was just cancelled. Locked
-    FOR UPDATE so two concurrent callers serialize on this batch instead of
-    double-granting an order. Returns Order objects (not just ids) since callers
-    need more than the id."""
+    it never re-enters the pool for the designer who was just cancelled.
+
+    `for_update=True` (the default, used by every granting caller) locks the rows
+    FOR UPDATE; those locks only serialize concurrent callers because the whole
+    granting operation (`_grant_orders` + its `apply_transition` calls) runs
+    without an intermediate commit — see `commit=False` there — so the locks are
+    held for the full operation, not released after the first order. Pass
+    `for_update=False` for a read-only display query (the board) so it does not
+    block writers indefinitely. Returns Order objects (not just ids) since
+    callers need more than the id."""
     active_assignment_order_ids = (
         session.query(Assignment.order_id)
         .filter(Assignment.status.in_(["draft", "approved"]))
         .subquery()
     )
-    return (
+    query = (
         session.query(Order)
         .filter(
             Order.batch_id == batch_id,
@@ -33,9 +41,10 @@ def _remaining_order_ids(session: Session, batch_id: uuid.UUID) -> list[Order]:
             ~Order.id.in_(session.query(active_assignment_order_ids.c.order_id)),
         )
         .order_by(Order.external_order_id)
-        .with_for_update()
-        .all()
     )
+    if for_update:
+        query = query.with_for_update()
+    return query.all()
 
 
 def _held_count(session: Session, designer_id: uuid.UUID) -> int:
@@ -73,6 +82,7 @@ def _grant_orders(
             OrderState.ASSIGNMENT_PENDING_APPROVAL,
             actor_id=actor_id,
             evidence={"source": "allocation"},
+            commit=False,
         )
         session.add(ApprovalRequest(kind="assignment", target_id=assignment.id))
         assignments.append(assignment)
@@ -90,7 +100,12 @@ def _check_capacity(session: Session, designer_id: uuid.UUID, quantity: int) -> 
         raise CapacityExceededError(designer_id, designer.capacity, held, quantity)
 
 
-def open_allocation(session: Session, batch_id: uuid.UUID, idempotency_key: str) -> dict:
+def open_allocation(
+    session: Session,
+    batch_id: uuid.UUID,
+    idempotency_key: str,
+    actor_id: uuid.UUID | None = None,
+) -> dict:
     def _do() -> dict:
         batch = session.get(Batch, batch_id)
         if batch is None:
@@ -106,8 +121,9 @@ def open_allocation(session: Session, batch_id: uuid.UUID, idempotency_key: str)
                 session,
                 order,
                 OrderState.OPEN_FOR_ALLOCATION,
-                actor_id=None,
+                actor_id=actor_id,
                 evidence={"source": "open_allocation"},
+                commit=False,
             )
             order_ids.append(order.external_order_id)
         batch.lifecycle_state = "allocating"
@@ -124,7 +140,15 @@ def request_quantity(
     batch_id: uuid.UUID,
     quantity: int,
     idempotency_key: str,
+    request_fingerprint: str | None = None,
 ) -> dict:
+    # Not trusting Pydantic's `Field(ge=1)` at the API layer alone — this function
+    # is also called directly from tests/workers, and a negative quantity turns
+    # into a Python negative slice in `select_block` (`[:-1]` = "all but last"),
+    # bypassing capacity entirely.
+    if quantity < 1:
+        raise ValueError(f"quantity must be >= 1, got {quantity}")
+
     def _do() -> dict:
         _check_capacity(session, designer_id, quantity)
         remaining = _remaining_order_ids(session, batch_id)
@@ -137,7 +161,10 @@ def request_quantity(
             "assignment_ids": [str(a.id) for a in assignments],
         }
 
-    return run_idempotent(session, idempotency_key, "request_quantity", _do)
+    return run_idempotent(
+        session, idempotency_key, "request_quantity", _do,
+        request_fingerprint=request_fingerprint,
+    )
 
 
 def create_assignment_draft(
@@ -146,6 +173,7 @@ def create_assignment_draft(
     designer_id: uuid.UUID,
     actor_id: uuid.UUID,
     idempotency_key: str,
+    request_fingerprint: str | None = None,
 ) -> dict:
     def _do() -> dict:
         order = session.query(Order).filter_by(external_order_id=order_id).one_or_none()
@@ -155,7 +183,10 @@ def create_assignment_draft(
         assignments = _grant_orders(session, [order], designer_id, actor_id=actor_id)
         return {"assignment_id": str(assignments[0].id)}
 
-    return run_idempotent(session, idempotency_key, "create_assignment_draft", _do)
+    return run_idempotent(
+        session, idempotency_key, "create_assignment_draft", _do,
+        request_fingerprint=request_fingerprint,
+    )
 
 
 def decide_assignment(
@@ -180,6 +211,24 @@ def decide_assignment(
         approval = session.get(ApprovalRequest, approval_id)
         if approval is None or approval.kind != "assignment":
             raise ValueError(f"assignment approval {approval_id} not found")
+        # Spec-required guard: run_idempotent's cache already prevents this for the
+        # common case (same idempotency_key replayed), but a *different* key on the
+        # same approval must not be allowed to re-decide it — the state machine
+        # permits ASSIGNED -> EXCEPTION, so a second decision would silently cancel
+        # an already-approved assignment.
+        if approval.status != "pending":
+            first_decision = (
+                session.query(ApprovalDecision)
+                .filter_by(approval_request_id=approval.id)
+                .order_by(ApprovalDecision.decided_at)
+                .first()
+            )
+            raise ApprovalAlreadyDecidedError(
+                approval.id,
+                first_decision.actor_id if first_decision else None,
+                first_decision.decided_at if first_decision else None,
+                approval.status,
+            )
         assignment = session.get(Assignment, approval.target_id)
         order = session.get(Order, assignment.order_id)
 
@@ -187,6 +236,7 @@ def decide_assignment(
             apply_transition(
                 session, order, OrderState.ASSIGNED, actor_id=actor_id,
                 evidence={"source": "decide_assignment"},
+                commit=False,
             )
             assignment.status = "approved"
             approval.status = "approved"
@@ -202,6 +252,7 @@ def decide_assignment(
             apply_transition(
                 session, order, OrderState.EXCEPTION, actor_id=actor_id,
                 evidence={"source": "decide_assignment", "reason": "cancel"},
+                commit=False,
             )
             assignment.status = "cancelled"
             assignment.cancel_reason = reason
