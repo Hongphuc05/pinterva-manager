@@ -27,7 +27,7 @@
   </tbody>
 </table>
 {% endif %}
-{% if order.design_tool_url %}<p><a href="{{ order.design_tool_url }}" target="_blank">Gen design custom</a></p>{% endif %}
+{% if order.design_tool_url %}<p><a href="{{ order.design_tool_url }}" target="_blank" rel="noopener noreferrer">Gen design custom</a></p>{% endif %}
 <p>Note outsource: {{ order.note_outsource or "-" }}</p>
 <p>Order note: {{ order.order_note or "-" }}</p>
 <p>Trạng thái hiện tại: <strong>{{ order.state }}</strong></p>
