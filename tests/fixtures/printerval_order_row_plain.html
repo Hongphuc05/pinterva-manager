@@ -1,0 +1,117 @@
+<!--
+Redacted real-DOM fixture (2026-09-07): one row from the Printerval admin design-job
+table, WITHOUT custom configuration and WITHOUT a design-tool link (a non-personalized
+order). Structure/classes/attributes kept byte-faithful to the live page (this is what
+get_order_detail's selectors target) — only order id, product name, SKU, and image URLs
+were replaced with fixture-safe placeholders. Source: live read-only DOM dump, order
+DJ3967595 ("Beach Casual Button Down Hawaiian Shirt"), redacted per claude.md §14
+(no customer-identifying data in committed fixtures).
+-->
+<table><tbody><tr>
+    <td>
+        <span class="ng-binding">DJ_FIXTURE_PLAIN</span>
+        <div class="mt-3 d-flex" style="gap: 8px; flex-wrap: wrap; align-items: center;">
+            <span class="label label-success ng-scope">Đã có template</span>
+        </div>
+    </td>
+    <td>
+        <div>
+            <img ng-if="item.local_code" style="height: 20px; width: 30px; cursor: default" src="/system/images/flags/png100px/us.png">
+            <a>
+                <h5 style="display: inline;" class="ng-binding">
+                    Fixture Product (Plain)
+                </h5>
+            </a>
+            <div class="form-check mt-3">
+                <input type="checkbox" class="form-check-input" ng-checked="item.multiple_design_id" id="multiple-design" disabled="">
+                <label class="form-check-label" for="multiple-design">Multiple design</label>
+            </div>
+            <div class="form-check mt-3">
+                <input type="checkbox" class="form-check-input" ng-checked="item.double_sided_id" id="double-sided" disabled="">
+                <label class="form-check-label" for="double-sided">Double sided</label>
+            </div>
+        </div>
+        <div>
+            <strong>Created at:</strong>
+            <span class="ng-binding">
+                03:48'
+                07/09/2026
+            </span>
+        </div>
+        <div>
+            <strong ng-if="item.order_created_at" class="ng-scope">Order created at:</strong>
+            <span ng-if="item.order_created_at" class="ng-binding ng-scope">
+                03:45'
+                07/09/2026
+            </span>
+        </div>
+        <div>
+            <strong>Deadline at:</strong>
+            <span class="text-danger ng-binding">
+                2026-08-27 03:45:10
+            </span>
+        </div>
+        <div class="product-sku-container ng-scope">
+            <div class="product-sku-item ng-scope">
+                <div class="thumbnail-product">
+                    <a href="#" target="_blank">
+                        <div class="sb-design-thumbnail">
+                            <img ng-src="https://assets.example.com/redacted-thumb-plain.webp" alt="Discover product" src="https://assets.example.com/redacted-thumb-plain.webp">
+                        </div>
+                    </a>
+                    <div style="display: inline-block; vertical-align: middle;">
+                        <span ng-bind="productSku.product_sku" class="ng-binding">P_FIXTURE-UNI-XL-PLAIN</span>
+                        <div ng-if="item.product.category_name" class="ng-scope"><span style="font-weight: bold;">Category: </span><span class="ng-binding">Hawaiians</span></div>
+                        <div ng-if="productSku.variants" class="ng-scope">
+                            <div ng-repeat="variant in productSku.variants.split(',') track by $index" class="ng-scope"><strong class="ng-binding"> | Size</strong> : <span class="ng-binding">  XL</span></div>
+                            <div ng-repeat="variant in productSku.variants.split(',') track by $index" class="ng-scope"><strong class="ng-binding">  Type</strong> : <span class="ng-binding">  Unisex</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div ng-init="cfgJob = item">
+            <!-- ngIf: cfgJob.displayConfigure (absent for this order — not personalized) -->
+        </div>
+    </td>
+    <td>
+        <div class="form-group mt-5 note p-2" ng-show="typeOutsource !== 'find-design'" aria-hidden="false">
+            <label>Note outsource:</label>
+            <div class="pre-note ng-binding" ng-show="!item.isEditingNoteOutSource" aria-hidden="false">Double click here to note!</div>
+            <textarea ng-show="item.isEditingNoteOutSource" rows="8" id="note-outsource" class="form-control ng-hide" ng-model="item.attributes.outsource_note" aria-hidden="true"></textarea>
+        </div>
+        <div class="thumbnail-design-container" ng-show="type !== 'find-design'" aria-hidden="false">
+            <button class="add-image-button"><i class="fa fa-plus"></i></button>
+        </div>
+        <div>
+            <!-- no "Gen design custom" link for a non-personalized order -->
+            <button class="btn btn-primary">Xem template của job</button>
+        </div>
+    </td>
+    <td>
+        <div class="form-group" style="margin-bottom: 0px;">
+            <select chosen="" class="form-control" style="display: none;">
+                <option value="">Choose Designer</option>
+                <option label="Chưa chia cho ai" value="string:unassigned">Chưa chia cho ai</option>
+                <option label="Nguyễn Thị Thuý Hường - 2D Prin" value="string:redacted@example.com" selected="selected">Nguyễn Thị Thuý Hường - 2D Prin</option>
+            </select>
+            <div class="chosen-container chosen-container-single"><a class="chosen-single"><span>Nguyễn Thị Thuý Hường - 2D Prin</span></a></div>
+        </div>
+        <div class="form-group mt-5 note p-2" ng-show="typeOutsource !== 'find-design'" aria-hidden="false">
+            <label>Note outsource:</label>
+            <div class="pre-note ng-binding" ng-show="!item.isEditingNoteOutSource" aria-hidden="false">Double click here to note!</div>
+            <textarea ng-show="item.isEditingNoteOutSource" rows="8" id="note-outsource" class="form-control ng-hide" ng-model="item.attributes.outsource_note" aria-hidden="true"></textarea>
+        </div>
+        <!-- no "Order note" block for this order (item.order_note falsy) -->
+    </td>
+    <td>
+        <select ng-show="typeOutsource !== 'find-design'" class="form-control">
+            <option label="Waiting" selected="selected">Waiting</option>
+            <option label="Doing">Doing</option>
+            <option label="Review">Review</option>
+            <option label="Done">Done</option>
+            <option label="Fix">Fix</option>
+            <option label="Confirm">Confirm</option>
+        </select>
+    </td>
+</tr></tbody></table>
