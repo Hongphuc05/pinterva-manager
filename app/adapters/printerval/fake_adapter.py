@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.adapters.printerval.interface import ALL_JOB_TYPES
 from app.adapters.printerval.models import (
     AssetResult,
     DiscoverResult,
@@ -37,7 +38,7 @@ class FakePrintervalAdapter:
         return order
 
     def discover_orders(
-        self, status: str, job_type: str = "2D", limit: int = 40, cursor: str | None = None
+        self, status: str, job_type: str = ALL_JOB_TYPES, limit: int = 40, cursor: str | None = None
     ) -> DiscoverResult:
         matched = [o for o in self._orders.values() if o.status == status]
         orders = [

@@ -4,29 +4,34 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.models import Batch, DeadLetter, ExternalObservation, Order, OrderAsset
 from app.adapters.playwright_support import with_retry
-from app.adapters.printerval.interface import PrintervalAdapter
+from app.adapters.printerval.interface import ALL_JOB_TYPES, PrintervalAdapter
 from app.application.operations import OperationInProgressError, run_idempotent
 from app.application.order_transitions import apply_transition
 from app.domain.models import OrderState
 
 
 def discover_waiting_orders(
-    session: Session, adapter: PrintervalAdapter, limit: int = 40
+    session: Session,
+    adapter: PrintervalAdapter,
+    limit: int = 40,
+    job_type: str = ALL_JOB_TYPES,
 ) -> list[str]:
-    """Return external_order_ids from the adapter's Waiting/2D queue that don't already
-    have an `Order` row — safe to call repeatedly. An exhausted-retry adapter failure is
-    dead-lettered (not silently treated as "zero new orders") so a prolonged failure
-    (login/session expired, site markup changed) stays visible to an operator instead of
-    looking identical to "nothing new right now."
+    """Return external_order_ids from the adapter's Waiting queue that don't already
+    have an `Order` row — safe to call repeatedly. Defaults to every job type (claude.md
+    §16, changed 2026-09-07 — job type is a customer-facing label, not a processing
+    constraint); pass a specific type (e.g. "2D") to narrow it. An exhausted-retry
+    adapter failure is dead-lettered (not silently treated as "zero new orders") so a
+    prolonged failure (login/session expired, site markup changed) stays visible to an
+    operator instead of looking identical to "nothing new right now."
     """
     result = with_retry(
-        lambda: adapter.discover_orders(status="Waiting", job_type="2D", limit=limit)
+        lambda: adapter.discover_orders(status="Waiting", job_type=job_type, limit=limit)
     )
     if not result.success:
         session.add(
             DeadLetter(
                 source="crawl.discover_waiting_orders",
-                payload={"status": "Waiting", "job_type": "2D", "limit": limit},
+                payload={"status": "Waiting", "job_type": job_type, "limit": limit},
                 error_class=result.error_class or "BUG",
             )
         )

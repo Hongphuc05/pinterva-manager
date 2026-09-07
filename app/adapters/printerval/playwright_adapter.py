@@ -8,6 +8,7 @@ from playwright.sync_api import Page
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from app.adapters.playwright_support import capture_evidence
+from app.adapters.printerval.interface import ALL_JOB_TYPES
 from app.adapters.printerval.models import (
     AssetResult,
     DiscoverResult,
@@ -181,7 +182,7 @@ class PlaywrightPrintervalAdapter:
     def discover_orders(
         self,
         status: str,
-        job_type: str = "2D",
+        job_type: str = ALL_JOB_TYPES,
         limit: int = 40,
         cursor: str | None = None,
     ) -> DiscoverResult:

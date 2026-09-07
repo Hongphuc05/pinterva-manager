@@ -43,11 +43,14 @@ không phải nơi quyết định workflow.
 
 ### C1 — Crawl & claim (thay B1+B2 cũ)
 
-Job nền định kỳ quét đơn `waiting` (chỉ loại **2D**, scoped theo tài khoản công ty) trên
-Printerval, tự động đổi designer sang `ntth` để claim, tải asset, xác minh từng write, rồi
-lưu thẳng vào Postgres (không qua Sheet intake). Không đổi internal state thành
-`CLAIMED_IMPORTED` nếu asset chưa xác minh. Đơn mới hiện ngay trên web dashboard cho admin
-xem.
+Job nền định kỳ quét đơn `waiting` (mặc định **tất cả loại job** — "Tất cả 2D&3D",
+scoped theo tài khoản công ty) trên Printerval, tự động đổi designer sang `ntth` để
+claim, tải asset, xác minh từng write, rồi lưu thẳng vào Postgres (không qua Sheet
+intake). Loại job (2D/3D/ART/WOOD/CALENDAR/EMBROIDERY/AI) chỉ là phân loại hiển thị,
+không phải rào cản nghiệp vụ — filter theo loại cụ thể là tuỳ chọn trên web (bổ sung
+UI chọn sau nếu cần), không hard-code cứng như bản nháp đầu. Không đổi internal state
+thành `CLAIMED_IMPORTED` nếu asset chưa xác minh. Đơn mới hiện ngay trên web dashboard
+cho admin xem.
 
 ### C2 — Phân bổ đơn (thay B3 cũ)
 
@@ -124,7 +127,7 @@ Approve mới bao giờ chạm tới Printerval.
                     ┌────────────┼───────┐         │
                     ▼            ▼       ▼         ▼
               Crawl job    Submit job  Sheet export  Playwright adapter
-           (đơn mới, 2D)  (link→site)  (archive)    → Printerval (1 site)
+          (đơn mới, mọi loại)(link→site)  (archive)    → Printerval (1 site)
 ```
 
 - Web dashboard là **giao diện duy nhất** cho admin và designer trong V1. Không có
@@ -393,7 +396,11 @@ coi là nhóm phải hỏi (nhóm 1–4).
 - **Khối lượng:** biến động, đỉnh có thể tới vài trăm order/ngày, tồn đọng quan sát được
   529 đơn tại 1 thời điểm — xác nhận Redis/Celery/Dramatiq và phân trang/queue đàng hoàng
   từ V1 là cần thiết.
-- **Phạm vi loại job V1:** chỉ **2D** — lọc cứng trong crawl/adapter.
+- **Phạm vi loại job V1 (đã đổi 2026-09-07, không còn lọc cứng 2D):** crawl mặc định
+  **tất cả loại job** ("Tất cả 2D&3D" — option thật đã xác nhận trên site, xem
+  `docs/phase0-field-map.md`). Loại job chỉ là nhãn phân loại từ khách, không ảnh hưởng
+  quy trình xử lý V1 (team vẫn xử lý được, không cần loại trừ). Có thể thêm UI chọn lọc
+  theo loại cụ thể trên web sau nếu cần, không bắt buộc cho V1.
 - **Hạ tầng production 24/7:** build/pilot hiện tại chạy trên MacBook Pro M3 Pro 32GB
   (máy dev). Cấu hình phần cứng production **chưa chốt** — không block V1 vì V1 không có
   LLM.
