@@ -4,6 +4,7 @@ from datetime import datetime
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 from app.adapters.google.models import ExportResult
 
@@ -36,6 +37,12 @@ class GoogleSheetsAdapter:
                 )
                 .execute()
             )
+        except HttpError as exc:
+            if exc.resp.status in (403, 404):
+                return ExportResult(success=False, error_class="PERMANENT_EXTERNAL")
+            if exc.resp.status == 400:
+                return ExportResult(success=False, error_class="VALIDATION")
+            return ExportResult(success=False, error_class="TRANSIENT_NETWORK")
         except Exception:
             return ExportResult(success=False, error_class="TRANSIENT_NETWORK")
         updated = response.get("updates", {}).get("updatedRows", len(rows))

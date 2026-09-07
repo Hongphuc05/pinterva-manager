@@ -11,6 +11,9 @@ CREDENTIALS_PATH = "credentials/google-service-account.json"
 # verified evidence. A human created this one spreadsheet by hand for exactly this test
 # to read/write against; it is never created or deleted here, only cleared before and
 # after use.
+# Not a secret, but a real personal-Drive resource pointer — kept in source (rather than
+# created per-run) only because the service account cannot create its own throwaway
+# sheets; see task-8-report.md.
 FIXTURE_SHEET_ID = "1sYAXViNT8QwuHZHEvN013PUr4ex5ASsx4PEuzsCGBoA"
 _CLEAR_RANGE = "A1:Z100"
 
@@ -22,6 +25,9 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture()
 def fixture_sheet():
+    # Reads/writes ONE fixed shared sheet rather than an isolated one per run (same
+    # zero-quota root cause) — concurrent runs against this credential could race.
+    # Acceptable for a local-only, credential-gated test never run in CI.
     from google.oauth2 import service_account
     from googleapiclient.discovery import build
 
