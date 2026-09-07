@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.adapters.allocation.reference import ReferenceAllocationTool
@@ -16,7 +16,8 @@ from app.application.allocation import (
     open_allocation,
     request_quantity,
 )
-from app.domain.exceptions import CapacityExceededError
+from app.application.operations import OperationInProgressError
+from app.domain.exceptions import ApprovalAlreadyDecidedError, CapacityExceededError
 
 router = APIRouter()
 _allocation_tool = ReferenceAllocationTool()
@@ -28,18 +29,21 @@ class OpenAllocationResponse(BaseModel):
 
 @router.post("/batches/{batch_id}/open-allocation", response_model=OpenAllocationResponse)
 def api_open_allocation(
-    batch_id: str, user: User = Depends(require_role("admin")), db: Session = Depends(get_db)
+    batch_id: uuid.UUID, user: User = Depends(require_role("admin")), db: Session = Depends(get_db)
 ):
     try:
-        result = open_allocation(db, uuid.UUID(batch_id), f"open_allocation:{batch_id}")
+        result = open_allocation(
+            db, batch_id, f"open_allocation:{batch_id}", actor_id=user.id
+        )
     except ValueError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
     return OpenAllocationResponse(order_ids=result["order_ids"])
 
 
 class OfferRequest(BaseModel):
-    batch_id: str
-    quantity: int
+    batch_id: uuid.UUID
+    quantity: int = Field(ge=1)
+    request_id: str
 
 
 class GrantResponse(BaseModel):
@@ -55,8 +59,9 @@ def api_allocation_offer(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Chỉ designer mới tự offer được")
     try:
         result = request_quantity(
-            db, _allocation_tool, user.id, uuid.UUID(payload.batch_id), payload.quantity,
-            f"offer:{payload.batch_id}:{user.id}:{uuid.uuid4()}",
+            db, _allocation_tool, user.id, payload.batch_id, payload.quantity,
+            f"offer:{payload.request_id}",
+            request_fingerprint=f"{payload.batch_id}:{user.id}:{payload.quantity}",
         )
     except CapacityExceededError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
@@ -65,7 +70,8 @@ def api_allocation_offer(
 
 class AssignRequest(BaseModel):
     order_id: str
-    designer_id: str
+    designer_id: uuid.UUID
+    request_id: str
 
 
 class AssignResponse(BaseModel):
@@ -80,8 +86,9 @@ def api_allocation_assign(
 ):
     try:
         result = create_assignment_draft(
-            db, payload.order_id, uuid.UUID(payload.designer_id), user.id,
-            f"assign:{payload.order_id}:{uuid.uuid4()}",
+            db, payload.order_id, payload.designer_id, user.id,
+            f"assign:{payload.request_id}",
+            request_fingerprint=f"{payload.order_id}:{payload.designer_id}",
         )
     except (ValueError, CapacityExceededError) as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
@@ -116,14 +123,16 @@ class BoardResponse(BaseModel):
 
 @router.get("/allocation/board", response_model=BoardResponse)
 def api_allocation_board(
-    batch_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)
+    batch_id: uuid.UUID, user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
+    # Read-only: must NOT take the FOR UPDATE lock that granting callers rely on
+    # for serialization, or a board left open blocks every writer indefinitely.
     unassigned = [
         BoardOrderOut(
             id=o.id, external_order_id=o.external_order_id, thumbnail_url=o.thumbnail_url,
             sku=o.sku, deadline_at_ext=str(o.deadline_at_ext) if o.deadline_at_ext else None,
         )
-        for o in _remaining_order_ids(db, uuid.UUID(batch_id))
+        for o in _remaining_order_ids(db, batch_id, for_update=False)
     ]
 
     designers_out = []
@@ -140,7 +149,12 @@ def api_allocation_board(
         if user.role == "admin":
             draft_assignments = (
                 db.query(Assignment)
-                .filter_by(designer_id=designer.id, status="draft")
+                .join(Order, Order.id == Assignment.order_id)
+                .filter(
+                    Assignment.designer_id == designer.id,
+                    Assignment.status == "draft",
+                    Order.batch_id == batch_id,
+                )
                 .all()
             )
             for assignment in draft_assignments:
@@ -152,6 +166,8 @@ def api_allocation_board(
                 if approval is None:
                     continue
                 order = db.get(Order, assignment.order_id)
+                if order is None:
+                    continue
                 pending.append(
                     PendingApprovalOut(
                         approval_id=approval.id,
@@ -183,26 +199,47 @@ class DecideResponse(BaseModel):
     decision: str
     order_id: str
     actor_id: str
+    decided_by_name: str
+    decided_at: str
     decided_by_me: bool
     replacement_assignment_ids: list[str] = []
 
 
 @router.post("/approvals/{approval_id}/decide", response_model=DecideResponse)
 def api_decide_assignment(
-    approval_id: str, payload: DecideRequest, user: User = Depends(require_role("admin")),
+    approval_id: uuid.UUID, payload: DecideRequest, user: User = Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ):
     try:
         result = decide_assignment(
-            db, _allocation_tool, uuid.UUID(approval_id), payload.decision, user.id,
+            db, _allocation_tool, approval_id, payload.decision, user.id,
             f"decide_assignment:{approval_id}", reason=payload.reason,
         )
+    except OperationInProgressError as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "Đang được admin khác xử lý, thử lại sau giây lát."
+        ) from exc
+    except ApprovalAlreadyDecidedError as exc:
+        actor_name = None
+        if exc.actor_id:
+            actor = db.get(User, exc.actor_id)
+            actor_name = actor.full_name if actor else None
+        detail = (
+            f"Đã được {actor_name or 'admin khác'} xử lý lúc {exc.decided_at}."
+            if exc.decided_at
+            else "Đã được xử lý trước đó."
+        )
+        raise HTTPException(status.HTTP_409_CONFLICT, detail) from exc
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    actor = db.get(User, uuid.UUID(result["actor_id"]))
     return DecideResponse(
         decision=result["decision"],
         order_id=result["order_id"],
         actor_id=result["actor_id"],
+        decided_by_name=actor.full_name if actor else "?",
+        decided_at=result["decided_at"],
         decided_by_me=result["actor_id"] == str(user.id),
         replacement_assignment_ids=result.get("replacement_assignment_ids", []),
     )
