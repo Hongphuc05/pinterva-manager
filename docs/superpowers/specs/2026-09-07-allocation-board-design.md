@@ -84,14 +84,29 @@ decide_assignment(session, allocation_tool, approval_id, decision, actor_id, ide
 `decision` ∈ `{"approve", "cancel"}`.
 - **Approve:** order `ASSIGNMENT_PENDING_APPROVAL → ASSIGNED`; `Assignment.status =
   "approved"`; `ApprovalRequest.status = "approved"`; ghi `ApprovalDecision`.
-- **Cancel:** bắt buộc có `reason` (tham số mới, lưu vào `Assignment.cancel_reason`);
-  order `ASSIGNMENT_PENDING_APPROVAL → OPEN_FOR_ALLOCATION` (release); `Assignment.status
-  = "cancelled"`; `ApprovalRequest.status = "cancelled"`; ghi `ApprovalDecision` với
-  `comment = reason`. **Trả quota (đúng claude.md §3 C3):** ngay sau khi release, gọi lại
-  đúng logic `request_quantity` cho **cùng designer, quantity=1**, để tự động cấp 1 order
-  bù từ phần còn lại của batch nếu còn — assignment bù có `replacement_of_id` trỏ về
-  assignment vừa bị cancel. Nếu batch hết order để bù, không lỗi — designer đơn giản
-  nhận ít hơn (không có gì để bù).
+- **Cancel:** bắt buộc có `reason` (tham số mới, lưu vào `Assignment.cancel_reason`).
+  **Sửa lại so với thiết kế đầu (phát hiện lúc implement Task 3, xem ghi chú dưới):**
+  order `ASSIGNMENT_PENDING_APPROVAL → EXCEPTION` (KHÔNG quay lại
+  `OPEN_FOR_ALLOCATION`) — state machine đã cho phép transition này sẵn
+  (`app/domain/state_machine.py`). `Assignment.status = "cancelled"`;
+  `ApprovalRequest.status = "cancelled"`; ghi `ApprovalDecision` với `comment =
+  reason`. **Trả quota (đúng claude.md §3 C3):** ngay sau đó, gọi lại đúng logic
+  `request_quantity` cho **cùng designer, quantity=1**, lấy từ phần **còn lại của
+  batch** (không bao giờ là chính đơn vừa cancel — đơn đó giờ ở `EXCEPTION`, không
+  còn nằm trong `OPEN_FOR_ALLOCATION` nên tự động bị loại khỏi pool, không cần lọc
+  thêm) — assignment bù có `replacement_of_id` trỏ về assignment vừa bị cancel. Nếu
+  batch hết order để bù, không lỗi — designer đơn giản nhận ít hơn.
+
+  **Vì sao không quay lại `OPEN_FOR_ALLOCATION`:** Cancel nghĩa là "đơn đã làm/không
+  hợp lệ" (claude.md §3 C3) — tiêu chí xác định cụ thể **chưa có** (tech debt #1,
+  claude.md §17). Cho đơn quay lại pool chung ngay lập tức nghĩa là FIFO có thể cấp
+  lại **chính đơn đó cho chính designer vừa bị hủy** (nếu đó là đơn sớm nhất còn
+  lại) — vô hiệu hoá hoàn toàn ý nghĩa của Cancel, và tệ hơn là có thể cấp 1 đơn
+  "đã làm/không hợp lệ" cho một designer khác làm tiếp. Đưa vào `EXCEPTION` khớp
+  đúng bất biến #10 ("Khi không chắc chắn, đưa vào exception queue thay vì đoán
+  cách recover") — admin xử lý thủ công đơn đó sau (recovery UI là claude.md §15
+  bước 10, **ngoài phạm vi sub-project này**, đơn ở EXCEPTION không tự thoát ra
+  được cho tới khi có UI đó — chấp nhận được cho V1, ghi vào tech debt).
 - **Idempotency đa-admin (claude.md §10, "quyết định đầu tiên hợp lệ là quyết định cuối
   cùng"):** trước khi quyết định, kiểm tra `ApprovalRequest.status`; nếu đã khác
   `"pending"`, raise `ApprovalAlreadyDecidedError` kèm decision đầu tiên (actor + thời

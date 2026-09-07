@@ -434,6 +434,7 @@ coi là nhóm phải hỏi (nhóm 1–4).
 | 7 | Cơ chế điểm designer (-5đ/lần Fix) + tiền phạt đã có sẵn trên website | Cần xác nhận | Có cần đồng bộ vào Postgres để ảnh hưởng thứ tự phân đơn C2, hay đây là tính năng riêng của website, hệ thống mình không cần đụng vào? |
 | 8 | 3 mốc thời gian mỗi đơn: `Created at` / `Order created at` / `Deadline at` | Cần xác nhận | Chưa rõ cái nào tính SLA/trễ hạn, cái nào là mốc claim. **Liên quan (Phase 2):** `PlaywrightPrintervalAdapter.get_order_detail` hiện chưa populate cả 3 mốc này (và `order_note`, `thumbnail_url` ở `discover_orders`) — cố tình để trống/default thay vì đoán field, vì chưa biết field nào đúng; cần khảo sát DOM thật (giống cách Task 5/6 đã làm cho các field khác) sau khi mục #8 này được chốt. |
 | 9 | Tool phân bổ FIFO production thật (đã có sẵn, chạy nơi khác) | Chưa tích hợp | V1 chỉ viết bản tham chiếu để test; tích hợp tool thật qua interface riêng ở giai đoạn sau |
+| 10 | Đơn bị Cancel ở C3 vào `EXCEPTION`, không có đường thoát tự động | Chấp nhận cho V1, cần recovery UI sau | Phát hiện lúc implement sub-project 3 (allocation board): nếu đơn Cancel quay lại `OPEN_FOR_ALLOCATION` ngay, FIFO có thể cấp lại chính đơn đó (hoặc cho designer khác) trong khi tiêu chí "đơn đã làm/không hợp lệ" (#1) chưa xác minh được — sai theo bất biến #10. V1 đưa đơn vào `EXCEPTION`, admin phải xử lý thủ công (chưa có UI, xem claude.md §15 bước 10) mới đưa đơn ra khỏi EXCEPTION được. |
 
 ## 18. Definition of done V1
 
