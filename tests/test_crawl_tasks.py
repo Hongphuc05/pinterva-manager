@@ -62,3 +62,26 @@ def test_crawl_and_claim_task_logs_and_returns_without_db_writes_when_playwright
         crawl_tasks.crawl_and_claim()
 
     assert "Cloudflare/login not ready" in caplog.text
+
+
+def test_crawl_and_claim_logs_distinct_message_for_cycle_body_failure(monkeypatch, caplog):
+    from contextlib import contextmanager
+
+    from app.workers import crawl_tasks
+
+    @contextmanager
+    def _fake_session():
+        yield object()
+
+    monkeypatch.setattr(crawl_tasks, "playwright_session", _fake_session)
+
+    def _boom_cycle(session, adapter, limit=40):
+        raise RuntimeError("simulated bug inside run_crawl_cycle")
+
+    monkeypatch.setattr(crawl_tasks, "run_crawl_cycle", _boom_cycle)
+
+    with caplog.at_level("ERROR"):
+        crawl_tasks.crawl_and_claim()
+
+    assert "cycle raised an unexpected exception mid-run" in caplog.text
+    assert "Playwright session failed to open" not in caplog.text

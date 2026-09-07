@@ -2,7 +2,7 @@ import uuid
 
 from app.adapters.db.models import Batch, DeadLetter, Order, OrderAsset
 from app.adapters.printerval.fake_adapter import FakePrintervalAdapter
-from app.application.crawl import claim_batch, discover_waiting_orders, import_claimed_batch
+from app.application.crawl import claim_batch, discover_waiting_orders, import_claimed_orders
 from app.domain.models import OrderState
 
 
@@ -81,12 +81,12 @@ def test_claim_batch_is_idempotent_for_the_same_order_ids(db_session):
     assert db_session.query(Batch).count() == 1
 
 
-def test_import_claimed_batch_verifies_asset_and_transitions_state(db_session):
+def test_import_claimed_orders_verifies_asset_and_transitions_state(db_session):
     adapter = FakePrintervalAdapter()
     _seed_waiting_order(adapter, "DJ0000001")
-    batch_result = claim_batch(db_session, adapter, ["DJ0000001"], owner="ntth")
+    claim_batch(db_session, adapter, ["DJ0000001"], owner="ntth")
 
-    result = import_claimed_batch(db_session, adapter, batch_result["batch_id"])
+    result = import_claimed_orders(db_session, adapter)
 
     assert result["imported"] == ["DJ0000001"]
     assert result["failed"] == []
@@ -96,10 +96,12 @@ def test_import_claimed_batch_verifies_asset_and_transitions_state(db_session):
     assert asset.checksum == "fakechecksum"
 
 
-def test_import_claimed_batch_leaves_order_discovered_on_download_failure(db_session, monkeypatch):
+def test_import_claimed_orders_dead_letters_and_leaves_state_on_download_failure(
+    db_session, monkeypatch
+):
     adapter = FakePrintervalAdapter()
     _seed_waiting_order(adapter, "DJ0000001")
-    batch_result = claim_batch(db_session, adapter, ["DJ0000001"], owner="ntth")
+    claim_batch(db_session, adapter, ["DJ0000001"], owner="ntth")
 
     def _fail(external_order_id):
         from app.adapters.printerval.models import AssetResult
@@ -110,7 +112,7 @@ def test_import_claimed_batch_leaves_order_discovered_on_download_failure(db_ses
 
     monkeypatch.setattr(adapter, "download_asset", _fail)
 
-    result = import_claimed_batch(db_session, adapter, batch_result["batch_id"])
+    result = import_claimed_orders(db_session, adapter)
 
     assert result["imported"] == []
     assert result["failed"] == ["DJ0000001"]
@@ -119,11 +121,11 @@ def test_import_claimed_batch_leaves_order_discovered_on_download_failure(db_ses
     assert db_session.query(OrderAsset).filter_by(order_id=order.id).count() == 0
 
 
-def test_import_claimed_batch_only_retries_orders_still_missing_an_asset(db_session):
+def test_import_claimed_orders_does_not_reimport_orders_already_imported(db_session):
     adapter = FakePrintervalAdapter()
     _seed_waiting_order(adapter, "DJ0000001")
-    batch_result = claim_batch(db_session, adapter, ["DJ0000001"], owner="ntth")
-    import_claimed_batch(db_session, adapter, batch_result["batch_id"])
+    claim_batch(db_session, adapter, ["DJ0000001"], owner="ntth")
+    import_claimed_orders(db_session, adapter)  # first pass, succeeds
 
     calls = {"n": 0}
     original = adapter.download_asset
@@ -133,11 +135,94 @@ def test_import_claimed_batch_only_retries_orders_still_missing_an_asset(db_sess
         return original(external_order_id)
 
     adapter.download_asset = _counting
-    # Re-running import_claimed_batch on an already-fully-imported batch must not
-    # re-call download_asset for an order that's no longer DISCOVERED — but since the
-    # idempotency key is scoped to batch_id and the first call already completed, this
-    # also proves the cached result short-circuits entirely.
-    result = import_claimed_batch(db_session, adapter, batch_result["batch_id"])
+    result = import_claimed_orders(db_session, adapter)  # second pass
 
-    assert calls["n"] == 0
+    assert calls["n"] == 0  # already CLAIMED_IMPORTED, not selected by the query at all
+    assert result["imported"] == []
+    assert result["failed"] == []
+
+
+def test_import_claimed_orders_excludes_orders_whose_claim_failed(db_session):
+    """Finding 1 regression test: an order whose claim_batch attempt was
+    dead-lettered (no confirmed-claim ExternalObservation) must never be picked up by
+    import_claimed_orders, even though it sits at DISCOVERED exactly like a
+    successfully-claimed order does."""
+    adapter = FakePrintervalAdapter()
+    # DJ0000001 is NOT added to the adapter -> claim_batch's set_designer call fails,
+    # dead-letters it, but still creates the Order row (existing defensive behavior).
+    claim_result = claim_batch(db_session, adapter, ["DJ0000001"], owner="ntth")
+    assert claim_result["failed"] == ["DJ0000001"]
+    order = db_session.query(Order).filter_by(external_order_id="DJ0000001").one()
+    assert order.state == OrderState.DISCOVERED.value
+
+    # Now make DJ0000001 exist on the adapter with a downloadable asset — simulating
+    # that, absent the fix, download_asset would have succeeded for this never-claimed
+    # order.
+    _seed_waiting_order(adapter, "DJ0000001", status="Waiting")
+
+    result = import_claimed_orders(db_session, adapter)
+
+    assert "DJ0000001" not in result["imported"]
+    order = db_session.query(Order).filter_by(external_order_id="DJ0000001").one()
+    assert order.state == OrderState.DISCOVERED.value, (
+        "a claim-failed order must never reach CLAIMED_IMPORTED"
+    )
+
+
+def test_import_claimed_orders_retries_a_crashed_attempt_on_next_call(db_session):
+    """Finding 2 regression test: an order whose import operation was left mid-attempt
+    (simulating a process crash — status stays 'pending' past its lease) must be
+    retried on the next call, even though it's not part of any batch just created in
+    that call."""
+    import uuid
+    from datetime import UTC, datetime, timedelta
+
+    from app.application.operations import PENDING_LEASE
+
+    adapter = FakePrintervalAdapter()
+    _seed_waiting_order(adapter, "DJ0000001")
+    claim_batch(db_session, adapter, ["DJ0000001"], owner="ntth")
+
+    order = db_session.query(Order).filter_by(external_order_id="DJ0000001").one()
+    # Manually insert a stale 'pending' Operation row for this order's import key,
+    # simulating a crash mid-attempt on a PRIOR call to import_claimed_orders.
+    from sqlalchemy import text
+
+    db_session.execute(
+        text(
+            "INSERT INTO operations "
+            "(id, idempotency_key, command_name, status, retry_count, created_at, updated_at) "
+            "VALUES (:id, :key, 'import_order', 'pending', 0, :ts, :ts)"
+        ),
+        {
+            "id": uuid.uuid4(),
+            "key": f"import_order:{order.external_order_id}",
+            "ts": datetime.now(UTC) - (PENDING_LEASE + timedelta(minutes=1)),
+        },
+    )
+    db_session.commit()
+
+    result = import_claimed_orders(db_session, adapter)
+
     assert result["imported"] == ["DJ0000001"]
+    order = db_session.query(Order).filter_by(external_order_id="DJ0000001").one()
+    assert order.state == OrderState.CLAIMED_IMPORTED.value
+
+
+def test_discover_waiting_orders_dead_letters_an_adapter_failure(db_session, monkeypatch):
+    adapter = FakePrintervalAdapter()
+
+    def _fail(status, job_type="2D", limit=40, cursor=None):
+        from app.adapters.printerval.models import DiscoverResult
+
+        return DiscoverResult(success=False, error_class="EXTERNAL_CHANGED")
+
+    monkeypatch.setattr(adapter, "discover_orders", _fail)
+
+    new_ids = discover_waiting_orders(db_session, adapter, limit=40)
+
+    assert new_ids == []
+    dead_letters = (
+        db_session.query(DeadLetter).filter_by(source="crawl.discover_waiting_orders").all()
+    )
+    assert len(dead_letters) == 1

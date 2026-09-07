@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import uuid
-
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import Batch, DeadLetter, ExternalObservation, Order, OrderAsset
 from app.adapters.playwright_support import with_retry
 from app.adapters.printerval.interface import PrintervalAdapter
-from app.application.operations import run_idempotent
+from app.application.operations import OperationInProgressError, run_idempotent
 from app.application.order_transitions import apply_transition
 from app.domain.models import OrderState
 
@@ -16,10 +14,23 @@ def discover_waiting_orders(
     session: Session, adapter: PrintervalAdapter, limit: int = 40
 ) -> list[str]:
     """Return external_order_ids from the adapter's Waiting/2D queue that don't already
-    have an `Order` row — pure read, safe to call repeatedly, no idempotency key needed.
+    have an `Order` row — safe to call repeatedly. An exhausted-retry adapter failure is
+    dead-lettered (not silently treated as "zero new orders") so a prolonged failure
+    (login/session expired, site markup changed) stays visible to an operator instead of
+    looking identical to "nothing new right now."
     """
-    result = adapter.discover_orders(status="Waiting", job_type="2D", limit=limit)
+    result = with_retry(
+        lambda: adapter.discover_orders(status="Waiting", job_type="2D", limit=limit)
+    )
     if not result.success:
+        session.add(
+            DeadLetter(
+                source="crawl.discover_waiting_orders",
+                payload={"status": "Waiting", "job_type": "2D", "limit": limit},
+                error_class=result.error_class or "BUG",
+            )
+        )
+        session.commit()
         return []
     discovered_ids = [o.external_order_id for o in result.orders]
     if not discovered_ids:
@@ -93,24 +104,40 @@ def claim_batch(
     return run_idempotent(session, idempotency_key, "claim_batch", _do)
 
 
-def import_claimed_batch(session: Session, adapter: PrintervalAdapter, batch_id: str) -> dict:
-    """Download+verify the asset for every Order in this batch still at DISCOVERED
-    (i.e. claimed but not yet imported), transitioning each to CLAIMED_IMPORTED only on
-    a verified download. A failed download dead-letters that order and leaves it at
-    DISCOVERED for the next crawl cycle to retry.
-    """
-    idempotency_key = f"import_claimed_batch:{batch_id}"
+def import_claimed_orders(session: Session, adapter: PrintervalAdapter) -> dict:
+    """Download+verify the asset for every Order that has a confirmed successful claim
+    (a `printerval`-source ExternalObservation row — written only when claim_batch's
+    adapter.set_designer call actually succeeded, never on a dead-lettered failure) and
+    is still at DISCOVERED. Scans across ALL batches/cycles, not just one just-created
+    batch — this is what makes a crash-interrupted import naturally retried by the next
+    crawl cycle. The ExternalObservation join is what makes a claim-failed order
+    structurally ineligible for import, closing the gap where it could otherwise reach
+    CLAIMED_IMPORTED without the real site ever confirming the claim.
 
-    def _do() -> dict:
-        orders = (
-            session.query(Order)
-            .filter_by(batch_id=uuid.UUID(batch_id), state=OrderState.DISCOVERED.value)
-            .all()
+    Each order's import is its own idempotent operation (`import_order:<external_order_id>`)
+    rather than one batch-wide operation. A crashed/never-finished attempt is retried
+    (run_idempotent's pending-lease reclaim naturally handles this). A *confirmed*
+    download failure (with_retry exhausted, dead-lettered) is marked "completed" (not
+    raised) so it stops being silently re-attempted — per claude.md §11, an
+    exhausted-retry failure needs an operator's explicit recovery action, not
+    indefinite silent auto-retry from this job.
+    """
+    orders = (
+        session.query(Order)
+        .join(ExternalObservation, ExternalObservation.order_id == Order.id)
+        .filter(
+            Order.state == OrderState.DISCOVERED.value,
+            ExternalObservation.source == "printerval",
         )
-        imported: list[str] = []
-        failed: list[str] = []
-        for order in orders:
-            result = with_retry(lambda o=order: adapter.download_asset(o.external_order_id))
+        .distinct()
+        .all()
+    )
+    imported: list[str] = []
+    failed: list[str] = []
+    for order in orders:
+
+        def _do(order=order) -> dict:
+            result = with_retry(lambda: adapter.download_asset(order.external_order_id))
             if result.success:
                 session.add(
                     OrderAsset(
@@ -127,17 +154,29 @@ def import_claimed_batch(session: Session, adapter: PrintervalAdapter, batch_id:
                     actor_id=None,
                     evidence={"source": "crawl_job"},
                 )
-                imported.append(order.external_order_id)
-            else:
-                session.add(
-                    DeadLetter(
-                        source="crawl.import_claimed_batch",
-                        payload={"order_id": order.external_order_id, "batch_id": batch_id},
-                        error_class=result.error_class or "BUG",
-                    )
+                return {"imported": True}
+            session.add(
+                DeadLetter(
+                    source="crawl.import_claimed_orders",
+                    payload={"order_id": order.external_order_id},
+                    error_class=result.error_class or "BUG",
                 )
-                failed.append(order.external_order_id)
+            )
+            return {"imported": False}
 
-        return {"batch_id": batch_id, "imported": imported, "failed": failed}
+        try:
+            outcome = run_idempotent(
+                session, f"import_order:{order.external_order_id}", "import_order", _do
+            )
+        except OperationInProgressError:
+            # Another process is mid-attempt on this exact order right now (fresh
+            # pending lease) — skip it this cycle, it'll be picked up naturally once
+            # that attempt finishes or its lease expires.
+            continue
 
-    return run_idempotent(session, idempotency_key, "import_claimed_batch", _do)
+        if outcome["imported"]:
+            imported.append(order.external_order_id)
+        else:
+            failed.append(order.external_order_id)
+
+    return {"imported": imported, "failed": failed}

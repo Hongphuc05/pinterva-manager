@@ -8,7 +8,7 @@ from app.adapters.db.session import SessionLocal
 from app.adapters.playwright_support import playwright_session
 from app.adapters.printerval.interface import PrintervalAdapter
 from app.adapters.printerval.playwright_adapter import PlaywrightPrintervalAdapter
-from app.application.crawl import claim_batch, discover_waiting_orders, import_claimed_batch
+from app.application.crawl import claim_batch, discover_waiting_orders, import_claimed_orders
 from app.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -20,25 +20,20 @@ def run_crawl_cycle(session: Session, adapter: PrintervalAdapter, limit: int = 4
     the test DB session — no Celery or Playwright involved here.
     """
     new_order_ids = discover_waiting_orders(session, adapter, limit=limit)
-    if not new_order_ids:
-        return {
-            "discovered": 0,
-            "claimed": 0,
-            "failed_claim": 0,
-            "imported": 0,
-            "failed_import": 0,
-        }
+    if new_order_ids:
+        claim_result = claim_batch(session, adapter, new_order_ids, owner="ntth")
+        claimed_count = len(claim_result["claimed"])
+        failed_claim_count = len(claim_result["failed"])
+    else:
+        claimed_count = 0
+        failed_claim_count = 0
 
-    claim_result = claim_batch(session, adapter, new_order_ids, owner="ntth")
-    import_result = (
-        import_claimed_batch(session, adapter, claim_result["batch_id"])
-        if claim_result["claimed"]
-        else {"imported": [], "failed": []}
-    )
+    import_result = import_claimed_orders(session, adapter)
+
     return {
         "discovered": len(new_order_ids),
-        "claimed": len(claim_result["claimed"]),
-        "failed_claim": len(claim_result["failed"]),
+        "claimed": claimed_count,
+        "failed_claim": failed_claim_count,
         "imported": len(import_result["imported"]),
         "failed_import": len(import_result["failed"]),
     }
@@ -50,23 +45,33 @@ def crawl_and_claim() -> None:
     whole cycle (claude.md tech debt #4 — 1 session/site, no persistent browser daemon).
     If the Playwright session itself fails to open (e.g. Cloudflare/login not ready),
     log and return without touching the DB — no partial batch from a browser that never
-    opened.
+    opened. A failure inside the cycle itself (after the session opened) is logged
+    distinctly, since by that point real DB writes may already be committed.
     """
+    # ponytail: alembic/env.py's fileConfig (disable_existing_loggers=True, run by the
+    # test suite's `engine` fixture) can flip this already-created logger's `.disabled`
+    # to True mid-process. Reset defensively up front so every log path below — not
+    # just the failure one — always fires. Upgrade path: set
+    # disable_existing_loggers=False in alembic/env.py if this ever needs generalizing
+    # beyond this one logger.
+    logger.disabled = False
+
     try:
-        with playwright_session() as page:
-            adapter = PlaywrightPrintervalAdapter(page=page)
-            session = SessionLocal()
-            try:
-                summary = run_crawl_cycle(session, adapter)
-                logger.info("crawl_and_claim cycle summary: %s", summary)
-            finally:
-                session.close()
+        session_cm = playwright_session()
+        page = session_cm.__enter__()
     except Exception:
-        # ponytail: alembic/env.py's fileConfig (disable_existing_loggers=True, run by
-        # the test suite's `engine` fixture) can flip this already-created logger's
-        # `.disabled` to True mid-process. Reset defensively so this alert — the one
-        # signal an operator gets that a whole crawl cycle was skipped — always fires.
-        # Upgrade path: set disable_existing_loggers=False in alembic/env.py if this
-        # ever needs generalizing beyond this one logger.
-        logger.disabled = False
         logger.exception("crawl_and_claim: Playwright session failed to open, skipping this cycle")
+        return
+
+    try:
+        adapter = PlaywrightPrintervalAdapter(page=page)
+        session = SessionLocal()
+        try:
+            summary = run_crawl_cycle(session, adapter)
+            logger.info("crawl_and_claim cycle summary: %s", summary)
+        except Exception:
+            logger.exception("crawl_and_claim: cycle raised an unexpected exception mid-run")
+        finally:
+            session.close()
+    finally:
+        session_cm.__exit__(None, None, None)
