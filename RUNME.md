@@ -54,6 +54,10 @@ bị Chrome profile trước khi bấm — và trang chi tiết đơn kèm lịc
 `admin` thấy mọi đơn; `designer` chỉ thấy đơn được giao (luôn rỗng cho tới khi Phase 5
 xong).
 
+Sau khi bấm Refresh, thông báo phân biệt rõ 3 trường hợp: thành công (kèm số đơn mới/
+nhập/lỗi), lỗi tìm đơn (site đổi giao diện/bộ lọc sai — xem `dead_letters` để biết chi
+tiết), hoặc lỗi mở phiên trình duyệt (thường do Chrome profile chưa/hết đăng nhập).
+
 API JSON thuần (Swagger) vẫn còn ở **http://127.0.0.1:8000/docs** nếu cần test qua
 Postman/curl thay vì trình duyệt.
 

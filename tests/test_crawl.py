@@ -1,8 +1,15 @@
 import uuid
 
+import pytest
+
 from app.adapters.db.models import Batch, DeadLetter, Order, OrderAsset
 from app.adapters.printerval.fake_adapter import FakePrintervalAdapter
-from app.application.crawl import claim_batch, discover_waiting_orders, import_claimed_orders
+from app.application.crawl import (
+    DiscoverFailedError,
+    claim_batch,
+    discover_waiting_orders,
+    import_claimed_orders,
+)
 from app.domain.models import OrderState
 
 
@@ -209,19 +216,22 @@ def test_import_claimed_orders_retries_a_crashed_attempt_on_next_call(db_session
     assert order.state == OrderState.CLAIMED_IMPORTED.value
 
 
-def test_discover_waiting_orders_dead_letters_an_adapter_failure(db_session, monkeypatch):
+def test_discover_waiting_orders_dead_letters_and_raises_on_failure(db_session, monkeypatch):
+    """Must raise DiscoverFailedError, never silently return [] — a real incident
+    showed a genuinely visible Waiting order on the live site get reported as "0 new
+    orders" because this failure mode wasn't distinguished from "nothing new"."""
     adapter = FakePrintervalAdapter()
 
-    def _fail(status, job_type="2D", limit=40, cursor=None):
+    def _fail(status, job_type="Tất cả 2D & 3D", limit=40, cursor=None):
         from app.adapters.printerval.models import DiscoverResult
 
         return DiscoverResult(success=False, error_class="EXTERNAL_CHANGED")
 
     monkeypatch.setattr(adapter, "discover_orders", _fail)
 
-    new_ids = discover_waiting_orders(db_session, adapter, limit=40)
+    with pytest.raises(DiscoverFailedError):
+        discover_waiting_orders(db_session, adapter, limit=40)
 
-    assert new_ids == []
     dead_letters = (
         db_session.query(DeadLetter).filter_by(source="crawl.discover_waiting_orders").all()
     )

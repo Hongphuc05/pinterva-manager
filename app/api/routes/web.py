@@ -10,6 +10,7 @@ from app.adapters.playwright_support import playwright_session
 from app.adapters.printerval.playwright_adapter import PlaywrightPrintervalAdapter
 from app.api.deps import SESSION_COOKIE_NAME, get_current_user_web, get_db
 from app.application.auth import create_session_token, verify_password
+from app.application.crawl import DiscoverFailedError
 from app.application.order_queries import (
     get_order_detail_for_user,
     get_order_history,
@@ -121,6 +122,18 @@ def orders_refresh(
         if failed_total:
             flash += f", {failed_total} lỗi (xem dead_letters)"
         flash += "."
+    except DiscoverFailedError:
+        # Distinct from the generic Playwright-session-failure case below: the
+        # session opened fine, but the site's "find waiting orders" step itself
+        # failed (e.g. a filter dropdown's option text changed) — already
+        # dead-lettered. Must never be confused with "0 new orders" (a real incident:
+        # a genuinely visible Waiting order on the live site was silently reported as
+        # 0 results because this case wasn't distinguished before).
+        flash = (
+            "Crawl thất bại khi tìm đơn mới — có thể site đổi giao diện hoặc bộ lọc "
+            "sai. Xem bảng dead_letters (source=crawl.discover_waiting_orders) để "
+            "biết chi tiết lỗi thật."
+        )
     except Exception:
         flash = "Crawl thất bại — kiểm tra Chrome profile đã đăng nhập Printerval chưa."
 

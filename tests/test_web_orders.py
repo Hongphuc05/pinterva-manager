@@ -130,3 +130,33 @@ def test_orders_refresh_shows_error_message_on_playwright_failure(client, db_ses
 
     assert resp.status_code == 200
     assert "Crawl thất bại" in resp.text
+
+
+def test_orders_refresh_shows_distinct_message_on_discover_failure(client, db_session, monkeypatch):
+    """Regression test for the real incident: a genuinely visible Waiting order on the
+    live site was reported as "0 new orders" (looking like success) because a discover
+    failure wasn't distinguished from "nothing new". DiscoverFailedError must produce a
+    message distinct from both the success path and the generic Playwright-failure path.
+    """
+    from contextlib import contextmanager
+
+    from app.api.routes import web
+    from app.application.crawl import DiscoverFailedError
+
+    @contextmanager
+    def _fake_session():
+        yield object()
+
+    def _fake_run_crawl_cycle(session, adapter, limit=40):
+        raise DiscoverFailedError("EXTERNAL_CHANGED")
+
+    monkeypatch.setattr(web, "playwright_session", _fake_session)
+    monkeypatch.setattr(web, "run_crawl_cycle", _fake_run_crawl_cycle)
+
+    _login(client, db_session, "admin")
+    resp = client.post("/orders/refresh")
+
+    assert resp.status_code == 200
+    assert "tìm đơn mới" in resp.text
+    assert "kiểm tra Chrome profile" not in resp.text
+    assert "Đã crawl xong" not in resp.text

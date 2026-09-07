@@ -10,6 +10,21 @@ from app.application.order_transitions import apply_transition
 from app.domain.models import OrderState
 
 
+class DiscoverFailedError(Exception):
+    """Raised by discover_waiting_orders when the adapter call itself failed (already
+    dead-lettered before this raises) — distinct from the site genuinely having zero
+    new orders right now, which returns an empty list normally. Callers (the Celery
+    task, the web dashboard's manual Refresh) must not treat this the same as "0 new
+    orders" — a real incident showed a live "Waiting" order sitting on the site while
+    the crawl silently reported success with 0 results, because a filter-option
+    mismatch was swallowed into an empty list instead of surfacing as a visible error.
+    """
+
+    def __init__(self, error_class: str):
+        super().__init__(f"discover_waiting_orders failed: {error_class}")
+        self.error_class = error_class
+
+
 def discover_waiting_orders(
     session: Session,
     adapter: PrintervalAdapter,
@@ -19,10 +34,12 @@ def discover_waiting_orders(
     """Return external_order_ids from the adapter's Waiting queue that don't already
     have an `Order` row — safe to call repeatedly. Defaults to every job type (claude.md
     §16, changed 2026-09-07 — job type is a customer-facing label, not a processing
-    constraint); pass a specific type (e.g. "2D") to narrow it. An exhausted-retry
-    adapter failure is dead-lettered (not silently treated as "zero new orders") so a
-    prolonged failure (login/session expired, site markup changed) stays visible to an
-    operator instead of looking identical to "nothing new right now."
+    constraint); pass a specific type (e.g. "2D") to narrow it.
+
+    Raises DiscoverFailedError (after dead-lettering) on an exhausted-retry adapter
+    failure — never silently returns an empty list for that case, so a prolonged
+    failure (login/session expired, site markup/filter text changed) can never look
+    identical to "nothing new right now" to a caller.
     """
     result = with_retry(
         lambda: adapter.discover_orders(status="Waiting", job_type=job_type, limit=limit)
@@ -36,7 +53,7 @@ def discover_waiting_orders(
             )
         )
         session.commit()
-        return []
+        raise DiscoverFailedError(result.error_class or "BUG")
     discovered_ids = [o.external_order_id for o in result.orders]
     if not discovered_ids:
         return []
