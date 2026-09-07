@@ -3,6 +3,7 @@ import { AuthProvider } from './auth/AuthContext'
 import { ProtectedRoute } from './auth/ProtectedRoute'
 import { LoginPage } from './pages/LoginPage'
 import { OrdersListPage } from './pages/OrdersListPage'
+import { OrderDetailPage } from './pages/OrderDetailPage'
 import { PrintervalLoginPage } from './pages/PrintervalLoginPage'
 
 function App() {
@@ -16,6 +17,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <OrdersListPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/orders/:id"
+            element={
+              <ProtectedRoute>
+                <OrderDetailPage />
               </ProtectedRoute>
             }
           />
