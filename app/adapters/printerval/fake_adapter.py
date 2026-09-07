@@ -23,7 +23,6 @@ class _FakeOrder:
     order_created_at: str = "2026-01-01T00:00:00"
     deadline_at: str = "2026-01-10T00:00:00"
     has_uploaded_design: bool = False
-    drive_url: str | None = None
 
 
 class FakePrintervalAdapter:
@@ -101,11 +100,11 @@ class FakePrintervalAdapter:
             return WriteResult(
                 success=False, external_order_id=external_order_id, error_class="VALIDATION"
             )
-        order.drive_url = drive_url
+        order.note_outsource = drive_url
         return WriteResult(
             success=True,
             external_order_id=external_order_id,
-            observed_state={"drive_url": order.drive_url},
+            observed_state={"result_link": order.note_outsource},
         )
 
     def download_asset(self, external_order_id: str) -> AssetResult:

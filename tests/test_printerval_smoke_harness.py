@@ -65,6 +65,18 @@ def test_run_write_method_smoke_test_still_restores_if_action_raises():
     assert detail.status == "Doing"  # still restored despite the raise
 
 
+def test_restore_order_reverts_note_outsource():
+    adapter = _seeded_adapter()
+    adapter.attach_result_link("DJ0000001", "https://drive.google.com/original")
+    snapshot = snapshot_order(adapter, "DJ0000001")
+    adapter.attach_result_link("DJ0000001", "https://drive.google.com/changed")
+
+    restore_order(adapter, snapshot)
+
+    detail = adapter.get_order_detail("DJ0000001")
+    assert detail.note_outsource == snapshot.note_outsource == "https://drive.google.com/original"
+
+
 def test_snapshot_order_raises_for_unknown_order():
     adapter = _seeded_adapter()
     with pytest.raises(RuntimeError, match="Cannot snapshot"):

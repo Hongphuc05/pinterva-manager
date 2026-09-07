@@ -62,7 +62,9 @@ def test_attach_result_link_updates_observed_state():
         "DJ0000002", "https://drive.google.com/file/d/abc123/view"
     )
     assert write_result.success is True
-    assert write_result.observed_state["drive_url"].startswith("https://drive.google.com")
+    assert write_result.observed_state["result_link"].startswith("https://drive.google.com")
+    detail = adapter.get_order_detail("DJ0000002")
+    assert detail.note_outsource == "https://drive.google.com/file/d/abc123/view"
 
 
 def test_download_asset_returns_local_path():

@@ -24,6 +24,38 @@ class _OrderNotFoundError(Exception):
     business validation failure, not adapter/site breakage."""
 
 
+class _SaveRejectedError(Exception):
+    """A write's save request actually completed (unlike a timeout) but the
+    server rejected it — a real external outcome, not an adapter bug or a
+    retryable network blip. Carries the HTTP status for classification."""
+
+    def __init__(self, message: str, status: int):
+        super().__init__(message)
+        self.status = status
+
+
+def _ensure_save_succeeded(resp) -> None:
+    """Raise _SaveRejectedError unless a save response is a genuine success.
+
+    Live-confirmed (Task 6 fix round) across all three save endpoints this
+    file uses (`/design-job/assign-designer`, `/design-job/update`,
+    `/design-job-meta`): a successful save is HTTP 200 with a JSON body
+    shaped `{"status": "successful", ...}`. This checks both the HTTP
+    status and that body convention — an HTTP failure or an explicit
+    non-"successful" body status both count as rejected. A response whose
+    body isn't JSON, or is JSON without a "status" key, is treated as fine
+    as long as the HTTP status is ok (no error signal available to check).
+    """
+    if not resp.ok:
+        raise _SaveRejectedError(f"HTTP {resp.status}", resp.status)
+    try:
+        body = resp.json()
+    except Exception:
+        return
+    if isinstance(body, dict) and body.get("status") not in (None, "successful"):
+        raise _SaveRejectedError(f"server rejected save: {body}", resp.status)
+
+
 def _classify_exception(exc: Exception) -> tuple[str, bool]:
     """Map an exception from a read method to (error_class, retryable).
 
@@ -31,15 +63,28 @@ def _classify_exception(exc: Exception) -> tuple[str, bool]:
       could just be a slow network, so it's worth a retry.
     - _OrderNotFoundError: the search succeeded but no row matched — not
       retryable, the order genuinely isn't there.
-    - LookupError (raised by _find_select_by_option_text): an expected
-      <select>/option is genuinely missing — the site's structure changed,
-      retrying won't help.
+    - LookupError (raised by _find_select_by_option_text, and by the write
+      methods' own existence checks before interacting with an expected
+      element): an expected element is genuinely missing — the site's
+      structure changed, retrying won't help.
+    - _SaveRejectedError: the save request completed but the server said no.
+      401/403 -> AUTH, 429 -> RATE_LIMIT, 5xx -> TRANSIENT_NETWORK (worth a
+      retry), anything else -> PERMANENT_EXTERNAL (a real rejection, not
+      retryable, needs a human).
     - anything else: unexpected — treat as a bug rather than guess.
     """
     if isinstance(exc, PlaywrightTimeoutError):
         return "TRANSIENT_NETWORK", True
     if isinstance(exc, _OrderNotFoundError):
         return "VALIDATION", False
+    if isinstance(exc, _SaveRejectedError):
+        if exc.status in (401, 403):
+            return "AUTH", False
+        if exc.status == 429:
+            return "RATE_LIMIT", True
+        if exc.status >= 500:
+            return "TRANSIENT_NETWORK", True
+        return "PERMANENT_EXTERNAL", False
     if isinstance(exc, LookupError):
         return "EXTERNAL_CHANGED", False
     return "BUG", False
@@ -194,11 +239,20 @@ class PlaywrightPrintervalAdapter:
         selects = row.locator("select")
         designer = _selected_option_text(selects.nth(0)) if selects.count() >= 1 else None
         status = _selected_option_text(selects.nth(1)) if selects.count() >= 2 else None
+        note_group = _note_outsource_group(row)
+        # Read the textarea's real ng-model value directly (works even
+        # while hidden) rather than the displayed `.pre-note` text, which
+        # shows a misleading "Double click here to note!" placeholder when
+        # the underlying value is genuinely empty.
+        note_outsource = (
+            note_group.locator("textarea").input_value() if note_group.count() > 0 else ""
+        )
         return OrderDetailResult(
             success=True,
             external_order_id=external_order_id,
             designer=designer,
             status=status,
+            note_outsource=note_outsource,
             has_uploaded_design=row.locator(".thumbnail-design-container img").count() > 0,
         )
 
@@ -240,9 +294,34 @@ class PlaywrightPrintervalAdapter:
         page = self.page
         try:
             row = _search_and_get_row(page, external_order_id)
-            designer_select = row.locator("select").nth(0)
-            designer_select.select_option(label=designer_option, force=True)
-            observed = _selected_option_text(designer_select)
+            selects = row.locator("select")
+            if selects.count() < 1:
+                raise LookupError(f"No Designer <select> found for order {external_order_id}")
+            designer_select = selects.nth(0)
+            if _selected_option_text(designer_select) == designer_option:
+                # Already the target value: selecting the same option again
+                # fires no real DOM 'change' event (confirmed live), so no
+                # save request would ever arrive — expect_response would
+                # hang for nothing. Nothing to save; skip straight to the
+                # fresh-state confirmation below.
+                pass
+            else:
+                with page.expect_response(
+                    lambda r: "/design-job/assign-designer" in r.url
+                    and r.request.method == "POST"
+                ) as resp_info:
+                    designer_select.select_option(label=designer_option, force=True)
+                _ensure_save_succeeded(resp_info.value)
+
+            # Genuine fresh-state check: re-navigate/re-search independently
+            # rather than trusting the same in-page <select> we just changed
+            # — a live incident proved a save can silently not persist while
+            # the in-page DOM still looks changed.
+            fresh_row = _search_and_get_row(page, external_order_id)
+            fresh_selects = fresh_row.locator("select")
+            observed = (
+                _selected_option_text(fresh_selects.nth(0)) if fresh_selects.count() >= 1 else None
+            )
         except Exception as exc:
             error_class, retryable = _classify_exception(exc)
             evidence = capture_evidence(page, f"set_designer_failed_{external_order_id}")
@@ -266,9 +345,27 @@ class PlaywrightPrintervalAdapter:
         page = self.page
         try:
             row = _search_and_get_row(page, external_order_id)
-            status_select = row.locator("select").nth(1)
-            status_select.select_option(label=target_status, force=True)
-            observed = _selected_option_text(status_select)
+            selects = row.locator("select")
+            if selects.count() < 2:
+                raise LookupError(f"No Status <select> found for order {external_order_id}")
+            status_select = selects.nth(1)
+            if _selected_option_text(status_select) == target_status:
+                # Already the target value — see set_designer's identical
+                # guard for why this must skip the save-response wait.
+                pass
+            else:
+                with page.expect_response(
+                    lambda r: "/design-job/update" in r.url and r.request.method == "PATCH"
+                ) as resp_info:
+                    status_select.select_option(label=target_status, force=True)
+                _ensure_save_succeeded(resp_info.value)
+
+            # Genuine fresh-state check (see set_designer for why).
+            fresh_row = _search_and_get_row(page, external_order_id)
+            fresh_selects = fresh_row.locator("select")
+            observed = (
+                _selected_option_text(fresh_selects.nth(1)) if fresh_selects.count() >= 2 else None
+            )
         except Exception as exc:
             error_class, retryable = _classify_exception(exc)
             evidence = capture_evidence(page, f"set_status_failed_{external_order_id}")
@@ -293,14 +390,26 @@ class PlaywrightPrintervalAdapter:
         try:
             row = _search_and_get_row(page, external_order_id)
             note_group = _note_outsource_group(row)
+            if note_group.count() == 0:
+                raise LookupError(f"No Note outsource field found for order {external_order_id}")
             note_group.dblclick()
             textarea = note_group.locator("textarea")
+            if textarea.count() == 0:
+                raise LookupError(f"No note textarea found for order {external_order_id}")
             textarea.fill(drive_url)
             with page.expect_response(
                 lambda r: "/design-job-meta" in r.url and r.request.method == "POST"
-            ):
+            ) as resp_info:
                 note_group.get_by_role("button", name="Save").click()
-            observed = textarea.input_value()
+            _ensure_save_succeeded(resp_info.value)
+
+            # Genuine fresh-state check: re-navigate/re-search independently
+            # instead of trusting the same in-page textarea we just filled —
+            # this is exactly the check that caught the original incident,
+            # where the save silently didn't persist while the in-page
+            # textarea still showed the new value.
+            fresh_row = _search_and_get_row(page, external_order_id)
+            observed = _note_outsource_group(fresh_row).locator("textarea").input_value()
         except Exception as exc:
             error_class, retryable = _classify_exception(exc)
             evidence = capture_evidence(page, f"attach_result_link_failed_{external_order_id}")
