@@ -98,6 +98,7 @@ class RefreshResponse(BaseModel):
 
 
 class SyncStatusResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     is_running: bool
     last_started_at: datetime | None = None
     last_finished_at: datetime | None = None

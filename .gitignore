@@ -44,3 +44,8 @@ cookies.txt
 200
 COOKIE_SECURE=false
 scratch/
+
+# celery runtime artifacts
+celery-*.log
+celery-*.pid
+celerybeat-schedule*

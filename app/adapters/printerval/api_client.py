@@ -215,28 +215,6 @@ class PrintervalApiClient:
     #: common case.
     ORDER_STATUSES = ("doing", "waiting", "review", "fix", "confirm", "done")
 
-    def list_status_page(
-        self, status: str, *, page_size: int = 100, page_id: int = 0
-    ) -> PrintervalApiPage:
-        """Read-only page of orders currently at one of the 6 confirmed site
-        statuses — the general form of discover_waiting_page (which is just this
-        hardcoded to status="waiting"). Used by the status-mirror sync, never for
-        anything that writes."""
-        if not 1 <= page_size <= 100:
-            raise ValueError("page_size must be between 1 and 100")
-        if page_id < 0:
-            raise ValueError("page_id must be non-negative")
-        params = {
-            "page_size": str(page_size),
-            "page_id": str(page_id),
-            "status": status,
-            "time_type": "created_at",
-            "job_type": "all",
-            "team_outsource": self.team_outsource or "",
-        }
-        result = self._fetch_find_rows(params, error_context=f"Status page ({status})")
-        return PrintervalApiPage(orders=result, raw={"status": "successful", "result": result})
-
     def find_order(
         self, external_order_id: str, statuses: tuple[str, ...] = ORDER_STATUSES
     ) -> dict[str, Any] | None:

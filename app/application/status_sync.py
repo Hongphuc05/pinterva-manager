@@ -14,30 +14,31 @@ from datetime import UTC, datetime
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import Order, Platform, PlatformSyncState
-from app.adapters.printerval.api_client import (
-    PrintervalApiClient,
-    PrintervalApiConfigurationError,
-    PrintervalApiError,
-)
-
-#: Safety bound on pages read per status per platform — a real backlog has been
-# observed up to ~529 orders at once (claude.md §16); 30 pages * 100 = 3000 covers that
-# with headroom without risking an unbounded scan against a live site.
-MAX_PAGES_PER_STATUS = 30
+from app.adapters.printerval.api_client import PrintervalApiClient
 
 
-def _external_id_to_numeric(external_order_id: str) -> int | None:
-    """"DJ3971347" -> 3971347. Returns None for anything that doesn't parse (never
-    guess — just skip matching that order)."""
-    code = external_order_id[2:] if external_order_id.upper().startswith("DJ") else external_order_id
-    return int(code) if code.isdigit() else None
+def _status_guess_order(last_known: str | None) -> tuple[str, ...]:
+    """find_order tries statuses in turn until one matches — trying the order's own
+    last-known status first resolves in a single HTTP call in the common case (an
+    order rarely jumps status between two syncs) instead of always walking the full
+    default order."""
+    if last_known and last_known in PrintervalApiClient.ORDER_STATUSES:
+        rest = [s for s in PrintervalApiClient.ORDER_STATUSES if s != last_known]
+        return (last_known, *rest)
+    return PrintervalApiClient.ORDER_STATUSES
 
 
 def sync_platform_order_statuses(
     session: Session, platform: Platform, api_client: PrintervalApiClient | None = None
 ) -> dict:
-    """Fetch every order across all 6 known statuses for this platform's team scope
-    and update Order.printerval_status for the orders we already have. Never creates
+    """Look up each Order we already track for this platform (one find_order call
+    each, hinted by its last-known status) and update Order.printerval_status.
+
+    Deliberately scoped to OUR orders, not a bulk page-through of Printerval's full
+    history: an established account can have thousands of "done" orders alone — a
+    live incident here paged 30+ pages (~3000 rows) of "done" for one account before
+    even finishing, taking minutes for a sync meant to run every 5. Cost now scales
+    with how many orders we track, not with the site's total history. Never creates
     an Order row — discovering new orders is C1's job, not this one.
     """
     owns_client = api_client is None
@@ -48,40 +49,23 @@ def sync_platform_order_statuses(
         team_outsource=platform.team_outsource,
     )
     try:
-        status_by_numeric_id: dict[int, str] = {}
-        pages_per_status: dict[str, int] = {}
-        for status in PrintervalApiClient.ORDER_STATUSES:
-            page_id = 0
-            for _ in range(MAX_PAGES_PER_STATUS):
-                page = client.list_status_page(status, page_size=100, page_id=page_id)
-                for row in page.orders:
-                    numeric_id = row.get("id")
-                    if isinstance(numeric_id, int):
-                        status_by_numeric_id[numeric_id] = status
-                pages_per_status[status] = page_id + 1
-                if len(page.orders) < 100:
-                    break
-                page_id += 1
-
         orders = session.query(Order).filter(Order.platform_id == platform.id).all()
         updated = 0
+        not_found = 0
         for order in orders:
-            numeric_id = _external_id_to_numeric(order.external_order_id)
-            if numeric_id is None:
+            row = client.find_order(
+                order.external_order_id, statuses=_status_guess_order(order.printerval_status)
+            )
+            if row is None:
+                not_found += 1
                 continue
-            found_status = status_by_numeric_id.get(numeric_id)
+            found_status = row.get("status")
             if found_status and found_status != order.printerval_status:
                 order.printerval_status = found_status
                 updated += 1
-            if found_status:
-                order.printerval_status_synced_at = datetime.now(UTC)
+            order.printerval_status_synced_at = datetime.now(UTC)
 
-        return {
-            "checked": len(orders),
-            "updated": updated,
-            "rows_seen": len(status_by_numeric_id),
-            "pages_per_status": pages_per_status,
-        }
+        return {"checked": len(orders), "updated": updated, "not_found": not_found}
     finally:
         if owns_client:
             client.close()
@@ -113,7 +97,14 @@ def sync_all_platforms(session: Session) -> dict[str, dict]:
             state.last_result = result
             state.last_error = None
             results[str(platform.id)] = result
-        except (PrintervalApiError, PrintervalApiConfigurationError) as exc:
+        except Exception as exc:
+            # Deliberately broad, not just PrintervalApiError/ConfigurationError: a
+            # live incident hit sqlalchemy.orm.exc.StaleDataError here (this task's
+            # manual trigger overlapped a scheduled run, both updating the same Order
+            # rows' optimistic-lock version) — an uncaught type below this except
+            # clause propagated straight out of the loop, silently skipping every
+            # platform after the failing one instead of just this one, contradicting
+            # this function's own "one platform's failure doesn't stop the others."
             session.rollback()
             state = session.get(PlatformSyncState, platform.id)
             state.last_error = str(exc)

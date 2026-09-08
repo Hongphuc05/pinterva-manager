@@ -56,7 +56,10 @@ print('Đã tạo tài khoản: admin/admin123 (Admin), designer1/designer123 (D
 
 ## 2. Khởi Chạy Web Dashboard
 
-Hệ thống hoạt động ở 2 tiến trình độc lập (Backend API & Frontend Dev Server):
+Hệ thống hoạt động ở **4 tiến trình độc lập**: Backend API, Frontend Dev Server, và
+**Celery Worker + Beat** (bắt buộc cho job nền tự động — quét đơn định kỳ và đồng bộ
+trạng thái Printerval; nút "Đồng bộ ngay" cũng cần Worker đang chạy để xử lý, nếu
+không sẽ chỉ nằm im trong hàng đợi Redis không ai xử lý).
 
 ### Tiến trình 1: Khởi chạy Backend (FastAPI Server)
 ```bash
@@ -74,6 +77,23 @@ npm install
 npm run dev
 ```
 *(Frontend Dev Server chạy tại `http://localhost:5173` — tự động proxy mọi API `/api` sang cổng 8000)*
+
+### Tiến trình 3 + 4: Khởi chạy Celery Worker & Beat (job nền)
+Mở 2 cửa sổ Terminal mới (mỗi tiến trình 1 cửa sổ riêng, hoặc `&` chạy nền):
+```bash
+cd /Users/hongphuc/Documents/01_congViec/pinterval
+source .venv/bin/activate
+celery -A app.workers.celery_app worker --loglevel=info
+```
+```bash
+cd /Users/hongphuc/Documents/01_congViec/pinterval
+source .venv/bin/activate
+celery -A app.workers.celery_app beat --loglevel=info
+```
+*(Worker xử lý task thật; Beat bắn lịch định kỳ — mặc định mỗi 300s cho cả quét đơn mới
+lẫn đồng bộ trạng thái Printerval, chỉnh qua `CRAWL_INTERVAL_SECONDS` /
+`STATUS_SYNC_INTERVAL_SECONDS` trong `.env`. Cần Redis đang chạy —
+`docker compose up -d redis` ở Bước 3.)*
 
 ---
 
@@ -95,6 +115,8 @@ npm run dev
   - Giao diện trực quan hỗ trợ phân công đơn hàng cho Designer.
 - **Bảng Tiến Độ Kanban:**
   - Theo dõi trạng thái quy trình xử lý đơn hàng từ DISCOVERED, ASSIGNED, CLAIMED_IMPORTED đến SUBMITTED, PASSED_QC.
+- **Trạng Thái Đơn (chỉ xem):**
+  - Mirror một chiều trạng thái thật trên Printerval (Waiting/Doing/Review/Fix/Confirm/Done), tự đồng bộ theo lịch + nút "Đồng bộ ngay". Không có nút đổi trạng thái ngược lại Printerval từ tab này (xem claude.md §10).
 - **Quản Lý Tài Khoản (User Management):**
   - Thêm, sửa, cấp quyền Admin / Designer cho nhân sự trong team.
 

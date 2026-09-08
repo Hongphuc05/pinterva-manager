@@ -147,3 +147,42 @@ def test_api_sync_status_run_dispatches_the_background_task(client, db_session, 
     assert resp.status_code == 200
     assert calls == [1]
 
+
+def test_api_sync_status_serializes_a_real_sync_state_row(client, db_session, monkeypatch):
+    """Regression test: SyncStatusResponse.model_validate(state) needs
+    from_attributes=True to read off the ORM object — the other sync-status tests all
+    happen to hit the `state is None` branch (constructed from kwargs instead), which
+    let this 500 slip through undetected."""
+    from datetime import UTC, datetime
+
+    from app.adapters.db.models import Platform, PlatformSyncState
+    from app.api.deps import get_current_platform_id
+
+    platform = Platform(name="P1", account_username="acc1@printerval.com")
+    db_session.add(platform)
+    db_session.flush()
+    db_session.add(
+        PlatformSyncState(
+            platform_id=platform.id,
+            is_running=False,
+            last_started_at=datetime.now(UTC),
+            last_finished_at=datetime.now(UTC),
+            last_result={"checked": 2, "updated": 1},
+        )
+    )
+    db_session.commit()
+
+    app = client.app
+    app.dependency_overrides[get_current_platform_id] = lambda: platform.id
+    _login(client, db_session, "admin")
+
+    try:
+        resp = client.get("/api/orders/sync-status")
+    finally:
+        del app.dependency_overrides[get_current_platform_id]
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["is_running"] is False
+    assert body["last_result"] == {"checked": 2, "updated": 1}
+
