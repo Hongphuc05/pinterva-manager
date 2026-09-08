@@ -15,23 +15,15 @@ def list_orders_for_user(
     designer_id: str | None = None,
     platform_id: uuid.UUID | None = None,
 ) -> list[Order]:
-    """Admin: all orders, optionally filtered. Designer: forced to only their own
-    assigned orders (any designer_id param is ignored, never trusted for a designer's
-    own view) — status/batch_id filters still apply on top of that.
+    """Admin and Designer: all platform orders, optionally filtered. Read-only for designers.
+    If designer_id is passed, filter by assigned designer.
     """
-    # An approved assignment remains the designer's active ownership through work,
-    # result submission, and QC. Draft assignments have not been approved and cancelled
-    # assignments must never grant visibility after a replacement is issued.
     query = session.query(Order)
 
     if platform_id:
         query = query.filter((Order.platform_id == platform_id) | (Order.platform_id.is_(None)))
 
-    if user.role == "designer":
-        query = query.join(Assignment, Assignment.order_id == Order.id).filter(
-            Assignment.designer_id == user.id, Assignment.status == "approved"
-        )
-    elif designer_id:
+    if designer_id:
         if designer_id == "unassigned":
             subq = session.query(Assignment.order_id).filter(Assignment.status == "approved")
             query = query.filter(Order.id.not_in(subq))
@@ -58,10 +50,7 @@ def list_orders_for_user(
 
 
 def get_order_detail_for_user(session: Session, user: User, order_id: str) -> Order | None:
-    """Admin: any order. Designer: only if they have an Assignment on it — returning
-    None either way (not 403) so a designer can't distinguish "doesn't exist" from
-    "not yours" by probing IDs.
-    """
+    """Return Order detail for Admin or Designer in platform."""
     try:
         order_uuid = uuid.UUID(order_id)
     except ValueError:
@@ -70,16 +59,6 @@ def get_order_detail_for_user(session: Session, user: User, order_id: str) -> Or
     order = session.get(Order, order_uuid)
     if order is None:
         return None
-
-    if user.role == "designer":
-        has_assignment = (
-            session.query(Assignment)
-            .filter_by(order_id=order.id, designer_id=user.id, status="approved")
-            .first()
-            is not None
-        )
-        if not has_assignment:
-            return None
 
     return order
 
