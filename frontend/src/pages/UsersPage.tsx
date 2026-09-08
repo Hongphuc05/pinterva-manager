@@ -19,6 +19,7 @@ type UserItem = {
   full_name: string
   role: string
   active: boolean
+  printerval_designer_option: string | null
   created_at: string
 }
 
@@ -39,6 +40,12 @@ export function UsersPage() {
   // Delete User Confirmation state
   const [deletingUser, setDeletingUser] = useState<UserItem | null>(null)
   const [deleting, setDeleting] = useState(false)
+
+  // Inline edit of "tên trên Printerval" (per-designer, required before assignment
+  // sync to the site can work — see app/application/assignment_sync.py)
+  const [editingUserId, setEditingUserId] = useState<string | null>(null)
+  const [editingValue, setEditingValue] = useState('')
+  const [savingPrintervalOption, setSavingPrintervalOption] = useState(false)
 
   useEffect(() => {
     loadUsers()
@@ -89,6 +96,22 @@ export function UsersPage() {
       }
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  async function handleSavePrintervalOption(userId: string) {
+    setSavingPrintervalOption(true)
+    try {
+      await apiFetch<UserItem>(`/users/${userId}/printerval-designer-option`, {
+        method: 'PATCH',
+        body: JSON.stringify({ printerval_designer_option: editingValue.trim() || null }),
+      })
+      setEditingUserId(null)
+      loadUsers()
+    } catch (err) {
+      alert(err instanceof ApiError ? err.message : 'Lỗi khi lưu tên Printerval.')
+    } finally {
+      setSavingPrintervalOption(false)
     }
   }
 
@@ -159,6 +182,7 @@ export function UsersPage() {
                     <th className="py-3.5 px-4">Tên Tài Khoản</th>
                     <th className="py-3.5 px-4">Họ Và Tên</th>
                     <th className="py-3.5 px-4">Vai Trò (Role)</th>
+                    <th className="py-3.5 px-4">Tên Trên Printerval</th>
                     <th className="py-3.5 px-4">Trạng Thái</th>
                     <th className="py-3.5 px-4">Ngày Tạo</th>
                     <th className="py-3.5 px-4 text-right">Hành Động</th>
@@ -186,6 +210,56 @@ export function UsersPage() {
                               <UserIcon className="h-3.5 w-3.5" />
                               <span>DESIGNER</span>
                             </span>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4">
+                          {isAdmin ? (
+                            <span className="text-slate-300">-</span>
+                          ) : editingUserId === u.id ? (
+                            <div className="flex items-center gap-1.5">
+                              <input
+                                autoFocus
+                                type="text"
+                                value={editingValue}
+                                onChange={(e) => setEditingValue(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleSavePrintervalOption(u.id)
+                                  if (e.key === 'Escape') setEditingUserId(null)
+                                }}
+                                placeholder="vd: Linh Designer - 2D Prin"
+                                className="px-2 py-1 text-[11px] rounded-lg border border-[#0052CC] focus:outline-none w-44 font-mono"
+                              />
+                              <button
+                                onClick={() => handleSavePrintervalOption(u.id)}
+                                disabled={savingPrintervalOption}
+                                className="p-1 rounded-md text-emerald-600 hover:bg-emerald-50 cursor-pointer disabled:opacity-50"
+                                title="Lưu"
+                              >
+                                {savingPrintervalOption ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                              </button>
+                              <button
+                                onClick={() => setEditingUserId(null)}
+                                className="p-1 rounded-md text-slate-400 hover:bg-slate-100 cursor-pointer"
+                                title="Hủy"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                setEditingUserId(u.id)
+                                setEditingValue(u.printerval_designer_option || '')
+                              }}
+                              title="Click để sửa — bắt buộc để đơn giao cho designer này tự động đồng bộ sang Printerval"
+                              className="text-left cursor-pointer hover:underline"
+                            >
+                              {u.printerval_designer_option ? (
+                                <span className="font-mono text-slate-700">{u.printerval_designer_option}</span>
+                              ) : (
+                                <span className="text-amber-600 font-semibold">+ Chưa đăng ký</span>
+                              )}
+                            </button>
                           )}
                         </td>
                         <td className="py-3.5 px-4">

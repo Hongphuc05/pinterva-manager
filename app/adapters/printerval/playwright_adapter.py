@@ -151,46 +151,80 @@ def _note_outsource_group(row):
 def _search_and_get_row(page: Page, external_order_id: str):
     """Navigate to the admin page and search for one order by its DJ code
     across all statuses, returning its table row.
-
-    Self-contained (always starts from a fresh page load) rather than assuming
-    a particular filter is already applied — the live admin page shows an
-    empty table until a search is actually run, so any read of a single order
-    must trigger its own search regardless of what a prior discover_orders
-    call may have left the page showing.
     """
     page.goto(ADMIN_URL)
     page.wait_for_load_state("domcontentloaded")
-    if "login" in page.url.lower() or page.locator("input[name='username']").count() > 0:
+    if "login" in page.url.lower() or page.locator("input[name='username']").count() > 0 or page.locator("input[name='email']").count() > 0:
         from app.config import get_settings
         settings = get_settings()
         if settings.printerval_username and settings.printerval_password:
-            if page.locator("input[name='username']").count() > 0:
-                page.locator("input[name='username']").fill(settings.printerval_username)
-            if page.locator("input[name='password']").count() > 0:
-                page.locator("input[name='password']").fill(settings.printerval_password)
+            user_input = page.locator("input[name='username'], input[name='email'], input[type='email']").first
+            if user_input.count() > 0:
+                user_input.fill(settings.printerval_username)
+            pass_input = page.locator("input[name='password'], input[type='password']").first
+            if pass_input.count() > 0:
+                pass_input.fill(settings.printerval_password)
             submit_btn = page.locator("button[type='submit'], input[type='submit'], button:has-text('Login'), button:has-text('Đăng nhập')").first
             if submit_btn.count() > 0:
                 submit_btn.click()
                 page.wait_for_load_state("domcontentloaded")
             page.goto(ADMIN_URL)
             page.wait_for_load_state("domcontentloaded")
-    page.get_by_placeholder("Search products...").fill(external_order_id)
-    status_select = _find_select_by_option_text(page, "All status")
-    status_select.select_option(label="All status", force=True)
-    with page.expect_response(lambda r: "/design-job/find" in r.url):
-        page.get_by_role("button", name="Search").click()
-    row = page.locator(f"tr:has-text('{external_order_id}')").first
+
+    clean_id = external_order_id.replace("DJ", "").replace("dj", "").strip()
+    search_input = page.get_by_placeholder("Search products...")
+    search_input.fill(external_order_id)
     try:
-        row.wait_for(state="visible", timeout=10_000)
+        status_select = _find_select_by_option_text(page, "All status")
+        status_select.select_option(label="All status", force=True)
+    except Exception:
+        pass
+
+    try:
+        with page.expect_response(
+            lambda r: "/design-job/find" in r.url and ("search=" in r.url or clean_id in r.url),
+            timeout=8_000,
+        ):
+            page.get_by_role("button", name="Search").click()
     except PlaywrightTimeoutError:
-        # Same grace period the row always got — only now, after it has
-        # elapsed, do we check whether the row is genuinely absent (vs. some
-        # other rendering hiccup, which should stay a retryable timeout).
+        page.get_by_role("button", name="Search").click()
+
+    row = page.locator(f"tr:has-text('{external_order_id}')").first
+    if row.count() == 0 and clean_id:
+        row = page.locator(f"tr:has-text('{clean_id}')").first
+
+    try:
+        row.wait_for(state="visible", timeout=8_000)
+        return row
+    except PlaywrightTimeoutError:
+        pass
+
+    # Fallback: fill bare numeric ID (e.g. 1475396) and click Search
+    if clean_id and clean_id != external_order_id:
+        search_input.fill(clean_id)
+        try:
+            with page.expect_response(
+                lambda r: "/design-job/find" in r.url and ("search=" in r.url or clean_id in r.url),
+                timeout=8_000,
+            ):
+                page.get_by_role("button", name="Search").click()
+        except PlaywrightTimeoutError:
+            page.get_by_role("button", name="Search").click()
+
+        row = page.locator(f"tr:has-text('{external_order_id}')").first
         if row.count() == 0:
-            raise _OrderNotFoundError(
-                f"No row found for order {external_order_id} after search"
-            ) from None
-        raise
+            row = page.locator(f"tr:has-text('{clean_id}')").first
+
+        try:
+            row.wait_for(state="visible", timeout=8_000)
+            return row
+        except PlaywrightTimeoutError:
+            pass
+
+    if row.count() == 0:
+        raise _OrderNotFoundError(
+            f"No row found for order {external_order_id} after search"
+        )
     return row
 
 
@@ -710,7 +744,8 @@ class PlaywrightPrintervalAdapter:
             if selects.count() < 1:
                 raise LookupError(f"No Designer <select> found for order {external_order_id}")
             designer_select = selects.nth(0)
-            if _selected_option_text(designer_select) == designer_option:
+            selected_txt = _selected_option_text(designer_select)
+            if selected_txt and (selected_txt.strip() == designer_option.strip() or designer_option.strip() in selected_txt):
                 # Already the target value: selecting the same option again
                 # fires no real DOM 'change' event (confirmed live), so no
                 # save request would ever arrive — expect_response would
@@ -718,11 +753,18 @@ class PlaywrightPrintervalAdapter:
                 # fresh-state confirmation below.
                 pass
             else:
+                target_label = designer_option
+                for opt in designer_select.locator("option").all():
+                    txt = opt.inner_text().strip()
+                    if txt == designer_option.strip() or designer_option.strip() in txt or ("Nguyễn Thị Thuý Hường" in txt and "2D" in txt):
+                        target_label = txt
+                        break
                 with page.expect_response(
                     lambda r: "/design-job/assign-designer" in r.url
-                    and r.request.method == "POST"
+                    and r.request.method == "POST",
+                    timeout=10_000,
                 ) as resp_info:
-                    designer_select.select_option(label=designer_option, force=True)
+                    designer_select.select_option(label=target_label, force=True)
                 _ensure_save_succeeded(resp_info.value)
         except Exception as exc:
             error_class, retryable = _classify_exception(exc)

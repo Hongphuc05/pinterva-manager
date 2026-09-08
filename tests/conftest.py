@@ -45,14 +45,9 @@ def db_session(engine):
 
 
 @pytest.fixture(autouse=True)
-def _truncate_tables(request):
+def _truncate_tables(engine):
     yield
-    # Pure-domain / pure-config tests need no Postgres at all; only touch (and thus
-    # only build) the `engine` fixture for tests that actually asked for the DB.
-    if "db_session" not in request.fixturenames and "engine" not in request.fixturenames:
-        return
-    eng = request.getfixturevalue("engine")
-    with eng.begin() as conn:
+    with engine.begin() as conn:
         tables = conn.execute(
             text(
                 "SELECT tablename FROM pg_tables "

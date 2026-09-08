@@ -134,10 +134,14 @@ export function OrdersListPage() {
     if (!assigningOrder || !selectedUserId) return
     setAssigning(true)
     try {
-      await apiFetch(`/orders/${assigningOrder.id}/assign`, {
-        method: 'POST',
-        body: JSON.stringify({ designer_id: selectedUserId }),
-      })
+      const res = await apiFetch<{ ok: boolean; printerval_sync_message?: string }>(
+        `/orders/${assigningOrder.id}/assign`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ designer_id: selectedUserId }),
+        }
+      )
+      if (res.printerval_sync_message) setFlash(res.printerval_sync_message)
       dismissHighlight(assigningOrder.id)
       setAssigningOrder(null)
       loadOrders()
