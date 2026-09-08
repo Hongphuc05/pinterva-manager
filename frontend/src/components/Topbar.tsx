@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { usePlatform } from '../auth/PlatformContext'
@@ -33,6 +33,15 @@ export function Topbar() {
     return 'Dashboard'
   }
 
+  // Auto-dismiss toast notification popup after 7 seconds (7000ms)
+  useEffect(() => {
+    if (!flashMessage) return
+    const timer = setTimeout(() => {
+      setFlashMessage(null)
+    }, 7000)
+    return () => clearTimeout(timer)
+  }, [flashMessage])
+
   async function handleRefreshCrawl(jobType: string) {
     setRefreshing(true)
     setFlashMessage(null)
@@ -45,11 +54,9 @@ export function Topbar() {
       setFlashMessage(res.flash)
       setIsError(res.flash.includes('thất bại') || res.flash.includes('lỗi'))
       setShowCrawlModal(false)
-      setTimeout(() => {
-        if (location.pathname === '/orders') {
-          window.location.reload()
-        }
-      }, 1500)
+
+      // Dispatch live update event so active views refresh immediately without destroying the toast popup
+      window.dispatchEvent(new CustomEvent('orders-updated'))
     } catch (e: any) {
       setIsError(true)
       setFlashMessage(e?.message || 'Quét đơn thất bại — kiểm tra cấu hình tài khoản Printerval API.')

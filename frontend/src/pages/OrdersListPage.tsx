@@ -181,6 +181,12 @@ export function OrdersListPage() {
     loadOrders().catch((e) => {
       setError(e instanceof ApiError ? e.message : 'Không tải được danh sách đơn.')
     })
+
+    function handleOrdersUpdated() {
+      loadOrders().catch(() => {})
+    }
+    window.addEventListener('orders-updated', handleOrdersUpdated)
+    return () => window.removeEventListener('orders-updated', handleOrdersUpdated)
   }, [statusFilter, batchFilter, designerFilter])
 
   // Filter client-side search & template filters
