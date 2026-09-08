@@ -4,6 +4,7 @@ import { PlatformProvider } from './auth/PlatformContext'
 import { ProtectedRoute } from './auth/ProtectedRoute'
 import { LoginPage } from './pages/LoginPage'
 import { OrdersListPage } from './pages/OrdersListPage'
+import { OrderStatusPage } from './pages/OrderStatusPage'
 import { OrderDetailPage } from './pages/OrderDetailPage'
 import { PrintervalLoginPage } from './pages/PrintervalLoginPage'
 import { AllocationBoardPage } from './pages/AllocationBoardPage'
@@ -67,6 +68,7 @@ function App() {
             }
           />
           <Route path="/kanban" element={<ProtectedRoute><KanbanPage /></ProtectedRoute>} />
+          <Route path="/order-status" element={<ProtectedRoute><OrderStatusPage /></ProtectedRoute>} />
           <Route path="/" element={<Navigate to="/orders" replace />} />
         </Routes>
         </PlatformProvider>

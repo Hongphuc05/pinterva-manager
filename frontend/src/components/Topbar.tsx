@@ -6,6 +6,7 @@ import { apiFetch } from '../api/client'
 import { Bell, LogOut, RefreshCw, CheckCircle2, AlertCircle, X, KeyRound } from 'lucide-react'
 import { PrintervalSettingsModal } from './PrintervalSettingsModal'
 import { CrawlFilterModal } from './CrawlFilterModal'
+import { useSyncStatus } from '../hooks/useSyncStatus'
 
 export function Topbar() {
   const { user, logout } = useAuth()
@@ -17,6 +18,7 @@ export function Topbar() {
   const [isError, setIsError] = useState(false)
   const [showSettingsModal, setShowSettingsModal] = useState(false)
   const [showCrawlModal, setShowCrawlModal] = useState(false)
+  const { status: syncStatus, triggerRun: triggerSyncRun } = useSyncStatus()
 
   async function handleLogout() {
     await logout()
@@ -30,6 +32,7 @@ export function Topbar() {
     if (path === '/kanban') return 'Bảng Tiến Độ Kanban'
     if (path === '/my-tasks') return 'Task Của Tôi'
     if (path === '/printerval-login') return 'Đăng Nhập Printerval'
+    if (path === '/order-status') return 'Trạng Thái Đơn'
     return 'Dashboard'
   }
 
@@ -127,6 +130,32 @@ export function Topbar() {
             </button>
           </>
         )}
+
+        {/* Status-sync indicator: green = idle/ok, red = last run errored, spins
+            while actively syncing. Doubles as the manual "refresh now" button. */}
+        <button
+          onClick={() => triggerSyncRun().catch(() => {})}
+          disabled={!!syncStatus?.is_running}
+          title={
+            syncStatus?.is_running
+              ? 'Đang đồng bộ trạng thái đơn từ Printerval...'
+              : syncStatus?.last_error
+              ? `Lần đồng bộ trước lỗi: ${syncStatus.last_error}`
+              : 'Bấm để đồng bộ ngay trạng thái đơn từ Printerval'
+          }
+          className="relative p-2 rounded-lg text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer disabled:cursor-wait"
+        >
+          <RefreshCw className={`h-5 w-5 ${syncStatus?.is_running ? 'animate-spin text-[#0052CC]' : ''}`} />
+          <span
+            className={`absolute top-1.5 right-1.5 h-2 w-2 rounded-full ring-2 ring-white ${
+              syncStatus?.is_running
+                ? 'bg-[#0052CC] animate-pulse'
+                : syncStatus?.last_error
+                ? 'bg-red-500'
+                : 'bg-emerald-500'
+            }`}
+          />
+        </button>
 
         {/* Bell Notifications */}
         <div className="relative">

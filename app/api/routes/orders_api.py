@@ -45,6 +45,10 @@ class OrderSummaryOut(BaseModel):
     template_jobs: list[dict] | None = None
     deadline_at_ext: datetime | None = None
     created_at: datetime
+    # Read-only mirror of Printerval's own site status — never written back to the
+    # site from here (see app/application/status_sync.py).
+    printerval_status: str | None = None
+    printerval_status_synced_at: datetime | None = None
 
 
 class OrdersListResponse(BaseModel):
@@ -91,6 +95,14 @@ class OrderDetailResponse(BaseModel):
 class RefreshResponse(BaseModel):
     flash: str
     summary: dict | None = None
+
+
+class SyncStatusResponse(BaseModel):
+    is_running: bool
+    last_started_at: datetime | None = None
+    last_finished_at: datetime | None = None
+    last_result: dict | None = None
+    last_error: str | None = None
 
 
 class RefreshRequest(BaseModel):
@@ -150,6 +162,38 @@ def api_orders_list(
         out_list.append(item)
 
     return OrdersListResponse(orders=out_list)
+
+
+# Declared before /orders/{order_id} — a literal path segment after a path-param
+# route of the same method would otherwise never be reached (FastAPI/Starlette
+# matches routes in declaration order; "sync-status" would be swallowed as order_id).
+@router.get("/orders/sync-status", response_model=SyncStatusResponse)
+def api_orders_sync_status(
+    user: User = Depends(get_current_user),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    from app.adapters.db.models import PlatformSyncState
+
+    state = db.get(PlatformSyncState, platform_id)
+    if state is None:
+        return SyncStatusResponse(is_running=False)
+    return SyncStatusResponse.model_validate(state)
+
+
+@router.post("/orders/sync-status/run", response_model=SyncStatusResponse)
+def api_orders_sync_status_run(
+    user: User = Depends(require_role("admin")),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    """Manual "refresh now" — dispatches the same read-only status-mirror job the
+    background schedule runs, for the current platform's row specifically, and
+    returns immediately (the frontend polls GET .../sync-status to see it finish)."""
+    from app.workers.status_sync_tasks import sync_order_statuses
+
+    sync_order_statuses.delay()
+    return api_orders_sync_status(user=user, platform_id=platform_id, db=db)
 
 
 @router.get("/orders/{order_id}", response_model=OrderDetailResponse)
@@ -223,11 +267,14 @@ def api_orders_refresh(
             password=crawl_password,
             team_outsource=crawl_team_outsource,
         ) as api_client:
-            # headless=True here fights Cloudflare (claude.md §16 — confirmed
-            # Chromium headless gets 403'd; real Chrome, non-headless, is what got
-            # past it) and was the actual cause of a live incident: both new orders'
-            # claim_batch calls timed out (TRANSIENT_NETWORK) instead of claiming.
-            with playwright_session(profile_dir=profile_dir, headless=False) as page:
+            # ponytail: headless=True per explicit operator request (no visible Chrome
+            # window popping up on every crawl) — accepting real risk: claude.md §16
+            # documents Chromium headless getting 403'd by Cloudflare, and this exact
+            # config caused a live incident (both new orders' claim_batch calls timed
+            # out instead of claiming). find_unclaimed_order_ids now retries a failed
+            # claim on the next cycle, so a headless-caused failure is not permanent —
+            # just slower to actually land. Flip to False if claims keep failing.
+            with playwright_session(profile_dir=profile_dir, headless=True) as page:
                 fallback = PlaywrightPrintervalAdapter(
                     page=page,
                     crawl_username=crawl_username,

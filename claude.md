@@ -280,6 +280,14 @@ version.
 - **Telegram không còn trong V1.** Có thể thêm lại ở V2 làm kênh **thông báo phụ**
   (push notification khi có task mới/QC mới) — không có nút bấm thao tác, mọi hành động
   vẫn bắt buộc làm trên web.
+- **Tab "Trạng Thái Đơn" (2026-09-08, đã chốt):** mirror **một chiều, chỉ đọc** trạng
+  thái thật trên Printerval (`Order.printerval_status`, 6 giá trị waiting/doing/review/
+  fix/confirm/done) vào web, đồng bộ bằng job nền theo lịch (`status_sync_interval_seconds`,
+  mặc định 300s, xem `app/application/status_sync.py`) + nút "Đồng bộ ngay" thủ công.
+  **Không có** nút đổi trạng thái/gán designer từ tab này ghi ngược lên Printerval —
+  đã cân nhắc và từ chối phương án đó vì vi phạm trực tiếp bất biến #5/#7 và §3 C5
+  ("chỉ Approve QC mới bao giờ chạm tới Printerval"). Muốn đổi gì thật vẫn phải qua
+  Allocation (C2/C3) và QC (C5) như cũ.
 
 ## 11. Error handling, retry và reconciliation
 

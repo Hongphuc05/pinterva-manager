@@ -13,6 +13,14 @@ def test_celery_app_has_crawl_beat_schedule():
     assert entry["schedule"] == 300  # default CRAWL_INTERVAL_SECONDS from Task 1
 
 
+def test_celery_app_has_status_sync_beat_schedule():
+    schedule = celery_app.conf.beat_schedule
+    assert "sync-order-statuses" in schedule
+    entry = schedule["sync-order-statuses"]
+    assert entry["task"] == "app.workers.status_sync_tasks.sync_order_statuses"
+    assert entry["schedule"] == 300  # default STATUS_SYNC_INTERVAL_SECONDS
+
+
 def test_run_crawl_cycle_discovers_claims_and_imports_in_order(db_session):
     adapter = FakePrintervalAdapter()
     adapter.add_order(

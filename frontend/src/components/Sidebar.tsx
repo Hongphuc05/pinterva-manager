@@ -1,15 +1,16 @@
 import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
-import { 
-  ListOrdered, 
-  Kanban, 
-  Columns3, 
-  Globe, 
-  CheckSquare, 
+import {
+  ListOrdered,
+  Kanban,
+  Columns3,
+  Globe,
+  CheckSquare,
   PackageCheck,
   UserCheck,
   ShieldAlert,
-  Users
+  Users,
+  Radio
 } from 'lucide-react'
 
 export function Sidebar() {
@@ -24,6 +25,7 @@ export function Sidebar() {
     { label: 'Danh Sách Đơn Hàng', path: '/orders', icon: ListOrdered },
     { label: 'Phân Bổ Kéo-Thả', path: '/allocation', icon: Kanban },
     { label: 'Bảng Tiến Độ Kanban', path: '/kanban', icon: Columns3 },
+    { label: 'Trạng Thái Đơn', path: '/order-status', icon: Radio },
     { label: 'Quản Lý Tài Khoản', path: '/users', icon: Users },
     { label: 'Đăng Nhập Printerval', path: '/printerval-login', icon: Globe },
   ]

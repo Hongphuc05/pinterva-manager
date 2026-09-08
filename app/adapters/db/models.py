@@ -110,6 +110,16 @@ class Order(Base):
     custom_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     template_jobs: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     design_tool_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    # Printerval's own live site status (waiting/doing/review/fix/confirm/done — the 6
+    # literal values live-confirmed 2026-09-08, see PrintervalApiClient.ORDER_STATUSES)
+    # — a READ-ONLY mirror kept in sync by a scheduled job + manual refresh, distinct
+    # from `state` (our own internal workflow state machine, claude.md §5). Nothing in
+    # this app ever writes this value back to Printerval; see claude.md §2 invariant #5
+    # and §3 C5 — only a QC Approve decision's own job is allowed to write site state.
+    printerval_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    printerval_status_synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -275,3 +285,18 @@ class DeadLetter(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class PlatformSyncState(Base):
+    """One row per platform, tracking the background order-status sync job (read-only
+    mirror of Printerval's own status, see Order.printerval_status) — lets the web
+    dashboard show a live "syncing / idle" indicator without polling Celery directly."""
+
+    __tablename__ = "platform_sync_state"
+
+    platform_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("platforms.id"), primary_key=True)
+    is_running: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    last_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(1024), nullable=True)

@@ -120,3 +120,30 @@ def test_api_bulk_assign_orders(client, db_session):
     assert resp.json()["ok"] is True
     assert resp.json()["assigned_count"] == 2
 
+
+def test_api_sync_status_defaults_to_not_running_when_never_synced(client, db_session):
+    _login(client, db_session, "admin")
+    resp = client.get("/api/orders/sync-status")
+    assert resp.status_code == 200
+    assert resp.json()["is_running"] is False
+    assert resp.json()["last_finished_at"] is None
+
+
+def test_api_sync_status_run_requires_admin(client, db_session):
+    _login(client, db_session, "designer")
+    resp = client.post("/api/orders/sync-status/run")
+    assert resp.status_code == 403
+
+
+def test_api_sync_status_run_dispatches_the_background_task(client, db_session, monkeypatch):
+    from app.workers import status_sync_tasks
+
+    calls = []
+    monkeypatch.setattr(status_sync_tasks.sync_order_statuses, "delay", lambda: calls.append(1))
+    _login(client, db_session, "admin")
+
+    resp = client.post("/api/orders/sync-status/run")
+
+    assert resp.status_code == 200
+    assert calls == [1]
+

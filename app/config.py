@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     session_max_age_seconds: int = 60 * 60 * 12
     redis_url: str = "redis://localhost:6379/0"
     crawl_interval_seconds: int = 300
+    # How often the read-only Printerval-status mirror (Order.printerval_status)
+    # refreshes in the background — separate from crawl_interval_seconds since it's a
+    # much cheaper, purely-read HTTP job (no Playwright), safe to run more often.
+    status_sync_interval_seconds: int = 300
     # These are server-side credentials only.  The SPA must never receive them.
     # They stay optional here so a normal local/test boot does not require a live
     # Printerval account; PrintervalApiClient validates them when it is used.
