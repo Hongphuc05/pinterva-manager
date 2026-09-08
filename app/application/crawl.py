@@ -96,6 +96,14 @@ def discover_waiting_orders_with_summaries(
                 existing_order.sku = summary.sku
             if not existing_order.product_category and summary.product_category:
                 existing_order.product_category = summary.product_category
+            if summary.sku_image_url:
+                existing_order.sku_image_url = summary.sku_image_url
+            if summary.external_order_url:
+                existing_order.external_order_url = summary.external_order_url
+            if summary.source_files:
+                existing_order.source_files = summary.source_files
+            if summary.source_download_all_url:
+                existing_order.source_download_all_url = summary.source_download_all_url
             if summary.template_jobs:
                 existing_order.template_jobs = summary.template_jobs
                 existing_order.has_template = True
@@ -195,6 +203,10 @@ def claim_batch(
                     thumbnail_url=summary.thumbnail_url if summary else None,
                     sku=summary.sku if summary else None,
                     product_category=summary.product_category if summary else None,
+                    sku_image_url=summary.sku_image_url if summary else None,
+                    external_order_url=summary.external_order_url if summary else None,
+                    source_files=summary.source_files if summary else None,
+                    source_download_all_url=summary.source_download_all_url if summary else None,
                     template_jobs=summary.template_jobs if summary else None,
                     has_template=summary.has_template if summary else False,
                 )
@@ -350,6 +362,14 @@ def import_claimed_orders(session: Session, adapter: PrintervalAdapter) -> dict:
                 detail_result.custom_config.model_dump() if detail_result.custom_config else None
             )
             order.design_tool_url = detail_result.design_tool_url
+            if detail_result.sku_image_url:
+                order.sku_image_url = detail_result.sku_image_url
+            if detail_result.external_order_url:
+                order.external_order_url = detail_result.external_order_url
+            if detail_result.source_files:
+                order.source_files = detail_result.source_files
+            if detail_result.source_download_all_url:
+                order.source_download_all_url = detail_result.source_download_all_url
 
             apply_transition(
                 session,

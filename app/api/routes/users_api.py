@@ -21,6 +21,7 @@ class UserOut(BaseModel):
     role: str
     active: bool
     platform_id: str | None = None
+    printerval_designer_option: str | None = None
     created_at: datetime
 
 
@@ -50,6 +51,7 @@ def list_users(
             role=u.role,
             active=u.active,
             platform_id=str(u.platform_id) if u.platform_id else None,
+            printerval_designer_option=u.printerval_designer_option,
             created_at=u.created_at,
         )
         for u in users
@@ -109,6 +111,48 @@ def create_user(
         active=new_user.active,
         platform_id=str(new_user.platform_id) if new_user.platform_id else None,
         created_at=new_user.created_at,
+    )
+
+
+class UpdatePrintervalDesignerOptionRequest(BaseModel):
+    printerval_designer_option: str | None = None
+
+
+@router.patch("/users/{user_id}/printerval-designer-option", response_model=UserOut)
+def update_printerval_designer_option(
+    user_id: str,
+    payload: UpdatePrintervalDesignerOptionRequest,
+    current_admin: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    """The exact visible label this designer is registered under in Printerval's own
+    per-team Designer <select> — required before any order assigned to them can sync
+    to the site (app/application/assignment_sync.py). Free text, not validated against
+    a live list: a wrong value fails loudly on the next sync attempt (dead-lettered,
+    EXTERNAL_CHANGED) rather than being guessed or silently rejected here."""
+    try:
+        target_uuid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mã người dùng không hợp lệ.")
+
+    target_user = db.get(User, target_uuid)
+    if target_user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy người dùng.")
+
+    value = payload.printerval_designer_option.strip() if payload.printerval_designer_option else None
+    target_user.printerval_designer_option = value or None
+    db.commit()
+    db.refresh(target_user)
+
+    return UserOut(
+        id=str(target_user.id),
+        username=target_user.username,
+        full_name=target_user.full_name,
+        role=target_user.role,
+        active=target_user.active,
+        platform_id=str(target_user.platform_id) if target_user.platform_id else None,
+        printerval_designer_option=target_user.printerval_designer_option,
+        created_at=target_user.created_at,
     )
 
 

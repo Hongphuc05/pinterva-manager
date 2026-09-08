@@ -49,9 +49,19 @@ class TaskOrderOut(BaseModel):
     product_name: str | None
     thumbnail_url: str | None
     sku: str | None
+    product_category: str | None = None
+    product_variants: list[dict] | None = None
+    has_template: bool = False
+    template_jobs: list[dict] | None = None
     deadline_at_ext: str | None
+    note_outsource: str | None = None
     order_note: str
     custom_config: dict | None
+    sku_image_url: str | None = None
+    external_order_url: str | None = None
+    source_files: list[dict] | None = None
+    source_download_all_url: str | None = None
+    design_tool_url: str | None = None
 
 
 class DesignerTaskOut(BaseModel):

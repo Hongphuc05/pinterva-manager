@@ -1,7 +1,10 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 import { ApiError, apiFetch } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { DashboardLayout } from '../components/DashboardLayout'
+import { SourceFilesCard, type SourceFile } from '../components/SourceFilesCard'
+import { TemplateModal, type TemplateJob } from '../components/TemplateModal'
 import { 
   CheckSquare, 
   Clock, 
@@ -32,9 +35,19 @@ type Task = {
     product_name: string | null
     thumbnail_url: string | null
     sku: string | null
+    product_category: string | null
+    product_variants: { name: string; value: string }[] | null
+    has_template: boolean
+    template_jobs: TemplateJob[] | null
     deadline_at_ext: string | null
+    note_outsource: string | null
     order_note: string
     custom_config: Record<string, unknown> | null
+    sku_image_url: string | null
+    external_order_url: string | null
+    source_files: SourceFile[] | null
+    source_download_all_url: string | null
+    design_tool_url: string | null
   }
   result_versions: ResultVersion[]
 }
@@ -95,6 +108,8 @@ export function MyTasksPage() {
     }
   }
 
+  const [activeTemplateJobs, setActiveTemplateJobs] = useState<{ jobs: TemplateJob[]; orderId: string } | null>(null)
+
   if (user?.role !== 'designer') {
     return (
       <DashboardLayout>
@@ -109,6 +124,14 @@ export function MyTasksPage() {
 
   return (
     <DashboardLayout>
+      {/* Template Modal */}
+      <TemplateModal
+        isOpen={!!activeTemplateJobs}
+        onClose={() => setActiveTemplateJobs(null)}
+        templateJobs={activeTemplateJobs?.jobs}
+        orderId={activeTemplateJobs?.orderId}
+      />
+
       {/* Header Info */}
       <div className="rounded-xl border border-[hsl(var(--border))] bg-white p-5 shadow-xs flex items-center justify-between">
         <div>
@@ -165,8 +188,34 @@ export function MyTasksPage() {
                   )}
 
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <h3 className="font-mono text-base font-bold text-[#0052CC]">{task.order.external_order_id}</h3>
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div className="flex items-center gap-2">
+                        <Link to={`/orders/${task.order.id}`} className="font-mono text-base font-bold text-[#0052CC] hover:underline">
+                          {task.order.external_order_id}
+                        </Link>
+                        {task.order.sku_image_url && (
+                          <a
+                            href={task.order.sku_image_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs font-bold text-[#0052CC] hover:underline flex items-center gap-0.5 px-2 py-0.5 rounded bg-blue-50 border border-blue-100"
+                          >
+                            <span>Image</span>
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                        )}
+                        {task.order.external_order_url && (
+                          <a
+                            href={task.order.external_order_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs font-bold text-[#0052CC] hover:underline flex items-center gap-0.5 px-2 py-0.5 rounded bg-blue-50 border border-blue-100"
+                          >
+                            <span>Order</span>
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                        )}
+                      </div>
                       <span className="text-xs font-semibold px-2.5 py-1 rounded-md bg-slate-100 text-slate-700 border border-slate-200">
                         {task.order.state}
                       </span>
@@ -176,14 +225,32 @@ export function MyTasksPage() {
                       {task.order.product_name ?? task.order.sku ?? 'Đơn thiết kế 2D'}
                     </p>
 
-                    {task.order.deadline_at_ext && (
-                      <p className="text-xs text-slate-500 font-mono flex items-center gap-1.5 mt-2">
-                        <Clock className="h-3.5 w-3.5 text-amber-600" />
-                        <span>Deadline: {new Date(task.order.deadline_at_ext).toLocaleString('vi-VN')}</span>
-                      </p>
-                    )}
+                    <div className="flex flex-wrap items-center gap-4 mt-2 text-xs text-slate-500 font-mono">
+                      {task.order.deadline_at_ext && (
+                        <span className="flex items-center gap-1">
+                          <Clock className="h-3.5 w-3.5 text-amber-600" />
+                          <span>Deadline: {new Date(task.order.deadline_at_ext).toLocaleString('vi-VN')}</span>
+                        </span>
+                      )}
+                      {task.order.template_jobs && task.order.template_jobs.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setActiveTemplateJobs({ jobs: task.order.template_jobs!, orderId: task.order.external_order_id })}
+                          className="inline-flex items-center gap-1 px-2.5 py-0.5 text-xs font-bold text-white bg-[#0052CC] hover:bg-[#0041A3] rounded-md transition-colors cursor-pointer"
+                        >
+                          <FileText className="h-3 w-3" />
+                          <span>Xem template</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
+
+                {/* Customer Source Files */}
+                <SourceFilesCard
+                  sourceFiles={task.order.source_files}
+                  downloadAllUrl={task.order.source_download_all_url}
+                />
 
                 {/* Order Note */}
                 {task.order.order_note && (

@@ -17,6 +17,10 @@ class OrderSummary(BaseModel):
     template_jobs: list[dict] | None = None
     sku: str | None = None
     product_category: str | None = None
+    sku_image_url: str | None = None
+    external_order_url: str | None = None
+    source_files: list[dict] | None = None
+    source_download_all_url: str | None = None
 
 
 class DiscoverResult(AdapterResult):
@@ -61,6 +65,10 @@ class OrderDetailResult(AdapterResult):
     custom_config: CustomConfig | None = None
     template_jobs: list[dict] | None = None
     design_tool_url: str | None = None
+    sku_image_url: str | None = None
+    external_order_url: str | None = None
+    source_files: list[dict] | None = None
+    source_download_all_url: str | None = None
 
 
 class WriteResult(AdapterResult):

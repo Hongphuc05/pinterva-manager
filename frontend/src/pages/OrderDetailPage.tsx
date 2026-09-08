@@ -4,6 +4,7 @@ import { apiFetch, ApiError } from '../api/client'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { ImageModal } from '../components/ImageModal'
 import { TemplateModal, type TemplateJob } from '../components/TemplateModal'
+import { SourceFilesCard, type SourceFile } from '../components/SourceFilesCard'
 import { getStatusInfo } from '../utils/statusTranslation'
 import { 
   ArrowLeft, 
@@ -36,6 +37,10 @@ type OrderDetail = {
   template_jobs: TemplateJob[] | null
   assigned_designer_name: string | null
   design_tool_url: string | null
+  sku_image_url: string | null
+  external_order_url: string | null
+  source_files: SourceFile[] | null
+  source_download_all_url: string | null
   created_at: string
 }
 
@@ -158,11 +163,63 @@ export function OrderDetailPage() {
                 <span>SKU: <strong className="text-slate-700">{order.sku ?? '-'}</strong></span>
                 <span>•</span>
                 <span>Category: <strong className="text-slate-700">{order.product_category ?? '-'}</strong></span>
+                {order.sku_image_url && (
+                  <>
+                    <span>•</span>
+                    <a
+                      href={order.sku_image_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-bold text-[#0052CC] hover:underline flex items-center gap-1"
+                    >
+                      <span>Image</span>
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </>
+                )}
+                {order.external_order_url && (
+                  <>
+                    <span>•</span>
+                    <a
+                      href={order.external_order_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-bold text-[#0052CC] hover:underline flex items-center gap-1"
+                    >
+                      <span>Order</span>
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </>
+                )}
               </div>
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-3 shrink-0">
+            {order.sku_image_url && (
+              <a
+                href={order.sku_image_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-[#0052CC] bg-blue-50 hover:bg-blue-100 rounded-xl transition-colors border border-blue-200"
+              >
+                <span>Image Link</span>
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            )}
+
+            {order.external_order_url && (
+              <a
+                href={order.external_order_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-[#0052CC] bg-blue-50 hover:bg-blue-100 rounded-xl transition-colors border border-blue-200"
+              >
+                <span>Order Link</span>
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            )}
+
             {order.template_jobs && order.template_jobs.length > 0 && (
               <button
                 onClick={() => setShowTemplateModal(true)}
@@ -221,6 +278,12 @@ export function OrderDetailPage() {
             </p>
           </div>
         </div>
+
+        {/* Customer Source Files */}
+        <SourceFilesCard
+          sourceFiles={order.source_files}
+          downloadAllUrl={order.source_download_all_url}
+        />
 
         {/* Notes */}
         {(order.order_note || order.note_outsource) && (

@@ -477,6 +477,56 @@ class PlaywrightPrintervalAdapter:
             design_tool_link.first.get_attribute("href") if design_tool_link.count() > 0 else None
         )
 
+        sku_image_url = None
+        img_link = row.locator("a:has-text('Image')").first
+        if img_link.count() > 0:
+            sku_image_url = img_link.get_attribute("ng-href") or img_link.get_attribute("href")
+            if sku_image_url:
+                sku_image_url = sku_image_url.strip()
+
+        external_order_url = None
+        order_link = row.locator("a:has-text('Order')").first
+        if order_link.count() > 0:
+            raw_order_href = order_link.get_attribute("ng-href") or order_link.get_attribute("href")
+            if raw_order_href:
+                raw_order_href = raw_order_href.strip()
+                if raw_order_href.startswith("/"):
+                    external_order_url = f"https://printerval.com{raw_order_href}"
+                else:
+                    external_order_url = raw_order_href
+
+        source_files: list[dict] = []
+        source_download_all_url = None
+
+        source_container = row.locator(".djcfg-card:has-text('SOURCE'), .source-card, div:has(h5:has-text('SOURCE')), .note:has-text('SOURCE')").first
+        if source_container.count() > 0:
+            for s_link in source_container.locator("a[href]").all():
+                text = s_link.inner_text().strip()
+                href = s_link.get_attribute("href") or s_link.get_attribute("ng-href")
+                if not href:
+                    continue
+                href = href.strip()
+                if "download tất cả" in text.lower() or "download" in text.lower() or "download" in href.lower():
+                    if not source_download_all_url:
+                        source_download_all_url = href
+                else:
+                    name = text or href.split("/")[-1]
+                    if not any(f["url"] == href for f in source_files):
+                        source_files.append({"name": name, "url": href})
+
+            dl_btn = source_container.locator("a:has-text('Download tất cả'), button:has-text('Download tất cả')").first
+            if dl_btn.count() > 0 and not source_download_all_url:
+                source_download_all_url = dl_btn.get_attribute("href") or dl_btn.get_attribute("ng-href")
+
+        if not source_files:
+            for s_link in row.locator("a[href*='screenshot'], a[href*='assets.printerval.com']").all():
+                href = s_link.get_attribute("href") or s_link.get_attribute("ng-href")
+                text = s_link.inner_text().strip()
+                if href and text.lower() != "image":
+                    name = text or href.split("/")[-1]
+                    if not any(f["url"] == href for f in source_files):
+                        source_files.append({"name": name, "url": href.strip()})
+
         template_jobs = None
         if has_template:
             template_jobs = self._extract_template_jobs_from_modal(row)
@@ -506,6 +556,10 @@ class PlaywrightPrintervalAdapter:
             priority_label=priority_label,
             custom_config=_extract_custom_config(row),
             design_tool_url=design_tool_url,
+            sku_image_url=sku_image_url,
+            external_order_url=external_order_url,
+            source_files=source_files if source_files else None,
+            source_download_all_url=source_download_all_url,
         )
 
     def _extract_template_jobs_from_modal(self, row) -> list[dict] | None:

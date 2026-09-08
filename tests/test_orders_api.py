@@ -121,6 +121,73 @@ def test_api_bulk_assign_orders(client, db_session):
     assert resp.json()["assigned_count"] == 2
 
 
+def test_api_assign_order_skips_printerval_sync_when_designer_not_registered(client, db_session, monkeypatch):
+    """Designer has no printerval_designer_option -> must not enqueue anything, and
+    say so plainly rather than silently doing nothing."""
+    from app.workers import assignment_sync_tasks
+
+    calls = []
+    monkeypatch.setattr(assignment_sync_tasks.sync_assignment_to_printerval_task, "delay", lambda *a: calls.append(a))
+    _login(client, db_session, "admin", "assign_admin1")
+    designer = User(username="des2", full_name="Chưa Đăng Ký", role="designer", password_hash="hash")
+    order = Order(external_order_id="A1", state=OrderState.DISCOVERED.value)
+    db_session.add_all([designer, order])
+    db_session.commit()
+
+    resp = client.post(f"/api/orders/{order.id}/assign", json={"designer_id": str(designer.id)})
+
+    assert resp.status_code == 200
+    assert calls == []
+    assert "CHƯA có tên đăng ký trên Printerval" in resp.json()["printerval_sync_message"]
+
+
+def test_api_assign_order_enqueues_printerval_sync_when_designer_registered(client, db_session, monkeypatch):
+    from app.workers import assignment_sync_tasks
+
+    calls = []
+    monkeypatch.setattr(assignment_sync_tasks.sync_assignment_to_printerval_task, "delay", lambda *a: calls.append(a))
+    _login(client, db_session, "admin", "assign_admin2")
+    designer = User(
+        username="des3", full_name="Linh Designer", role="designer", password_hash="hash",
+        printerval_designer_option="Linh Designer - 2D Prin",
+    )
+    order = Order(external_order_id="A2", state=OrderState.DISCOVERED.value)
+    db_session.add_all([designer, order])
+    db_session.commit()
+
+    resp = client.post(f"/api/orders/{order.id}/assign", json={"designer_id": str(designer.id)})
+
+    assert resp.status_code == 200
+    assert calls == [(str(order.id), str(designer.id))]
+    assert "đang đồng bộ sang Printerval" in resp.json()["printerval_sync_message"]
+
+
+def test_api_bulk_assign_orders_enqueues_printerval_sync_per_order_when_registered(client, db_session, monkeypatch):
+    from app.workers import assignment_sync_tasks
+
+    calls = []
+    monkeypatch.setattr(assignment_sync_tasks.sync_assignment_to_printerval_task, "delay", lambda *a: calls.append(a))
+    _login(client, db_session, "admin", "bulk_admin2")
+    designer = User(
+        username="des4", full_name="Linh Designer", role="designer", password_hash="hash",
+        printerval_designer_option="Linh Designer - 2D Prin",
+    )
+    order1 = Order(external_order_id="C1", state=OrderState.DISCOVERED.value)
+    order2 = Order(external_order_id="C2", state=OrderState.DISCOVERED.value)
+    db_session.add_all([designer, order1, order2])
+    db_session.commit()
+
+    resp = client.post(
+        "/api/orders/bulk-assign",
+        json={"order_ids": [str(order1.id), str(order2.id)], "designer_id": str(designer.id)},
+    )
+
+    assert resp.status_code == 200
+    assert len(calls) == 2
+    assert {c[0] for c in calls} == {str(order1.id), str(order2.id)}
+    assert "đồng bộ sang Printerval" in resp.json()["message"]
+
+
 def test_api_sync_status_defaults_to_not_running_when_never_synced(client, db_session):
     _login(client, db_session, "admin")
     resp = client.get("/api/orders/sync-status")

@@ -10,7 +10,11 @@ celery_app = Celery(
     "pinterval_ops",
     broker=_settings.redis_url,
     backend=_settings.redis_url,
-    include=["app.workers.crawl_tasks", "app.workers.status_sync_tasks"],
+    include=[
+        "app.workers.crawl_tasks",
+        "app.workers.status_sync_tasks",
+        "app.workers.assignment_sync_tasks",
+    ],
 )
 
 celery_app.conf.beat_schedule = {

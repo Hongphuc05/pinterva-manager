@@ -49,6 +49,10 @@ class OrderSummaryOut(BaseModel):
     # site from here (see app/application/status_sync.py).
     printerval_status: str | None = None
     printerval_status_synced_at: datetime | None = None
+    sku_image_url: str | None = None
+    external_order_url: str | None = None
+    source_files: list[dict] | None = None
+    source_download_all_url: str | None = None
 
 
 class OrdersListResponse(BaseModel):
@@ -77,6 +81,10 @@ class OrderDetailOut(BaseModel):
     template_jobs: list[dict] | None = None
     assigned_designer_name: str | None = None
     design_tool_url: str | None
+    sku_image_url: str | None = None
+    external_order_url: str | None = None
+    source_files: list[dict] | None = None
+    source_download_all_url: str | None = None
     created_at: datetime
 
 
@@ -334,6 +342,24 @@ class AssignOrderRequest(BaseModel):
     designer_id: str
 
 
+def _trigger_printerval_assignment_sync(order: Order, designer: User) -> str:
+    """Enqueues the background job that mirrors this assignment onto Printerval (set
+    Designer + status=Doing) — never runs inline (Playwright is slow), never touches
+    our own state machine (claude.md §5 — the designer's own "Bắt đầu" action still
+    owns ASSIGNED -> IN_PROGRESS). Returns a short status message for the response,
+    it does not wait for the sync itself to finish."""
+    if not designer.printerval_designer_option:
+        return (
+            f"Đã phân công nội bộ cho {designer.full_name or designer.username}. "
+            "Designer này CHƯA có tên đăng ký trên Printerval (xem Quản Lý Tài Khoản) "
+            "nên KHÔNG đồng bộ sang Printerval — chỉ lưu nội bộ."
+        )
+    from app.workers.assignment_sync_tasks import sync_assignment_to_printerval_task
+
+    sync_assignment_to_printerval_task.delay(str(order.id), str(designer.id))
+    return "Đã phân công nội bộ, đang đồng bộ sang Printerval trong nền (Doing + đổi Designer)."
+
+
 @router.post("/orders/{order_id}/assign")
 def api_assign_order(
     order_id: str,
@@ -373,7 +399,13 @@ def api_assign_order(
 
     order.state = OrderState.ASSIGNED.value
     db.commit()
-    return {"ok": True, "assigned_designer_name": designer.full_name or designer.username}
+
+    synced_message = _trigger_printerval_assignment_sync(order, designer)
+    return {
+        "ok": True,
+        "assigned_designer_name": designer.full_name or designer.username,
+        "printerval_sync_message": synced_message,
+    }
 
 
 class BulkAssignOrdersRequest(BaseModel):
@@ -436,11 +468,21 @@ def api_bulk_assign_orders(
         updated_count += 1
 
     db.commit()
+
+    message = f"Đã phân công thành công {updated_count} đơn hàng cho {designer.full_name or designer.username}."
+    if designer.printerval_designer_option:
+        for order in orders:
+            _trigger_printerval_assignment_sync(order, designer)
+        message += " Đang đồng bộ sang Printerval trong nền (Doing + đổi Designer)."
+    else:
+        message += (
+            " Designer này CHƯA có tên đăng ký trên Printerval nên KHÔNG đồng bộ sang site — chỉ lưu nội bộ."
+        )
     return {
         "ok": True,
         "assigned_count": updated_count,
         "designer_name": designer.full_name or designer.username,
-        "message": f"Đã phân công thành công {updated_count} đơn hàng cho {designer.full_name or designer.username}.",
+        "message": message,
     }
 
 

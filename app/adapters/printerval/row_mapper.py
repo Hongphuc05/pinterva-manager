@@ -129,17 +129,76 @@ def parse_product_summary_fields(row: dict[str, Any]) -> tuple[str, str | None, 
     return product_name, sku, category
 
 
+def extract_sku_image_url(row: dict[str, Any]) -> str | None:
+    meta = _meta_data(row)
+    sku_data = _first_sku_data(meta)
+    if sku_data:
+        url = sku_data.get("image_url")
+        if isinstance(url, str) and url.strip():
+            return url.strip()
+    raw = row.get("sku_image_url") or row.get("image_url")
+    return str(raw).strip() if isinstance(raw, str) and raw.strip() else None
+
+
+def extract_external_order_url(row: dict[str, Any]) -> str | None:
+    meta = _meta_data(row)
+    sku_data = _first_sku_data(meta)
+    order_id = (sku_data.get("order_id") if sku_data else None) or row.get("order_id") or row.get("id")
+    if order_id:
+        order_id_str = str(order_id).strip()
+        if order_id_str.startswith("http"):
+            return order_id_str
+        return f"https://printerval.com/admin/orders?id={order_id_str}"
+    raw = row.get("external_order_url") or row.get("order_url")
+    return str(raw).strip() if isinstance(raw, str) and raw.strip() else None
+
+
 def extract_source_asset_url(row: dict[str, Any]) -> str | None:
-    """The customer's own personalization source image — download_asset's target.
-    Only present for personalized (`is_custom_design`) orders, matching the
-    Playwright fallback's identical "no personalized source file" contract."""
-    if not row.get("is_custom_design"):
-        return None
-    sku_data = _first_sku_data(_meta_data(row))
-    if not sku_data:
-        return None
-    url = sku_data.get("image_url")
-    return url.strip() if isinstance(url, str) and url.strip() else None
+    meta = _meta_data(row)
+    sku_data = _first_sku_data(meta)
+    if sku_data and sku_data.get("configurations"):
+        url = sku_data.get("image_url")
+        if isinstance(url, str) and url.strip():
+            return url.strip()
+    raw = row.get("source_asset_url") or row.get("source_url")
+    return str(raw).strip() if isinstance(raw, str) and raw.strip() else None
+
+
+def extract_source_files(row: dict[str, Any]) -> list[dict[str, str]] | None:
+    """Extract list of customer uploaded source images/files."""
+    sources: list[dict[str, str]] = []
+    
+    # 1. From row.get("designs")
+    designs = row.get("designs")
+    if isinstance(designs, list):
+        for item in designs:
+            if isinstance(item, dict):
+                url = item.get("url") or item.get("image_url") or item.get("file_url")
+                name = item.get("name") or item.get("file_name") or (url.split("/")[-1] if url else "source.jpg")
+                if url:
+                    sources.append({"name": str(name), "url": str(url)})
+
+    # 2. From custom_design_files / attachments
+    attachments = row.get("custom_design_files") or row.get("attachments") or row.get("source_files")
+    if isinstance(attachments, list):
+        for item in attachments:
+            if isinstance(item, dict):
+                url = item.get("url") or item.get("file_url")
+                name = item.get("name") or item.get("file_name") or (url.split("/")[-1] if url else "source.jpg")
+                if url:
+                    sources.append({"name": str(name), "url": str(url)})
+            elif isinstance(item, str) and item.strip():
+                name = item.split("/")[-1]
+                sources.append({"name": name, "url": item.strip()})
+
+    # 3. Fallback: single personalization image
+    if not sources:
+        single_url = extract_source_asset_url(row)
+        if single_url:
+            name = single_url.split("/")[-1]
+            sources.append({"name": name, "url": single_url})
+
+    return sources if sources else None
 
 
 def parse_order_detail_from_row(
@@ -162,6 +221,10 @@ def parse_order_detail_from_row(
 
     is_custom = bool(row.get("is_custom_design"))
     attributes = row.get("attributes") if isinstance(row.get("attributes"), dict) else {}
+
+    sku_img = extract_sku_image_url(row)
+    ext_order_link = extract_external_order_url(row)
+    source_files_list = extract_source_files(row)
 
     return OrderDetailResult(
         success=True,
@@ -186,4 +249,7 @@ def parse_order_detail_from_row(
         design_tool_url=(
             DESIGN_TOOL_URL_TEMPLATE.format(code=external_order_id) if is_custom else None
         ),
+        sku_image_url=sku_img,
+        external_order_url=ext_order_link,
+        source_files=source_files_list,
     )

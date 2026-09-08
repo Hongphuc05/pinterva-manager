@@ -119,11 +119,21 @@ def list_my_tasks(session: Session, designer_id: uuid.UUID) -> list[dict]:
                     "product_name": order.product_name,
                     "thumbnail_url": order.thumbnail_url,
                     "sku": order.sku,
+                    "product_category": order.product_category,
+                    "product_variants": order.product_variants,
+                    "has_template": order.has_template,
+                    "template_jobs": order.template_jobs,
                     "deadline_at_ext": (
                         order.deadline_at_ext.isoformat() if order.deadline_at_ext else None
                     ),
+                    "note_outsource": order.note_outsource,
                     "order_note": order.order_note,
                     "custom_config": order.custom_config,
+                    "sku_image_url": order.sku_image_url,
+                    "external_order_url": order.external_order_url,
+                    "source_files": order.source_files,
+                    "source_download_all_url": order.source_download_all_url,
+                    "design_tool_url": order.design_tool_url,
                 },
                 "result_versions": history,
             }

@@ -19,7 +19,8 @@ import {
   FileText,
   UserPlus,
   X,
-  Loader2
+  Loader2,
+  ExternalLink
 } from 'lucide-react'
 
 type OrderSummary = {
@@ -33,6 +34,10 @@ type OrderSummary = {
   assigned_designer_name: string | null
   template_jobs: TemplateJob[] | null
   deadline_at_ext: string | null
+  sku_image_url: string | null
+  external_order_url: string | null
+  source_files: { name: string; url: string }[] | null
+  source_download_all_url: string | null
   created_at: string
 }
 
@@ -533,6 +538,37 @@ export function OrdersListPage() {
                               title="Đơn mới crawl về! Click để tắt highlight"
                             >
                               ⚡ MỚI CRAWL
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
+                          {o.sku_image_url && (
+                            <a
+                              href={o.sku_image_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[10px] font-bold text-[#0052CC] hover:underline inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-blue-50 border border-blue-100"
+                              title="Xem ảnh SKU Printerval"
+                            >
+                              <span>Image</span>
+                              <ExternalLink className="h-2.5 w-2.5" />
+                            </a>
+                          )}
+                          {o.external_order_url && (
+                            <a
+                              href={o.external_order_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[10px] font-bold text-[#0052CC] hover:underline inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-blue-50 border border-blue-100"
+                              title="Mở đơn trên Printerval"
+                            >
+                              <span>Order</span>
+                              <ExternalLink className="h-2.5 w-2.5" />
+                            </a>
+                          )}
+                          {o.source_files && o.source_files.length > 0 && (
+                            <span className="text-[10px] font-bold text-slate-600 px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200">
+                              {o.source_files.length} file source
                             </span>
                           )}
                         </div>

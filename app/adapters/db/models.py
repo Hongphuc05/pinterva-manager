@@ -42,6 +42,15 @@ class User(Base):
     active: Mapped[bool] = mapped_column(default=True, nullable=False)
     capacity: Mapped[int | None] = mapped_column(nullable=True)
     platform_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("platforms.id"), nullable=True)
+    # The exact visible label this designer is registered under in Printerval's own
+    # per-team Designer <select> (e.g. "Nguyễn Thị Thuý Hường - 2D Prin") — live-
+    # confirmed the site supports real per-designer sub-users (ng-options bound to
+    # item.attributes.designer_email, admin-editable), not just the single shared
+    # claim account NTTH_DESIGNER_OPTION was hardcoded to. NULL means this designer
+    # has no Printerval registration yet (or none needed) — assignment sync is
+    # skipped, not guessed, for that case. Set by admin, must match an option that
+    # genuinely exists on the site or the write dead-letters (EXTERNAL_CHANGED).
+    printerval_designer_option: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -110,6 +119,10 @@ class Order(Base):
     custom_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     template_jobs: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     design_tool_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    sku_image_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    external_order_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    source_files: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    source_download_all_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     # Printerval's own live site status (waiting/doing/review/fix/confirm/done — the 6
     # literal values live-confirmed 2026-09-08, see PrintervalApiClient.ORDER_STATUSES)
     # — a READ-ONLY mirror kept in sync by a scheduled job + manual refresh, distinct
