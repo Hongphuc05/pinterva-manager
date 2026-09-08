@@ -98,7 +98,15 @@ def test_printerval_credentials_persist_team_outsource_per_platform_not_env(clie
     """Regression test: switching to a second mother account must not clobber the
     first account's team_outsource via process-wide os.environ — each Platform row
     keeps its own value (root cause of "crawl thất bại" after switching acc mẹ)."""
+    from app.adapters.printerval.api_client import PrintervalApiClient
+
     monkeypatch.delenv("PRINTERVAL_TEAM_OUTSOURCE", raising=False)
+    # Saving credentials now verifies them against the real site first (a real
+    # incident: a wrong password sat silently in the DB with no verification) — stub
+    # that out here, it's covered by its own dedicated tests below.
+    monkeypatch.setattr(PrintervalApiClient, "login", lambda self: None)
+    monkeypatch.setattr(PrintervalApiClient, "discover_waiting_page", lambda self, **k: None)
+    monkeypatch.setattr(PrintervalApiClient, "close", lambda self: None)
     _, token = _login(client, db_session, "admin", "admin_plat3")
     headers = {"Authorization": f"Bearer {token}"}
 
@@ -122,3 +130,52 @@ def test_printerval_credentials_persist_team_outsource_per_platform_not_env(clie
     # The whole point: logging into account 2 must not have overwritten account 1's
     # persisted value via a shared global.
     assert "PRINTERVAL_TEAM_OUTSOURCE" not in os.environ
+
+
+def test_printerval_credentials_rejects_a_login_that_fails_against_the_real_site(client, db_session, monkeypatch):
+    """Regression test: a wrong password used to save silently — nothing verified it
+    could actually log in — and only surfaced as a mysterious "crawl thất bại" during
+    an unrelated crawl attempt much later."""
+    from app.adapters.printerval.api_client import PrintervalApiClient, PrintervalApiError
+    from app.adapters.errors import ErrorClass
+
+    def _fail_login(self):
+        raise PrintervalApiError(ErrorClass.AUTH, "Printerval did not accept the supplied login")
+
+    monkeypatch.setattr(PrintervalApiClient, "login", _fail_login)
+    monkeypatch.setattr(PrintervalApiClient, "close", lambda self: None)
+    _, token = _login(client, db_session, "admin", "admin_plat4")
+
+    resp = client.post(
+        "/api/orders/printerval-credentials",
+        json={"username": "bad@printerval.com", "password": "wrong", "team_outsource": "team-a"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert resp.status_code == 400
+    assert db_session.query(Platform).filter_by(account_username="bad@printerval.com").first() is None
+
+
+def test_printerval_credentials_rejects_a_team_outsource_the_find_endpoint_errors_on(
+    client, db_session, monkeypatch
+):
+    from app.adapters.printerval.api_client import PrintervalApiClient, PrintervalApiError
+    from app.adapters.errors import ErrorClass
+
+    monkeypatch.setattr(PrintervalApiClient, "login", lambda self: None)
+    monkeypatch.setattr(PrintervalApiClient, "close", lambda self: None)
+
+    def _fail_discover(self, **kwargs):
+        raise PrintervalApiError(ErrorClass.EXTERNAL_CHANGED, "Waiting queue response changed or was rejected")
+
+    monkeypatch.setattr(PrintervalApiClient, "discover_waiting_page", _fail_discover)
+    _, token = _login(client, db_session, "admin", "admin_plat5")
+
+    resp = client.post(
+        "/api/orders/printerval-credentials",
+        json={"username": "acc3@printerval.com", "password": "pw3", "team_outsource": "wrong-team"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert resp.status_code == 400
+    assert db_session.query(Platform).filter_by(account_username="acc3@printerval.com").first() is None

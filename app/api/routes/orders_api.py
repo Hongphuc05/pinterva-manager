@@ -11,7 +11,11 @@ from app.adapters.db.models import Assignment, Order, User
 from app.adapters.playwright_support import playwright_session
 from app.adapters.printerval import login_session
 from app.adapters.printerval.api_adapter import PrintervalApiAdapter
-from app.adapters.printerval.api_client import PrintervalApiClient
+from app.adapters.printerval.api_client import (
+    PrintervalApiClient,
+    PrintervalApiConfigurationError,
+    PrintervalApiError,
+)
 from app.adapters.printerval.interface import ALL_JOB_TYPES
 from app.adapters.printerval.playwright_adapter import PlaywrightPrintervalAdapter
 from app.api.deps import DEFAULT_PLATFORM_ID, get_current_platform_id, get_current_user, get_db, require_role
@@ -395,6 +399,40 @@ def api_update_printerval_credentials(
     username_clean = payload.username.strip()
     password_clean = payload.password.strip()
     team_outsource_clean = payload.team_outsource.strip() if payload.team_outsource else None
+
+    # Verify these credentials actually work against the real site BEFORE saving
+    # anything — a real incident: a wrong password sat silently in the DB (saved with
+    # no verification) and only surfaced as a mysterious "crawl thất bại" much later,
+    # during an unrelated crawl attempt on a different day.
+    settings = get_settings()
+    probe_client = PrintervalApiClient(
+        base_url=settings.printerval_api_base_url,
+        username=username_clean,
+        password=password_clean,
+        team_outsource=team_outsource_clean,
+    )
+    try:
+        probe_client.login()
+    except PrintervalApiConfigurationError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
+    except PrintervalApiError as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Không đăng nhập được vào Printerval bằng tài khoản '{username_clean}': {exc}. "
+            "Kiểm tra lại username/mật khẩu.",
+        )
+    try:
+        # login succeeding only proves username/password — team_outsource only gets
+        # validated by the find endpoint, which a wrong value doesn't error on (it
+        # just returns 0 rows), so this is a best-effort check, not a guarantee.
+        probe_client.discover_waiting_page(page_size=1)
+    except PrintervalApiError as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Đăng nhập thành công nhưng Team Outsource có vẻ không đúng: {exc}",
+        )
+    finally:
+        probe_client.close()
 
     # Get or create Platform for this mother account. Credentials (incl. team_outsource,
     # which scopes Printerval's find endpoint per account) are stored on the Platform row
