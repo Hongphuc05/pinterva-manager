@@ -70,7 +70,9 @@ class FakePrintervalAdapter:
         ]
         return DiscoverResult(success=True, orders=orders, cursor=None)
 
-    def get_order_detail(self, external_order_id: str) -> OrderDetailResult:
+    def get_order_detail(
+        self, external_order_id: str, platform_id: str | None = None
+    ) -> OrderDetailResult:
         order = self._orders.get(external_order_id)
         if order is None:
             return OrderDetailResult(success=False, error_class="VALIDATION")
@@ -137,7 +139,9 @@ class FakePrintervalAdapter:
             observed_state={"result_link": order.note_outsource},
         )
 
-    def download_asset(self, external_order_id: str) -> AssetResult:
+    def download_asset(
+        self, external_order_id: str, platform_id: str | None = None
+    ) -> AssetResult:
         order = self._orders.get(external_order_id)
         if order is None:
             return AssetResult(

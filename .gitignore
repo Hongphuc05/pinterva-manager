@@ -39,6 +39,7 @@ credentials/
 chrome-profile-*/
 crawled_assets/
 crawled_orders.csv
+platform_data/
 cookies.txt
 200
 COOKIE_SECURE=false

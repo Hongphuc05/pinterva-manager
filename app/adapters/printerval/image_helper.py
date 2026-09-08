@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import csv
 import logging
 import re
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +10,6 @@ import httpx
 logger = logging.getLogger(__name__)
 
 CRAWLED_ASSETS_DIR = Path("crawled_assets")
-CSV_FILE_PATH = Path("crawled_orders.csv")
 
 
 def extract_image_url_from_dict_or_html(data: dict[str, Any] | str | None) -> str | None:
@@ -159,61 +156,3 @@ def download_and_save_image(
         )
 
     return None
-
-
-def append_to_crawled_orders_csv(
-    external_order_id: str,
-    product_name: str | None = None,
-    sku: str | None = None,
-    product_category: str | None = None,
-    status: str | None = None,
-    batch_id: str | None = None,
-    thumbnail_url: str | None = None,
-    local_image_path: str | None = None,
-    csv_path: Path = CSV_FILE_PATH,
-    platform_id: str | None = None,
-) -> None:
-    """Append order crawl metadata and local image path to platform-specific CSV."""
-    if not external_order_id:
-        return
-
-    if platform_id:
-        target_dir = CRAWLED_ASSETS_DIR / str(platform_id)
-        target_dir.mkdir(parents=True, exist_ok=True)
-        target_csv_path = target_dir / "crawled_orders.csv"
-    else:
-        target_csv_path = csv_path
-
-    file_exists = target_csv_path.exists()
-    fieldnames = [
-        "external_order_id",
-        "product_name",
-        "sku",
-        "product_category",
-        "status",
-        "batch_id",
-        "thumbnail_url",
-        "local_image_path",
-        "crawled_at",
-    ]
-
-    try:
-        with open(target_csv_path, mode="a", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            if not file_exists:
-                writer.writeheader()
-            writer.writerow(
-                {
-                    "external_order_id": external_order_id,
-                    "product_name": product_name or "",
-                    "sku": sku or "",
-                    "product_category": product_category or "",
-                    "status": status or "",
-                    "batch_id": batch_id or "",
-                    "thumbnail_url": thumbnail_url or "",
-                    "local_image_path": local_image_path or "",
-                    "crawled_at": datetime.now().isoformat(),
-                }
-            )
-    except Exception as exc:
-        logger.warning("Failed to write order %s to CSV: %s", external_order_id, exc)

@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import csv
 import hashlib
+import uuid
+from pathlib import Path
 
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import Batch, DeadLetter, ExternalObservation, Order, OrderAsset
 from app.adapters.playwright_support import with_retry
 from app.adapters.printerval.interface import ALL_JOB_TYPES, NTTH_DESIGNER_OPTION, PrintervalAdapter
+from app.adapters.printerval.models import OrderSummary
 from app.application.operations import OperationInProgressError, run_idempotent
 from app.application.order_transitions import apply_transition
 from app.domain.models import OrderState
@@ -82,6 +86,10 @@ def discover_waiting_orders_with_summaries(
                 existing_order.thumbnail_url = summary.thumbnail_url
             if not existing_order.product_name and summary.product_name:
                 existing_order.product_name = summary.product_name
+            if not existing_order.sku and summary.sku:
+                existing_order.sku = summary.sku
+            if not existing_order.product_category and summary.product_category:
+                existing_order.product_category = summary.product_category
             if summary.template_jobs:
                 existing_order.template_jobs = summary.template_jobs
                 existing_order.has_template = True
@@ -159,6 +167,8 @@ def claim_batch(
                     state=OrderState.DISCOVERED.value,
                     product_name=summary.product_name if summary else None,
                     thumbnail_url=summary.thumbnail_url if summary else None,
+                    sku=summary.sku if summary else None,
+                    product_category=summary.product_category if summary else None,
                     template_jobs=summary.template_jobs if summary else None,
                     has_template=summary.has_template if summary else False,
                 )
@@ -225,7 +235,10 @@ def import_claimed_orders(session: Session, adapter: PrintervalAdapter) -> dict:
     for order in orders:
 
         def _do(order=order) -> dict:
-            result = with_retry(lambda: adapter.download_asset(order.external_order_id))
+            order_platform_id = str(order.platform_id) if order.platform_id else None
+            result = with_retry(
+                lambda: adapter.download_asset(order.external_order_id, platform_id=order_platform_id)
+            )
             if not result.success:
                 session.add(
                     DeadLetter(
@@ -236,7 +249,9 @@ def import_claimed_orders(session: Session, adapter: PrintervalAdapter) -> dict:
                 )
                 return {"imported": False}
 
-            detail_result = with_retry(lambda: adapter.get_order_detail(order.external_order_id))
+            detail_result = with_retry(
+                lambda: adapter.get_order_detail(order.external_order_id, platform_id=order_platform_id)
+            )
             if not detail_result.success:
                 session.add(
                     DeadLetter(
@@ -252,19 +267,33 @@ def import_claimed_orders(session: Session, adapter: PrintervalAdapter) -> dict:
             # still leave a committed OrderAsset row for an order stuck at
             # DISCOVERED, which then double-inserts on operator recovery/retry
             # (claude.md §18: batch/resume/retry must be idempotent).
-            session.add(
-                OrderAsset(
-                    order_id=order.id,
-                    source_image_ref=result.local_path,
-                    checksum=result.checksum,
-                    storage_location=result.local_path,
+            # download_asset can succeed with no local_path (plain product orders have
+            # no separate personalized source file to download) — only record an
+            # OrderAsset when there's an actual file, since source_image_ref/
+            # storage_location are NOT NULL columns.
+            if result.local_path:
+                session.add(
+                    OrderAsset(
+                        order_id=order.id,
+                        source_image_ref=result.local_path,
+                        checksum=result.checksum,
+                        storage_location=result.local_path,
+                    )
                 )
-            )
 
-            order.product_name = detail_result.product_name
-            order.thumbnail_url = detail_result.thumbnail_url
-            order.sku = detail_result.sku
-            order.product_category = detail_result.product_category
+            # Only overwrite what discover-time already captured (from the list API
+            # response) when the detail scrape actually found a value — Playwright's
+            # DOM extraction can legitimately come back empty for a field (selector
+            # didn't match this row's layout) and must not blank out a value we
+            # already have, just because it ran second.
+            if detail_result.product_name:
+                order.product_name = detail_result.product_name
+            if detail_result.thumbnail_url:
+                order.thumbnail_url = detail_result.thumbnail_url
+            if detail_result.sku:
+                order.sku = detail_result.sku
+            if detail_result.product_category:
+                order.product_category = detail_result.product_category
             order.product_variants = [v.model_dump() for v in detail_result.product_variants]
             order.has_template = detail_result.has_template
             if detail_result.template_jobs:
@@ -307,3 +336,57 @@ def import_claimed_orders(session: Session, adapter: PrintervalAdapter) -> dict:
             failed.append(order.external_order_id)
 
     return {"imported": imported, "failed": failed}
+
+
+PLATFORM_DATA_DIR = Path("platform_data")
+
+_CSV_FIELDNAMES = [
+    "external_order_id",
+    "state",
+    "product_name",
+    "sku",
+    "product_category",
+    "thumbnail_url",
+    "has_template",
+    "created_at",
+]
+
+
+def export_platform_orders_csv(session: Session, platform_id: uuid.UUID | None) -> Path:
+    """Overwrite platform_data/<platform_id>/orders.csv with every Order this platform
+    currently has in Postgres (the source of truth) — one row per order, no duplicates.
+
+    Replaces the old per-row append during discover_orders, which re-appended the same
+    order on every retry/poll (a single order could accumulate a dozen duplicate CSV
+    rows) and had no real platform isolation (a missing platform_id silently fell back
+    to one shared root-level file, which pytest runs polluted with fixture data too).
+    A fresh, deduplicated snapshot each call sidesteps all of that — it can never drift
+    from the DB, and calling it twice in a row is a no-op.
+    """
+    target_dir = PLATFORM_DATA_DIR / (str(platform_id) if platform_id else "default")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = target_dir / "orders.csv"
+
+    query = session.query(Order)
+    query = query.filter(Order.platform_id == platform_id) if platform_id else query.filter(
+        Order.platform_id.is_(None)
+    )
+    orders = query.order_by(Order.external_order_id).all()
+
+    with open(csv_path, mode="w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=_CSV_FIELDNAMES)
+        writer.writeheader()
+        for order in orders:
+            writer.writerow(
+                {
+                    "external_order_id": order.external_order_id,
+                    "state": order.state,
+                    "product_name": order.product_name or "",
+                    "sku": order.sku or "",
+                    "product_category": order.product_category or "",
+                    "thumbnail_url": order.thumbnail_url or "",
+                    "has_template": order.has_template,
+                    "created_at": order.created_at.isoformat() if order.created_at else "",
+                }
+            )
+    return csv_path

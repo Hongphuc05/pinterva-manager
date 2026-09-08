@@ -12,8 +12,9 @@ from app.adapters.playwright_support import playwright_session
 from app.adapters.printerval import login_session
 from app.adapters.printerval.api_adapter import PrintervalApiAdapter
 from app.adapters.printerval.api_client import PrintervalApiClient
+from app.adapters.printerval.interface import ALL_JOB_TYPES
 from app.adapters.printerval.playwright_adapter import PlaywrightPrintervalAdapter
-from app.api.deps import get_current_platform_id, get_current_user, get_db, require_role
+from app.api.deps import DEFAULT_PLATFORM_ID, get_current_platform_id, get_current_user, get_db, require_role
 from app.application.crawl import DiscoverFailedError
 from app.application.order_queries import (
     get_order_detail_for_user,
@@ -88,6 +89,15 @@ class RefreshResponse(BaseModel):
     summary: dict | None = None
 
 
+class RefreshRequest(BaseModel):
+    # Mirrors Printerval's own filter bar (Loại design job). Only "Tất cả 2D & 3D" is
+    # confirmed safe on the fast HTTP API path (docs/phase0-field-map.md §4); any other
+    # value routes this crawl through the slower, DOM-verified Playwright fallback
+    # instead of guessing an unconfirmed HTTP query value for it (a real past incident:
+    # a wrong filter string silently returned 0 orders instead of erroring).
+    job_type: str = ALL_JOB_TYPES
+
+
 class PrintervalLoginStatus(BaseModel):
     session_open: bool
 
@@ -160,6 +170,7 @@ def api_order_detail(
 
 @router.post("/orders/refresh", response_model=RefreshResponse)
 def api_orders_refresh(
+    payload: RefreshRequest = RefreshRequest(),
     user: User = Depends(require_role("admin")),
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
@@ -170,10 +181,28 @@ def api_orders_refresh(
         platform = db.get(Platform, platform_id)
         crawl_username = platform.account_username if platform and platform.account_username else settings.printerval_username
         crawl_password = platform.account_password if platform and platform.account_password else settings.printerval_password
+        # team_outsource scopes Printerval's find endpoint per mother account — it must
+        # come from THIS platform's own row, never the process-wide .env value, or
+        # crawling one platform silently uses another platform's team scope (root cause
+        # of "crawl thất bại" after switching acc mẹ). Only the ONE original .env-
+        # configured default platform (created before multi-tenant existed) falls back
+        # to settings — any other platform without its own value is a real gap that
+        # must be reported, not silently patched over with someone else's team.
+        crawl_team_outsource = platform.team_outsource if platform else None
+        if not crawl_team_outsource and platform_id == DEFAULT_PLATFORM_ID:
+            crawl_team_outsource = settings.printerval_team_outsource
 
         if not platform or not platform.account_password:
             return RefreshResponse(
                 flash=f"Tài khoản '{crawl_username}' chưa được lưu mật khẩu Printerval trong CSDL. Vui lòng vào menu 'Acc Mẹ Printerval' -> 'Đăng Nhập Acc Mẹ Mới' để đăng nhập lại."
+            )
+        if not crawl_team_outsource:
+            # Printerval's find endpoint rejects an unscoped query — without this, the
+            # API call fails, falls back to headless Playwright, and dies on Cloudflare
+            # (see PrintervalApiClient docstring). Fail fast with a clear message instead
+            # of paying that whole cascade for an outcome we already know is wrong.
+            return RefreshResponse(
+                flash=f"Tài khoản '{crawl_username}' chưa có 'Team Outsource'. Vui lòng vào 'Acc Mẹ Printerval' -> 'Đăng Nhập Acc Mẹ Mới' và điền đúng Team Outsource cho tài khoản này."
             )
 
         clean_user_slug = crawl_username.replace("@", "_").replace(".", "_").replace("+", "_") if crawl_username else "default"
@@ -183,7 +212,7 @@ def api_orders_refresh(
             base_url=settings.printerval_api_base_url,
             username=crawl_username,
             password=crawl_password,
-            team_outsource=settings.printerval_team_outsource,
+            team_outsource=crawl_team_outsource,
         ) as api_client:
             with playwright_session(profile_dir=profile_dir, headless=True) as page:
                 fallback = PlaywrightPrintervalAdapter(
@@ -192,7 +221,9 @@ def api_orders_refresh(
                     crawl_password=crawl_password,
                 )
                 adapter = PrintervalApiAdapter(api_client=api_client, fallback_adapter=fallback)
-                summary = run_crawl_cycle(db, adapter, platform_id=platform_id)
+                summary = run_crawl_cycle(
+                    db, adapter, platform_id=platform_id, job_type=payload.job_type
+                )
         flash = (
             f"Đã crawl xong qua API ({crawl_username}): {summary['discovered']} đơn mới, "
             f"{summary['imported']} đơn nhập thành công"
@@ -359,17 +390,16 @@ def api_update_printerval_credentials(
     user: User = Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ):
-    import os
     from app.adapters.db.models import Platform
 
     username_clean = payload.username.strip()
     password_clean = payload.password.strip()
-    os.environ["PRINTERVAL_USERNAME"] = username_clean
-    os.environ["PRINTERVAL_PASSWORD"] = password_clean
-    if payload.team_outsource:
-        os.environ["PRINTERVAL_TEAM_OUTSOURCE"] = payload.team_outsource.strip()
+    team_outsource_clean = payload.team_outsource.strip() if payload.team_outsource else None
 
-    # Get or create Platform for this mother account
+    # Get or create Platform for this mother account. Credentials (incl. team_outsource,
+    # which scopes Printerval's find endpoint per account) are stored on the Platform row
+    # itself, never in process-wide os.environ/Settings — that global state was clobbered
+    # by whichever account logged in last, breaking crawl for every other platform.
     platform = (
         db.query(Platform)
         .filter(Platform.account_username == username_clean)
@@ -380,17 +410,19 @@ def api_update_printerval_credentials(
             name=f"Acc Mẹ: {username_clean}",
             account_username=username_clean,
             account_password=password_clean,
+            team_outsource=team_outsource_clean,
             is_active=True,
         )
         db.add(platform)
     else:
         platform.account_password = password_clean
+        if team_outsource_clean:
+            platform.team_outsource = team_outsource_clean
         platform.is_active = True
 
     db.commit()
     db.refresh(platform)
 
-    get_settings.cache_clear()
     return {
         "ok": True,
         "platform_id": str(platform.id),

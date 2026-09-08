@@ -9,10 +9,7 @@ from playwright.sync_api import Page
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from app.adapters.playwright_support import capture_evidence
-from app.adapters.printerval.image_helper import (
-    append_to_crawled_orders_csv,
-    download_and_save_image,
-)
+from app.adapters.printerval.image_helper import download_and_save_image
 from app.adapters.printerval.interface import ALL_JOB_TYPES
 from app.adapters.printerval.models import (
     AssetResult,
@@ -310,6 +307,15 @@ class PlaywrightPrintervalAdapter:
         self.page = page
         self.crawl_username = crawl_username
         self.crawl_password = crawl_password
+        # import_claimed_orders calls download_asset(oid) then get_order_detail(oid) for
+        # the same order back-to-back — each one used to do its own full
+        # _search_and_get_row (page navigation + search), doubling browser round-trips
+        # per order for no reason. Caching the last searched row (by order id) lets the
+        # second call reuse it instead of re-navigating, cutting that in half. Safe only
+        # because nothing else touches self.page between those two calls in that loop —
+        # a cache miss (different order, or discover_orders in between) just falls back
+        # to a fresh search, so this can never serve a stale/wrong row.
+        self._last_row_cache: tuple[str, object] | None = None
 
     def discover_orders(
         self,
@@ -381,15 +387,6 @@ class PlaywrightPrintervalAdapter:
             )
             final_thumbnail = local_path or raw_img_url
 
-            append_to_crawled_orders_csv(
-                external_order_id=order_id,
-                product_name=product_name,
-                status=status_value,
-                thumbnail_url=raw_img_url,
-                local_image_path=local_path,
-                platform_id=platform_id,
-            )
-
             orders.append(
                 OrderSummary(
                     external_order_id=order_id,
@@ -402,7 +399,9 @@ class PlaywrightPrintervalAdapter:
             )
         return DiscoverResult(success=True, orders=orders, cursor=None)
 
-    def _extract_order_detail_from_row(self, row, external_order_id: str) -> OrderDetailResult:
+    def _extract_order_detail_from_row(
+        self, row, external_order_id: str, platform_id: str | None = None
+    ) -> OrderDetailResult:
         """Extract every OrderDetailResult field from an already-located row."""
         selects = row.locator("select")
         designer = _selected_option_text(selects.nth(0)) if selects.count() >= 1 else None
@@ -437,7 +436,7 @@ class PlaywrightPrintervalAdapter:
 
         raw_url = _extract_row_thumbnail_url(row)
         if raw_url:
-            local_path = download_and_save_image(external_order_id, raw_url)
+            local_path = download_and_save_image(external_order_id, raw_url, platform_id=platform_id)
             thumbnail_url = local_path or raw_url
 
         has_template = _extract_row_has_template(row)
@@ -558,10 +557,19 @@ class PlaywrightPrintervalAdapter:
         return None
 
 
-    def get_order_detail(self, external_order_id: str) -> OrderDetailResult:
+    def _search_and_get_row_cached(self, external_order_id: str):
+        if self._last_row_cache is not None and self._last_row_cache[0] == external_order_id:
+            return self._last_row_cache[1]
+        row = _search_and_get_row(self.page, external_order_id)
+        self._last_row_cache = (external_order_id, row)
+        return row
+
+    def get_order_detail(
+        self, external_order_id: str, platform_id: str | None = None
+    ) -> OrderDetailResult:
         page = self.page
         try:
-            row = _search_and_get_row(page, external_order_id)
+            row = self._search_and_get_row_cached(external_order_id)
         except Exception as exc:
             error_class, retryable = _classify_exception(exc)
             evidence = capture_evidence(page, f"get_order_detail_missing_{external_order_id}")
@@ -570,7 +578,7 @@ class PlaywrightPrintervalAdapter:
             )
 
         try:
-            return self._extract_order_detail_from_row(row, external_order_id)
+            return self._extract_order_detail_from_row(row, external_order_id, platform_id=platform_id)
         except Exception as exc:
             error_class, retryable = _classify_exception(exc)
             evidence = capture_evidence(
@@ -580,10 +588,12 @@ class PlaywrightPrintervalAdapter:
                 success=False, error_class=error_class, retryable=retryable, evidence=evidence
             )
 
-    def download_asset(self, external_order_id: str) -> AssetResult:
+    def download_asset(
+        self, external_order_id: str, platform_id: str | None = None
+    ) -> AssetResult:
         page = self.page
         try:
-            row = _search_and_get_row(page, external_order_id)
+            row = self._search_and_get_row_cached(external_order_id)
         except Exception as exc:
             error_class, retryable = _classify_exception(exc)
             evidence = capture_evidence(page, f"download_asset_missing_{external_order_id}")
@@ -597,9 +607,14 @@ class PlaywrightPrintervalAdapter:
 
         link = row.locator("a.djcfg-src-link").first
         if link.count() == 0:
-            return AssetResult(
-                success=False, external_order_id=external_order_id, error_class="VALIDATION"
-            )
+            # Only personalized (djcfg) orders have a separate source file to download
+            # (see _extract_custom_config) — a plain product order legitimately has
+            # none. That's not a validation failure: treating it as one permanently
+            # dead-lettered import_claimed_orders before it ever reached
+            # get_order_detail, which is what actually fills in thumbnail/template/sku
+            # for these orders — the real cause of orders showing no image/template on
+            # the dashboard despite having them on Printerval.
+            return AssetResult(success=True, external_order_id=external_order_id)
         src = link.get_attribute("href")
         try:
             response = page.request.get(src)
@@ -613,9 +628,12 @@ class PlaywrightPrintervalAdapter:
                 success=False, external_order_id=external_order_id,
                 error_class=error_class, retryable=retryable, evidence=evidence,
             )
-        Path("order_assets").mkdir(exist_ok=True)
+        # Partitioned by platform_id, same convention as crawled_assets/ (image_helper),
+        # so one mother account's source files are never mixed in with another's.
+        assets_dir = Path("order_assets") / str(platform_id) if platform_id else Path("order_assets")
+        assets_dir.mkdir(parents=True, exist_ok=True)
         suffix = Path(urlparse(src).path).suffix or ".bin"
-        local_path = Path("order_assets") / f"{external_order_id}{suffix}"
+        local_path = assets_dir / f"{external_order_id}{suffix}"
         local_path.write_bytes(body)
         checksum = hashlib.sha256(body).hexdigest()
         return AssetResult(

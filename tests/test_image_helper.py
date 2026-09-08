@@ -3,7 +3,6 @@ import httpx
 import pytest
 
 from app.adapters.printerval.image_helper import (
-    append_to_crawled_orders_csv,
     download_and_save_image,
     extract_image_url_from_dict_or_html,
     normalize_image_url,
@@ -65,38 +64,3 @@ def test_download_and_save_image(tmp_path):
     assert file_path.read_bytes() == b"fake-image-bytes"
 
 
-def test_append_to_crawled_orders_csv(tmp_path):
-    csv_file = tmp_path / "crawled_orders.csv"
-    append_to_crawled_orders_csv(
-        external_order_id="DJ1001",
-        product_name="Custom T-Shirt 2D",
-        sku="SKU-123",
-        product_category="Clothing",
-        status="Waiting",
-        batch_id="batch-001",
-        thumbnail_url="https://gdn.printerval.com/unsafe/600x0/assets.printerval.com/img.png",
-        local_image_path="/crawled_assets/DJ1001.png",
-        csv_path=csv_file,
-    )
-
-    assert csv_file.exists()
-    content = csv_file.read_text(encoding="utf-8")
-    assert "/crawled_assets/DJ1001.png" in content
-
-
-def test_append_to_crawled_orders_csv_platform(tmp_path, monkeypatch):
-    platform_id = "4582df07-b9e8-4959-94e9-0f57e42694ee"
-    crawled_dir = tmp_path / "crawled_assets"
-    monkeypatch.setattr("app.adapters.printerval.image_helper.CRAWLED_ASSETS_DIR", crawled_dir)
-
-    append_to_crawled_orders_csv(
-        external_order_id="DJ2002",
-        product_name="Custom Mug 3D",
-        status="Waiting",
-        platform_id=platform_id,
-    )
-
-    platform_csv = crawled_dir / platform_id / "crawled_orders.csv"
-    assert platform_csv.exists()
-    content = platform_csv.read_text(encoding="utf-8")
-    assert "DJ2002,Custom Mug 3D" in content

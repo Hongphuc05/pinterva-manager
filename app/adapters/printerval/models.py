@@ -15,6 +15,8 @@ class OrderSummary(BaseModel):
     status: str
     has_template: bool = False
     template_jobs: list[dict] | None = None
+    sku: str | None = None
+    product_category: str | None = None
 
 
 class DiscoverResult(AdapterResult):

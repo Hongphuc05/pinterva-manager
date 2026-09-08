@@ -1,3 +1,5 @@
+import os
+
 import pytest
 import uuid
 from fastapi.testclient import TestClient
@@ -90,3 +92,33 @@ def test_platform_scoped_orders(client, db_session):
     orders_p2 = r2.json()["orders"]
     assert len(orders_p2) == 1
     assert orders_p2[0]["external_order_id"] == "DJ_P2_001"
+
+
+def test_printerval_credentials_persist_team_outsource_per_platform_not_env(client, db_session, monkeypatch):
+    """Regression test: switching to a second mother account must not clobber the
+    first account's team_outsource via process-wide os.environ — each Platform row
+    keeps its own value (root cause of "crawl thất bại" after switching acc mẹ)."""
+    monkeypatch.delenv("PRINTERVAL_TEAM_OUTSOURCE", raising=False)
+    _, token = _login(client, db_session, "admin", "admin_plat3")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    r1 = client.post(
+        "/api/orders/printerval-credentials",
+        json={"username": "acc1@printerval.com", "password": "pw1", "team_outsource": "team-a"},
+        headers=headers,
+    )
+    assert r1.status_code == 200
+    r2 = client.post(
+        "/api/orders/printerval-credentials",
+        json={"username": "acc2@printerval.com", "password": "pw2", "team_outsource": "team-b"},
+        headers=headers,
+    )
+    assert r2.status_code == 200
+
+    p1 = db_session.query(Platform).filter_by(account_username="acc1@printerval.com").one()
+    p2 = db_session.query(Platform).filter_by(account_username="acc2@printerval.com").one()
+    assert p1.team_outsource == "team-a"
+    assert p2.team_outsource == "team-b"
+    # The whole point: logging into account 2 must not have overwritten account 1's
+    # persisted value via a shared global.
+    assert "PRINTERVAL_TEAM_OUTSOURCE" not in os.environ

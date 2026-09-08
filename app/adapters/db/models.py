@@ -17,6 +17,13 @@ class Platform(Base):
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     account_username: Mapped[str] = mapped_column(String(128), nullable=False)
     account_password: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Printerval's design-job/find endpoint rejects an unscoped query (see
+    # docs/superpowers/specs/2026-09-07-printerval-api-crawl-design.md) — each mother
+    # account has its own team scope. Previously this lived only in the process-wide
+    # Settings/.env, so switching the active platform silently broke crawling for every
+    # OTHER platform (last login's team_outsource clobbered the global value). Per
+    # platform is the root-cause fix.
+    team_outsource: Mapped[str | None] = mapped_column(String(128), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, server_default=text("true"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

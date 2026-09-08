@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import logging
+import uuid
 
 from sqlalchemy.orm import Session
 
 from app.adapters.db.session import SessionLocal
 from app.adapters.playwright_support import playwright_session
-from app.adapters.printerval.interface import NTTH_DESIGNER_OPTION, PrintervalAdapter
+from app.adapters.printerval.interface import ALL_JOB_TYPES, NTTH_DESIGNER_OPTION, PrintervalAdapter
 from app.adapters.printerval.playwright_adapter import PlaywrightPrintervalAdapter
 from app.application.crawl import (
     claim_batch,
     discover_waiting_orders_with_summaries,
+    export_platform_orders_csv,
     import_claimed_orders,
 )
 from app.workers.celery_app import celery_app
@@ -23,13 +25,14 @@ def run_crawl_cycle(
     adapter: PrintervalAdapter,
     limit: int = 40,
     platform_id: uuid.UUID | None = None,
+    job_type: str = ALL_JOB_TYPES,
 ) -> dict:
     """The pure crawl-cycle logic: discover -> claim -> import, in order. Takes an
     already-open session/adapter so it's directly unit-testable with a fake adapter and
     the test DB session — no Celery or Playwright involved here.
     """
     new_order_ids, summaries = discover_waiting_orders_with_summaries(
-        session, adapter, limit=limit, platform_id=platform_id
+        session, adapter, limit=limit, platform_id=platform_id, job_type=job_type
     )
     if new_order_ids:
         claim_result = claim_batch(
@@ -47,6 +50,10 @@ def run_crawl_cycle(
         failed_claim_count = 0
 
     import_result = import_claimed_orders(session, adapter)
+
+    # One clean, DB-driven snapshot per platform — replaces the old per-row CSV append
+    # (which duplicated a row on every retry/poll and had no platform isolation).
+    export_platform_orders_csv(session, platform_id)
 
     return {
         "discovered": len(new_order_ids),

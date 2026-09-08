@@ -15,7 +15,6 @@ from app.adapters.printerval.api_client import (
     PrintervalApiError,
 )
 from app.adapters.printerval.image_helper import (
-    append_to_crawled_orders_csv,
     download_and_save_image,
     extract_image_url_from_dict_or_html,
 )
@@ -51,6 +50,23 @@ class PrintervalApiAdapter:
         cursor: str | None = None,
         platform_id: str | None = None,
     ) -> DiscoverResult:
+        if job_type != ALL_JOB_TYPES:
+            # Only "all" is a confirmed-safe value for the fast HTTP find endpoint
+            # (docs/phase0-field-map.md §4) — every other job_type label is only
+            # verified against the live DOM's <select>, via the Playwright fallback's
+            # own discover_orders. Guessing an HTTP query value for it risks the exact
+            # incident already on record: a mismatched filter string silently returning
+            # 0 orders instead of erroring.
+            if self.fallback_adapter:
+                return self.fallback_adapter.discover_orders(
+                    status=status, job_type=job_type, limit=limit, cursor=cursor, platform_id=platform_id
+                )
+            return DiscoverResult(
+                success=False,
+                error_class=ErrorClass.PERMANENT_EXTERNAL.value,
+                evidence={"message": f"job_type={job_type!r} requires the Playwright fallback, none configured"},
+            )
+
         page_id = int(cursor) if cursor and cursor.isdigit() else 0
         try:
             page = self.api_client.discover_waiting_page(page_size=limit, page_id=page_id)
@@ -106,17 +122,6 @@ class PrintervalApiAdapter:
                 )
                 final_thumbnail = local_path or raw_image_url
 
-                append_to_crawled_orders_csv(
-                    external_order_id=order_id,
-                    product_name=product_name,
-                    sku=sku,
-                    product_category=category,
-                    status=status,
-                    thumbnail_url=raw_image_url,
-                    local_image_path=local_path,
-                    platform_id=platform_id,
-                )
-
                 template_jobs = row.get("templateJobs")
                 if not isinstance(template_jobs, list):
                     template_jobs = None
@@ -128,6 +133,8 @@ class PrintervalApiAdapter:
                         thumbnail_url=final_thumbnail,
                         status=status,
                         template_jobs=template_jobs,
+                        sku=sku or None,
+                        product_category=category or None,
                     )
                 )
 
@@ -139,9 +146,11 @@ class PrintervalApiAdapter:
             total_found=len(discovered),
         )
 
-    def get_order_detail(self, external_order_id: str) -> OrderDetailResult:
+    def get_order_detail(
+        self, external_order_id: str, platform_id: str | None = None
+    ) -> OrderDetailResult:
         if self.fallback_adapter:
-            return self.fallback_adapter.get_order_detail(external_order_id)
+            return self.fallback_adapter.get_order_detail(external_order_id, platform_id=platform_id)
         return OrderDetailResult(
             success=False,
             error_class=ErrorClass.PERMANENT_EXTERNAL.value,
@@ -175,9 +184,11 @@ class PrintervalApiAdapter:
             evidence={"message": "No fallback adapter provided for attach_result_link"},
         )
 
-    def download_asset(self, external_order_id: str) -> AssetResult:
+    def download_asset(
+        self, external_order_id: str, platform_id: str | None = None
+    ) -> AssetResult:
         if self.fallback_adapter:
-            return self.fallback_adapter.download_asset(external_order_id)
+            return self.fallback_adapter.download_asset(external_order_id, platform_id=platform_id)
         return AssetResult(
             success=False,
             error_class=ErrorClass.PERMANENT_EXTERNAL.value,

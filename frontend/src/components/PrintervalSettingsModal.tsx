@@ -23,8 +23,8 @@ export function PrintervalSettingsModal({ isOpen, onClose }: PrintervalSettingsM
 
   async function handleLoginNewAccount(e: React.FormEvent) {
     e.preventDefault()
-    if (!username.trim() || !password.trim()) {
-      setError('Vui lòng nhập đầy đủ tên tài khoản và mật khẩu Printerval!')
+    if (!username.trim() || !password.trim() || !teamOutsource.trim()) {
+      setError('Vui lòng nhập đầy đủ tên tài khoản, mật khẩu và Team Outsource của Printerval!')
       return
     }
     setError('')
@@ -43,7 +43,7 @@ export function PrintervalSettingsModal({ isOpen, onClose }: PrintervalSettingsM
         body: JSON.stringify({
           username: username.trim(),
           password: password.trim(),
-          team_outsource: teamOutsource.trim() || undefined,
+          team_outsource: teamOutsource.trim(),
         }),
       })
 
@@ -237,14 +237,20 @@ export function PrintervalSettingsModal({ isOpen, onClose }: PrintervalSettingsM
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700 block">Team Outsource (Tùy chọn)</label>
+                <label className="text-xs font-bold text-slate-700 block">
+                  Team Outsource <span className="text-red-500">*</span>
+                </label>
                 <input
                   type="text"
+                  required
                   placeholder="ví dụ: 2D Prin"
                   value={teamOutsource}
                   onChange={(e) => setTeamOutsource(e.target.value)}
                   className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#0052CC]/20 focus:border-[#0052CC] transition-all"
                 />
+                <p className="text-[10px] text-slate-400">
+                  Bắt buộc — mỗi tài khoản mẹ Printerval chỉ quét được đúng team này. Lấy từ Network request thật khi đăng nhập account đó.
+                </p>
               </div>
 
               <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">

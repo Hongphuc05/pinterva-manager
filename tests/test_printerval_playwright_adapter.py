@@ -70,6 +70,58 @@ def test_download_asset_returns_failure_and_writes_nothing_on_non_ok_response(
     assert not (tmp_path / "order_assets").exists()
 
 
+def test_search_and_get_row_cached_reuses_the_same_order_and_refetches_on_a_different_one(
+    monkeypatch,
+):
+    """Regression test: download_asset(oid) then get_order_detail(oid) — the real
+    sequence import_claimed_orders runs for every order — must only navigate/search
+    once per order, not twice, since each used to do its own full _search_and_get_row."""
+    calls = []
+
+    def _fake_search(page, order_id):
+        calls.append(order_id)
+        return _FakeRow()
+
+    monkeypatch.setattr(pa, "_search_and_get_row", _fake_search)
+    adapter = pa.PlaywrightPrintervalAdapter(page=_FakePage(None))
+
+    row_a1 = adapter._search_and_get_row_cached("DJ0000001")
+    row_a2 = adapter._search_and_get_row_cached("DJ0000001")  # same order -> cache hit
+    adapter._search_and_get_row_cached("DJ0000002")  # different order -> cache miss
+
+    assert row_a1 is row_a2
+    assert calls == ["DJ0000001", "DJ0000002"]
+
+
+class _FakeRowNoSourceLink:
+    """A row for a plain (non-personalized) product order — no djcfg-src-link at
+    all, unlike _FakeRow above."""
+
+    def locator(self, selector):
+        if selector == "a.djcfg-src-link":
+            return _FakeLocator(count=0)
+        raise AssertionError(f"unexpected locator {selector!r}")
+
+
+def test_download_asset_succeeds_with_no_local_path_when_order_has_no_source_link(
+    tmp_path, monkeypatch
+):
+    """Regression test: a plain product order has no separate djcfg source file to
+    download — that must not be treated as a VALIDATION failure (which previously
+    dead-lettered the order forever, before get_order_detail ever ran and filled in
+    its real thumbnail/template/sku)."""
+    monkeypatch.setattr(pa, "_search_and_get_row", lambda page, order_id: _FakeRowNoSourceLink())
+    monkeypatch.chdir(tmp_path)
+
+    adapter = pa.PlaywrightPrintervalAdapter(page=_FakePage(None))
+
+    result = adapter.download_asset("DJ0000001")
+
+    assert result.success is True
+    assert result.local_path is None
+    assert not (tmp_path / "order_assets").exists()
+
+
 class _FakeSelect:
     def __init__(self, text):
         self._text = text

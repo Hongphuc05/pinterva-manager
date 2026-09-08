@@ -9,6 +9,7 @@ from app.application.crawl import (
     DiscoverFailedError,
     claim_batch,
     discover_waiting_orders,
+    export_platform_orders_csv,
     import_claimed_orders,
 )
 from app.domain.models import OrderState
@@ -111,7 +112,7 @@ def test_import_claimed_orders_dead_letters_and_leaves_state_on_download_failure
     _seed_waiting_order(adapter, "DJ0000001")
     claim_batch(db_session, adapter, ["DJ0000001"], owner="ntth")
 
-    def _fail(external_order_id):
+    def _fail(external_order_id, platform_id=None):
         from app.adapters.printerval.models import AssetResult
 
         return AssetResult(
@@ -126,6 +127,30 @@ def test_import_claimed_orders_dead_letters_and_leaves_state_on_download_failure
     assert result["failed"] == ["DJ0000001"]
     order = db_session.query(Order).filter_by(external_order_id="DJ0000001").one()
     assert order.state == OrderState.DISCOVERED.value
+    assert db_session.query(OrderAsset).filter_by(order_id=order.id).count() == 0
+
+
+def test_import_claimed_orders_imports_without_asset_when_no_source_file_exists(db_session, monkeypatch):
+    """Regression test: an order with no downloadable source file (download_asset
+    succeeds with local_path=None — a plain product order) must still reach
+    CLAIMED_IMPORTED via get_order_detail, just without an OrderAsset row."""
+    adapter = FakePrintervalAdapter()
+    _seed_waiting_order(adapter, "DJ0000001", thumbnail_url="https://assets.printerval.com/thumb.png")
+    claim_batch(db_session, adapter, ["DJ0000001"], owner="ntth")
+
+    def _no_asset(external_order_id, platform_id=None):
+        from app.adapters.printerval.models import AssetResult
+
+        return AssetResult(success=True, external_order_id=external_order_id, local_path=None)
+
+    monkeypatch.setattr(adapter, "download_asset", _no_asset)
+
+    result = import_claimed_orders(db_session, adapter)
+
+    assert result["imported"] == ["DJ0000001"]
+    order = db_session.query(Order).filter_by(external_order_id="DJ0000001").one()
+    assert order.state == OrderState.CLAIMED_IMPORTED.value
+    assert order.thumbnail_url == "https://assets.printerval.com/thumb.png"
     assert db_session.query(OrderAsset).filter_by(order_id=order.id).count() == 0
 
 
@@ -313,7 +338,7 @@ def test_import_claimed_orders_dead_letters_on_get_order_detail_failure(db_sessi
     _seed_waiting_order(adapter, "DJ0000001")
     claim_batch(db_session, adapter, ["DJ0000001"], owner="ntth")
 
-    def _fail(external_order_id):
+    def _fail(external_order_id, platform_id=None):
         return OrderDetailResult(success=False, error_class="EXTERNAL_CHANGED")
 
     monkeypatch.setattr(adapter, "get_order_detail", _fail)
@@ -336,3 +361,31 @@ def test_import_claimed_orders_dead_letters_on_get_order_detail_failure(db_sessi
         .all()
     )
     assert len(dead_letters) == 1
+
+
+def test_export_platform_orders_csv_is_a_fresh_deduplicated_snapshot(db_session, monkeypatch, tmp_path):
+    """Regression test: two orders, two calls — the CSV must always have exactly one
+    row per order (no duplicate-on-retry like the old per-row append had), scoped to
+    its own platform_id folder, auto-created on first use."""
+    import app.application.crawl as crawl_module
+    from app.adapters.db.models import Platform
+
+    monkeypatch.setattr(crawl_module, "PLATFORM_DATA_DIR", tmp_path / "platform_data")
+
+    platform = Platform(name="P export test", account_username="export_test@printerval.com")
+    db_session.add(platform)
+    db_session.flush()
+    platform_id = platform.id
+    db_session.add(Order(external_order_id="DJ0000001", state=OrderState.DISCOVERED.value, platform_id=platform_id))
+    db_session.commit()
+
+    path1 = export_platform_orders_csv(db_session, platform_id)
+    path2 = export_platform_orders_csv(db_session, platform_id)
+
+    assert path1 == path2
+    assert path1 == tmp_path / "platform_data" / str(platform_id) / "orders.csv"
+    rows = path1.read_text(encoding="utf-8").strip().splitlines()
+    assert len(rows) == 2  # header + exactly one order row, even after two calls
+
+    other_platform_dir = tmp_path / "platform_data" / str(uuid.uuid4())
+    assert not other_platform_dir.exists()

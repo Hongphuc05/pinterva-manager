@@ -5,6 +5,7 @@ import { usePlatform } from '../auth/PlatformContext'
 import { apiFetch } from '../api/client'
 import { Bell, LogOut, RefreshCw, CheckCircle2, AlertCircle, X, KeyRound } from 'lucide-react'
 import { PrintervalSettingsModal } from './PrintervalSettingsModal'
+import { CrawlFilterModal } from './CrawlFilterModal'
 
 export function Topbar() {
   const { user, logout } = useAuth()
@@ -15,6 +16,7 @@ export function Topbar() {
   const [flashMessage, setFlashMessage] = useState<string | null>(null)
   const [isError, setIsError] = useState(false)
   const [showSettingsModal, setShowSettingsModal] = useState(false)
+  const [showCrawlModal, setShowCrawlModal] = useState(false)
 
   async function handleLogout() {
     await logout()
@@ -31,14 +33,18 @@ export function Topbar() {
     return 'Dashboard'
   }
 
-  async function handleRefreshCrawl() {
+  async function handleRefreshCrawl(jobType: string) {
     setRefreshing(true)
     setFlashMessage(null)
     setIsError(false)
     try {
-      const res = await apiFetch<{ flash: string }>('/orders/refresh', { method: 'POST' })
+      const res = await apiFetch<{ flash: string }>('/orders/refresh', {
+        method: 'POST',
+        body: JSON.stringify({ job_type: jobType }),
+      })
       setFlashMessage(res.flash)
       setIsError(res.flash.includes('thất bại') || res.flash.includes('lỗi'))
+      setShowCrawlModal(false)
       setTimeout(() => {
         if (location.pathname === '/orders') {
           window.location.reload()
@@ -96,7 +102,7 @@ export function Topbar() {
             </button>
 
             <button
-              onClick={handleRefreshCrawl}
+              onClick={() => setShowCrawlModal(true)}
               disabled={refreshing}
               className={`flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold rounded-xl border transition-all ${
                 refreshing
@@ -134,6 +140,12 @@ export function Topbar() {
       <PrintervalSettingsModal
         isOpen={showSettingsModal}
         onClose={() => setShowSettingsModal(false)}
+      />
+      <CrawlFilterModal
+        isOpen={showCrawlModal}
+        onClose={() => setShowCrawlModal(false)}
+        onSearch={handleRefreshCrawl}
+        loading={refreshing}
       />
     </header>
   )
