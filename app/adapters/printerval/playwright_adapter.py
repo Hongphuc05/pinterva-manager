@@ -324,7 +324,12 @@ class PlaywrightPrintervalAdapter:
         limit: int = 40,
         cursor: str | None = None,
         platform_id: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
     ) -> DiscoverResult:
+        # date_from/date_to: not wired here yet — the DOM date pickers
+        # (filter.dateFrom/dateTo) have never been driven by this adapter, only read
+        # about. Silently not applied on this path (see api_adapter.py's docstring).
         page = self.page
         page.goto(ADMIN_URL)
         page.wait_for_load_state("domcontentloaded")

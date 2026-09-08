@@ -37,12 +37,18 @@ def discover_waiting_orders_with_summaries(
     limit: int = 40,
     job_type: str = ALL_JOB_TYPES,
     platform_id: uuid.UUID | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
 ) -> tuple[list[str], list[OrderSummary]]:
     """Return new external_order_ids + OrderSummary objects from adapter's Waiting queue."""
     platform_str = str(platform_id) if platform_id else None
     kwargs = {"status": "Waiting", "job_type": job_type, "limit": limit}
     if platform_str:
         kwargs["platform_id"] = platform_str
+    if date_from:
+        kwargs["date_from"] = date_from
+    if date_to:
+        kwargs["date_to"] = date_to
     result = with_retry(lambda: adapter.discover_orders(**kwargs))
     if not result.success:
         session.add(
@@ -122,6 +128,26 @@ def discover_waiting_orders(
         session, adapter, limit=limit, job_type=job_type, platform_id=platform_id
     )
     return new_ids
+
+
+def find_unclaimed_order_ids(session: Session, platform_id: uuid.UUID | None) -> list[str]:
+    """Orders sitting at DISCOVERED with no confirmed printerval claim — a prior
+    claim_batch attempt failed (dead-lettered) for them, and the normal discover step
+    will never resurface them on its own (they already have an Order row, so they're
+    never "new" again). Merged into the next crawl cycle's claim_batch call alongside
+    genuinely new orders, so a failed claim actually gets retried instead of sitting
+    stuck forever."""
+    query = (
+        session.query(Order)
+        .outerjoin(
+            ExternalObservation,
+            (ExternalObservation.order_id == Order.id) & (ExternalObservation.source == "printerval"),
+        )
+        .filter(Order.state == OrderState.DISCOVERED.value, ExternalObservation.id.is_(None))
+    )
+    if platform_id:
+        query = query.filter(Order.platform_id == platform_id)
+    return [o.external_order_id for o in query.all()]
 
 
 def claim_batch(

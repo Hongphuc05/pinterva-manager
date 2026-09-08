@@ -65,6 +65,28 @@ def test_discover_orders_prefixes_a_bare_numeric_row_id_with_dj():
     assert [o.external_order_id for o in res.orders] == ["DJ3971347"]
 
 
+def test_discover_orders_forwards_date_filters_to_the_client():
+    seen_params = []
+
+    def handler(request):
+        if request.method == "GET" and request.url.path == LOGIN_PATH:
+            return httpx.Response(200, text='<input type="hidden" name="_token" value="csrf-123">')
+        if request.method == "POST" and request.url.path == LOGIN_PATH:
+            return httpx.Response(302, headers={"location": "/admin"})
+        if request.method == "GET" and request.url.path == FIND_PATH:
+            seen_params.append(dict(request.url.params))
+            return httpx.Response(200, json={"status": "successful", "result": []})
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    adapter = _api_adapter(handler)
+    adapter.discover_orders(
+        status="Waiting", date_from="2026-09-01 00:00:00", date_to="2026-09-07 23:59:59"
+    )
+
+    assert seen_params[0]["date_from"] == "2026-09-01 00:00:00"
+    assert seen_params[0]["date_to"] == "2026-09-07 23:59:59"
+
+
 def test_discover_orders_missing_config():
     api_client = PrintervalApiClient(
         base_url="https://printerval.test",

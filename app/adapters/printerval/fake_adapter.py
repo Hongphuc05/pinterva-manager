@@ -57,6 +57,8 @@ class FakePrintervalAdapter:
         limit: int = 40,
         cursor: str | None = None,
         platform_id: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
     ) -> DiscoverResult:
         matched = [o for o in self._orders.values() if o.status == status]
         orders = [

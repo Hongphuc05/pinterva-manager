@@ -68,6 +68,8 @@ class PrintervalApiAdapter:
         limit: int = 40,
         cursor: str | None = None,
         platform_id: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
     ) -> DiscoverResult:
         if job_type != ALL_JOB_TYPES:
             # Only "all" is a confirmed-safe value for the fast HTTP find endpoint
@@ -75,7 +77,9 @@ class PrintervalApiAdapter:
             # verified against the live DOM's <select>, via the Playwright fallback's
             # own discover_orders. Guessing an HTTP query value for it risks the exact
             # incident already on record: a mismatched filter string silently returning
-            # 0 orders instead of erroring.
+            # 0 orders instead of erroring. The Playwright fallback also doesn't (yet)
+            # fill the DOM date pickers — date_from/date_to are silently not applied
+            # for this path.
             if self.fallback_adapter:
                 return self.fallback_adapter.discover_orders(
                     status=status, job_type=job_type, limit=limit, cursor=cursor, platform_id=platform_id
@@ -88,7 +92,9 @@ class PrintervalApiAdapter:
 
         page_id = int(cursor) if cursor and cursor.isdigit() else 0
         try:
-            page = self.api_client.discover_waiting_page(page_size=limit, page_id=page_id)
+            page = self.api_client.discover_waiting_page(
+                page_size=limit, page_id=page_id, date_from=date_from, date_to=date_to
+            )
         except Exception as exc:
             error_cls = (
                 exc.error_class.value

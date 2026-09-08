@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { X, KeyRound, Check, AlertCircle, Loader2, ArrowRightLeft, Plus, CheckCircle2 } from 'lucide-react'
+import { X, KeyRound, Check, AlertCircle, Loader2, ArrowRightLeft, Plus, CheckCircle2, HelpCircle } from 'lucide-react'
 import { apiFetch, ApiError } from '../api/client'
 import { usePlatform } from '../auth/PlatformContext'
 
@@ -18,6 +18,7 @@ export function PrintervalSettingsModal({ isOpen, onClose }: PrintervalSettingsM
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [successMsg, setSuccessMsg] = useState('')
+  const [showTeamOutsourceHelp, setShowTeamOutsourceHelp] = useState(false)
 
   if (!isOpen) return null
 
@@ -236,9 +237,17 @@ export function PrintervalSettingsModal({ isOpen, onClose }: PrintervalSettingsM
                 />
               </div>
 
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700 block">
-                  Team Outsource <span className="text-red-500">*</span>
+              <div className="space-y-1 relative">
+                <label className="text-xs font-bold text-slate-700 flex items-center gap-1">
+                  <span>Team Outsource</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowTeamOutsourceHelp((v) => !v)}
+                    className="text-red-500 hover:text-[#0052CC] cursor-pointer inline-flex items-center"
+                    title="Xem hướng dẫn lấy Team Outsource"
+                  >
+                    *
+                  </button>
                 </label>
                 <input
                   type="text"
@@ -249,8 +258,42 @@ export function PrintervalSettingsModal({ isOpen, onClose }: PrintervalSettingsM
                   className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#0052CC]/20 focus:border-[#0052CC] transition-all"
                 />
                 <p className="text-[10px] text-slate-400">
-                  Bắt buộc — mỗi tài khoản mẹ Printerval chỉ quét được đúng team này. Lấy từ Network request thật khi đăng nhập account đó.
+                  Bắt buộc — mỗi tài khoản mẹ Printerval chỉ quét được đúng team này.{' '}
+                  <button
+                    type="button"
+                    onClick={() => setShowTeamOutsourceHelp((v) => !v)}
+                    className="text-[#0052CC] font-semibold underline cursor-pointer"
+                  >
+                    Cách lấy giá trị này?
+                  </button>
                 </p>
+
+                {showTeamOutsourceHelp && (
+                  <div className="absolute z-10 top-full mt-1 left-0 right-0 p-3 bg-slate-800 text-slate-100 rounded-xl shadow-xl text-[11px] space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <p className="font-bold flex items-center gap-1">
+                        <HelpCircle className="h-3.5 w-3.5" />
+                        Cách lấy Team Outsource
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setShowTeamOutsourceHelp(false)}
+                        className="text-slate-400 hover:text-white cursor-pointer"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                    <ol className="list-decimal list-inside space-y-1 text-slate-200">
+                      <li>Đăng nhập trực tiếp trên trình duyệt (không qua web này) vào printerval.com bằng đúng tài khoản mẹ này.</li>
+                      <li>Vào trang: printerval.com/central/outsource/pod/design-job/admin</li>
+                      <li>Mở DevTools (F12) → tab Network.</li>
+                      <li>Bấm nút "Search" trên trang để trang gọi lại API.</li>
+                      <li>Tìm request tên "find" (…/design-job/find?...).</li>
+                      <li>Xem "Query String Parameters" → dòng <code className="bg-slate-700 px-1 rounded">team_outsource</code> — đó chính là giá trị cần điền.</li>
+                    </ol>
+                    <p className="text-slate-400 italic">Không đoán theo tên tài khoản — mỗi acc mẹ có 1 giá trị riêng, đoán sai sẽ khiến quét đơn âm thầm trả về 0 kết quả.</p>
+                  </div>
+                )}
               </div>
 
               <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">

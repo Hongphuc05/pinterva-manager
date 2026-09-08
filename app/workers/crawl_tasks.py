@@ -13,6 +13,7 @@ from app.application.crawl import (
     claim_batch,
     discover_waiting_orders_with_summaries,
     export_platform_orders_csv,
+    find_unclaimed_order_ids,
     import_claimed_orders,
 )
 from app.workers.celery_app import celery_app
@@ -26,19 +27,32 @@ def run_crawl_cycle(
     limit: int = 40,
     platform_id: uuid.UUID | None = None,
     job_type: str = ALL_JOB_TYPES,
+    date_from: str | None = None,
+    date_to: str | None = None,
 ) -> dict:
     """The pure crawl-cycle logic: discover -> claim -> import, in order. Takes an
     already-open session/adapter so it's directly unit-testable with a fake adapter and
     the test DB session — no Celery or Playwright involved here.
     """
     new_order_ids, summaries = discover_waiting_orders_with_summaries(
-        session, adapter, limit=limit, platform_id=platform_id, job_type=job_type
+        session,
+        adapter,
+        limit=limit,
+        platform_id=platform_id,
+        job_type=job_type,
+        date_from=date_from,
+        date_to=date_to,
     )
-    if new_order_ids:
+    # Retry orders a prior claim_batch dead-lettered — they already have an Order row
+    # so discover_waiting_orders_with_summaries's "new" filter will never surface them
+    # again on its own.
+    retry_ids = [oid for oid in find_unclaimed_order_ids(session, platform_id) if oid not in new_order_ids]
+    order_ids_to_claim = new_order_ids + retry_ids
+    if order_ids_to_claim:
         claim_result = claim_batch(
             session,
             adapter,
-            new_order_ids,
+            order_ids_to_claim,
             owner=NTTH_DESIGNER_OPTION,
             order_summaries=summaries,
             platform_id=platform_id,

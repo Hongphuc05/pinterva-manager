@@ -10,6 +10,7 @@ from app.application.crawl import (
     claim_batch,
     discover_waiting_orders,
     export_platform_orders_csv,
+    find_unclaimed_order_ids,
     import_claimed_orders,
 )
 from app.domain.models import OrderState
@@ -103,6 +104,17 @@ def test_claim_batch_commits_after_every_order_not_once_for_the_whole_batch(db_s
 
     # At least one commit per order, not one single commit for the entire batch.
     assert commit_count["n"] >= 3
+
+
+def test_find_unclaimed_order_ids_returns_only_orders_with_no_confirmed_claim(db_session):
+    adapter = FakePrintervalAdapter()
+    _seed_waiting_order(adapter, "DJ0000001")
+    # DJ0000002 intentionally not added to the adapter -> its claim will fail below.
+    claim_batch(db_session, adapter, ["DJ0000001", "DJ0000002"], owner="ntth")
+
+    unclaimed = find_unclaimed_order_ids(db_session, platform_id=None)
+
+    assert unclaimed == ["DJ0000002"]
 
 
 def test_claim_batch_is_idempotent_for_the_same_order_ids(db_session):

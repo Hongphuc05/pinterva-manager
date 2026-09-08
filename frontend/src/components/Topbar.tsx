@@ -42,14 +42,18 @@ export function Topbar() {
     return () => clearTimeout(timer)
   }, [flashMessage])
 
-  async function handleRefreshCrawl(jobType: string) {
+  async function handleRefreshCrawl(jobType: string, dateFrom: string, dateTo: string) {
     setRefreshing(true)
     setFlashMessage(null)
     setIsError(false)
     try {
       const res = await apiFetch<{ flash: string }>('/orders/refresh', {
         method: 'POST',
-        body: JSON.stringify({ job_type: jobType }),
+        body: JSON.stringify({
+          job_type: jobType,
+          date_from: dateFrom || undefined,
+          date_to: dateTo || undefined,
+        }),
       })
       setFlashMessage(res.flash)
       setIsError(res.flash.includes('thất bại') || res.flash.includes('lỗi'))

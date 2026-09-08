@@ -115,6 +115,29 @@ def test_discover_waiting_rejects_an_unknown_schema():
     assert caught.value.error_class is ErrorClass.EXTERNAL_CHANGED
 
 
+def test_discover_waiting_page_sends_date_from_and_date_to_only_when_given():
+    seen_params = []
+
+    def handler(request):
+        if request.method == "GET" and request.url.path == LOGIN_PATH:
+            return httpx.Response(200, text='<input type="hidden" name="_token" value="csrf">')
+        if request.method == "POST" and request.url.path == LOGIN_PATH:
+            return httpx.Response(302, headers={"location": ADMIN_PATH})
+        if request.method == "GET" and request.url.path == FIND_PATH:
+            seen_params.append(dict(request.url.params))
+            return httpx.Response(200, json={"status": "successful", "result": []})
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    with _client(handler) as client:
+        client.discover_waiting_page()
+        client.discover_waiting_page(date_from="2026-09-01 00:00:00", date_to="2026-09-07 23:59:59")
+
+    assert "date_from" not in seen_params[0]
+    assert "date_to" not in seen_params[0]
+    assert seen_params[1]["date_from"] == "2026-09-01 00:00:00"
+    assert seen_params[1]["date_to"] == "2026-09-07 23:59:59"
+
+
 def test_find_order_tries_each_status_until_one_matches():
     """Live-confirmed 2026-09-08: `search=` only matches together with the order's
     exact current status — a mismatched status returns 0 rows, not an error."""

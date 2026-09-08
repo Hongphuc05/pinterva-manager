@@ -43,6 +43,8 @@ class PrintervalAdapter(Protocol):
         limit: int = 40,
         cursor: str | None = None,
         platform_id: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
     ) -> DiscoverResult: ...
 
     def get_order_detail(

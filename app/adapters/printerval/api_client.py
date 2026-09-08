@@ -171,8 +171,23 @@ class PrintervalApiClient:
             )
         self._authenticated = True
 
-    def discover_waiting_page(self, *, page_size: int = 40, page_id: int = 0) -> PrintervalApiPage:
-        """Fetch one page of Waiting jobs without modifying any external order."""
+    def discover_waiting_page(
+        self,
+        *,
+        page_size: int = 40,
+        page_id: int = 0,
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> PrintervalApiPage:
+        """Fetch one page of Waiting jobs without modifying any external order.
+
+        date_from/date_to (each "YYYY-MM-DD HH:MM:SS", filtering on `created_at`) are
+        live-confirmed 2026-09-08 by reading the site's own controller JS
+        (design-job-outsource-controller.js's buildUrl) for the real param names and
+        format, then verified empirically: a far-future date_from and a far-past
+        date_to each returned 0 rows, and a real recent date_from returned a
+        different row set than no filter at all.
+        """
         if not 1 <= page_size <= 100:
             raise ValueError("page_size must be between 1 and 100")
         if page_id < 0:
@@ -185,6 +200,10 @@ class PrintervalApiClient:
             "job_type": "all",
             "team_outsource": self.team_outsource or "",
         }
+        if date_from:
+            params["date_from"] = date_from
+        if date_to:
+            params["date_to"] = date_to
         result = self._fetch_find_rows(params, error_context="Waiting queue")
         return PrintervalApiPage(orders=result, raw={"status": "successful", "result": result})
 

@@ -100,6 +100,11 @@ class RefreshRequest(BaseModel):
     # instead of guessing an unconfirmed HTTP query value for it (a real past incident:
     # a wrong filter string silently returned 0 orders instead of erroring).
     job_type: str = ALL_JOB_TYPES
+    # Plain "YYYY-MM-DD" from the date picker (filters on created_at) — live-confirmed
+    # 2026-09-08 against the real site's own find endpoint (date_from/date_to,
+    # "YYYY-MM-DD HH:MM:SS"). Only applies on the fast HTTP path (job_type == default).
+    date_from: str | None = None
+    date_to: str | None = None
 
 
 class PrintervalLoginStatus(BaseModel):
@@ -218,7 +223,11 @@ def api_orders_refresh(
             password=crawl_password,
             team_outsource=crawl_team_outsource,
         ) as api_client:
-            with playwright_session(profile_dir=profile_dir, headless=True) as page:
+            # headless=True here fights Cloudflare (claude.md §16 — confirmed
+            # Chromium headless gets 403'd; real Chrome, non-headless, is what got
+            # past it) and was the actual cause of a live incident: both new orders'
+            # claim_batch calls timed out (TRANSIENT_NETWORK) instead of claiming.
+            with playwright_session(profile_dir=profile_dir, headless=False) as page:
                 fallback = PlaywrightPrintervalAdapter(
                     page=page,
                     crawl_username=crawl_username,
@@ -226,7 +235,12 @@ def api_orders_refresh(
                 )
                 adapter = PrintervalApiAdapter(api_client=api_client, fallback_adapter=fallback)
                 summary = run_crawl_cycle(
-                    db, adapter, platform_id=platform_id, job_type=payload.job_type
+                    db,
+                    adapter,
+                    platform_id=platform_id,
+                    job_type=payload.job_type,
+                    date_from=f"{payload.date_from} 00:00:00" if payload.date_from else None,
+                    date_to=f"{payload.date_to} 23:59:59" if payload.date_to else None,
                 )
         flash = (
             f"Đã crawl xong qua API ({crawl_username}): {summary['discovered']} đơn mới, "
