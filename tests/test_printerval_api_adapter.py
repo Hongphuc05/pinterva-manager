@@ -45,6 +45,26 @@ def test_discover_orders_success():
     assert [o.external_order_id for o in res.orders] == ["DJ101", "DJ102"]
 
 
+def test_discover_orders_prefixes_a_bare_numeric_row_id_with_dj():
+    """Regression test for a real incident: newly-crawled orders were stored without
+    the "DJ" prefix (e.g. "3971347" instead of "DJ3971347") because real rows have no
+    "code"/"job_code" field, only a bare numeric `id` — discover_orders used to fall
+    through straight to that unprefixed value."""
+    def handler(request):
+        if request.method == "GET" and request.url.path == LOGIN_PATH:
+            return httpx.Response(200, text='<input type="hidden" name="_token" value="csrf-123">')
+        if request.method == "POST" and request.url.path == LOGIN_PATH:
+            return httpx.Response(302, headers={"location": "/admin"})
+        if request.method == "GET" and request.url.path == FIND_PATH:
+            return httpx.Response(200, json={"status": "successful", "result": [{"id": 3971347}]})
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    adapter = _api_adapter(handler)
+    res = adapter.discover_orders(status="Waiting", limit=40)
+    assert res.success is True
+    assert [o.external_order_id for o in res.orders] == ["DJ3971347"]
+
+
 def test_discover_orders_missing_config():
     api_client = PrintervalApiClient(
         base_url="https://printerval.test",

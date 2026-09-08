@@ -31,6 +31,7 @@ from app.adapters.printerval.models import (
 )
 from app.adapters.printerval.row_mapper import (
     extract_source_asset_url,
+    parse_external_order_id,
     parse_order_detail_from_row,
     parse_product_summary_fields,
 )
@@ -112,13 +113,7 @@ class PrintervalApiAdapter:
 
         discovered: list[OrderSummary] = []
         for row in page.orders:
-            order_id = str(
-                row.get("code")
-                or row.get("job_code")
-                or row.get("external_order_id")
-                or row.get("id")
-                or ""
-            ).strip()
+            order_id = parse_external_order_id(row)
             if order_id:
                 product_name, sku, category = parse_product_summary_fields(row)
 

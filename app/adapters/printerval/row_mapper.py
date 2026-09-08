@@ -91,6 +91,27 @@ def _parse_custom_config(sku_data: dict[str, Any] | None) -> CustomConfig | None
     return CustomConfig(original=original, translated_vn=translated)
 
 
+def parse_external_order_id(row: dict[str, Any]) -> str:
+    """The site's own external code. Live-confirmed 2026-09-08: a real row carries no
+    "code"/"job_code" field already holding the "DJ#######" form — its own numeric
+    `id` IS the code, just missing the "DJ" prefix (confirmed via `search=DJ<id>`
+    matching exactly that row on the same endpoint). Returns "" if the row has no
+    usable id at all.
+
+    Regression note: before this, discover_orders fell through straight to a bare
+    `row.get("id")` with no prefix, so newly-crawled orders got stored as "3971347"
+    while the exact same order elsewhere (Playwright, which reads the prefixed code
+    straight off the page) was "DJ3971347" — two different identities for one order.
+    """
+    for key in ("code", "job_code", "external_order_id"):
+        val = row.get(key)
+        if val:
+            val = str(val).strip()
+            return val if val.upper().startswith("DJ") else f"DJ{val}"
+    raw_id = row.get("id")
+    return f"DJ{raw_id}" if raw_id else ""
+
+
 def parse_product_summary_fields(row: dict[str, Any]) -> tuple[str, str | None, str | None]:
     """(product_name, sku, product_category) — the subset already used at discover
     time, factored out here so discover and detail read the same fields the same way."""

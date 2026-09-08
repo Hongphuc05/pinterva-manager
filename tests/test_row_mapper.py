@@ -2,6 +2,7 @@ import json
 
 from app.adapters.printerval.row_mapper import (
     extract_source_asset_url,
+    parse_external_order_id,
     parse_order_detail_from_row,
     parse_product_summary_fields,
 )
@@ -57,6 +58,24 @@ PLAIN_ROW = {
     "attributes": {},
     "templateJobs": None,
 }
+
+
+def test_parse_external_order_id_prefixes_a_bare_numeric_id_with_dj():
+    """Regression test: real rows carry no "code"/"job_code" field already holding
+    the "DJ#######" form — only a bare numeric `id`. Before this, discover_orders fell
+    through straight to that bare id with no prefix, storing e.g. "3971347" for an
+    order that is "DJ3971347" everywhere else (Printerval's own site, Playwright's own
+    extraction) — two different identities for the same order."""
+    assert parse_external_order_id({"id": 3971347}) == "DJ3971347"
+
+
+def test_parse_external_order_id_prefers_an_already_prefixed_code_field():
+    assert parse_external_order_id({"code": "DJ101", "id": 999}) == "DJ101"
+    assert parse_external_order_id({"job_code": "202", "id": 999}) == "DJ202"
+
+
+def test_parse_external_order_id_empty_when_nothing_usable():
+    assert parse_external_order_id({}) == ""
 
 
 def test_parse_product_summary_fields():
