@@ -197,6 +197,20 @@ def claim_batch(
                 )
                 failed.append(order_id)
 
+            # Commit after every single order, not once at the very end of the whole
+            # batch. Each set_designer call is a real Playwright round-trip (seconds,
+            # sometimes much more) — a batch of dozens of new orders previously stayed
+            # one giant uncommitted transaction the entire time, so nothing about its
+            # progress was ever visible from outside, and one slow/stuck order made the
+            # whole request look identically "hung" whether it truly was or was just
+            # working through a long backlog. A crash/retry after this point re-walks
+            # order_ids and skips orders that already have a row (the `order is None`
+            # check above) — the one known cost is a retried batch re-issuing
+            # set_designer for already-claimed orders (harmless: it's already idempotent
+            # against "already the target value") and a duplicate ExternalObservation
+            # row for those, not a duplicate claim.
+            session.commit()
+
         return {"batch_id": str(batch.id), "claimed": claimed, "failed": failed}
 
     return run_idempotent(session, idempotency_key, "claim_batch", _do)

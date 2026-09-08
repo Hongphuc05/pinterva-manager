@@ -173,14 +173,10 @@ class PrintervalApiClient:
 
     def discover_waiting_page(self, *, page_size: int = 40, page_id: int = 0) -> PrintervalApiPage:
         """Fetch one page of Waiting jobs without modifying any external order."""
-        self._validate_configuration()
         if not 1 <= page_size <= 100:
             raise ValueError("page_size must be between 1 and 100")
         if page_id < 0:
             raise ValueError("page_id must be non-negative")
-        if not self._authenticated:
-            self.login()
-
         params = {
             "page_size": str(page_size),
             "page_id": str(page_id),
@@ -189,32 +185,80 @@ class PrintervalApiClient:
             "job_type": "all",
             "team_outsource": self.team_outsource or "",
         }
+        result = self._fetch_find_rows(params, error_context="Waiting queue")
+        return PrintervalApiPage(orders=result, raw={"status": "successful", "result": result})
+
+    #: The site's 6 real order statuses (docs/phase0-field-map.md §1), confirmed live
+    #: 2026-09-08 as the exact literal values this endpoint's own `status` param
+    #: accepts (lowercase of the DOM label) — each one returned rows whose own
+    #: `status` field echoed back that same value. "doing" first: find_order is only
+    #: ever called right after this app's own claim, so that's overwhelmingly the
+    #: common case.
+    ORDER_STATUSES = ("doing", "waiting", "review", "fix", "confirm", "done")
+
+    def find_order(
+        self, external_order_id: str, statuses: tuple[str, ...] = ORDER_STATUSES
+    ) -> dict[str, Any] | None:
+        """Fetch one order's full row via the site's own `search=` filter — Live-
+        confirmed 2026-09-08: `search=<DJ code>` matches by exact code, but only
+        together with a `status` that exactly matches the order's current site
+        status (a mismatched status returns 0 rows, not an error) — hence trying
+        each candidate status in turn until one matches. Read-only, same endpoint
+        `discover_waiting_page` already uses, just scoped to one order instead of a
+        page. Returns the raw row dict, or None if not found under any of them.
+        """
+        code = (
+            external_order_id
+            if external_order_id.upper().startswith("DJ")
+            else f"DJ{external_order_id}"
+        )
+        for status in statuses:
+            params = {
+                "page_size": "1",
+                "page_id": "0",
+                "status": status,
+                "time_type": "created_at",
+                "job_type": "all",
+                "team_outsource": self.team_outsource or "",
+                "search": code,
+            }
+            rows = self._fetch_find_rows(params, error_context="Order search")
+            if rows:
+                return rows[0]
+        return None
+
+    def _fetch_find_rows(self, params: dict[str, str], *, error_context: str) -> list[dict[str, Any]]:
+        """Shared GET+validate+parse for `/design-job/find` — used by both the
+        Waiting-queue page fetch and the single-order search."""
+        self._validate_configuration()
+        if not self._authenticated:
+            self.login()
         response = self._find_with_one_reauthentication(params)
         if response.status_code >= 400:
             error_class, retryable = _classify_http_status(response.status_code)
             raise PrintervalApiError(
-                error_class, "Waiting queue request was rejected", retryable=retryable
+                error_class, f"{error_context} request was rejected", retryable=retryable
             )
         try:
             payload = response.json()
         except ValueError as exc:
             raise PrintervalApiError(
-                ErrorClass.EXTERNAL_CHANGED, "Waiting queue was not JSON"
+                ErrorClass.EXTERNAL_CHANGED, f"{error_context} was not JSON"
             ) from exc
         if not isinstance(payload, dict) or payload.get("status") != "successful":
             raise PrintervalApiError(
-                ErrorClass.EXTERNAL_CHANGED, "Waiting queue response changed or was rejected"
+                ErrorClass.EXTERNAL_CHANGED, f"{error_context} response changed or was rejected"
             )
         result = payload.get("result")
         if not isinstance(result, list):
             raise PrintervalApiError(
-                ErrorClass.EXTERNAL_CHANGED, "Waiting queue has no result list"
+                ErrorClass.EXTERNAL_CHANGED, f"{error_context} has no result list"
             )
         if not all(isinstance(item, dict) for item in result):
             raise PrintervalApiError(
-                ErrorClass.EXTERNAL_CHANGED, "Waiting queue contains an invalid row"
+                ErrorClass.EXTERNAL_CHANGED, f"{error_context} contains an invalid row"
             )
-        return PrintervalApiPage(orders=result, raw=payload)
+        return result
 
     def _find_with_one_reauthentication(self, params: dict[str, str]) -> httpx.Response:
         try:

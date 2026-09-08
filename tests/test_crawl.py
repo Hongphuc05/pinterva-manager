@@ -79,6 +79,32 @@ def test_claim_batch_dead_letters_a_failing_order_without_aborting_the_batch(db_
     assert dead_letters[0].payload["order_id"] == "DJ0000002"
 
 
+def test_claim_batch_commits_after_every_order_not_once_for_the_whole_batch(db_session, monkeypatch):
+    """Regression test: a big batch used to stay one uncommitted transaction from the
+    first order to the last (each set_designer call is a real, possibly slow Playwright
+    round-trip) — nothing about its progress was ever visible from outside, and one
+    slow/stuck order looked identical to the whole request being hung. Each order must
+    now commit on its own."""
+    adapter = FakePrintervalAdapter()
+    _seed_waiting_order(adapter, "DJ0000001")
+    _seed_waiting_order(adapter, "DJ0000002")
+    _seed_waiting_order(adapter, "DJ0000003")
+
+    commit_count = {"n": 0}
+    original_commit = db_session.commit
+
+    def _counting_commit():
+        commit_count["n"] += 1
+        original_commit()
+
+    monkeypatch.setattr(db_session, "commit", _counting_commit)
+
+    claim_batch(db_session, adapter, ["DJ0000001", "DJ0000002", "DJ0000003"], owner="ntth")
+
+    # At least one commit per order, not one single commit for the entire batch.
+    assert commit_count["n"] >= 3
+
+
 def test_claim_batch_is_idempotent_for_the_same_order_ids(db_session):
     adapter = FakePrintervalAdapter()
     _seed_waiting_order(adapter, "DJ0000001")

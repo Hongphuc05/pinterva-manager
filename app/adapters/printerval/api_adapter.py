@@ -8,6 +8,9 @@ have been verified.
 
 from __future__ import annotations
 
+import hashlib
+from pathlib import Path
+
 from app.adapters.errors import ErrorClass
 from app.adapters.printerval.api_client import (
     PrintervalApiClient,
@@ -26,6 +29,21 @@ from app.adapters.printerval.models import (
     OrderSummary,
     WriteResult,
 )
+from app.adapters.printerval.row_mapper import (
+    extract_source_asset_url,
+    parse_order_detail_from_row,
+    parse_product_summary_fields,
+)
+
+
+def _checksum_of(web_path: str) -> str | None:
+    """download_and_save_image returns a served web path (e.g. "/crawled_assets/
+    <platform_id>/<order_id>.png"), not the downloaded bytes — read the file it just
+    wrote back to compute the same sha256 checksum the Playwright fallback records."""
+    try:
+        return hashlib.sha256(Path(web_path.lstrip("/")).read_bytes()).hexdigest()
+    except OSError:
+        return None
 
 
 class PrintervalApiAdapter:
@@ -102,17 +120,7 @@ class PrintervalApiAdapter:
                 or ""
             ).strip()
             if order_id:
-                product_info = row.get("product") if isinstance(row.get("product"), dict) else {}
-                product_name = str(
-                    product_info.get("name")
-                    or row.get("product_name")
-                    or row.get("name")
-                    or row.get("job_title")
-                    or row.get("title")
-                    or "Đơn 2D Custom"
-                )
-                sku = str(product_info.get("sku") or row.get("sku") or "")
-                category = str(product_info.get("category_name") or row.get("product_category") or "")
+                product_name, sku, category = parse_product_summary_fields(row)
 
                 raw_image_url = extract_image_url_from_dict_or_html(row)
                 local_path = (
@@ -133,8 +141,8 @@ class PrintervalApiAdapter:
                         thumbnail_url=final_thumbnail,
                         status=status,
                         template_jobs=template_jobs,
-                        sku=sku or None,
-                        product_category=category or None,
+                        sku=sku,
+                        product_category=category,
                     )
                 )
 
@@ -146,16 +154,40 @@ class PrintervalApiAdapter:
             total_found=len(discovered),
         )
 
+    def _find_order_row(self, external_order_id: str) -> tuple[dict | None, str | None]:
+        """(row, error_class) — row is None on any failure, with error_class set;
+        both None only means the order genuinely wasn't found under any known status."""
+        try:
+            row = self.api_client.find_order(external_order_id)
+        except Exception as exc:
+            error_cls = (
+                exc.error_class.value
+                if isinstance(exc, PrintervalApiError)
+                else ErrorClass.PERMANENT_EXTERNAL.value
+            )
+            return None, error_cls
+        return row, None
+
     def get_order_detail(
         self, external_order_id: str, platform_id: str | None = None
     ) -> OrderDetailResult:
-        if self.fallback_adapter:
-            return self.fallback_adapter.get_order_detail(external_order_id, platform_id=platform_id)
-        return OrderDetailResult(
-            success=False,
-            error_class=ErrorClass.PERMANENT_EXTERNAL.value,
-            evidence={"message": "No fallback adapter provided for get_order_detail"},
-        )
+        row, error_cls = self._find_order_row(external_order_id)
+        if error_cls is not None:
+            if self.fallback_adapter:
+                return self.fallback_adapter.get_order_detail(external_order_id, platform_id=platform_id)
+            return OrderDetailResult(success=False, error_class=error_cls)
+        if row is None:
+            # Not found under any of the 6 known site statuses — genuinely surprising
+            # (an order we ourselves claimed should exist in one of them), fall back to
+            # Playwright's own live search rather than guess why.
+            if self.fallback_adapter:
+                return self.fallback_adapter.get_order_detail(external_order_id, platform_id=platform_id)
+            return OrderDetailResult(
+                success=False,
+                error_class=ErrorClass.EXTERNAL_CHANGED.value,
+                evidence={"message": f"order {external_order_id} not found under any known status"},
+            )
+        return parse_order_detail_from_row(row, external_order_id, platform_id=platform_id)
 
     def set_designer(self, external_order_id: str, designer_option: str) -> WriteResult:
         if self.fallback_adapter:
@@ -187,10 +219,43 @@ class PrintervalApiAdapter:
     def download_asset(
         self, external_order_id: str, platform_id: str | None = None
     ) -> AssetResult:
-        if self.fallback_adapter:
-            return self.fallback_adapter.download_asset(external_order_id, platform_id=platform_id)
+        row, error_cls = self._find_order_row(external_order_id)
+        if error_cls is not None:
+            if self.fallback_adapter:
+                return self.fallback_adapter.download_asset(external_order_id, platform_id=platform_id)
+            return AssetResult(
+                success=False, external_order_id=external_order_id, error_class=error_cls
+            )
+        if row is None:
+            if self.fallback_adapter:
+                return self.fallback_adapter.download_asset(external_order_id, platform_id=platform_id)
+            return AssetResult(
+                success=False,
+                external_order_id=external_order_id,
+                error_class=ErrorClass.EXTERNAL_CHANGED.value,
+                evidence={"message": f"order {external_order_id} not found under any known status"},
+            )
+
+        source_url = extract_source_asset_url(row)
+        if not source_url:
+            # Only personalized orders have a source file to download — see
+            # extract_source_asset_url. Same "success, nothing to download" contract
+            # as the Playwright fallback's identical case.
+            return AssetResult(success=True, external_order_id=external_order_id)
+
+        local_path = download_and_save_image(external_order_id, source_url, platform_id=platform_id)
+        if not local_path:
+            return AssetResult(
+                success=False,
+                external_order_id=external_order_id,
+                error_class=ErrorClass.TRANSIENT_NETWORK.value,
+                retryable=True,
+                evidence={"message": f"failed to download source asset from {source_url}"},
+            )
+        checksum = _checksum_of(local_path)
         return AssetResult(
-            success=False,
-            error_class=ErrorClass.PERMANENT_EXTERNAL.value,
-            evidence={"message": "No fallback adapter provided for download_asset"},
+            success=True,
+            external_order_id=external_order_id,
+            local_path=local_path,
+            checksum=checksum,
         )

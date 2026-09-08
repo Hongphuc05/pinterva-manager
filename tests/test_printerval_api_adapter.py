@@ -61,7 +61,7 @@ def test_fallback_delegation():
     fake = FakePrintervalAdapter()
     fake.add_order(external_order_id="DJ999", product_name="Test", designer=None, status="waiting")
     adapter = _api_adapter(lambda req: httpx.Response(500), fallback_adapter=fake)
-    
+
     # get_order_detail delegates to fallback
     detail = adapter.get_order_detail("DJ999")
     assert detail.success is True
@@ -70,3 +70,63 @@ def test_fallback_delegation():
     # set_designer delegates to fallback
     write = adapter.set_designer("DJ999", "Nguyễn Thị Thuý Hường - 2D Prin")
     assert write.success is True
+
+
+def test_get_order_detail_uses_the_fast_http_path_without_touching_fallback():
+    def handler(request):
+        if request.method == "GET" and request.url.path == LOGIN_PATH:
+            return httpx.Response(200, text='<input type="hidden" name="_token" value="csrf">')
+        if request.method == "POST" and request.url.path == LOGIN_PATH:
+            return httpx.Response(302, headers={"location": "/admin"})
+        if request.method == "GET" and request.url.path == FIND_PATH:
+            params = dict(request.url.params)
+            if params["status"] == "doing":
+                return httpx.Response(
+                    200,
+                    json={
+                        "status": "successful",
+                        "result": [{"id": 3968034, "status": "doing", "product": {"name": "Mug"}}],
+                    },
+                )
+            return httpx.Response(200, json={"status": "successful", "result": []})
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    class _ExplodingFallback:
+        def __getattr__(self, name):
+            raise AssertionError(f"fallback.{name} must not be called — the fast path found the row")
+
+    adapter = _api_adapter(handler, fallback_adapter=_ExplodingFallback())
+    result = adapter.get_order_detail("DJ3968034")
+
+    assert result.success is True
+    assert result.product_name == "Mug"
+
+
+def test_download_asset_uses_the_fast_http_path_for_a_plain_product_order():
+    def handler(request):
+        if request.method == "GET" and request.url.path == LOGIN_PATH:
+            return httpx.Response(200, text='<input type="hidden" name="_token" value="csrf">')
+        if request.method == "POST" and request.url.path == LOGIN_PATH:
+            return httpx.Response(302, headers={"location": "/admin"})
+        if request.method == "GET" and request.url.path == FIND_PATH:
+            params = dict(request.url.params)
+            if params["status"] == "doing":
+                return httpx.Response(
+                    200,
+                    json={
+                        "status": "successful",
+                        "result": [{"id": 3968678, "status": "doing", "is_custom_design": None}],
+                    },
+                )
+            return httpx.Response(200, json={"status": "successful", "result": []})
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    class _ExplodingFallback:
+        def __getattr__(self, name):
+            raise AssertionError(f"fallback.{name} must not be called — the fast path found the row")
+
+    adapter = _api_adapter(handler, fallback_adapter=_ExplodingFallback())
+    result = adapter.download_asset("DJ3968678")
+
+    assert result.success is True
+    assert result.local_path is None  # plain product order — nothing to download

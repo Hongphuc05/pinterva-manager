@@ -113,3 +113,64 @@ def test_discover_waiting_rejects_an_unknown_schema():
         with pytest.raises(PrintervalApiError) as caught:
             client.discover_waiting_page()
     assert caught.value.error_class is ErrorClass.EXTERNAL_CHANGED
+
+
+def test_find_order_tries_each_status_until_one_matches():
+    """Live-confirmed 2026-09-08: `search=` only matches together with the order's
+    exact current status — a mismatched status returns 0 rows, not an error."""
+    seen_statuses = []
+
+    def handler(request):
+        if request.method == "GET" and request.url.path == LOGIN_PATH:
+            return httpx.Response(200, text='<input type="hidden" name="_token" value="csrf">')
+        if request.method == "POST" and request.url.path == LOGIN_PATH:
+            return httpx.Response(302, headers={"location": ADMIN_PATH})
+        if request.method == "GET" and request.url.path == FIND_PATH:
+            params = dict(request.url.params)
+            seen_statuses.append(params["status"])
+            assert params["search"] == "DJ3968034"
+            if params["status"] == "review":
+                return httpx.Response(
+                    200, json={"status": "successful", "result": [{"id": 3968034, "status": "review"}]}
+                )
+            return httpx.Response(200, json={"status": "successful", "result": []})
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    with _client(handler) as client:
+        row = client.find_order("DJ3968034")
+
+    assert row == {"id": 3968034, "status": "review"}
+    # "doing" and "waiting" (the two confirmed-common cases) tried first, in that
+    # order, before falling through to "review" where it actually matched.
+    assert seen_statuses == ["doing", "waiting", "review"]
+
+
+def test_find_order_normalizes_a_bare_numeric_id_to_the_dj_code():
+    def handler(request):
+        if request.method == "GET" and request.url.path == LOGIN_PATH:
+            return httpx.Response(200, text='<input type="hidden" name="_token" value="csrf">')
+        if request.method == "POST" and request.url.path == LOGIN_PATH:
+            return httpx.Response(302, headers={"location": ADMIN_PATH})
+        if request.method == "GET" and request.url.path == FIND_PATH:
+            assert dict(request.url.params)["search"] == "DJ3968034"
+            return httpx.Response(200, json={"status": "successful", "result": [{"id": 3968034}]})
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    with _client(handler) as client:
+        row = client.find_order("3968034")
+
+    assert row == {"id": 3968034}
+
+
+def test_find_order_returns_none_when_not_found_under_any_status():
+    def handler(request):
+        if request.method == "GET" and request.url.path == LOGIN_PATH:
+            return httpx.Response(200, text='<input type="hidden" name="_token" value="csrf">')
+        if request.method == "POST" and request.url.path == LOGIN_PATH:
+            return httpx.Response(302, headers={"location": ADMIN_PATH})
+        if request.method == "GET" and request.url.path == FIND_PATH:
+            return httpx.Response(200, json={"status": "successful", "result": []})
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    with _client(handler) as client:
+        assert client.find_order("DJ0000001") is None
