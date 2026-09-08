@@ -28,6 +28,10 @@ class DiscoverResult(AdapterResult):
     cursor: str | None = None
 
 
+class DesignerOptionsResult(AdapterResult):
+    options: list[str] = []
+
+
 class ProductVariant(BaseModel):
     name: str
     value: str

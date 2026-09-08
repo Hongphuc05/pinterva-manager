@@ -78,7 +78,13 @@ def _parse_custom_config(sku_data: dict[str, Any] | None) -> CustomConfig | None
     if not sku_data:
         return None
     raw_config = sku_data.get("configurations")
-    config = json.loads(raw_config) if isinstance(raw_config, str) else raw_config
+    if isinstance(raw_config, str):
+        try:
+            config = json.loads(raw_config)
+        except (TypeError, ValueError):
+            return None
+    else:
+        config = raw_config
     if not isinstance(config, dict) or not config:
         return None
     original = [CustomConfigEntry(key=str(k), value=str(v)) for k, v in config.items()]
@@ -178,7 +184,30 @@ def extract_source_files(row: dict[str, Any]) -> list[dict[str, str]] | None:
                 if url:
                     sources.append({"name": str(name), "url": str(url)})
 
-    # 2. From custom_design_files / attachments
+    # 2. From the SKU's own `configurations` — the customer's raw personalization
+    # uploads (e.g. "Your Photo 1".."Your Photo N"), distinct from `designs` above
+    # (the designer's finished/composited output). This is the block the live site's
+    # own "SOURCE" panel shows — confirmed 2026-09-08 against a real row whose
+    # `designs` entry was an unrelated file (api_client.find_order bug, now fixed),
+    # while `configurations` held the customer's actual uploaded photos.
+    meta = _meta_data(row)
+    sku_data = _first_sku_data(meta)
+    raw_config = sku_data.get("configurations") if sku_data else None
+    if isinstance(raw_config, str):
+        try:
+            config = json.loads(raw_config)
+        except (TypeError, ValueError):
+            config = None
+    else:
+        config = raw_config
+    if isinstance(config, dict):
+        for key, entry in config.items():
+            if isinstance(entry, dict) and entry.get("type") == "image":
+                url = entry.get("value")
+                if isinstance(url, str) and url.strip():
+                    sources.append({"name": str(key), "url": url.strip()})
+
+    # 3. From custom_design_files / attachments
     attachments = row.get("custom_design_files") or row.get("attachments") or row.get("source_files")
     if isinstance(attachments, list):
         for item in attachments:
@@ -191,7 +220,7 @@ def extract_source_files(row: dict[str, Any]) -> list[dict[str, str]] | None:
                 name = item.split("/")[-1]
                 sources.append({"name": name, "url": item.strip()})
 
-    # 3. Fallback: single personalization image
+    # 4. Fallback: single personalization image
     if not sources:
         single_url = extract_source_asset_url(row)
         if single_url:

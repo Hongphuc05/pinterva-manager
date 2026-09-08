@@ -39,13 +39,23 @@ def test_sync_platform_order_statuses_updates_matching_orders_only(db_session):
     db_session.add(Order(external_order_id="DJ9999", platform_id=platform.id, state="DISCOVERED"))  # not on site
     db_session.commit()
 
-    client = _mock_client({"DJ1001": {"id": 1001, "status": "doing"}})
+    client = _mock_client(
+        {
+            "DJ1001": {
+                "id": 1001,
+                "status": "doing",
+                "designer": "Nguyễn Thị Thuý Hường - 2D Prin",
+            }
+        }
+    )
     result = sync_platform_order_statuses(db_session, platform, api_client=client)
 
     order1 = db_session.query(Order).filter_by(external_order_id="DJ1001").one()
     order2 = db_session.query(Order).filter_by(external_order_id="DJ9999").one()
     assert order1.printerval_status == "doing"
     assert order1.printerval_status_synced_at is not None
+    assert order1.printerval_designer == "Nguyễn Thị Thuý Hường - 2D Prin"
+    assert order1.printerval_designer_synced_at is not None
     assert order2.printerval_status is None
     # DJ9999 was still looked up (and its sync attempt noted), just not found on site.
     assert order2.printerval_status_synced_at is None

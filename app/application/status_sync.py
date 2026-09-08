@@ -28,6 +28,21 @@ def _status_guess_order(last_known: str | None) -> tuple[str, ...]:
     return PrintervalApiClient.ORDER_STATUSES
 
 
+def _row_designer(row: dict) -> str | None:
+    """Extract the visible Designer label without guessing an internal mapping."""
+    for key in ("designer", "designer_name", "designer_email"):
+        value = row.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    attributes = row.get("attributes")
+    if isinstance(attributes, dict):
+        for key in ("designer", "designer_name", "designer_email"):
+            value = attributes.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
 def sync_platform_order_statuses(
     session: Session, platform: Platform, api_client: PrintervalApiClient | None = None
 ) -> dict:
@@ -63,6 +78,10 @@ def sync_platform_order_statuses(
             if found_status and found_status != order.printerval_status:
                 order.printerval_status = found_status
                 updated += 1
+            found_designer = _row_designer(row)
+            if found_designer and found_designer != order.printerval_designer:
+                order.printerval_designer = found_designer
+                order.printerval_designer_synced_at = datetime.now(UTC)
             order.printerval_status_synced_at = datetime.now(UTC)
 
         return {"checked": len(orders), "updated": updated, "not_found": not_found}

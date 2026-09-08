@@ -77,6 +77,44 @@ def test_run_crawl_cycle_retries_an_order_whose_claim_previously_failed(db_sessi
     assert order.state == OrderState.CLAIMED_IMPORTED.value
 
 
+def test_run_crawl_cycle_actually_retries_a_claim_that_claim_batch_itself_already_failed(db_session):
+    """Regression test (live incident 2026-09-08): once claim_batch itself has run and
+    dead-lettered an order, that exact order_ids set is now a "completed" Operation —
+    if a later cycle's retry re-used claim_batch's own idempotency key for the same
+    still-unclaimed set (which is exactly what happens when nothing new is discovered
+    in between), it silently returned the first cycle's cached failure forever and
+    never actually asked the site again, so deadline/source fields (only populated by
+    import_claimed_orders, gated on a confirmed claim) stayed empty indefinitely."""
+    adapter = FakePrintervalAdapter()
+    adapter.add_order(external_order_id="DJ0000001", product_name="Test Mug", designer=None, status="Waiting")
+
+    # Cycle 1: discovered, but claim fails — simulate a real claim rejection.
+    from app.adapters.printerval.models import WriteResult
+
+    real_set_designer = adapter.set_designer
+    adapter.set_designer = lambda *a, **k: WriteResult(success=False, external_order_id="DJ0000001", error_class="VALIDATION")
+    first = run_crawl_cycle(db_session, adapter, limit=40)
+    assert first["discovered"] == 1
+    assert first["failed_claim"] == 1
+    order = db_session.query(Order).filter_by(external_order_id="DJ0000001").one()
+    assert order.state == OrderState.DISCOVERED.value
+
+    # Cycle 2: nothing new to discover (already has an Order row), site now accepts
+    # the claim — must actually retry against the (fake) site, not return a cached
+    # failure from cycle 1's already-"completed" claim_batch operation.
+    adapter.set_designer = real_set_designer
+    second = run_crawl_cycle(db_session, adapter, limit=40)
+    assert second["discovered"] == 0
+    assert second["claimed"] == 1
+    assert second["imported"] == 1
+    order = db_session.query(Order).filter_by(external_order_id="DJ0000001").one()
+    assert order.state == OrderState.CLAIMED_IMPORTED.value
+
+    # Cycle 3: already claimed+imported — nothing left to do.
+    third = run_crawl_cycle(db_session, adapter, limit=40)
+    assert third == {"discovered": 0, "claimed": 0, "failed_claim": 0, "imported": 0, "failed_import": 0}
+
+
 def test_crawl_and_claim_task_logs_and_returns_without_db_writes_when_playwright_session_fails(
     monkeypatch, caplog
 ):
@@ -104,7 +142,8 @@ def test_crawl_and_claim_logs_distinct_message_for_cycle_body_failure(monkeypatc
     from app.workers import crawl_tasks
 
     @contextmanager
-    def _fake_session():
+    def _fake_session(*, headless=False):
+        assert headless is True
         yield object()
 
     monkeypatch.setattr(crawl_tasks, "playwright_session", _fake_session)

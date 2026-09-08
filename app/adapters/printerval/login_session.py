@@ -24,7 +24,8 @@ def is_session_open() -> bool:
 def start_session() -> None:
     global _login_session
     if not is_session_open():
-        playwright_cm, context, page = open_playwright_session()
+        # This is the one explicit interactive login flow, so it may show Chrome.
+        playwright_cm, context, page = open_playwright_session(headless=False)
         page.goto(ADMIN_URL)
         _login_session = {"playwright_cm": playwright_cm, "context": context}
 

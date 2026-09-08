@@ -19,9 +19,8 @@ from app.application.order_transitions import apply_transition
 from app.domain.models import OrderState
 
 ACTIVE_TASK_STATES = {
-    OrderState.ASSIGNED.value,
     OrderState.IN_PROGRESS.value,
-    OrderState.REVISION_REQUESTED.value,
+    OrderState.REVISION.value,
 }
 SUB_STATUSES = {"doing", "fixing", "done"}
 
@@ -150,12 +149,10 @@ def start_task(
 ) -> dict:
     def _do() -> dict:
         assignment, order = _owned_task(session, assignment_id, designer_id, lock=True)
-        if order.state == OrderState.ASSIGNED.value:
-            sub_status = "doing"
-        elif order.state == OrderState.REVISION_REQUESTED.value:
+        if order.state == OrderState.REVISION.value:
             sub_status = "fixing"
         else:
-            raise ValueError("task is already in progress")
+            sub_status = "doing"
         apply_transition(
             session, order, OrderState.IN_PROGRESS, actor_id=designer_id,
             evidence={"source": "designer_task_start"}, commit=False,
@@ -237,15 +234,10 @@ def submit_result(
             )
         )
         apply_transition(
-            session, order, OrderState.RESULT_SUBMITTED, actor_id=designer_id,
+            session, order, OrderState.QC_PENDING, actor_id=designer_id,
             evidence={
                 "source": "designer_result_submit", "result_version_id": str(result_version.id)
             },
-            commit=False,
-        )
-        apply_transition(
-            session, order, OrderState.QC_PENDING, actor_id=designer_id,
-            evidence={"source": "create_qc_request", "result_version_id": str(result_version.id)},
             commit=False,
         )
         assignment.sub_status = "done"

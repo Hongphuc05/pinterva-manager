@@ -171,15 +171,16 @@ class PrintervalApiClient:
             )
         self._authenticated = True
 
-    def discover_waiting_page(
+    def discover_page(
         self,
         *,
+        status: str = "waiting",
         page_size: int = 40,
         page_id: int = 0,
         date_from: str | None = None,
         date_to: str | None = None,
     ) -> PrintervalApiPage:
-        """Fetch one page of Waiting jobs without modifying any external order.
+        """Fetch one page of jobs for a confirmed Printerval status, read-only.
 
         date_from/date_to (each "YYYY-MM-DD HH:MM:SS", filtering on `created_at`) are
         live-confirmed 2026-09-08 by reading the site's own controller JS
@@ -195,7 +196,7 @@ class PrintervalApiClient:
         params = {
             "page_size": str(page_size),
             "page_id": str(page_id),
-            "status": "waiting",
+            "status": status.lower(),
             "time_type": "created_at",
             "job_type": "all",
             "team_outsource": self.team_outsource or "",
@@ -204,8 +205,12 @@ class PrintervalApiClient:
             params["date_from"] = date_from
         if date_to:
             params["date_to"] = date_to
-        result = self._fetch_find_rows(params, error_context="Waiting queue")
+        result = self._fetch_find_rows(params, error_context=f"{status} queue")
         return PrintervalApiPage(orders=result, raw={"status": "successful", "result": result})
+
+    def discover_waiting_page(self, **kwargs) -> PrintervalApiPage:
+        """Compatibility wrapper for existing Waiting-only callers."""
+        return self.discover_page(status="waiting", **kwargs)
 
     #: The site's 6 real order statuses (docs/phase0-field-map.md §1), confirmed live
     #: 2026-09-08 as the exact literal values this endpoint's own `status` param
@@ -225,12 +230,23 @@ class PrintervalApiClient:
         each candidate status in turn until one matches. Read-only, same endpoint
         `discover_waiting_page` already uses, just scoped to one order instead of a
         page. Returns the raw row dict, or None if not found under any of them.
+
+        Verifies the returned row's own numeric `id` actually matches the requested
+        order before trusting it — live incident 2026-09-08: for a status that isn't
+        the order's real current status, the endpoint doesn't always reliably return
+        zero rows as documented above; it was observed to instead return an unrelated
+        order's row (page 1 of that status, `search` silently not applied), which
+        `_fetch_find_rows` has no way to tell apart from a real match by shape alone.
+        Blindly trusting `rows[0]` overwrote one order's product/deadline/source files
+        with a completely different order's data. A mismatch is treated exactly like
+        an empty result — keep trying the remaining statuses.
         """
         code = (
             external_order_id
             if external_order_id.upper().startswith("DJ")
             else f"DJ{external_order_id}"
         )
+        numeric_id = code[2:] if code.upper().startswith("DJ") else code
         for status in statuses:
             params = {
                 "page_size": "1",
@@ -242,7 +258,7 @@ class PrintervalApiClient:
                 "search": code,
             }
             rows = self._fetch_find_rows(params, error_context="Order search")
-            if rows:
+            if rows and str(rows[0].get("id")) == numeric_id:
                 return rows[0]
         return None
 

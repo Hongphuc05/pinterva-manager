@@ -5,61 +5,52 @@ export type StateInfo = {
 }
 
 export const STATE_MAP: Record<string, StateInfo> = {
-  DISCOVERED: {
-    label: 'Đã Quét (Chờ xử lý)',
-    description: 'Đơn hàng vừa được phát hiện qua hệ thống quét Printerval, chờ phân bổ hoặc claim.',
-    badgeClass: 'bg-slate-100 text-slate-700 border-slate-200',
-  },
-  OPEN_FOR_ALLOCATION: {
-    label: 'Mở Phân Bổ',
-    description: 'Đơn hàng sẵn sàng để Admin phân công cho Designer đảm nhận.',
+  OPEN: {
+    label: 'Chờ phân công',
+    description: 'Đơn hàng vừa cào về hoặc đã nhập kho, sẵn sàng để giao cho Designer.',
     badgeClass: 'bg-amber-100 text-amber-800 border-amber-200',
   },
-  ASSIGNED: {
-    label: 'Đã Phân Công',
-    description: 'Đơn hàng đã được giao cho Designer cụ thể.',
-    badgeClass: 'bg-blue-100 text-blue-800 border-blue-200',
-  },
   IN_PROGRESS: {
-    label: 'Đang Thực Hiện',
-    description: 'Designer đang thiết kế / xử lý công việc.',
+    label: 'Đang làm',
+    description: 'Đã giao cho Designer và Designer đang làm bài thiết kế.',
     badgeClass: 'bg-blue-100 text-blue-800 border-blue-200',
   },
-  SUBMITTING_TO_SITE: {
-    label: 'Đang Gửi Printerval',
-    description: 'Đang đẩy link kết quả thiết kế lên hệ thống Printerval.',
-    badgeClass: 'bg-indigo-100 text-indigo-800 border-indigo-200',
+  QC_PENDING: {
+    label: 'Chờ duyệt (QC)',
+    description: 'Designer đã nộp bài (link Drive), đang chờ Admin kiểm tra hoặc đẩy lên Printerval.',
+    badgeClass: 'bg-purple-100 text-purple-800 border-purple-200',
   },
-  CLAIMED_IMPORTED: {
-    label: 'Đã Claim (Nhập kho)',
-    description: 'Đã nhận đơn thành công trên Printerval và nhập thông tin đầy đủ.',
-    badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+  REVISION: {
+    label: 'Yêu cầu sửa',
+    description: 'Admin kiểm tra bài chưa đạt và yêu cầu Designer sửa lại.',
+    badgeClass: 'bg-orange-100 text-orange-800 border-orange-200',
   },
   DONE: {
-    label: 'Hoàn Thành',
-    description: 'Đơn hàng đã hoàn tất toàn bộ quy trình.',
+    label: 'Hoàn thành',
+    description: 'Đơn hàng đã hoàn tất 100% quy trình.',
     badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-200',
   },
   CANCELLED: {
-    label: 'Đã Hủy',
+    label: 'Đã hủy',
     description: 'Đơn hàng đã bị hủy bỏ.',
-    badgeClass: 'bg-red-100 text-red-800 border-red-200',
+    badgeClass: 'bg-gray-100 text-gray-700 border-gray-200',
   },
   EXCEPTION: {
-    label: 'Ngoại Lệ / Lỗi',
-    description: 'Đơn gặp lỗi hoặc sự cố, cần Admin kiểm tra thủ công.',
+    label: 'Lỗi / Ngoại lệ',
+    description: 'Đơn gặp sự cố cào dữ liệu hoặc lỗi cần Admin kiểm tra.',
     badgeClass: 'bg-red-100 text-red-800 border-red-200',
   },
-  ASSIGNMENT_PENDING_APPROVAL: {
-    label: 'Chờ Duyệt Phân Công',
-    description: 'Đơn đang trong quá trình chờ phê duyệt phân công.',
-    badgeClass: 'bg-purple-100 text-purple-800 border-purple-200',
-  },
-  QC_PENDING: {
-    label: 'Chờ Kiểm Hàng (QC)',
-    description: 'Kết quả thiết kế đang chờ kiểm tra chất lượng (QC).',
-    badgeClass: 'bg-cyan-100 text-cyan-800 border-cyan-200',
-  },
+  // Legacy compatibility mappings
+  DISCOVERED: { label: 'Chờ phân công', description: 'Đơn hàng vừa cào về', badgeClass: 'bg-amber-100 text-amber-800 border-amber-200' },
+  CLAIMED_IMPORTED: { label: 'Chờ phân công', description: 'Đã nhập kho', badgeClass: 'bg-amber-100 text-amber-800 border-amber-200' },
+  OPEN_FOR_ALLOCATION: { label: 'Chờ phân công', description: 'Sẵn sàng phân công', badgeClass: 'bg-amber-100 text-amber-800 border-amber-200' },
+  ASSIGNMENT_PENDING_APPROVAL: { label: 'Chờ phân công', description: 'Chờ duyệt gán', badgeClass: 'bg-amber-100 text-amber-800 border-amber-200' },
+  ASSIGNED: { label: 'Đang làm', description: 'Đã phân công', badgeClass: 'bg-blue-100 text-blue-800 border-blue-200' },
+  RESULT_SUBMITTED: { label: 'Chờ duyệt (QC)', description: 'Đã nộp kết quả', badgeClass: 'bg-purple-100 text-purple-800 border-purple-200' },
+  SUBMITTING_TO_SITE: { label: 'Chờ duyệt (QC)', description: 'Đang đẩy Printerval', badgeClass: 'bg-purple-100 text-purple-800 border-purple-200' },
+  REASSIGNMENT_REQUIRED: { label: 'Lỗi / Ngoại lệ', description: 'Cần gán lại', badgeClass: 'bg-red-100 text-red-800 border-red-200' },
+  REVISION_REQUESTED: { label: 'Yêu cầu sửa', description: 'Cần sửa lại', badgeClass: 'bg-orange-100 text-orange-800 border-orange-200' },
+  SKIPPED: { label: 'Hoàn thành', description: 'Đã hoàn tất', badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
 }
 
 export function getStatusInfo(state: string): StateInfo {

@@ -33,7 +33,10 @@ type OrderDetail = {
   deadline_at_ext: string | null
   note_outsource: string
   order_note: string
-  custom_config: { original: { key: string; value: string }[] } | null
+  custom_config: {
+    original: { key: string; value: string }[]
+    translated_vn?: { key: string; value: string }[]
+  } | null
   template_jobs: TemplateJob[] | null
   assigned_designer_name: string | null
   design_tool_url: string | null
@@ -41,6 +44,8 @@ type OrderDetail = {
   external_order_url: string | null
   source_files: SourceFile[] | null
   source_download_all_url: string | null
+  printerval_designer: string | null
+  printerval_status: string | null
   created_at: string
 }
 
@@ -155,6 +160,15 @@ export function OrderDetailPage() {
                   <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-blue-50 text-[#0052CC] text-xs font-semibold border border-blue-100">
                     <User className="h-3.5 w-3.5" />
                     <span>DES: {order.assigned_designer_name}</span>
+                  </span>
+                )}
+                {order.printerval_designer && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-violet-50 text-violet-700 text-xs font-semibold border border-violet-100">
+                    <User className="h-3.5 w-3.5" />
+                    <span>
+                      Printerval: {order.printerval_designer}
+                      {order.printerval_status ? ` · ${order.printerval_status}` : ''}
+                    </span>
                   </span>
                 )}
               </div>
@@ -326,6 +340,29 @@ export function OrderDetailPage() {
                 </tbody>
               </table>
             </div>
+            {order.custom_config.translated_vn && order.custom_config.translated_vn.length > 0 && (
+              <div className="rounded-xl border border-indigo-200 overflow-hidden">
+                <div className="px-4 py-2 bg-indigo-50 text-[11px] font-semibold text-indigo-700 uppercase">
+                  Bản dịch tiếng Việt
+                </div>
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-semibold text-slate-500 uppercase">
+                      <th className="py-2.5 px-4 w-1/3">Thuộc Tính</th>
+                      <th className="py-2.5 px-4">Giá Trị</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-mono text-slate-700">
+                    {order.custom_config.translated_vn.map((entry, i) => (
+                      <tr key={i} className="hover:bg-slate-50/50">
+                        <td className="py-2 px-4 font-semibold text-slate-600">{entry.key}</td>
+                        <td className="py-2 px-4 text-[#0052CC]">{entry.value}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 

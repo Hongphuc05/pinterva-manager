@@ -24,6 +24,7 @@ from app.adapters.printerval.image_helper import (
 from app.adapters.printerval.interface import ALL_JOB_TYPES, PrintervalAdapter
 from app.adapters.printerval.models import (
     AssetResult,
+    DesignerOptionsResult,
     DiscoverResult,
     OrderDetailResult,
     OrderSummary,
@@ -57,9 +58,11 @@ class PrintervalApiAdapter:
         self,
         api_client: PrintervalApiClient,
         fallback_adapter: PrintervalAdapter | None = None,
+        download_images: bool = True,
     ) -> None:
         self.api_client = api_client
         self.fallback_adapter = fallback_adapter
+        self.download_images = download_images
 
     def discover_orders(
         self,
@@ -92,8 +95,12 @@ class PrintervalApiAdapter:
 
         page_id = int(cursor) if cursor and cursor.isdigit() else 0
         try:
-            page = self.api_client.discover_waiting_page(
-                page_size=limit, page_id=page_id, date_from=date_from, date_to=date_to
+            page = self.api_client.discover_page(
+                status=status,
+                page_size=limit,
+                page_id=page_id,
+                date_from=date_from,
+                date_to=date_to,
             )
         except Exception as exc:
             error_cls = (
@@ -126,7 +133,7 @@ class PrintervalApiAdapter:
                 raw_image_url = extract_image_url_from_dict_or_html(row)
                 local_path = (
                     download_and_save_image(order_id, raw_image_url, platform_id=platform_id)
-                    if raw_image_url
+                    if raw_image_url and self.download_images
                     else None
                 )
                 final_thumbnail = local_path or raw_image_url
@@ -144,6 +151,12 @@ class PrintervalApiAdapter:
                         template_jobs=template_jobs,
                         sku=sku,
                         product_category=category,
+                        designer=(
+                            str(row.get("attributes", {}).get("designer_email") or "").strip()
+                            if isinstance(row.get("attributes"), dict)
+                            else None
+                        )
+                        or None,
                     )
                 )
 
@@ -168,6 +181,15 @@ class PrintervalApiAdapter:
             )
             return None, error_cls
         return row, None
+
+    def list_designer_options(self, external_order_id: str) -> DesignerOptionsResult:
+        if self.fallback_adapter:
+            return self.fallback_adapter.list_designer_options(external_order_id)
+        return DesignerOptionsResult(
+            success=False,
+            error_class=ErrorClass.PERMANENT_EXTERNAL.value,
+            evidence={"message": "No browser adapter provided for Designer options"},
+        )
 
     def get_order_detail(
         self, external_order_id: str, platform_id: str | None = None

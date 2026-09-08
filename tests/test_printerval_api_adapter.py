@@ -144,6 +144,56 @@ def test_get_order_detail_uses_the_fast_http_path_without_touching_fallback():
     assert result.product_name == "Mug"
 
 
+def test_get_order_detail_crawls_text_only_custom_configuration_without_an_image():
+    """DJ3949734 is the live shape: personalization is text configuration, not an
+    uploaded resource image. It must still be imported through the HTTP path."""
+
+    def handler(request):
+        if request.method == "GET" and request.url.path == LOGIN_PATH:
+            return httpx.Response(200, text='<input type="hidden" name="_token" value="csrf">')
+        if request.method == "POST" and request.url.path == LOGIN_PATH:
+            return httpx.Response(302, headers={"location": "/admin"})
+        if request.method == "GET" and request.url.path == FIND_PATH:
+            if dict(request.url.params)["status"] == "doing":
+                return httpx.Response(
+                    200,
+                    json={
+                        "status": "successful",
+                        "result": [
+                            {
+                                "id": 3949734,
+                                "status": "doing",
+                                "product": {"name": "Custom jacket"},
+                                "meta_data": (
+                                    '{"product_skus":{"sku":{"configurations":'
+                                    '"{\\"Custom Name\\": \\"Sample name\\"}",'
+                                    '"translated_configurations":{"Tên Tùy Chỉnh":"Sample name"}}}}'
+                                ),
+                            }
+                        ],
+                    },
+                )
+            return httpx.Response(200, json={"status": "successful", "result": []})
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    class _ExplodingFallback:
+        def __getattr__(self, name):
+            raise AssertionError(f"fallback.{name} must not be called")
+
+    adapter = _api_adapter(handler, fallback_adapter=_ExplodingFallback())
+    result = adapter.get_order_detail("DJ3949734")
+
+    assert result.success is True
+    assert result.thumbnail_url is None
+    assert result.custom_config is not None
+    assert [entry.model_dump() for entry in result.custom_config.original] == [
+        {"key": "Custom Name", "value": "Sample name"}
+    ]
+    assert [entry.model_dump() for entry in result.custom_config.translated_vn] == [
+        {"key": "Tên Tùy Chỉnh", "value": "Sample name"}
+    ]
+
+
 def test_download_asset_uses_the_fast_http_path_for_a_plain_product_order():
     def handler(request):
         if request.method == "GET" and request.url.path == LOGIN_PATH:

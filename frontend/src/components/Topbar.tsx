@@ -18,6 +18,7 @@ export function Topbar() {
   const [isError, setIsError] = useState(false)
   const [showSettingsModal, setShowSettingsModal] = useState(false)
   const [showCrawlModal, setShowCrawlModal] = useState(false)
+  const [crawlDesigners, setCrawlDesigners] = useState<string[]>([])
   const { status: syncStatus, triggerRun: triggerSyncRun } = useSyncStatus()
 
   async function handleLogout() {
@@ -45,7 +46,7 @@ export function Topbar() {
     return () => clearTimeout(timer)
   }, [flashMessage])
 
-  async function handleRefreshCrawl(jobType: string, dateFrom: string, dateTo: string) {
+  async function handleRefreshCrawl(jobType: string, status: string, designer: string, dateFrom: string, dateTo: string) {
     setRefreshing(true)
     setFlashMessage(null)
     setIsError(false)
@@ -54,6 +55,8 @@ export function Topbar() {
         method: 'POST',
         body: JSON.stringify({
           job_type: jobType,
+          printerval_status: status,
+          printerval_designer: designer || undefined,
           date_from: dateFrom || undefined,
           date_to: dateTo || undefined,
         }),
@@ -116,7 +119,17 @@ export function Topbar() {
             </button>
 
             <button
-              onClick={() => setShowCrawlModal(true)}
+              onClick={() => {
+                apiFetch<{ orders: { printerval_designer: string | null }[] }>('/orders')
+                  .then((result) => {
+                    const options = result.orders
+                      .map((order) => order.printerval_designer)
+                      .filter((item): item is string => Boolean(item))
+                    setCrawlDesigners(Array.from(new Set(options)).sort())
+                  })
+                  .catch(() => setCrawlDesigners([]))
+                setShowCrawlModal(true)
+              }}
               disabled={refreshing}
               className={`flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold rounded-xl border transition-all ${
                 refreshing
@@ -186,6 +199,7 @@ export function Topbar() {
         onClose={() => setShowCrawlModal(false)}
         onSearch={handleRefreshCrawl}
         loading={refreshing}
+        designers={crawlDesigners}
       />
     </header>
   )

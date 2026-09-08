@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, String, Text, func, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, String, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -72,12 +72,13 @@ class Batch(Base):
 
 class Order(Base):
     __tablename__ = "orders"
+    __table_args__ = (UniqueConstraint("platform_id", "external_order_id", name="uq_orders_platform_external_id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    external_order_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    external_order_id: Mapped[str] = mapped_column(String(64), nullable=False)
     batch_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("batches.id"), nullable=True)
     platform_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("platforms.id"), nullable=True)
-    state: Mapped[str] = mapped_column(String(32), nullable=False, default="DISCOVERED")
+    state: Mapped[str] = mapped_column(String(32), nullable=False, default="OPEN")
     version: Mapped[int] = mapped_column(nullable=False, default=1)
     external_observation: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     product_name: Mapped[str | None] = mapped_column(String(512), nullable=True)
@@ -123,6 +124,10 @@ class Order(Base):
     external_order_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     source_files: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     source_download_all_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    printerval_designer: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    printerval_designer_synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     # Printerval's own live site status (waiting/doing/review/fix/confirm/done — the 6
     # literal values live-confirmed 2026-09-08, see PrintervalApiClient.ORDER_STATUSES)
     # — a READ-ONLY mirror kept in sync by a scheduled job + manual refresh, distinct
@@ -168,6 +173,31 @@ class Assignment(Base):
     replacement_of_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("assignments.id"), nullable=True
     )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class PrintervalAssignmentRequest(Base):
+    """Auditable per-order intent and outcome for an external Designer/Status update."""
+
+    __tablename__ = "printerval_assignment_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    order_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("orders.id"), nullable=False)
+    platform_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("platforms.id"), nullable=False)
+    internal_designer_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    designer_option: Mapped[str] = mapped_column(String(255), nullable=False)
+    target_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    lifecycle: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    observed_designer: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    observed_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    error_class: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    evidence: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
-from app.adapters.db.models import Assignment, Order, User
+from app.adapters.db.models import Assignment, Order, Platform, PrintervalAssignmentRequest, User
 from app.adapters.playwright_support import playwright_session
 from app.adapters.printerval import login_session
 from app.adapters.printerval.api_adapter import PrintervalApiAdapter
@@ -18,16 +18,26 @@ from app.adapters.printerval.api_client import (
 )
 from app.adapters.printerval.interface import ALL_JOB_TYPES
 from app.adapters.printerval.playwright_adapter import PlaywrightPrintervalAdapter
-from app.api.deps import DEFAULT_PLATFORM_ID, get_current_platform_id, get_current_user, get_db, require_role
-from app.application.crawl import DiscoverFailedError
+from app.api.deps import (
+    DEFAULT_PLATFORM_ID,
+    get_current_platform_id,
+    get_current_user,
+    get_db,
+    require_role,
+)
+from app.application.crawl import DiscoverFailedError, scan_orders_fast
 from app.application.order_queries import (
     get_order_detail_for_user,
     get_order_history,
     list_orders_for_user,
 )
+from app.application.printerval_assignment_requests import (
+    PRINTERVAL_STATUSES,
+    PrintervalAssignmentValidationError,
+    create_request,
+)
 from app.config import get_settings
 from app.domain.models import OrderState
-from app.workers.crawl_tasks import run_crawl_cycle
 
 router = APIRouter()
 
@@ -53,6 +63,8 @@ class OrderSummaryOut(BaseModel):
     external_order_url: str | None = None
     source_files: list[dict] | None = None
     source_download_all_url: str | None = None
+    printerval_designer: str | None = None
+    printerval_assignment_lifecycle: str | None = None
 
 
 class OrdersListResponse(BaseModel):
@@ -85,6 +97,8 @@ class OrderDetailOut(BaseModel):
     external_order_url: str | None = None
     source_files: list[dict] | None = None
     source_download_all_url: str | None = None
+    printerval_designer: str | None = None
+    printerval_status: str | None = None
     created_at: datetime
 
 
@@ -121,6 +135,8 @@ class RefreshRequest(BaseModel):
     # instead of guessing an unconfirmed HTTP query value for it (a real past incident:
     # a wrong filter string silently returned 0 orders instead of erroring).
     job_type: str = ALL_JOB_TYPES
+    printerval_status: str = "Waiting"
+    printerval_designer: str | None = None
     # Plain "YYYY-MM-DD" from the date picker (filters on created_at) — live-confirmed
     # 2026-09-08 against the real site's own find endpoint (date_from/date_to,
     # "YYYY-MM-DD HH:MM:SS"). Only applies on the fast HTTP path (job_type == default).
@@ -134,6 +150,31 @@ class PrintervalLoginStatus(BaseModel):
 
 class OrderStatesResponse(BaseModel):
     states: list[str]
+
+
+class PrintervalOptionsResponse(BaseModel):
+    designers: list[str]
+    statuses: list[str]
+
+
+class PrintervalAssignmentPayload(BaseModel):
+    designer_id: str
+    printerval_designer: str
+    printerval_status: str = "Doing"
+
+
+class PrintervalAssignmentResponse(BaseModel):
+    request_id: uuid.UUID
+    lifecycle: str
+
+
+class BulkPrintervalAssignmentPayload(PrintervalAssignmentPayload):
+    order_ids: list[str]
+
+
+class BulkPrintervalAssignmentResponse(BaseModel):
+    request_ids: list[uuid.UUID]
+    queued_count: int
 
 
 @router.get("/order-states", response_model=OrderStatesResponse)
@@ -163,11 +204,25 @@ def api_orders_list(
         else []
     )
     designer_map = {a.order_id: u.full_name or u.username for a, u in assignments}
+    requests = (
+        db.query(PrintervalAssignmentRequest)
+        .filter(PrintervalAssignmentRequest.order_id.in_(order_ids))
+        .order_by(PrintervalAssignmentRequest.created_at.desc())
+        .all()
+        if order_ids
+        else []
+    )
+    request_map = {}
+    for request in requests:
+        request_map.setdefault(request.order_id, request)
 
     out_list = []
     for o in orders:
         item = OrderSummaryOut.model_validate(o)
         item.assigned_designer_name = designer_map.get(o.id)
+        item.printerval_assignment_lifecycle = (
+            request_map[o.id].lifecycle if o.id in request_map else None
+        )
         out_list.append(item)
 
     return OrdersListResponse(orders=out_list)
@@ -203,6 +258,153 @@ def api_orders_sync_status_run(
 
     sync_order_statuses.delay()
     return api_orders_sync_status(user=user, platform_id=platform_id, db=db)
+
+
+@router.get("/orders/{order_id}/printerval-options", response_model=PrintervalOptionsResponse)
+def api_printerval_options(
+    order_id: str,
+    user: User = Depends(require_role("admin")),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    order = get_order_detail_for_user(db, user, order_id)
+    if order is None or order.platform_id != platform_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Order not found for active platform")
+    platform = db.get(Platform, platform_id)
+    if platform is None or not platform.account_password:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Platform credentials are unavailable")
+    profile_dir = "chrome-profile-" + platform.account_username.replace("@", "_").replace(".", "_")
+    with playwright_session(profile_dir=profile_dir, headless=True) as page:
+        adapter = PlaywrightPrintervalAdapter(
+            page=page,
+            crawl_username=platform.account_username,
+            crawl_password=platform.account_password,
+        )
+        result = adapter.list_designer_options(order.external_order_id)
+    if not result.success:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            "Could not load Printerval Designer options",
+        )
+    return PrintervalOptionsResponse(designers=result.options, statuses=list(PRINTERVAL_STATUSES))
+
+
+@router.post(
+    "/orders/{order_id}/printerval-assignment",
+    response_model=PrintervalAssignmentResponse,
+)
+def api_printerval_assignment(
+    order_id: str,
+    payload: PrintervalAssignmentPayload,
+    user: User = Depends(require_role("admin")),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    order = get_order_detail_for_user(db, user, order_id)
+    if order is None or order.platform_id != platform_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Order not found for active platform")
+    try:
+        designer = db.get(User, uuid.UUID(payload.designer_id))
+    except ValueError:
+        designer = None
+    if designer is None or not designer.active:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Designer not found")
+    if not payload.printerval_designer.strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Printerval Designer is required")
+    if payload.printerval_status not in PRINTERVAL_STATUSES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid Printerval status")
+    assignment = db.query(Assignment).filter(Assignment.order_id == order.id).one_or_none()
+    if assignment is None:
+        assignment = Assignment(order_id=order.id, designer_id=designer.id, status="approved")
+        db.add(assignment)
+    else:
+        assignment.designer_id = designer.id
+        assignment.status = "approved"
+    order.state = OrderState.IN_PROGRESS.value
+    try:
+        request = create_request(
+            db,
+            order=order,
+            internal_designer=designer,
+            platform_id=platform_id,
+            designer_option=payload.printerval_designer,
+            target_status=payload.printerval_status,
+        )
+    except PrintervalAssignmentValidationError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    from app.workers.assignment_sync_tasks import sync_printerval_assignment_request
+
+    sync_printerval_assignment_request.delay(str(request.id))
+    return PrintervalAssignmentResponse(request_id=request.id, lifecycle=request.lifecycle)
+
+
+@router.post(
+    "/orders/bulk-printerval-assignment",
+    response_model=BulkPrintervalAssignmentResponse,
+)
+def api_bulk_printerval_assignment(
+    payload: BulkPrintervalAssignmentPayload,
+    user: User = Depends(require_role("admin")),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    if not payload.order_ids:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Danh sách đơn hàng không được để trống")
+    try:
+        designer_id = uuid.UUID(payload.designer_id)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid designer ID") from exc
+    designer = db.get(User, designer_id)
+    if designer is None or not designer.active:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Designer not found")
+    if not payload.printerval_designer.strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Printerval Designer is required")
+    if payload.printerval_status not in PRINTERVAL_STATUSES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid Printerval status")
+    try:
+        order_ids = [uuid.UUID(order_id) for order_id in payload.order_ids]
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid order ID") from exc
+    if len(set(order_ids)) != len(order_ids):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Danh sách đơn hàng bị trùng")
+    orders = db.query(Order).filter(Order.id.in_(order_ids)).all()
+    if len(orders) != len(order_ids) or any(order.platform_id != platform_id for order in orders):
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "Mỗi đơn phải thuộc platform đang chọn",
+        )
+
+    requests: list[PrintervalAssignmentRequest] = []
+    for order in orders:
+        assignment = db.query(Assignment).filter(Assignment.order_id == order.id).one_or_none()
+        if assignment is None:
+            db.add(Assignment(order_id=order.id, designer_id=designer.id, status="approved"))
+        else:
+            assignment.designer_id = designer.id
+            assignment.status = "approved"
+        order.state = OrderState.IN_PROGRESS.value
+        try:
+            requests.append(
+                create_request(
+                    db,
+                    order=order,
+                    internal_designer=designer,
+                    platform_id=platform_id,
+                    designer_option=payload.printerval_designer,
+                    target_status=payload.printerval_status,
+                )
+            )
+        except PrintervalAssignmentValidationError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    from app.workers.assignment_sync_tasks import sync_printerval_assignment_request
+
+    for request in requests:
+        sync_printerval_assignment_request.delay(str(request.id))
+    return BulkPrintervalAssignmentResponse(
+        request_ids=[request.id for request in requests],
+        queued_count=len(requests),
+    )
 
 
 @router.get("/orders/{order_id}", response_model=OrderDetailResponse)
@@ -267,44 +469,27 @@ def api_orders_refresh(
                 flash=f"Tài khoản '{crawl_username}' chưa có 'Team Outsource'. Vui lòng vào 'Acc Mẹ Printerval' -> 'Đăng Nhập Acc Mẹ Mới' và điền đúng Team Outsource cho tài khoản này."
             )
 
-        clean_user_slug = crawl_username.replace("@", "_").replace(".", "_").replace("+", "_") if crawl_username else "default"
-        profile_dir = f"chrome-profile-{clean_user_slug}"
-
         with PrintervalApiClient(
             base_url=settings.printerval_api_base_url,
             username=crawl_username,
             password=crawl_password,
             team_outsource=crawl_team_outsource,
         ) as api_client:
-            # ponytail: headless=True per explicit operator request (no visible Chrome
-            # window popping up on every crawl) — accepting real risk: claude.md §16
-            # documents Chromium headless getting 403'd by Cloudflare, and this exact
-            # config caused a live incident (both new orders' claim_batch calls timed
-            # out instead of claiming). find_unclaimed_order_ids now retries a failed
-            # claim on the next cycle, so a headless-caused failure is not permanent —
-            # just slower to actually land. Flip to False if claims keep failing.
-            with playwright_session(profile_dir=profile_dir, headless=True) as page:
-                fallback = PlaywrightPrintervalAdapter(
-                    page=page,
-                    crawl_username=crawl_username,
-                    crawl_password=crawl_password,
-                )
-                adapter = PrintervalApiAdapter(api_client=api_client, fallback_adapter=fallback)
-                summary = run_crawl_cycle(
-                    db,
-                    adapter,
-                    platform_id=platform_id,
-                    job_type=payload.job_type,
-                    date_from=f"{payload.date_from} 00:00:00" if payload.date_from else None,
-                    date_to=f"{payload.date_to} 23:59:59" if payload.date_to else None,
-                )
+            adapter = PrintervalApiAdapter(api_client=api_client, download_images=False)
+            summary = scan_orders_fast(
+                db,
+                adapter,
+                platform_id=platform_id,
+                status=payload.printerval_status,
+                designer=payload.printerval_designer,
+                job_type=payload.job_type,
+                date_from=f"{payload.date_from} 00:00:00" if payload.date_from else None,
+                date_to=f"{payload.date_to} 23:59:59" if payload.date_to else None,
+            )
         flash = (
-            f"Đã crawl xong qua API ({crawl_username}): {summary['discovered']} đơn mới, "
-            f"{summary['imported']} đơn nhập thành công"
+            f"Đã quét nhanh qua API ({crawl_username}): {summary['scanned']} đơn khớp bộ lọc, "
+            f"{summary['added']} đơn mới"
         )
-        failed_total = summary["failed_claim"] + summary["failed_import"]
-        if failed_total:
-            flash += f", {failed_total} lỗi (xem dead_letters)"
         flash += "."
         return RefreshResponse(flash=flash, summary=summary)
     except DiscoverFailedError:
@@ -397,7 +582,7 @@ def api_assign_order(
         )
         db.add(new_assignment)
 
-    order.state = OrderState.ASSIGNED.value
+    order.state = OrderState.IN_PROGRESS.value
     db.commit()
 
     synced_message = _trigger_printerval_assignment_sync(order, designer)
@@ -464,7 +649,7 @@ def api_bulk_assign_orders(
                 status="approved",
             )
             db.add(new_assignment)
-        order.state = OrderState.ASSIGNED.value
+        order.state = OrderState.IN_PROGRESS.value
         updated_count += 1
 
     db.commit()
@@ -572,4 +757,3 @@ def api_update_printerval_credentials(
         "account_username": platform.account_username,
         "message": f"Đã đăng nhập tài khoản Printerval thành công: {username_clean}",
     }
-

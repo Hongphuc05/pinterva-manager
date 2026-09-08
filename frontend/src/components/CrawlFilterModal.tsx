@@ -15,12 +15,17 @@ const JOB_TYPES = ['Tất cả 2D & 3D', '2D', '3D', 'ART', 'WOOD', 'CALENDAR', 
 type CrawlFilterModalProps = {
   isOpen: boolean
   onClose: () => void
-  onSearch: (jobType: string, dateFrom: string, dateTo: string) => void
+  onSearch: (jobType: string, status: string, designer: string, dateFrom: string, dateTo: string) => void
   loading: boolean
+  designers: string[]
 }
 
-export function CrawlFilterModal({ isOpen, onClose, onSearch, loading }: CrawlFilterModalProps) {
+const STATUSES = ['Waiting', 'Doing', 'Review', 'Fix', 'Confirm', 'Done']
+
+export function CrawlFilterModal({ isOpen, onClose, onSearch, loading, designers }: CrawlFilterModalProps) {
   const [jobType, setJobType] = useState(JOB_TYPES[0])
+  const [status, setStatus] = useState('Waiting')
+  const [designer, setDesigner] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
 
@@ -50,21 +55,16 @@ export function CrawlFilterModal({ isOpen, onClose, onSearch, loading }: CrawlFi
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <label className="text-xs font-bold text-slate-700 block">Status</label>
-              <input
-                disabled
-                value="Waiting"
-                title="Quét luôn nhắm vào đơn Waiting (đơn mới, chưa có designer) — đây là đối tượng duy nhất có thể claim."
-                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-slate-50 text-slate-400"
-              />
+              <select value={status} onChange={(e) => setStatus(e.target.value)} className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300">
+                {STATUSES.map((item) => <option key={item} value={item}>{item}</option>)}
+              </select>
             </div>
             <div className="space-y-1">
               <label className="text-xs font-bold text-slate-700 block">Designer</label>
-              <input
-                disabled
-                value="Chưa chia cho ai"
-                title="Đơn Waiting luôn chưa có designer — không có gì để lọc thêm."
-                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-slate-50 text-slate-400"
-              />
+              <select value={designer} onChange={(e) => setDesigner(e.target.value)} className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300">
+                <option value="">Tất cả designer</option>
+                {designers.map((item) => <option key={item} value={item}>{item}</option>)}
+              </select>
             </div>
           </div>
 
@@ -112,6 +112,8 @@ export function CrawlFilterModal({ isOpen, onClose, onSearch, loading }: CrawlFi
               type="button"
               onClick={() => {
                 setJobType(JOB_TYPES[0])
+                setStatus('Waiting')
+                setDesigner('')
                 setDateFrom('')
                 setDateTo('')
               }}
@@ -123,7 +125,7 @@ export function CrawlFilterModal({ isOpen, onClose, onSearch, loading }: CrawlFi
             <button
               type="button"
               disabled={loading}
-              onClick={() => onSearch(jobType, dateFrom, dateTo)}
+              onClick={() => onSearch(jobType, status, designer, dateFrom, dateTo)}
               className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-[#0052CC] hover:bg-[#0041A3] rounded-xl disabled:opacity-50 cursor-pointer"
             >
               <Search className="h-3.5 w-3.5" />

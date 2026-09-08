@@ -6,7 +6,7 @@ from app.domain.models import OrderState
 
 
 def _make_order(db_session, external_id="DJ0000001"):
-    order = Order(external_order_id=external_id, state=OrderState.DISCOVERED.value)
+    order = Order(external_order_id=external_id, state=OrderState.OPEN.value)
     db_session.add(order)
     db_session.commit()
     db_session.refresh(order)
@@ -17,17 +17,15 @@ def test_apply_transition_updates_state_and_writes_event(db_session):
     from app.application.order_transitions import apply_transition
 
     order = _make_order(db_session)
-    initial_version = order.version
 
     event = apply_transition(
-        db_session, order, OrderState.CLAIMED_IMPORTED, actor_id=None, evidence={"note": "claimed"}
+        db_session, order, OrderState.IN_PROGRESS, actor_id=None, evidence={"note": "in_progress"}
     )
 
-    assert order.state == OrderState.CLAIMED_IMPORTED.value
-    assert order.version > initial_version
-    assert event.from_state == OrderState.DISCOVERED.value
-    assert event.to_state == OrderState.CLAIMED_IMPORTED.value
-    assert event.evidence == {"note": "claimed"}
+    assert order.state == OrderState.IN_PROGRESS.value
+    assert event.from_state == OrderState.OPEN.value
+    assert event.to_state == OrderState.IN_PROGRESS.value
+    assert event.evidence == {"note": "in_progress"}
 
 
 def test_apply_transition_rejects_invalid_transition(db_session):
@@ -39,15 +37,15 @@ def test_apply_transition_rejects_invalid_transition(db_session):
         apply_transition(db_session, order, OrderState.DONE, actor_id=None, evidence={})
 
     db_session.refresh(order)
-    assert order.state == OrderState.DISCOVERED.value
+    assert order.state == OrderState.OPEN.value
 
 
 def test_workflow_events_are_append_only(db_session):
     from app.application.order_transitions import apply_transition
 
     order = _make_order(db_session, external_id="DJ0000003")
-    apply_transition(db_session, order, OrderState.CLAIMED_IMPORTED, actor_id=None, evidence={})
-    apply_transition(db_session, order, OrderState.OPEN_FOR_ALLOCATION, actor_id=None, evidence={})
+    apply_transition(db_session, order, OrderState.IN_PROGRESS, actor_id=None, evidence={})
+    apply_transition(db_session, order, OrderState.QC_PENDING, actor_id=None, evidence={})
 
     events = (
         db_session.query(WorkflowEvent)
@@ -56,6 +54,6 @@ def test_workflow_events_are_append_only(db_session):
         .all()
     )
     assert [e.to_state for e in events] == [
-        OrderState.CLAIMED_IMPORTED.value,
-        OrderState.OPEN_FOR_ALLOCATION.value,
+        OrderState.IN_PROGRESS.value,
+        OrderState.QC_PENDING.value,
     ]

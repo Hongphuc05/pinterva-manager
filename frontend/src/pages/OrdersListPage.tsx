@@ -38,6 +38,9 @@ type OrderSummary = {
   external_order_url: string | null
   source_files: { name: string; url: string }[] | null
   source_download_all_url: string | null
+  printerval_designer: string | null
+  printerval_status: string | null
+  printerval_assignment_lifecycle: string | null
   created_at: string
 }
 
@@ -72,11 +75,18 @@ export function OrdersListPage() {
   const [assigningOrder, setAssigningOrder] = useState<OrderSummary | null>(null)
   const [usersList, setUsersList] = useState<UserOption[]>([])
   const [selectedUserId, setSelectedUserId] = useState('')
+  const [printervalDesigners, setPrintervalDesigners] = useState<string[]>([])
+  const [printervalStatuses, setPrintervalStatuses] = useState<string[]>([])
+  const [selectedPrintervalDesigner, setSelectedPrintervalDesigner] = useState('')
+  const [selectedPrintervalStatus, setSelectedPrintervalStatus] = useState('Doing')
+  const [loadingPrintervalOptions, setLoadingPrintervalOptions] = useState(false)
   const [assigning, setAssigning] = useState(false)
 
   // Bulk Selection State
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([])
   const [bulkDesignerId, setBulkDesignerId] = useState<string>('')
+  const [bulkPrintervalDesigner, setBulkPrintervalDesigner] = useState('')
+  const [bulkPrintervalStatus, setBulkPrintervalStatus] = useState('Doing')
   const [bulkAssigning, setBulkAssigning] = useState<boolean>(false)
 
   useEffect(() => {
@@ -84,6 +94,50 @@ export function OrdersListPage() {
       apiFetch<UserOption[]>('/users').then(setUsersList).catch(() => {})
     }
   }, [isAdmin])
+
+  useEffect(() => {
+    if (!assigningOrder) return
+    setSelectedUserId('')
+    setSelectedPrintervalDesigner('')
+    setSelectedPrintervalStatus('Doing')
+    setLoadingPrintervalOptions(true)
+    apiFetch<{ designers: string[]; statuses: string[] }>(
+      `/orders/${assigningOrder.id}/printerval-options`
+    )
+      .then((result) => {
+        setPrintervalDesigners(result.designers)
+        setPrintervalStatuses(result.statuses)
+      })
+      .catch((err) => {
+        setPrintervalDesigners([])
+        setPrintervalStatuses([])
+        setError(err instanceof ApiError ? err.message : 'Không tải được danh sách Designer Printerval.')
+      })
+      .finally(() => setLoadingPrintervalOptions(false))
+  }, [assigningOrder])
+
+  useEffect(() => {
+    const firstOrderId = selectedOrderIds[0]
+    if (!firstOrderId) {
+      setBulkPrintervalDesigner('')
+      return
+    }
+    setBulkPrintervalDesigner('')
+    setLoadingPrintervalOptions(true)
+    apiFetch<{ designers: string[]; statuses: string[] }>(
+      `/orders/${firstOrderId}/printerval-options`
+    )
+      .then((result) => {
+        setPrintervalDesigners(result.designers)
+        setPrintervalStatuses(result.statuses)
+      })
+      .catch((err) => {
+        setPrintervalDesigners([])
+        setPrintervalStatuses([])
+        setError(err instanceof ApiError ? err.message : 'Không tải được danh sách Designer Printerval.')
+      })
+      .finally(() => setLoadingPrintervalOptions(false))
+  }, [selectedOrderIds])
 
   function dismissHighlight(orderId: string) {
     setNewlyCrawledOrderIds((prev) => prev.filter((id) => id !== orderId))
@@ -105,20 +159,23 @@ export function OrdersListPage() {
   }
 
   async function handleBulkAssign() {
-    if (!bulkDesignerId || selectedOrderIds.length === 0) return
+    if (!bulkDesignerId || !bulkPrintervalDesigner || selectedOrderIds.length === 0) return
     setBulkAssigning(true)
     try {
-      const res = await apiFetch<{ ok: boolean; message: string }>('/orders/bulk-assign', {
+      const res = await apiFetch<{ queued_count: number }>('/orders/bulk-printerval-assignment', {
         method: 'POST',
         body: JSON.stringify({
           order_ids: selectedOrderIds,
           designer_id: bulkDesignerId,
+          printerval_designer: bulkPrintervalDesigner,
+          printerval_status: bulkPrintervalStatus,
         }),
       })
-      setFlash(res.message)
+      setFlash(`Đã phân công và xếp đồng bộ Printerval cho ${res.queued_count} đơn.`)
       selectedOrderIds.forEach(dismissHighlight)
       setSelectedOrderIds([])
       setBulkDesignerId('')
+      setBulkPrintervalDesigner('')
       loadOrders()
     } catch (err) {
       if (err instanceof ApiError) {
@@ -131,17 +188,21 @@ export function OrdersListPage() {
 
   async function handleAssignOrder(e: React.FormEvent) {
     e.preventDefault()
-    if (!assigningOrder || !selectedUserId) return
+    if (!assigningOrder || !selectedUserId || !selectedPrintervalDesigner) return
     setAssigning(true)
     try {
-      const res = await apiFetch<{ ok: boolean; printerval_sync_message?: string }>(
-        `/orders/${assigningOrder.id}/assign`,
+      await apiFetch<{ request_id: string; lifecycle: string }>(
+        `/orders/${assigningOrder.id}/printerval-assignment`,
         {
           method: 'POST',
-          body: JSON.stringify({ designer_id: selectedUserId }),
+          body: JSON.stringify({
+            designer_id: selectedUserId,
+            printerval_designer: selectedPrintervalDesigner,
+            printerval_status: selectedPrintervalStatus,
+          }),
         }
       )
-      if (res.printerval_sync_message) setFlash(res.printerval_sync_message)
+      setFlash('Đã phân công và xếp đồng bộ Designer, trạng thái lên Printerval.')
       dismissHighlight(assigningOrder.id)
       setAssigningOrder(null)
       loadOrders()
@@ -420,9 +481,34 @@ export function OrdersListPage() {
               ))}
             </select>
 
+            <select
+              value={bulkPrintervalDesigner}
+              onChange={(e) => setBulkPrintervalDesigner(e.target.value)}
+              disabled={loadingPrintervalOptions}
+              className="bg-white text-slate-800 text-xs font-semibold px-3 py-1.5 rounded-lg border border-white/30 focus:outline-none shadow-xs disabled:opacity-60"
+            >
+              <option value="">
+                {loadingPrintervalOptions ? 'Đang tải DES Printerval...' : '-- Chọn DES Printerval --'}
+              </option>
+              {printervalDesigners.map((designer) => (
+                <option key={designer} value={designer}>{designer}</option>
+              ))}
+            </select>
+
+            <select
+              value={bulkPrintervalStatus}
+              onChange={(e) => setBulkPrintervalStatus(e.target.value)}
+              disabled={loadingPrintervalOptions}
+              className="bg-white text-slate-800 text-xs font-semibold px-3 py-1.5 rounded-lg border border-white/30 focus:outline-none shadow-xs disabled:opacity-60"
+            >
+              {(printervalStatuses.length ? printervalStatuses : ['Doing']).map((status) => (
+                <option key={status} value={status}>{status}</option>
+              ))}
+            </select>
+
             <button
               onClick={handleBulkAssign}
-              disabled={!bulkDesignerId || bulkAssigning}
+              disabled={!bulkDesignerId || !bulkPrintervalDesigner || bulkAssigning || loadingPrintervalOptions}
               className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-[#0052CC] bg-white hover:bg-slate-100 rounded-lg shadow-sm transition-all disabled:opacity-50 cursor-pointer"
             >
               {bulkAssigning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
@@ -612,6 +698,13 @@ export function OrdersListPage() {
                             {isAdmin ? '+ Phân công DES' : 'Chưa phân bổ'}
                           </span>
                         )}
+                        {(o.printerval_designer || o.printerval_status) && (
+                          <p className="mt-1 text-[10px] font-medium text-slate-500">
+                            Printerval: {o.printerval_designer || '—'}
+                            {o.printerval_status ? ` · ${o.printerval_status}` : ''}
+                            {o.printerval_assignment_lifecycle === 'pending' ? ' · đang đồng bộ' : ''}
+                          </p>
+                        )}
                       </td>
 
                       {/* Template Button */}
@@ -714,6 +807,43 @@ export function OrdersListPage() {
                 </select>
               </div>
 
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-700 block">
+                  Designer trên Printerval <span className="text-red-500">*</span>
+                </label>
+                <select
+                  required
+                  value={selectedPrintervalDesigner}
+                  onChange={(e) => setSelectedPrintervalDesigner(e.target.value)}
+                  disabled={loadingPrintervalOptions}
+                  className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-[#0052CC]/20 focus:border-[#0052CC] disabled:bg-slate-100"
+                >
+                  <option value="">
+                    {loadingPrintervalOptions ? 'Đang tải danh sách...' : '-- Chọn Designer Printerval --'}
+                  </option>
+                  {printervalDesigners.map((designer) => (
+                    <option key={designer} value={designer}>{designer}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-700 block">
+                  Trạng thái trên Printerval <span className="text-red-500">*</span>
+                </label>
+                <select
+                  required
+                  value={selectedPrintervalStatus}
+                  onChange={(e) => setSelectedPrintervalStatus(e.target.value)}
+                  disabled={loadingPrintervalOptions}
+                  className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-[#0052CC]/20 focus:border-[#0052CC] disabled:bg-slate-100"
+                >
+                  {(printervalStatuses.length ? printervalStatuses : ['Doing']).map((status) => (
+                    <option key={status} value={status}>{status}</option>
+                  ))}
+                </select>
+              </div>
+
               <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">
                 <button
                   type="button"
@@ -724,7 +854,7 @@ export function OrdersListPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={assigning || !selectedUserId}
+                  disabled={assigning || loadingPrintervalOptions || !selectedUserId || !selectedPrintervalDesigner}
                   className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-[#0052CC] hover:bg-[#0041A3] rounded-xl transition-colors shadow-2xs disabled:opacity-50 cursor-pointer"
                 >
                   {assigning && <Loader2 className="h-3.5 w-3.5 animate-spin" />}

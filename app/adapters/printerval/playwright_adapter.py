@@ -15,6 +15,7 @@ from app.adapters.printerval.models import (
     AssetResult,
     CustomConfig,
     CustomConfigEntry,
+    DesignerOptionsResult,
     DiscoverResult,
     OrderDetailResult,
     OrderSummary,
@@ -350,6 +351,31 @@ class PlaywrightPrintervalAdapter:
         # a cache miss (different order, or discover_orders in between) just falls back
         # to a fresh search, so this can never serve a stale/wrong row.
         self._last_row_cache: tuple[str, object] | None = None
+
+    def list_designer_options(self, external_order_id: str) -> DesignerOptionsResult:
+        """Read the exact visible Designer labels for this platform and order."""
+        try:
+            row = self._search_and_get_row_cached(external_order_id)
+            selects = row.locator("select")
+            if selects.count() < 1:
+                raise LookupError("No Designer <select> found")
+            labels = [label.strip() for label in selects.nth(0).locator("option").all_inner_texts()]
+            options = [
+                label
+                for label in labels
+                if label and label.lower() not in {"choose designer", "chưa chia cho ai"}
+            ]
+            if not options:
+                raise LookupError("Designer <select> has no selectable options")
+            return DesignerOptionsResult(success=True, options=list(dict.fromkeys(options)))
+        except Exception as exc:
+            error_class, retryable = _classify_exception(exc)
+            return DesignerOptionsResult(
+                success=False,
+                error_class=error_class,
+                retryable=retryable,
+                evidence=capture_evidence(self.page, f"list_designer_options_{external_order_id}"),
+            )
 
     def discover_orders(
         self,

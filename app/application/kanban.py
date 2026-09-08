@@ -4,13 +4,12 @@ from app.adapters.db.models import Assignment, DeadLetter, Order, User
 from app.domain.models import OrderState
 
 KANBAN_COLUMNS = (
-    ("new", "Mới", {"DISCOVERED", "CLAIMED_IMPORTED", "OPEN_FOR_ALLOCATION"}),
-    ("assignment_review", "Chờ duyệt gán", {"ASSIGNMENT_PENDING_APPROVAL"}),
-    ("design", "Đang thiết kế", {"ASSIGNED", "IN_PROGRESS", "REVISION_REQUESTED"}),
-    ("qc", "Chờ QC", {"RESULT_SUBMITTED", "QC_PENDING"}),
-    ("submitting", "Đang đưa lên site", {"SUBMITTING_TO_SITE"}),
-    ("complete", "Hoàn tất", {"DONE", "SKIPPED", "CANCELLED"}),
-    ("attention", "Cần xử lý", {"REASSIGNMENT_REQUIRED", "EXCEPTION"}),
+    ("open", "Chờ phân công", {"OPEN", "DISCOVERED", "CLAIMED_IMPORTED", "OPEN_FOR_ALLOCATION", "ASSIGNMENT_PENDING_APPROVAL"}),
+    ("in_progress", "Đang làm", {"IN_PROGRESS", "ASSIGNED", "REVISION"}),
+    ("qc", "Chờ duyệt (QC)", {"QC_PENDING", "RESULT_SUBMITTED", "SUBMITTING_TO_SITE"}),
+    ("complete", "Hoàn thành", {"DONE", "SKIPPED"}),
+    ("cancelled", "Đã hủy", {"CANCELLED"}),
+    ("attention", "Lỗi / Ngoại lệ", {"EXCEPTION", "REASSIGNMENT_REQUIRED"}),
 )
 
 

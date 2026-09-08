@@ -185,6 +185,42 @@ def test_find_order_normalizes_a_bare_numeric_id_to_the_dj_code():
     assert row == {"id": 3968034}
 
 
+def test_find_order_rejects_a_row_whose_id_does_not_match_the_requested_order():
+    """Regression test (live incident 2026-09-08): for a status that isn't the order's
+    real one, the endpoint was observed to return an unrelated order's row instead of
+    zero rows (search silently not applied) — DJ1475396 got overwritten with a
+    completely different order's product/deadline/source files as a result. A
+    mismatched id must be treated exactly like an empty result, not trusted."""
+    seen_statuses = []
+
+    def handler(request):
+        if request.method == "GET" and request.url.path == LOGIN_PATH:
+            return httpx.Response(200, text='<input type="hidden" name="_token" value="csrf">')
+        if request.method == "POST" and request.url.path == LOGIN_PATH:
+            return httpx.Response(302, headers={"location": ADMIN_PATH})
+        if request.method == "GET" and request.url.path == FIND_PATH:
+            params = dict(request.url.params)
+            seen_statuses.append(params["status"])
+            if params["status"] == "doing":
+                # Wrong status for this order -> site returns an unrelated row instead
+                # of the documented empty result.
+                return httpx.Response(
+                    200, json={"status": "successful", "result": [{"id": 9999999, "status": "doing"}]}
+                )
+            if params["status"] == "waiting":
+                return httpx.Response(
+                    200, json={"status": "successful", "result": [{"id": 1475396, "status": "waiting"}]}
+                )
+            return httpx.Response(200, json={"status": "successful", "result": []})
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    with _client(handler) as client:
+        row = client.find_order("DJ1475396")
+
+    assert row == {"id": 1475396, "status": "waiting"}
+    assert seen_statuses == ["doing", "waiting"]
+
+
 def test_find_order_returns_none_when_not_found_under_any_status():
     def handler(request):
         if request.method == "GET" and request.url.path == LOGIN_PATH:

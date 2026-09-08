@@ -39,7 +39,7 @@ def _login(client, db_session, role: str, username: str):
     return user
 
 
-def _seed_owned_task(db_session, designer, state=OrderState.ASSIGNED.value):
+def _seed_owned_task(db_session, designer, state=OrderState.IN_PROGRESS.value):
     batch = Batch(source="printerval_crawl", owner="ntth", count=1)
     db_session.add(batch)
     db_session.flush()

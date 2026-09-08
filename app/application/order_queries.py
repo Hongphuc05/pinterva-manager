@@ -21,7 +21,7 @@ def list_orders_for_user(
     query = session.query(Order)
 
     if platform_id:
-        query = query.filter((Order.platform_id == platform_id) | (Order.platform_id.is_(None)))
+        query = query.filter(Order.platform_id == platform_id)
 
     if designer_id:
         if designer_id == "unassigned":

@@ -37,7 +37,7 @@ def _remaining_order_ids(
         session.query(Order)
         .filter(
             Order.batch_id == batch_id,
-            Order.state == OrderState.OPEN_FOR_ALLOCATION.value,
+            Order.state == OrderState.OPEN.value,
             ~Order.id.in_(session.query(active_assignment_order_ids.c.order_id)),
         )
         .order_by(Order.external_order_id)
@@ -79,7 +79,7 @@ def _grant_orders(
         apply_transition(
             session,
             order,
-            OrderState.ASSIGNMENT_PENDING_APPROVAL,
+            OrderState.IN_PROGRESS,
             actor_id=actor_id,
             evidence={"source": "allocation"},
             commit=False,
@@ -122,7 +122,7 @@ def open_allocation(
             raise ValueError(f"batch {batch_id} not found")
         orders = (
             session.query(Order)
-            .filter_by(batch_id=batch.id, state=OrderState.CLAIMED_IMPORTED.value)
+            .filter_by(batch_id=batch.id, state=OrderState.OPEN.value)
             .all()
         )
         order_ids = []
@@ -130,7 +130,7 @@ def open_allocation(
             apply_transition(
                 session,
                 order,
-                OrderState.OPEN_FOR_ALLOCATION,
+                OrderState.OPEN,
                 actor_id=actor_id,
                 evidence={"source": "open_allocation"},
                 commit=False,
@@ -255,7 +255,7 @@ def decide_assignment(
 
         if decision == "approve":
             apply_transition(
-                session, order, OrderState.ASSIGNED, actor_id=actor_id,
+                session, order, OrderState.IN_PROGRESS, actor_id=actor_id,
                 evidence={"source": "decide_assignment"},
                 commit=False,
             )

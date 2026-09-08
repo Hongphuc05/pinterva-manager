@@ -3,14 +3,47 @@ from __future__ import annotations
 import logging
 import uuid
 
-from app.adapters.db.models import Order, Platform, User
+from app.adapters.db.models import Order, Platform, PrintervalAssignmentRequest, User
 from app.adapters.db.session import SessionLocal
 from app.adapters.playwright_support import playwright_session
 from app.adapters.printerval.playwright_adapter import PlaywrightPrintervalAdapter
 from app.application.assignment_sync import sync_assignment_to_printerval
+from app.application.printerval_assignment_requests import execute_request
 from app.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
+
+
+@celery_app.task(name="app.workers.assignment_sync_tasks.sync_printerval_assignment_request")
+def sync_printerval_assignment_request(request_id: str) -> None:
+    """Run one explicit per-order Designer/Status request for its own platform."""
+    session = SessionLocal()
+    try:
+        request = session.get(PrintervalAssignmentRequest, uuid.UUID(request_id))
+        if request is None:
+            logger.error("Printerval assignment request %s not found", request_id)
+            return
+        platform = session.get(Platform, request.platform_id)
+        if platform is None or not platform.account_password:
+            request.lifecycle = "failed"
+            request.error_class = "AUTH"
+            request.error_message = "Platform credentials are unavailable"
+            session.commit()
+            return
+        account_slug = platform.account_username.replace("@", "_").replace(".", "_")
+        profile_dir = "chrome-profile-" + account_slug
+        # Chrome real is required by the known Cloudflare behaviour for write flows.
+        with playwright_session(profile_dir=profile_dir, headless=True) as page:
+            adapter = PlaywrightPrintervalAdapter(
+                page=page,
+                crawl_username=platform.account_username,
+                crawl_password=platform.account_password,
+            )
+            execute_request(session, adapter, request)
+    except Exception:
+        logger.exception("Printerval assignment request %s crashed", request_id)
+    finally:
+        session.close()
 
 
 @celery_app.task(name="app.workers.assignment_sync_tasks.sync_assignment_to_printerval_task")

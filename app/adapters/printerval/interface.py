@@ -4,6 +4,7 @@ from typing import Protocol, runtime_checkable
 
 from app.adapters.printerval.models import (
     AssetResult,
+    DesignerOptionsResult,
     DiscoverResult,
     OrderDetailResult,
     WriteResult,
@@ -36,6 +37,8 @@ NTTH_DESIGNER_OPTION = "Nguyễn Thị Thuý Hường - 2D Prin"
 
 @runtime_checkable
 class PrintervalAdapter(Protocol):
+    def list_designer_options(self, external_order_id: str) -> DesignerOptionsResult: ...
+
     def discover_orders(
         self,
         status: str,

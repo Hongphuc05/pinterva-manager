@@ -18,7 +18,7 @@ from app.application.designer_tasks import (
 from app.domain.models import OrderState
 
 
-def _seed_task(db_session, *, state=OrderState.ASSIGNED.value):
+def _seed_task(db_session, *, state=OrderState.IN_PROGRESS.value):
     batch = Batch(source="printerval_crawl", owner="ntth", count=1)
     designer = User(
         username=f"designer-{uuid.uuid4()}", full_name="Designer", role="designer",

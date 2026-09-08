@@ -7,6 +7,7 @@ from app.adapters.printerval.interface import ALL_JOB_TYPES
 from app.adapters.printerval.models import (
     AssetResult,
     CustomConfig,
+    DesignerOptionsResult,
     DiscoverResult,
     OrderDetailResult,
     OrderSummary,
@@ -44,6 +45,15 @@ class FakePrintervalAdapter:
 
     def __init__(self):
         self._orders: dict[str, _FakeOrder] = {}
+
+    def list_designer_options(self, external_order_id: str) -> DesignerOptionsResult:
+        if external_order_id not in self._orders:
+            return DesignerOptionsResult(success=False, error_class="VALIDATION")
+        options = sorted(
+            {order.designer for order in self._orders.values() if order.designer}
+            | {"Nguyễn Thị Thuý Hường - 2D Prin"}
+        )
+        return DesignerOptionsResult(success=True, options=options)
 
     def add_order(self, **kwargs) -> _FakeOrder:
         order = _FakeOrder(**kwargs)

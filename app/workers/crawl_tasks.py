@@ -15,6 +15,7 @@ from app.application.crawl import (
     export_platform_orders_csv,
     find_unclaimed_order_ids,
     import_claimed_orders,
+    retry_failed_claims,
 )
 from app.workers.celery_app import celery_app
 
@@ -43,25 +44,34 @@ def run_crawl_cycle(
         date_from=date_from,
         date_to=date_to,
     )
-    # Retry orders a prior claim_batch dead-lettered — they already have an Order row
-    # so discover_waiting_orders_with_summaries's "new" filter will never surface them
-    # again on its own.
-    retry_ids = [oid for oid in find_unclaimed_order_ids(session, platform_id) if oid not in new_order_ids]
-    order_ids_to_claim = new_order_ids + retry_ids
-    if order_ids_to_claim:
+    claimed_count = 0
+    failed_claim_count = 0
+    if new_order_ids:
         claim_result = claim_batch(
             session,
             adapter,
-            order_ids_to_claim,
+            new_order_ids,
             owner=NTTH_DESIGNER_OPTION,
             order_summaries=summaries,
             platform_id=platform_id,
         )
-        claimed_count = len(claim_result["claimed"])
-        failed_claim_count = len(claim_result["failed"])
-    else:
-        claimed_count = 0
-        failed_claim_count = 0
+        claimed_count += len(claim_result["claimed"])
+        failed_claim_count += len(claim_result["failed"])
+
+    # Retry orders a prior claim_batch dead-lettered — they already have an Order row
+    # so discover_waiting_orders_with_summaries's "new" filter will never surface them
+    # again on its own. Goes through retry_failed_claims, NOT claim_batch: this same
+    # still-unclaimed set is resubmitted every cycle nothing new is discovered, and
+    # claim_batch's idempotency key (a hash of the exact order_ids) would otherwise
+    # cache the very first failure forever, silently never retrying against the site
+    # again (see retry_failed_claims's docstring).
+    retry_ids = [oid for oid in find_unclaimed_order_ids(session, platform_id) if oid not in new_order_ids]
+    if retry_ids:
+        retry_result = retry_failed_claims(
+            session, adapter, retry_ids, owner=NTTH_DESIGNER_OPTION, platform_id=platform_id
+        )
+        claimed_count += len(retry_result["claimed"])
+        failed_claim_count += len(retry_result["failed"])
 
     import_result = import_claimed_orders(session, adapter)
 
@@ -96,7 +106,8 @@ def crawl_and_claim() -> None:
     logger.disabled = False
 
     try:
-        session_cm = playwright_session()
+        # Scheduled crawling must never open a visible Chrome window for operators.
+        session_cm = playwright_session(headless=True)
         page = session_cm.__enter__()
     except Exception:
         logger.exception("crawl_and_claim: Playwright session failed to open, skipping this cycle")

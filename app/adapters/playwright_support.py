@@ -24,7 +24,7 @@ def cleanup_profile_locks(profile_dir: str = "chrome-profile") -> None:
                     pass
 
 
-def open_playwright_session(profile_dir: str = "chrome-profile", headless: bool = False):
+def open_playwright_session(profile_dir: str = "chrome-profile", headless: bool = True):
     """Low-level open: launch the persistent Chrome profile and return
     `(playwright_cm, context, page)` WITHOUT closing anything — the caller owns
     cleanup via `close_playwright_session(playwright_cm, context)`.
@@ -62,7 +62,7 @@ def close_playwright_session(playwright_cm, context) -> None:
 
 
 @contextmanager
-def playwright_session(profile_dir: str = "chrome-profile", headless: bool = False):
+def playwright_session(profile_dir: str = "chrome-profile", headless: bool = True):
     """Launch a persistent Chrome profile, yield the Page to use.
 
     The profile directory must already be logged into Printerval (done once,

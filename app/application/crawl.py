@@ -138,6 +138,75 @@ def discover_waiting_orders(
     return new_ids
 
 
+def scan_orders_fast(
+    session: Session,
+    adapter: PrintervalAdapter,
+    *,
+    platform_id: uuid.UUID,
+    status: str,
+    designer: str | None = None,
+    job_type: str = ALL_JOB_TYPES,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> dict:
+    """Read-only API scan: upsert the selected site queue without claiming jobs."""
+    cursor: str | None = None
+    seen: set[str] = set()
+    added = 0
+    updated = 0
+    while True:
+        result = adapter.discover_orders(
+            status=status,
+            job_type=job_type,
+            limit=100,
+            cursor=cursor,
+            platform_id=str(platform_id),
+            date_from=date_from,
+            date_to=date_to,
+        )
+        if not result.success:
+            raise DiscoverFailedError(result.error_class or "BUG")
+        for summary in result.orders:
+            if designer and summary.designer != designer:
+                continue
+            if summary.external_order_id in seen:
+                continue
+            seen.add(summary.external_order_id)
+            order = (
+                session.query(Order)
+                .filter(Order.external_order_id == summary.external_order_id, Order.platform_id == platform_id)
+                .one_or_none()
+            )
+            if order is None:
+                session.add(
+                    Order(
+                        external_order_id=summary.external_order_id,
+                        platform_id=platform_id,
+                        state=OrderState.OPEN.value,
+                        product_name=summary.product_name,
+                        thumbnail_url=summary.thumbnail_url,
+                        sku=summary.sku,
+                        product_category=summary.product_category,
+                        template_jobs=summary.template_jobs,
+                        has_template=bool(summary.template_jobs),
+                        printerval_designer=summary.designer,
+                        printerval_status=summary.status.lower(),
+                    )
+                )
+                added += 1
+            else:
+                order.printerval_designer = summary.designer or order.printerval_designer
+                order.printerval_status = summary.status.lower()
+                order.thumbnail_url = summary.thumbnail_url or order.thumbnail_url
+                updated += 1
+        if not result.cursor:
+            break
+        cursor = result.cursor
+    session.commit()
+    export_platform_orders_csv(session, platform_id)
+    return {"scanned": len(seen), "added": added, "updated": updated}
+
+
 def find_unclaimed_order_ids(session: Session, platform_id: uuid.UUID | None) -> list[str]:
     """Orders sitting at DISCOVERED with no confirmed printerval claim — a prior
     claim_batch attempt failed (dead-lettered) for them, and the normal discover step
@@ -151,11 +220,83 @@ def find_unclaimed_order_ids(session: Session, platform_id: uuid.UUID | None) ->
             ExternalObservation,
             (ExternalObservation.order_id == Order.id) & (ExternalObservation.source == "printerval"),
         )
-        .filter(Order.state == OrderState.DISCOVERED.value, ExternalObservation.id.is_(None))
+        .filter(Order.state == OrderState.OPEN.value, ExternalObservation.id.is_(None))
     )
     if platform_id:
         query = query.filter(Order.platform_id == platform_id)
     return [o.external_order_id for o in query.all()]
+
+
+def _claim_one_order(
+    session: Session,
+    adapter: PrintervalAdapter,
+    batch: Batch,
+    order_id: str,
+    owner: str,
+    summaries_map: dict[str, OrderSummary],
+    dead_letter_source: str,
+) -> bool:
+    """Ensure an Order row exists for order_id, then claim it on the site via
+    `adapter.set_designer`. Returns True/claimed, False/dead-lettered. Commits once,
+    itself — shared by claim_batch (new orders) and retry_failed_claims (orders a
+    prior claim_batch already dead-lettered)."""
+    order = session.query(Order).filter_by(external_order_id=order_id).one_or_none()
+    if order is None:
+        summary = summaries_map.get(order_id)
+        order = Order(
+            external_order_id=order_id,
+            batch_id=batch.id,
+            platform_id=batch.platform_id,
+            state=OrderState.OPEN.value,
+            product_name=summary.product_name if summary else None,
+            thumbnail_url=summary.thumbnail_url if summary else None,
+            sku=summary.sku if summary else None,
+            product_category=summary.product_category if summary else None,
+            sku_image_url=summary.sku_image_url if summary else None,
+            external_order_url=summary.external_order_url if summary else None,
+            source_files=summary.source_files if summary else None,
+            source_download_all_url=summary.source_download_all_url if summary else None,
+            template_jobs=summary.template_jobs if summary else None,
+            has_template=summary.has_template if summary else False,
+        )
+        session.add(order)
+        session.flush()
+
+    result = with_retry(lambda: adapter.set_designer(order_id, owner))
+    if result.success:
+        session.add(
+            ExternalObservation(
+                order_id=order.id,
+                source="printerval",
+                external_id=order_id,
+                observed_state=str(result.observed_state.get("designer")),
+                evidence=result.evidence,
+            )
+        )
+        claimed = True
+    else:
+        session.add(
+            DeadLetter(
+                source=dead_letter_source,
+                payload={"order_id": order_id, "batch_id": str(batch.id)},
+                error_class=result.error_class or "BUG",
+            )
+        )
+        claimed = False
+
+    # Commit after every single order, not once at the very end of the whole batch.
+    # Each set_designer call is a real Playwright round-trip (seconds, sometimes much
+    # more) — a batch of dozens of new orders previously stayed one giant uncommitted
+    # transaction the entire time, so nothing about its progress was ever visible from
+    # outside, and one slow/stuck order made the whole request look identically "hung"
+    # whether it truly was or was just working through a long backlog. A crash/retry
+    # after this point re-walks order_ids and skips orders that already have a row
+    # (the `order is None` check above) — the one known cost is a retried batch
+    # re-issuing set_designer for already-claimed orders (harmless: it's already
+    # idempotent against "already the target value") and a duplicate ExternalObservation
+    # row for those, not a duplicate claim.
+    session.commit()
+    return claimed
 
 
 def claim_batch(
@@ -170,6 +311,11 @@ def claim_batch(
     Order row — defensive re-entrancy if a prior crash happened between discover and
     claim), then claim each on the site via `adapter.set_designer`. One order's claim
     failure dead-letters that order and continues the rest of the batch.
+
+    Idempotent per exact order_ids set (protects a genuine double-submit of the same
+    request from creating two Batches/duplicate claims) — callers that need a *failed*
+    claim retried on a later, separate attempt must use `retry_failed_claims` instead,
+    not call this again with the same set (see its docstring for why).
     """
     # ponytail: hashed, not the raw joined IDs — `operations.idempotency_key` is
     # VARCHAR(255), and a real crawl can discover far more than ~20 new orders in one
@@ -189,69 +335,56 @@ def claim_batch(
         claimed: list[str] = []
         failed: list[str] = []
         for order_id in order_ids:
-            order = (
-                session.query(Order).filter_by(external_order_id=order_id).one_or_none()
-            )
-            if order is None:
-                summary = summaries_map.get(order_id)
-                order = Order(
-                    external_order_id=order_id,
-                    batch_id=batch.id,
-                    platform_id=platform_id,
-                    state=OrderState.DISCOVERED.value,
-                    product_name=summary.product_name if summary else None,
-                    thumbnail_url=summary.thumbnail_url if summary else None,
-                    sku=summary.sku if summary else None,
-                    product_category=summary.product_category if summary else None,
-                    sku_image_url=summary.sku_image_url if summary else None,
-                    external_order_url=summary.external_order_url if summary else None,
-                    source_files=summary.source_files if summary else None,
-                    source_download_all_url=summary.source_download_all_url if summary else None,
-                    template_jobs=summary.template_jobs if summary else None,
-                    has_template=summary.has_template if summary else False,
-                )
-                session.add(order)
-                session.flush()
-
-            result = with_retry(lambda oid=order_id: adapter.set_designer(oid, owner))
-            if result.success:
-                session.add(
-                    ExternalObservation(
-                        order_id=order.id,
-                        source="printerval",
-                        external_id=order_id,
-                        observed_state=str(result.observed_state.get("designer")),
-                        evidence=result.evidence,
-                    )
-                )
+            if _claim_one_order(session, adapter, batch, order_id, owner, summaries_map, "crawl.claim_batch"):
                 claimed.append(order_id)
             else:
-                session.add(
-                    DeadLetter(
-                        source="crawl.claim_batch",
-                        payload={"order_id": order_id, "batch_id": str(batch.id)},
-                        error_class=result.error_class or "BUG",
-                    )
-                )
                 failed.append(order_id)
-
-            # Commit after every single order, not once at the very end of the whole
-            # batch. Each set_designer call is a real Playwright round-trip (seconds,
-            # sometimes much more) — a batch of dozens of new orders previously stayed
-            # one giant uncommitted transaction the entire time, so nothing about its
-            # progress was ever visible from outside, and one slow/stuck order made the
-            # whole request look identically "hung" whether it truly was or was just
-            # working through a long backlog. A crash/retry after this point re-walks
-            # order_ids and skips orders that already have a row (the `order is None`
-            # check above) — the one known cost is a retried batch re-issuing
-            # set_designer for already-claimed orders (harmless: it's already idempotent
-            # against "already the target value") and a duplicate ExternalObservation
-            # row for those, not a duplicate claim.
-            session.commit()
 
         return {"batch_id": str(batch.id), "claimed": claimed, "failed": failed}
 
     return run_idempotent(session, idempotency_key, "claim_batch", _do)
+
+
+def retry_failed_claims(
+    session: Session,
+    adapter: PrintervalAdapter,
+    order_ids: list[str],
+    owner: str = NTTH_DESIGNER_OPTION,
+    platform_id: uuid.UUID | None = None,
+) -> dict:
+    """Re-attempt claiming orders a *previous* claim_batch already dead-lettered
+    (order_ids must come from find_unclaimed_order_ids — each already has an Order
+    row and no confirmed printerval claim yet).
+
+    Deliberately NOT wrapped in run_idempotent, unlike claim_batch: this same set of
+    still-unclaimed order_ids is exactly what a *new* crawl cycle re-submits every
+    single time nothing new gets discovered in between (claude.md §16 backlog can sit
+    for many cycles). claim_batch's own idempotency key is a hash of the order_ids
+    set, so wrapping this in it too would key every single retry cycle to the same
+    operation row — the very first failure would be cached as "completed" forever,
+    and the order would never actually be retried against the site again (confirmed
+    live 2026-09-08: 3 orders stuck at DISCOVERED, repeatedly reported as errors by
+    every crawl, with zero new dead_letters or set_designer attempts after the first).
+    Safe to skip idempotency here because `adapter.set_designer` is itself idempotent
+    (a no-op read-after-write check if already the target value) and the only entries
+    fed in are ones with no confirmed claim yet, so nothing here can double-claim an
+    order that already succeeded.
+    """
+    if not order_ids:
+        return {"claimed": [], "failed": []}
+    batch = Batch(source="printerval_crawl_retry", owner=owner, count=len(order_ids), platform_id=platform_id)
+    session.add(batch)
+    session.flush()
+
+    claimed: list[str] = []
+    failed: list[str] = []
+    for order_id in order_ids:
+        if _claim_one_order(session, adapter, batch, order_id, owner, {}, "crawl.retry_failed_claims"):
+            claimed.append(order_id)
+        else:
+            failed.append(order_id)
+
+    return {"batch_id": str(batch.id), "claimed": claimed, "failed": failed}
 
 
 def import_claimed_orders(session: Session, adapter: PrintervalAdapter) -> dict:
@@ -276,8 +409,9 @@ def import_claimed_orders(session: Session, adapter: PrintervalAdapter) -> dict:
         session.query(Order)
         .join(ExternalObservation, ExternalObservation.order_id == Order.id)
         .filter(
-            Order.state == OrderState.DISCOVERED.value,
+            Order.state == OrderState.OPEN.value,
             ExternalObservation.source == "printerval",
+            Order.product_variants.is_(None),
         )
         .distinct()
         .all()
@@ -374,7 +508,7 @@ def import_claimed_orders(session: Session, adapter: PrintervalAdapter) -> dict:
             apply_transition(
                 session,
                 order,
-                OrderState.CLAIMED_IMPORTED,
+                OrderState.OPEN,
                 actor_id=None,
                 evidence={"source": "crawl_job"},
             )

@@ -14,6 +14,7 @@ EXPECTED_TABLES = {
     "workflow_events",
     "outbox",
     "dead_letters",
+    "printerval_assignment_requests",
     "alembic_version",
 }
 

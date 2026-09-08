@@ -115,7 +115,7 @@ def test_create_assignment_draft_grants_a_single_named_order(db_session):
     assignment = db_session.get(Assignment, uuid.UUID(result["assignment_id"]))
     assert assignment.order_id == orders[1].id
     db_session.refresh(orders[1])
-    assert orders[1].state == OrderState.ASSIGNMENT_PENDING_APPROVAL.value
+    assert orders[1].state == OrderState.IN_PROGRESS.value
 
 
 def _draft_one_assignment(db_session):

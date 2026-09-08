@@ -2,6 +2,7 @@ import json
 
 from app.adapters.printerval.row_mapper import (
     extract_source_asset_url,
+    extract_source_files,
     parse_external_order_id,
     parse_order_detail_from_row,
     parse_product_summary_fields,
@@ -88,6 +89,47 @@ def test_parse_product_summary_fields():
 def test_extract_source_asset_url_only_for_personalized_orders():
     assert extract_source_asset_url(PERSONALIZED_ROW) == "https://assets.printerval.com/source.jpg"
     assert extract_source_asset_url(PLAIN_ROW) is None
+
+
+def test_extract_source_files_includes_customer_uploaded_configuration_photos():
+    """Regression test: a live row (2026-09-08) whose SKU personalization is a set of
+    customer-uploaded photos ("Your Photo 1".."Your Photo N", type "image") — the
+    site's own "SOURCE" panel — was previously dropped entirely: extract_source_files
+    only looked at `designs` (the designer's finished output) and generic attachment
+    fields, never the SKU's own `configurations`."""
+    row = {
+        "designs": [],
+        "meta_data": json.dumps(
+            {
+                "product_skus": {
+                    "123": {
+                        "configurations": json.dumps(
+                            {
+                                "Your Photo 1": {"type": "image", "value": "https://assets.printerval.com/p1.jpg"},
+                                "Your Photo 2": {"type": "image", "value": "https://assets.printerval.com/p2.jpg"},
+                                "Uploaded image count": 2,
+                            }
+                        ),
+                    }
+                }
+            }
+        ),
+    }
+
+    sources = extract_source_files(row)
+
+    assert sources == [
+        {"name": "Your Photo 1", "url": "https://assets.printerval.com/p1.jpg"},
+        {"name": "Your Photo 2", "url": "https://assets.printerval.com/p2.jpg"},
+    ]
+
+
+def test_extract_source_files_text_only_configuration_yields_nothing_extra():
+    """A non-photo personalization (e.g. jersey name/number, PERSONALIZED_ROW's own
+    shape) must not be mistaken for a source image."""
+    assert extract_source_files(PERSONALIZED_ROW) == [
+        {"name": "source.jpg", "url": "https://assets.printerval.com/source.jpg"}
+    ]  # falls through to the single-image fallback, same as extract_source_asset_url
 
 
 def test_parse_order_detail_from_row_personalized(monkeypatch):
