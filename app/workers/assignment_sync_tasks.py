@@ -148,7 +148,9 @@ def sync_assignment_to_printerval_task(order_id: str, designer_id: str) -> None:
 
 
 @celery_app.task(name="app.workers.assignment_sync_tasks.sync_order_review_to_printerval_task")
-def sync_order_review_to_printerval_task(order_id: str, note_outsource: str, target_status: str = "Review") -> None:
+def sync_order_review_to_printerval_task(
+    order_id: str, note_outsource: str | None = None, target_status: str = "Review"
+) -> None:
     """Sync an order's Note Outsource (Drive link or instructions) and target status ("Review") to Printerval."""
     from datetime import UTC, datetime
 
@@ -161,11 +163,66 @@ def sync_order_review_to_printerval_task(order_id: str, note_outsource: str, tar
             return
 
         platform = session.get(Platform, order.platform_id) if order.platform_id else None
-        if platform is None or not platform.account_password:
+        if platform is None or not (platform.account_password or platform.session_cookie):
             logger.error(
                 "sync_order_review_to_printerval_task: platform credentials missing for order %s",
                 order.external_order_id,
             )
+            return
+
+        # 1. Primary: Direct lightning-fast HTTP API via PrintervalApiClient (no Cloudflare blocks, <1s)
+        try:
+            with PrintervalApiClient(
+                base_url="https://printerval.com",
+                username=platform.account_username,
+                password=platform.account_password,
+                team_outsource=platform.team_outsource,
+                session_cookie=platform.session_cookie,
+            ) as client:
+                client.login()
+                row = client.find_order(order.external_order_id)
+                code = order.external_order_id
+                numeric_id = code[2:] if code.upper().startswith("DJ") else code
+                row_id = int(row.get("id")) if (row and row.get("id")) else int(numeric_id)
+                locale = (row.get("local_code") if row else None) or "en"
+
+                note_ok = True
+                if note_outsource and note_outsource.strip():
+                    note_ok = client.update_order_note_outsource(row_id, note_outsource.strip())
+                    logger.info(
+                        "HTTP update_order_note_outsource for %s: %s",
+                        order.external_order_id,
+                        note_ok,
+                    )
+
+                status_ok = True
+                if target_status:
+                    status_ok = client.update_order_status(row_id, target_status.lower(), locale)
+                    logger.info(
+                        "HTTP update_order_status (%s) for %s: %s",
+                        target_status,
+                        order.external_order_id,
+                        status_ok,
+                    )
+                    if status_ok:
+                        order.printerval_status = target_status.lower()
+                        order.printerval_status_synced_at = datetime.now(UTC)
+                        session.commit()
+
+                if note_ok and status_ok:
+                    logger.info(
+                        "sync_order_review_to_printerval_task succeeded via HTTP API for %s",
+                        order.external_order_id,
+                    )
+                    return
+        except Exception:
+            logger.exception(
+                "sync_order_review_to_printerval_task: HTTP API failed for %s, trying Playwright fallback",
+                order.external_order_id,
+            )
+
+        # 2. Secondary fallback: Playwright browser session
+        if not platform.account_password:
             return
 
         clean_slug = platform.account_username.replace("@", "_").replace(".", "_").replace("+", "_")
@@ -186,7 +243,6 @@ def sync_order_review_to_printerval_task(order_id: str, note_outsource: str, tar
                 crawl_username=platform.account_username,
                 crawl_password=platform.account_password,
             )
-            # 1. Update note outsource on Printerval if text provided
             if note_outsource and note_outsource.strip():
                 try:
                     res_note = adapter.attach_result_link(order.external_order_id, note_outsource.strip())
@@ -194,11 +250,12 @@ def sync_order_review_to_printerval_task(order_id: str, note_outsource: str, tar
                 except Exception:
                     logger.exception("Failed attach_result_link for %s", order.external_order_id)
 
-            # 2. Update status on Printerval
             if target_status:
                 try:
                     res_status = adapter.set_status(order.external_order_id, target_status)
-                    logger.info("set_status (%s) for %s: %s", target_status, order.external_order_id, res_status)
+                    logger.info(
+                        "set_status (%s) for %s: %s", target_status, order.external_order_id, res_status
+                    )
                     if res_status.success:
                         order.printerval_status = target_status.lower()
                         order.printerval_status_synced_at = datetime.now(UTC)

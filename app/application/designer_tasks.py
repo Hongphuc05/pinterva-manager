@@ -190,15 +190,20 @@ def update_sub_status(
 
 
 def _verify_drive(drive_adapter: DriveAdapter, drive_url: str) -> None:
-    verification = drive_adapter.verify_url(drive_url)
-    if not verification.success:
-        if verification.error_class in {"AUTH", "TRANSIENT_NETWORK"}:
-            raise DriveUnavailableError(verification.error_class)
-        raise DriveValidationError("Drive URL is invalid")
-    if not verification.exists:
-        raise DriveValidationError("Drive file does not exist")
-    if not verification.accessible:
-        raise DriveValidationError("Drive file is not accessible")
+    if not drive_url or not ("drive.google.com" in drive_url or "docs.google.com" in drive_url):
+        return
+    try:
+        verification = drive_adapter.verify_url(drive_url)
+        if not verification.success:
+            return
+        if not verification.exists:
+            raise DriveValidationError("Drive file does not exist")
+        if not verification.accessible:
+            raise DriveValidationError("Drive file is not accessible")
+    except DriveValidationError:
+        raise
+    except Exception:
+        return
 
 
 def submit_result(

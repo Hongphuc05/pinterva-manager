@@ -1037,7 +1037,7 @@ def api_update_order_state(
     if order is None:
         order = db.query(Order).filter(Order.external_order_id == order_id).first()
 
-    if order is None or order.platform_id != platform_id:
+    if order is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
 
     raw_state = payload.state.strip().upper()
@@ -1070,7 +1070,7 @@ def api_update_order_state(
             .filter(
                 Assignment.order_id == order.id,
                 Assignment.designer_id == user.id,
-                Assignment.status == "approved",
+                Assignment.status != "cancelled",
             )
             .first()
             is not None

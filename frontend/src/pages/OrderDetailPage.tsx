@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { apiFetch, ApiError, resolveAssetUrl } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
@@ -137,37 +137,31 @@ export function OrderDetailPage() {
     loadOrderDetail()
   }, [id])
 
-  function handleInitiateReviewSubmit(e?: FormEvent) {
+  function handleInitiateReviewSubmit(e?: React.FormEvent) {
     if (e) e.preventDefault()
     if (!order) return
     const norm = (order.state || '').toUpperCase()
     if (norm === 'QC_PENDING' || norm === 'REVIEW') return
-
-    if (!driveUrl.trim()) {
-      setActionError('Vui lòng nhập/dán link Google Drive kết quả trước khi nộp bài và chuyển Review!')
-      return
-    }
     setActionError(null)
     setShowSubmitModal(true)
   }
 
   async function handleConfirmSubmit() {
     if (!order) return
-    if (!driveUrl.trim()) {
-      setActionError('Hãy nhập link Google Drive kết quả trước khi nộp.')
-      setShowSubmitModal(false)
-      return
-    }
     setBusyAssignment(true)
     setActionError(null)
     setActionSuccess(null)
     setShowSubmitModal(false)
     try {
+      const submittedText = driveUrl.trim()
       if (order.assignment_id) {
         try {
           await apiFetch(`/assignments/${order.assignment_id}/results`, {
             method: 'POST',
-            body: JSON.stringify({ drive_url: driveUrl.trim(), request_id: crypto.randomUUID() }),
+            body: JSON.stringify({
+              drive_url: submittedText || 'Đã hoàn thành',
+              request_id: crypto.randomUUID(),
+            }),
           })
         } catch (assignErr: any) {
           console.warn('Ghi nhận assignment result:', assignErr)
@@ -175,7 +169,11 @@ export function OrderDetailPage() {
       }
       await apiFetch(`/orders/${order.id}/state`, {
         method: 'PATCH',
-        body: JSON.stringify({ state: 'QC_PENDING', drive_url: driveUrl.trim() }),
+        body: JSON.stringify({
+          state: 'QC_PENDING',
+          drive_url: submittedText || undefined,
+          note_outsource: submittedText || undefined,
+        }),
       })
       setActionSuccess('Nộp bài QC và chuyển sang Review (Chờ duyệt) thành công!')
       window.dispatchEvent(new CustomEvent('orders-updated'))
@@ -297,22 +295,32 @@ export function OrderDetailPage() {
               </p>
               <div className="pt-2 border-t border-purple-200/60">
                 <span className="text-[10px] font-bold text-purple-800 uppercase tracking-wider block mb-1">
-                  Link Google Drive nộp:
+                  Kết quả / Ghi chú nộp bài (Tùy chọn):
                 </span>
-                <a
-                  href={driveUrl.trim()}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-mono text-[11px] text-[#0052CC] hover:underline break-all flex items-center gap-1 font-semibold"
-                >
-                  <span className="truncate">{driveUrl.trim()}</span>
-                  <ExternalLink className="h-3 w-3 shrink-0" />
-                </a>
+                {driveUrl.trim() ? (
+                  driveUrl.trim().startsWith('http://') || driveUrl.trim().startsWith('https://') ? (
+                    <a
+                      href={driveUrl.trim()}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-mono text-[11px] text-[#0052CC] hover:underline break-all flex items-center gap-1 font-semibold"
+                    >
+                      <span className="truncate">{driveUrl.trim()}</span>
+                      <ExternalLink className="h-3 w-3 shrink-0" />
+                    </a>
+                  ) : (
+                    <div className="font-mono text-[11px] text-slate-800 font-semibold break-words whitespace-pre-wrap">
+                      {driveUrl.trim()}
+                    </div>
+                  )
+                ) : (
+                  <span className="text-[11px] text-slate-500 italic">(Không nhập ghi chú / link)</span>
+                )}
               </div>
             </div>
 
             <div className="text-[11px] text-slate-500 bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-              💡 Sau khi nộp, ô điền link sẽ được khóa. Nếu cần sửa lại link, bạn có thể bấm nút <strong>"Doing"</strong> để mở lại.
+              💡 Sau khi nộp, ô nhập bài sẽ được khóa. Nếu cần sửa lại, bạn có thể bấm nút <strong>"Doing"</strong> để mở lại.
             </div>
 
             <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
@@ -647,7 +655,7 @@ export function OrderDetailPage() {
                 <div className="flex flex-col sm:flex-row gap-3">
                   <div className="relative flex-1">
                     <input
-                      type="url"
+                      type="text"
                       disabled={isReview || busyAssignment}
                       className={`w-full px-3.5 py-2 text-xs rounded-xl border font-mono transition-all focus:outline-none ${
                         isReview
@@ -656,8 +664,8 @@ export function OrderDetailPage() {
                       }`}
                       placeholder={
                         isReview
-                          ? 'Đã nộp bài - Đang ở Review (Bấm "Doing" ở trên nếu muốn sửa link nộp lại)'
-                          : 'https://drive.google.com/file/d/... (Dán link Google Drive kết quả)'
+                          ? 'Đã nộp bài - Đang ở Review (Bấm "Doing" ở trên nếu muốn sửa nộp lại)'
+                          : 'Nhập link Drive, link ảnh hoặc ghi chú hoàn thành (tùy chọn)...'
                       }
                       value={driveUrl}
                       onChange={(e) => setDriveUrl(e.target.value)}
@@ -686,9 +694,9 @@ export function OrderDetailPage() {
 
                 {isReview && (
                   <p className="text-[11px] text-slate-500 italic flex items-center gap-1 pt-1">
-                    <span>💡 Đơn đang chờ Admin review. Nếu cần nộp lại link khác, bạn chỉ cần bấm nút</span>
+                    <span>💡 Đơn đang chờ Admin review. Nếu cần nộp lại, bạn chỉ cần bấm nút</span>
                     <strong className="text-blue-600 font-bold not-italic">"Doing (Đang làm)"</strong>
-                    <span>ở trên để mở khóa ô nhập link.</span>
+                    <span>ở trên để mở khóa ô nhập bài.</span>
                   </p>
                 )}
               </form>

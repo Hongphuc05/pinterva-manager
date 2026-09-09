@@ -443,3 +443,37 @@ class PrintervalApiClient:
             raise PrintervalApiError(
                 ErrorClass.TRANSIENT_NETWORK, "Waiting queue retry failed", retryable=True
             ) from exc
+
+    def update_order_note_outsource(self, design_job_id: int | str, note: str) -> bool:
+        """Set outsource_note attribute on Printerval via direct HTTP API."""
+        self._validate_configuration()
+        payload = {
+            "design_job_id": int(design_job_id),
+            "key": "outsource_note",
+            "value": note,
+        }
+        try:
+            resp = self._client.post("/outsource/pod/design-job-meta", json=payload)
+            if resp.status_code in (401, 403):
+                self.login()
+                resp = self._client.post("/outsource/pod/design-job-meta", json=payload)
+            return resp.status_code == 200 and resp.json().get("status") == "successful"
+        except Exception:
+            return False
+
+    def update_order_status(self, design_job_id: int | str, status: str, locale: str = "en") -> bool:
+        """Update order status (doing, review, fix, done) on Printerval via direct HTTP API."""
+        self._validate_configuration()
+        payload = {
+            "status": status.lower(),
+            "locale": locale,
+        }
+        try:
+            resp = self._client.patch(f"/outsource/pod/design-job/update?id={int(design_job_id)}", json=payload)
+            if resp.status_code in (401, 403):
+                self.login()
+                resp = self._client.patch(f"/outsource/pod/design-job/update?id={int(design_job_id)}", json=payload)
+            return resp.status_code == 200 and resp.json().get("status") == "successful"
+        except Exception:
+            return False
+

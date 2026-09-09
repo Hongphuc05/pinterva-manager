@@ -84,7 +84,7 @@ class SubStatusPayload(RequestIdPayload):
 
 
 class SubmitResultPayload(RequestIdPayload):
-    drive_url: HttpUrl
+    drive_url: str = Field(default="")
 
 
 class TaskMutationResponse(BaseModel):

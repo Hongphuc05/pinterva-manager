@@ -26,6 +26,12 @@ celery_app.conf.task_routes = {
     "app.workers.assignment_sync_tasks.sync_printerval_assignment_request": {
         "queue": "assignment"
     },
+    "app.workers.assignment_sync_tasks.sync_order_review_to_printerval_task": {
+        "queue": "assignment"
+    },
+    "app.workers.assignment_sync_tasks.sync_assignment_to_printerval_task": {
+        "queue": "assignment"
+    },
 }
 
 celery_app.conf.beat_schedule = {
