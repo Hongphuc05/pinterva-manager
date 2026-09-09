@@ -287,9 +287,9 @@ export function PrintervalSettingsModal({ isOpen, onClose }: PrintervalSettingsM
                       <li>Đăng nhập trực tiếp trên trình duyệt (không qua web này) vào printerval.com bằng đúng tài khoản mẹ này.</li>
                       <li>Vào trang: printerval.com/central/outsource/pod/design-job/admin</li>
                       <li>Mở DevTools (F12) → tab Network.</li>
-                      <li>Bấm nút "Search" trên trang để trang gọi lại API.</li>
-                      <li>Tìm request tên "find" (…/design-job/find?...).</li>
-                      <li>Xem "Query String Parameters" → dòng <code className="bg-slate-700 px-1 rounded">team_outsource</code> — đó chính là giá trị cần điền.</li>
+                      <li>Nhấn F5 (hoặc tải lại trang).</li>
+                      <li>Tìm dòng request có tên dạng: <code className="bg-slate-700 px-1 rounded">count?team_outsource=...</code></li>
+                      <li>Giá trị đứng ngay sau chữ <code className="bg-slate-700 px-1 rounded">team_outsource=</code> chính là giá trị cần điền (hoặc xem ở tiêu đề trang: "Quản lí công việc - Team ...").</li>
                     </ol>
                     <p className="text-slate-400 italic">Không đoán theo tên tài khoản — mỗi acc mẹ có 1 giá trị riêng, đoán sai sẽ khiến quét đơn âm thầm trả về 0 kết quả.</p>
                   </div>
