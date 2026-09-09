@@ -93,6 +93,9 @@ export function DesignerBoardPage() {
   }
 
   async function handleSyncPrintervalStatus(orderIds?: string[]) {
+    if (!orderIds?.length) {
+      return
+    }
     setSyncingPrinterval(true)
     window.dispatchEvent(new CustomEvent('sync-printerval-start'))
     try {
@@ -100,7 +103,7 @@ export function DesignerBoardPage() {
         '/orders/sync-printerval-status',
         {
           method: 'POST',
-          body: JSON.stringify(orderIds && orderIds.length > 0 ? { order_ids: orderIds } : {}),
+          body: JSON.stringify({ order_ids: orderIds }),
         }
       )
       await loadWorkload()
@@ -140,6 +143,15 @@ export function DesignerBoardPage() {
     return true
   })
 
+  // The page-level action only checks the tasks currently represented by this
+  // board.  It must never fall back to a platform-wide scan just because this
+  // filtered view happens to be empty.
+  const visibleSyncOrderIds = filteredDesigners.flatMap((des) =>
+    des.orders
+      .filter((o) => ['QC_PENDING', 'REVISION', 'IN_PROGRESS', 'RESULT_SUBMITTED'].includes(o.state.toUpperCase()))
+      .map((o) => o.id),
+  )
+
   // Listen for Topbar sync button click
   useEffect(() => {
     function handleRequestSync() {
@@ -151,7 +163,7 @@ export function DesignerBoardPage() {
           )
           .map((o) => o.id)
       )
-      handleSyncPrintervalStatus(targetOrderIds.length > 0 ? targetOrderIds : undefined)
+      handleSyncPrintervalStatus(targetOrderIds)
     }
     window.addEventListener('request-sync-current-tab', handleRequestSync)
     return () => window.removeEventListener('request-sync-current-tab', handleRequestSync)
@@ -174,13 +186,13 @@ export function DesignerBoardPage() {
 
           <div className="flex items-center gap-2">
             <button
-              onClick={() => handleSyncPrintervalStatus()}
-              disabled={syncingPrinterval}
+              onClick={() => handleSyncPrintervalStatus(visibleSyncOrderIds)}
+              disabled={syncingPrinterval || visibleSyncOrderIds.length === 0}
               className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-xl border border-purple-200 shadow-2xs transition-all cursor-pointer disabled:opacity-50"
-              title="Quét kiểm tra trạng thái các đơn Review / Fix trực tiếp từ Printerval"
+              title="Chỉ đồng bộ các đơn Doing / Review / Fix đang hiển thị trên bảng"
             >
               <RefreshCw className={`h-3.5 w-3.5 text-purple-600 ${syncingPrinterval ? 'animate-spin' : ''}`} />
-              <span>{syncingPrinterval ? 'Đang quét Printerval...' : 'Đồng Bộ Printerval'}</span>
+              <span>{syncingPrinterval ? 'Đang quét Printerval...' : `Đồng Bộ Đang Hiển Thị (${visibleSyncOrderIds.length})`}</span>
             </button>
 
             <button

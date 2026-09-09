@@ -2,7 +2,11 @@ import httpx
 
 from app.adapters.db.models import Order, Platform, PlatformSyncState
 from app.adapters.printerval.api_client import FIND_PATH, LOGIN_PATH, PrintervalApiClient
-from app.application.status_sync import sync_all_platforms, sync_platform_order_statuses
+from app.application.status_sync import (
+    sync_all_platforms,
+    sync_platform_order_statuses,
+    sync_selected_order_statuses,
+)
 
 
 def _mock_client(rows_by_code: dict[str, dict]) -> PrintervalApiClient:
@@ -62,6 +66,41 @@ def test_sync_platform_order_statuses_updates_matching_orders_only(db_session):
     assert result["checked"] == 2
     assert result["updated"] == 1
     assert result["not_found"] == 1
+
+
+def test_sync_selected_order_statuses_only_updates_requested_orders(db_session):
+    platform = Platform(name="P1", account_username="acc1@printerval.com", team_outsource="team-a")
+    db_session.add(platform)
+    db_session.flush()
+    selected = Order(
+        external_order_id="DJ1001",
+        platform_id=platform.id,
+        state="IN_PROGRESS",
+        printerval_status="doing",
+    )
+    untouched = Order(
+        external_order_id="DJ1002",
+        platform_id=platform.id,
+        state="IN_PROGRESS",
+        printerval_status="doing",
+    )
+    db_session.add_all([selected, untouched])
+    db_session.commit()
+
+    result = sync_selected_order_statuses(
+        db_session,
+        platform,
+        [selected],
+        api_client=_mock_client({"DJ1001": {"id": 1001, "status": "done"}}),
+    )
+
+    db_session.refresh(selected)
+    db_session.refresh(untouched)
+    assert result == {"checked": 1, "updated": 1, "not_found": 0, "failed": 0}
+    assert selected.state == "DONE"
+    assert selected.printerval_status == "done"
+    assert untouched.state == "IN_PROGRESS"
+    assert untouched.printerval_status == "doing"
 
 
 def test_sync_platform_order_statuses_tries_the_last_known_status_first(db_session):

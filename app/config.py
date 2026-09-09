@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     # refreshes in the background — separate from crawl_interval_seconds since it's a
     # much cheaper, purely-read HTTP job (no Playwright), safe to run more often.
     status_sync_interval_seconds: int = 300
+    # A manually requested tab sync talks to Printerval for only the selected orders.
+    # Keep this deliberately modest: a shared session cookie can be rate-limited if a
+    # browser-like burst is too large, while four concurrent reads remove most of the
+    # wall-clock wait caused by one-request-per-order lookup.
+    printerval_manual_sync_concurrency: int = 4
     # Comma-separated browser origins permitted to call the JSON API.  Kept explicit
     # because the Vercel SPA and API are separate production origins.
     cors_origins: str = "http://localhost:5173"

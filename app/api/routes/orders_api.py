@@ -1466,8 +1466,7 @@ def api_sync_printerval_status(
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
-    from app.adapters.printerval.api_client import PrintervalApiClient
-    from app.application.status_sync import _status_guess_order
+    from app.application.status_sync import sync_selected_order_statuses
 
     platform = db.get(Platform, platform_id)
     if platform is None or not (platform.account_username and (platform.account_password or platform.session_cookie)):
@@ -1524,97 +1523,18 @@ def api_sync_printerval_status(
     if not orders:
         return {"ok": True, "checked_count": 0, "updated_count": 0, "message": "Không có đơn hàng nào cần kiểm tra."}
 
-    client = PrintervalApiClient(
-        base_url="https://printerval.com",
-        username=platform.account_username,
-        password=platform.account_password,
-        team_outsource=platform.team_outsource,
-        session_cookie=platform.session_cookie,
-    )
-    updated_count = 0
-    now_utc = datetime.now(UTC)
-    try:
-        for o in orders:
-            try:
-                row = client.find_order(o.external_order_id, statuses=_status_guess_order(o.printerval_status))
-            except Exception:
-                continue
-            if row is None:
-                continue
-
-            found_status = row.get("status")
-            attributes = row.get("attributes") or {}
-            found_outsource_note = str(attributes.get("outsource_note") or row.get("note") or "").strip()
-
-            norm_status = (found_status or "").upper()
-            state_changed = False
-            old_st = o.state
-
-            # If Printerval returns Done -> Done
-            if norm_status == "DONE" and o.state != OrderState.DONE.value:
-                o.state = OrderState.DONE.value
-                state_changed = True
-                event = WorkflowEvent(
-                    order_id=o.id,
-                    from_state=old_st,
-                    to_state=OrderState.DONE.value,
-                    actor_id=user.id,
-                    evidence={
-                        "action": "APPROVE_DONE",
-                        "actor_name": "Printerval",
-                        "description": "Printerval đã duyệt hoàn thành đơn hàng (Done)",
-                    },
-                )
-                db.add(event)
-
-            # If Printerval returns Fix -> Fix (needs Admin review)
-            elif norm_status == "FIX" and o.state != OrderState.REVISION.value:
-                o.state = OrderState.REVISION.value
-                o.previous_note_outsource = o.note_outsource
-                if found_outsource_note:
-                    o.note_outsource = found_outsource_note
-                o.fix_approved_by_admin = False
-                state_changed = True
-                event = WorkflowEvent(
-                    order_id=o.id,
-                    from_state=old_st,
-                    to_state=OrderState.REVISION.value,
-                    actor_id=user.id,
-                    evidence={
-                        "action": "REQUEST_FIX",
-                        "actor_name": "Printerval",
-                        "description": f"Printerval trả về Fix với note: {found_outsource_note or 'Không có note'}",
-                        "note_outsource": found_outsource_note,
-                    },
-                )
-                db.add(event)
-
-            elif found_outsource_note and found_outsource_note != o.note_outsource:
-                if norm_status == "FIX":
-                    o.previous_note_outsource = o.note_outsource
-                    o.note_outsource = found_outsource_note
-                    updated_count += 1
-                elif not o.note_outsource:
-                    o.note_outsource = found_outsource_note
-                    updated_count += 1
-
-            if found_status and found_status.lower() != o.printerval_status:
-                o.printerval_status = found_status.lower()
-                o.printerval_status_synced_at = now_utc
-                updated_count += 1
-            elif state_changed:
-                o.printerval_status_synced_at = now_utc
-                updated_count += 1
-
-        db.commit()
-    finally:
-        client.close()
+    result = sync_selected_order_statuses(db, platform, orders, actor_id=user.id)
 
     return {
         "ok": True,
-        "checked_count": len(orders),
-        "updated_count": updated_count,
-        "message": f"Đã kiểm tra {len(orders)} đơn hàng từ Printerval, cập nhật {updated_count} thay đổi.",
+        "checked_count": result["checked"],
+        "updated_count": result["updated"],
+        "not_found_count": result["not_found"],
+        "failed_count": result["failed"],
+        "message": (
+            f"Đã kiểm tra {result['checked']} đơn trong tab, cập nhật {result['updated']} thay đổi"
+            f"; không tìm thấy {result['not_found']}; lỗi {result['failed']}."
+        ),
     }
 
 
