@@ -31,23 +31,22 @@ def _status_guess_order(last_known: str | None) -> tuple[str, ...]:
     return PrintervalApiClient.ORDER_STATUSES
 
 
-def _row_designer(row: dict) -> str | None:
-    """Extract a visible Designer *label*, never the order's contact metadata.
+def _row_designer(row: dict, designer_map: dict[str, str] | None = None) -> str | None:
+    """Extract a visible Designer label for display, mapping designer_email when available."""
+    attributes = row.get("attributes")
+    if isinstance(attributes, dict) and designer_map:
+        email = str(attributes.get("designer_email") or "").strip().lower()
+        if email in designer_map:
+            return designer_map[email]
 
-    Printerval's order API includes ``attributes.designer_email`` even when its
-    Designer dropdown is empty.  That email identifies a contact on the order; it
-    is not an option selected in the Designer dropdown and must not be shown as the
-    Printerval assignee in our dashboard.
-    """
     for key in ("designer", "designer_name"):
         value = row.get(key)
-        if isinstance(value, str) and value.strip():
+        if isinstance(value, str) and value.strip() and "@" not in value:
             return value.strip()
-    attributes = row.get("attributes")
     if isinstance(attributes, dict):
         for key in ("designer", "designer_name"):
             value = attributes.get(key)
-            if isinstance(value, str) and value.strip():
+            if isinstance(value, str) and value.strip() and "@" not in value:
                 return value.strip()
     return None
 
@@ -75,6 +74,7 @@ def sync_platform_order_statuses(
         session_cookie=platform.session_cookie,
     )
     try:
+        designer_map = client.get_designer_map()
         orders = session.query(Order).filter(Order.platform_id == platform.id).all()
         updated = 0
         not_found = 0
@@ -89,7 +89,7 @@ def sync_platform_order_statuses(
             if found_status and found_status != order.printerval_status:
                 order.printerval_status = found_status
                 updated += 1
-            found_designer = _row_designer(row)
+            found_designer = _row_designer(row, designer_map=designer_map)
             if found_designer and found_designer != order.printerval_designer:
                 order.printerval_designer = found_designer
                 order.printerval_designer_synced_at = datetime.now(UTC)
@@ -102,7 +102,9 @@ def sync_platform_order_statuses(
             order.printerval_status_synced_at = datetime.now(UTC)
 
             # Re-apply full detail metadata (source files, template jobs, custom config, notes, deadlines)
-            detail_result = parse_order_detail_from_row(row, order.external_order_id, platform_id=str(platform.id))
+            detail_result = parse_order_detail_from_row(
+                row, order.external_order_id, platform_id=str(platform.id), download_images=False
+            )
             if detail_result.success:
                 _apply_order_detail_result(order, detail_result)
 

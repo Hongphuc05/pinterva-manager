@@ -99,9 +99,12 @@ def download_and_save_image(
     raw_url: str,
     assets_dir: Path = CRAWLED_ASSETS_DIR,
     platform_id: str | None = None,
+    download: bool = True,
 ) -> str | None:
     """Download image from raw_url, save to assets_dir/[platform_id/]{external_order_id}.png,
-    and return web access path '/crawled_assets/[platform_id/]{external_order_id}.png'."""
+    and return web access path '/crawled_assets/[platform_id/]{external_order_id}.png'.
+    Returns existing file path immediately if already present on disk without network overhead.
+    """
     if not external_order_id or not raw_url:
         return None
 
@@ -111,6 +114,20 @@ def download_and_save_image(
 
     target_dir = assets_dir / str(platform_id) if platform_id else assets_dir
     target_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. Fast path: check if this order's image is already saved on disk
+    for candidate_ext in (".jpg", ".png", ".webp", ".jpeg"):
+        existing_file = target_dir / f"{external_order_id}{candidate_ext}"
+        if existing_file.exists() and existing_file.stat().st_size > 0:
+            return (
+                f"/crawled_assets/{platform_id}/{external_order_id}{candidate_ext}"
+                if platform_id
+                else f"/crawled_assets/{external_order_id}{candidate_ext}"
+            )
+
+    if not download:
+        return None
+
     full_url = normalize_image_url(raw_url)
 
     ext = ".png"
@@ -129,7 +146,7 @@ def download_and_save_image(
 
     try:
         with httpx.Client(
-            timeout=15.0,
+            timeout=5.0,
             follow_redirects=True,
             headers={
                 "User-Agent": (

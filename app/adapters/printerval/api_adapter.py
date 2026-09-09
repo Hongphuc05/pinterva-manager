@@ -125,6 +125,7 @@ class PrintervalApiAdapter:
                 evidence={"message": str(exc)},
             )
 
+        designer_map = self.api_client.get_designer_map()
         discovered: list[OrderSummary] = []
         for row in page.orders:
             order_id = parse_external_order_id(row)
@@ -134,8 +135,13 @@ class PrintervalApiAdapter:
 
                 raw_image_url = extract_image_url_from_dict_or_html(row)
                 local_path = (
-                    download_and_save_image(order_id, raw_image_url, platform_id=platform_id)
-                    if raw_image_url and self.download_images
+                    download_and_save_image(
+                        order_id,
+                        raw_image_url,
+                        platform_id=platform_id,
+                        download=self.download_images,
+                    )
+                    if raw_image_url
                     else None
                 )
                 final_thumbnail = local_path or raw_image_url
@@ -143,6 +149,17 @@ class PrintervalApiAdapter:
                 template_jobs = row.get("templateJobs")
                 if not isinstance(template_jobs, list):
                     template_jobs = None
+
+                designer_email = (
+                    str(row.get("attributes", {}).get("designer_email") or "").strip().lower()
+                    if isinstance(row.get("attributes"), dict)
+                    else ""
+                )
+                designer_name = (
+                    designer_map.get(designer_email)
+                    or str(row.get("designer_name") or row.get("designer") or "").strip()
+                    or None
+                )
 
                 discovered.append(
                     OrderSummary(
@@ -153,12 +170,7 @@ class PrintervalApiAdapter:
                         template_jobs=template_jobs,
                         sku=sku,
                         product_category=category,
-                        designer=(
-                            str(row.get("attributes", {}).get("designer_email") or "").strip()
-                            if isinstance(row.get("attributes"), dict)
-                            else None
-                        )
-                        or None,
+                        designer=designer_name,
                     )
                 )
 
@@ -215,7 +227,12 @@ class PrintervalApiAdapter:
                 error_class=ErrorClass.EXTERNAL_CHANGED.value,
                 evidence={"message": f"order {external_order_id} not found under any known status"},
             )
-        return parse_order_detail_from_row(row, external_order_id, platform_id=platform_id)
+        return parse_order_detail_from_row(
+            row,
+            external_order_id,
+            platform_id=platform_id,
+            download_images=self.download_images,
+        )
 
     def set_designer(self, external_order_id: str, designer_option: str) -> WriteResult:
         try:

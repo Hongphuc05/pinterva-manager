@@ -250,3 +250,30 @@ def test_sync_all_platforms_includes_cookie_only_platform(db_session, monkeypatc
     state = db_session.get(PlatformSyncState, platform.id)
     assert state is not None
     assert state.is_running is False
+
+
+def test_sync_platform_order_statuses_maps_designer_email_to_full_name(db_session):
+    platform = Platform(name="P3", account_username="acc3@printerval.com", team_outsource="team-c")
+    db_session.add(platform)
+    db_session.flush()
+
+    db_session.add(Order(external_order_id="DJ3904000", platform_id=platform.id, state="DISCOVERED"))
+    db_session.commit()
+
+    client = _mock_client(
+        {
+            "DJ3904000": {
+                "id": 3904000,
+                "status": "doing",
+                "attributes": {"designer_email": "thuyhg.22102001@gmail.com"},
+            }
+        }
+    )
+    client._designer_map_cache = {"thuyhg.22102001@gmail.com": "Nguyễn Thị Thuý Hường - 2D Prin"}
+
+    sync_platform_order_statuses(db_session, platform, api_client=client)
+
+    order = db_session.query(Order).filter_by(external_order_id="DJ3904000").one()
+    assert order.printerval_status == "doing"
+    assert order.printerval_designer == "Nguyễn Thị Thuý Hường - 2D Prin"
+    assert order.printerval_designer_synced_at is not None

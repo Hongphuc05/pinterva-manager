@@ -249,7 +249,10 @@ def extract_source_files(row: dict[str, Any]) -> list[dict[str, str]] | None:
 
 
 def parse_order_detail_from_row(
-    row: dict[str, Any], external_order_id: str, platform_id: str | None = None
+    row: dict[str, Any],
+    external_order_id: str,
+    platform_id: str | None = None,
+    download_images: bool = True,
 ) -> OrderDetailResult:
     product_name, sku, category = parse_product_summary_fields(row)
     meta = _meta_data(row)
@@ -257,7 +260,12 @@ def parse_order_detail_from_row(
 
     raw_image_url = extract_image_url_from_dict_or_html(row)
     local_path = (
-        download_and_save_image(external_order_id, raw_image_url, platform_id=platform_id)
+        download_and_save_image(
+            external_order_id,
+            raw_image_url,
+            platform_id=platform_id,
+            download=download_images,
+        )
         if raw_image_url
         else None
     )

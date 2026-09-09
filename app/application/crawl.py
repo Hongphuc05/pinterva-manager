@@ -180,25 +180,26 @@ def scan_orders_fast(
             )
             if order is None:
                 order = Order(
-                        external_order_id=summary.external_order_id,
-                        platform_id=platform_id,
-                        state=OrderState.OPEN.value,
-                        product_name=summary.product_name,
-                        thumbnail_url=summary.thumbnail_url,
-                        sku=summary.sku,
-                        product_category=summary.product_category,
-                        template_jobs=summary.template_jobs,
-                        has_template=bool(summary.template_jobs),
-                        # The list API's designer_email is order metadata, not the
-                        # visible Designer selection.  Only an explicit assignment
-                        # write may populate this mirror.
-                        printerval_designer=None,
-                        printerval_status=summary.status.lower(),
-                    )
+                    external_order_id=summary.external_order_id,
+                    platform_id=platform_id,
+                    state=OrderState.OPEN.value,
+                    product_name=summary.product_name,
+                    thumbnail_url=summary.thumbnail_url,
+                    sku=summary.sku,
+                    product_category=summary.product_category,
+                    template_jobs=summary.template_jobs,
+                    has_template=bool(summary.template_jobs),
+                    printerval_designer=summary.designer,
+                    printerval_designer_synced_at=datetime.now(UTC) if summary.designer else None,
+                    printerval_status=summary.status.lower(),
+                )
                 session.add(order)
                 added += 1
             else:
-                if order.printerval_designer and "@" in order.printerval_designer:
+                if summary.designer:
+                    order.printerval_designer = summary.designer
+                    order.printerval_designer_synced_at = datetime.now(UTC)
+                elif order.printerval_designer and "@" in order.printerval_designer:
                     order.printerval_designer = None
                 order.printerval_status = summary.status.lower()
                 order.thumbnail_url = summary.thumbnail_url or order.thumbnail_url

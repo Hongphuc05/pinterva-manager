@@ -108,6 +108,8 @@ class PrintervalApiClient:
             headers=headers,
         )
         self._authenticated = False
+        self._designer_map_cache: dict[str, str] | None = None
+        self._designer_options_cache: list[str] | None = None
 
     def close(self) -> None:
         self._client.close()
@@ -303,8 +305,8 @@ class PrintervalApiClient:
                 return rows[0]
         return None
 
-    def list_designer_options(self) -> list[str]:
-        """Read Designer labels for this client's own outsourced team via HTTP."""
+    def get_designer_options_raw(self) -> list[dict[str, Any]]:
+        """Fetch raw designer rows for this client's team outsource."""
         self._validate_configuration()
         try:
             response = self._client.get(
@@ -346,12 +348,35 @@ class PrintervalApiClient:
                 ErrorClass.EXTERNAL_CHANGED,
                 "Designer options response changed or was rejected",
             )
+        return [r for r in rows if isinstance(r, dict)]
+
+    def get_designer_map(self) -> dict[str, str]:
+        """Return a mapping of email (lowercased) -> full_name for team designers."""
+        if self._designer_map_cache is not None:
+            return self._designer_map_cache
+        try:
+            rows = self.get_designer_options_raw()
+            mapping: dict[str, str] = {}
+            for r in rows:
+                email = str(r.get("email") or "").strip().lower()
+                full_name = str(r.get("full_name") or "").strip()
+                if email and full_name:
+                    mapping[email] = full_name
+            self._designer_map_cache = mapping
+            return mapping
+        except Exception:
+            return {}
+
+    def list_designer_options(self) -> list[str]:
+        """Read Designer labels for this client's own outsourced team via HTTP."""
+        if self._designer_options_cache is not None:
+            return self._designer_options_cache
+        rows = self.get_designer_options_raw()
         options = list(
             dict.fromkeys(
                 name.strip()
                 for row in rows
-                if isinstance(row, dict)
-                and isinstance((name := row.get("full_name")), str)
+                if isinstance((name := row.get("full_name")), str)
                 and name.strip()
             )
         )
@@ -360,6 +385,7 @@ class PrintervalApiClient:
                 ErrorClass.EXTERNAL_CHANGED,
                 "Designer options response had no usable Designer",
             )
+        self._designer_options_cache = options
         return options
 
     def _fetch_find_rows(self, params: dict[str, str], *, error_context: str) -> list[dict[str, Any]]:
