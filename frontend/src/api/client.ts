@@ -20,9 +20,10 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     headers['X-Platform-Id'] = activePlatformId
   }
 
-  const resp = await fetch(`/api${path}`, {
+  const baseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
+  const resp = await fetch(`${baseUrl}/api${path}`, {
     ...init,
-    credentials: 'same-origin',
+    credentials: baseUrl ? 'include' : 'same-origin',
     headers,
   })
   if (resp.status === 401 && !path.startsWith('/me') && !path.startsWith('/login')) {
