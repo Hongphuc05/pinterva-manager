@@ -5,10 +5,11 @@ rồi gửi URL ảnh về đúng task trên Tacahu Ops. Nó không gửi hay l�
 
 1. Vào `chrome://extensions`, bật **Developer mode**, chọn **Load unpacked** và chọn thư mục `CopyImage`.
 2. Trên Tacahu Ops, mở **Acc Mẹ Printerval** đúng platform, bấm **Tạo token CopyImage** và sao chép token.
-3. Mở **Details** của extension, chọn **Extension options**, điền:
+3. Trong modal Acc Mẹ Printerval, sao chép **Platform ID** vừa hiển thị và token CopyImage.
+4. Mở **Details** của extension, chọn **Extension options**, điền:
    - Địa chỉ backend: URL backend đang được Vercel dùng, ví dụ `https://desktop-p259ei0.tailea8fce.ts.net`.
-   - Platform ID: ID platform đang chọn trong web (mở DevTools > Application > Local Storage, khóa `activePlatformId`).
+   - Platform ID: giá trị vừa sao chép trong modal Acc Mẹ Printerval.
    - Token CopyImage vừa tạo.
-4. Trên bảng Design Job Printerval, mỗi dòng có nút **Quét & đồng bộ ảnh**. Bấm nút đó sau khi crawl task về. Khi thành công, web Tacahu Ops hiển thị toàn bộ gallery trong trang chi tiết task.
+5. Trên bảng Design Job Printerval, mỗi dòng có nút **Quét & đồng bộ ảnh**. Bấm nút đó sau khi crawl task về. Khi thành công, web Tacahu Ops hiển thị toàn bộ gallery trong trang chi tiết task.
 
 Khi đổi Acc Mẹ/platform, luôn tạo token mới và thay **cả Platform ID lẫn token** trong options trước khi đồng bộ ảnh.

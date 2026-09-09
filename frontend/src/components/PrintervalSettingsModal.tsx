@@ -235,6 +235,19 @@ export function PrintervalSettingsModal({ isOpen, onClose }: PrintervalSettingsM
                   <p className="text-[11px] text-slate-500">
                     Tạo token riêng cho platform đang chọn rồi dán vào Cài đặt CopyImage. Token chỉ đồng bộ gallery cho platform này.
                   </p>
+                  <div className="flex items-center gap-2">
+                    <code className="min-w-0 flex-1 truncate rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[10px]" title={activePlatform.id}>
+                      Platform ID: {activePlatform.id}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => navigator.clipboard.writeText(activePlatform.id)}
+                      className="p-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:text-[#0052CC]"
+                      title="Sao chép Platform ID"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                   <button
                     type="button"
                     onClick={createGalleryBridgeToken}
