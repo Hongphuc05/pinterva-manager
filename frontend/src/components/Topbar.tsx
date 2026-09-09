@@ -19,7 +19,9 @@ export function Topbar() {
   const [showSettingsModal, setShowSettingsModal] = useState(false)
   const [showCrawlModal, setShowCrawlModal] = useState(false)
   const [crawlDesigners, setCrawlDesigners] = useState<string[]>([])
-  const { status: syncStatus, triggerRun: triggerSyncRun } = useSyncStatus()
+  const [isFastSyncing, setIsFastSyncing] = useState(false)
+  const [fastSyncError, setFastSyncError] = useState<string | null>(null)
+  const { status: syncStatus } = useSyncStatus()
 
   async function handleLogout() {
     await logout()
@@ -48,6 +50,55 @@ export function Topbar() {
     }, 7000)
     return () => clearTimeout(timer)
   }, [flashMessage])
+
+  // Listen for sync-printerval events to drive the circular animation
+  useEffect(() => {
+    function onStart() {
+      setIsFastSyncing(true)
+      setFastSyncError(null)
+    }
+    function onEnd() {
+      setIsFastSyncing(false)
+    }
+    window.addEventListener('sync-printerval-start', onStart)
+    window.addEventListener('sync-printerval-end', onEnd)
+    return () => {
+      window.removeEventListener('sync-printerval-start', onStart)
+      window.removeEventListener('sync-printerval-end', onEnd)
+    }
+  }, [])
+
+  async function handleRefreshCurrentTab() {
+    setIsFastSyncing(true)
+    setFastSyncError(null)
+    window.dispatchEvent(new CustomEvent('sync-printerval-start'))
+
+    let handled = false
+    const onHandled = () => {
+      handled = true
+    }
+    window.addEventListener('sync-tab-handled', onHandled, { once: true })
+    window.dispatchEvent(new CustomEvent('request-sync-current-tab'))
+
+    // Wait a brief moment to check if an active view handled syncing its specific tab
+    await new Promise((r) => setTimeout(r, 60))
+    window.removeEventListener('sync-tab-handled', onHandled)
+
+    if (!handled) {
+      try {
+        await apiFetch('/orders/sync-printerval-status', {
+          method: 'POST',
+          body: JSON.stringify({}),
+        })
+        window.dispatchEvent(new CustomEvent('orders-updated'))
+      } catch (err: any) {
+        setFastSyncError(err?.message || 'Lỗi khi đồng bộ từ Printerval')
+      } finally {
+        setIsFastSyncing(false)
+        window.dispatchEvent(new CustomEvent('sync-printerval-end'))
+      }
+    }
+  }
 
   async function handleRefreshCrawl(jobType: string, status: string, designer: string, dateFrom: string, dateTo: string) {
     setRefreshing(true)
@@ -164,25 +215,29 @@ export function Topbar() {
         )}
 
         {/* Status-sync indicator: green = idle/ok, red = last run errored, spins
-            while actively syncing. Doubles as the manual "refresh now" button. */}
+            while actively syncing. Refreshes the orders present in the currently active tab. */}
         <button
-          onClick={() => triggerSyncRun().catch(() => {})}
-          disabled={!!syncStatus?.is_running}
+          onClick={handleRefreshCurrentTab}
+          disabled={isFastSyncing || !!syncStatus?.is_running}
           title={
-            syncStatus?.is_running
+            isFastSyncing || syncStatus?.is_running
               ? 'Đang đồng bộ trạng thái đơn từ Printerval...'
-              : syncStatus?.last_error
-              ? `Lần đồng bộ trước lỗi: ${syncStatus.last_error}`
-              : 'Bấm để đồng bộ ngay trạng thái đơn từ Printerval'
+              : fastSyncError || syncStatus?.last_error
+              ? `Lần đồng bộ trước lỗi: ${fastSyncError || syncStatus?.last_error}`
+              : 'Bấm để làm mới trạng thái các đơn trong tab đang chọn từ Printerval'
           }
           className="relative p-2 rounded-lg text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer disabled:cursor-wait"
         >
-          <RefreshCw className={`h-5 w-5 ${syncStatus?.is_running ? 'animate-spin text-[#0052CC]' : ''}`} />
+          <RefreshCw
+            className={`h-5 w-5 ${
+              isFastSyncing || syncStatus?.is_running ? 'animate-spin text-[#0052CC]' : ''
+            }`}
+          />
           <span
             className={`absolute top-1.5 right-1.5 h-2 w-2 rounded-full ring-2 ring-white ${
-              syncStatus?.is_running
+              isFastSyncing || syncStatus?.is_running
                 ? 'bg-[#0052CC] animate-pulse'
-                : syncStatus?.last_error
+                : fastSyncError || syncStatus?.last_error
                 ? 'bg-red-500'
                 : 'bg-emerald-500'
             }`}

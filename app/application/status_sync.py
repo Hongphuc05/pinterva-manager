@@ -89,6 +89,21 @@ def sync_platform_order_statuses(
             if found_status and found_status != order.printerval_status:
                 order.printerval_status = found_status
                 updated += 1
+
+            norm_st = (found_status or "").upper()
+            if norm_st == "FIX" and order.state in ("QC_PENDING", "REVIEW", "IN_PROGRESS"):
+                order.state = "REVISION"
+                order.previous_note_outsource = order.note_outsource
+                attrs = row.get("attributes") or {}
+                found_note = str(attrs.get("outsource_note") or row.get("note") or "").strip()
+                if found_note:
+                    order.note_outsource = found_note
+                order.fix_approved_by_admin = False
+                updated += 1
+            elif norm_st == "DONE" and order.state != "DONE":
+                order.state = "DONE"
+                updated += 1
+
             found_designer = _row_designer(row, designer_map=designer_map)
             if found_designer and found_designer != order.printerval_designer:
                 order.printerval_designer = found_designer

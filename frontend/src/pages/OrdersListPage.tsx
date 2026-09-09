@@ -283,12 +283,16 @@ export function OrdersListPage() {
     return () => window.removeEventListener('orders-updated', handleOrdersUpdated)
   }, [statusFilter, batchFilter, designerFilter])
 
-  async function handleSyncPrintervalStatus() {
+  async function handleSyncPrintervalStatus(orderIds?: string[]) {
     setSyncingPrinterval(true)
+    window.dispatchEvent(new CustomEvent('sync-printerval-start'))
     try {
       const res = await apiFetch<{ synced_count: number; updated_count: number; message: string }>(
         '/orders/sync-printerval-status',
-        { method: 'POST', body: JSON.stringify({}) }
+        {
+          method: 'POST',
+          body: JSON.stringify(orderIds && orderIds.length > 0 ? { order_ids: orderIds } : {}),
+        }
       )
       await loadOrders()
       setFlash(res.message || 'Đã đồng bộ trạng thái đơn từ Printerval.')
@@ -296,6 +300,7 @@ export function OrdersListPage() {
       setError(err?.message || 'Lỗi khi đồng bộ từ Printerval.')
     } finally {
       setSyncingPrinterval(false)
+      window.dispatchEvent(new CustomEvent('sync-printerval-end'))
     }
   }
 
@@ -351,6 +356,26 @@ export function OrdersListPage() {
 
     return true
   })
+
+  // Listen for Topbar sync button click
+  useEffect(() => {
+    function handleRequestSync() {
+      window.dispatchEvent(new CustomEvent('sync-tab-handled'))
+      const targetOrders = !isAdmin
+        ? activeDesignerTab === 'todo'
+          ? todoOrders
+          : activeDesignerTab === 'doing'
+          ? doingOrders
+          : activeDesignerTab === 'review'
+          ? reviewOrders
+          : orders
+        : filteredOrders
+      const targetIds = targetOrders.map((o) => o.id)
+      handleSyncPrintervalStatus(targetIds.length > 0 ? targetIds : undefined)
+    }
+    window.addEventListener('request-sync-current-tab', handleRequestSync)
+    return () => window.removeEventListener('request-sync-current-tab', handleRequestSync)
+  }, [isAdmin, activeDesignerTab, todoOrders, doingOrders, reviewOrders, orders, filteredOrders])
 
   // Calculate Metrics
   const totalCount = orders.length
@@ -472,7 +497,7 @@ export function OrdersListPage() {
 
           <button
             type="button"
-            onClick={handleSyncPrintervalStatus}
+            onClick={() => handleSyncPrintervalStatus()}
             disabled={syncingPrinterval}
             className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-xl border border-purple-200 shadow-2xs transition-all cursor-pointer shrink-0 disabled:opacity-50"
             title="Đồng bộ kết quả duyệt/fix từ Printerval"

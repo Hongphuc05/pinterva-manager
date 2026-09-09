@@ -165,7 +165,7 @@ MIGRATE_ARGS=(docker compose -f compose.yaml --env-file .env --profile migration
 "${MIGRATE_ARGS[@]}" run --rm migrate
 
 echo "==> Starting / Updating containers..."
-"${COMPOSE_ARGS[@]}" up -d
+"${COMPOSE_ARGS[@]}" up -d --force-recreate
 
 echo "==> Waiting for API health check..."
 HEALTHY=false

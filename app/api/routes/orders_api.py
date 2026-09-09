@@ -1400,7 +1400,7 @@ def api_sync_printerval_status(
 
             found_status = row.get("status")
             attributes = row.get("attributes") or {}
-            found_outsource_note = str(attributes.get("outsource_note") or "").strip()
+            found_outsource_note = str(attributes.get("outsource_note") or row.get("note") or "").strip()
 
             norm_status = (found_status or "").upper()
             state_changed = False

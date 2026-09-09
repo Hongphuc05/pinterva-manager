@@ -94,6 +94,7 @@ export function DesignerBoardPage() {
 
   async function handleSyncPrintervalStatus(orderIds?: string[]) {
     setSyncingPrinterval(true)
+    window.dispatchEvent(new CustomEvent('sync-printerval-start'))
     try {
       const res = await apiFetch<{ synced_count: number; updated_count: number; message: string }>(
         '/orders/sync-printerval-status',
@@ -111,6 +112,7 @@ export function DesignerBoardPage() {
       alert(err.message || 'Lỗi khi đồng bộ trạng thái từ Printerval')
     } finally {
       setSyncingPrinterval(false)
+      window.dispatchEvent(new CustomEvent('sync-printerval-end'))
     }
   }
 
@@ -137,6 +139,23 @@ export function DesignerBoardPage() {
     if (filterMode === 'active') return des.doing_count > 0 || des.review_count > 0 || des.fix_count > 0
     return true
   })
+
+  // Listen for Topbar sync button click
+  useEffect(() => {
+    function handleRequestSync() {
+      window.dispatchEvent(new CustomEvent('sync-tab-handled'))
+      const targetOrderIds = filteredDesigners.flatMap((d) =>
+        d.orders
+          .filter((o) =>
+            ['QC_PENDING', 'REVISION', 'IN_PROGRESS', 'RESULT_SUBMITTED'].includes(o.state.toUpperCase())
+          )
+          .map((o) => o.id)
+      )
+      handleSyncPrintervalStatus(targetOrderIds.length > 0 ? targetOrderIds : undefined)
+    }
+    window.addEventListener('request-sync-current-tab', handleRequestSync)
+    return () => window.removeEventListener('request-sync-current-tab', handleRequestSync)
+  }, [filteredDesigners])
 
   return (
     <DashboardLayout>
