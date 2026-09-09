@@ -97,9 +97,10 @@ class PrintervalApiClient:
             c_val = self.session_cookie.strip().strip('"').strip("'")
             if c_val.lower().startswith("cookie:"):
                 c_val = c_val[7:].strip()
-            if "=" not in c_val:
-                c_val = f"laravel_session={c_val}"
-            headers["Cookie"] = c_val
+            if "laravel_session=" in c_val or (";" in c_val and "=" in c_val):
+                headers["Cookie"] = c_val
+            else:
+                headers["Cookie"] = f"laravel_session={c_val}"
 
         self._client = client or httpx.Client(
             base_url=self.base_url,
