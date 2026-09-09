@@ -309,10 +309,10 @@ def api_refresh_order_detail(
     if order is None or order.platform_id != platform_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Order not found for active platform")
     platform = db.get(Platform, platform_id)
-    if platform is None or not platform.account_password or not platform.team_outsource:
+    if platform is None or not (platform.account_password or platform.session_cookie) or not platform.team_outsource:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            "Platform chưa có đủ tài khoản, mật khẩu hoặc Team Outsource Printerval.",
+            "Platform chưa có Session Cookie hoặc mật khẩu, hoặc chưa có Team Outsource Printerval.",
         )
     settings = get_settings()
     with PrintervalApiClient(
@@ -359,10 +359,10 @@ def api_refresh_printerval_options(
     db: Session = Depends(get_db),
 ):
     platform = db.get(Platform, platform_id)
-    if platform is None or not platform.account_password or not platform.team_outsource:
+    if platform is None or not (platform.account_password or platform.session_cookie) or not platform.team_outsource:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            "Platform needs Printerval credentials and team scope",
+            "Platform needs a Printerval session cookie or password and team scope",
         )
     settings = get_settings()
     try:
@@ -568,11 +568,11 @@ def api_orders_refresh(
         if (
             platform is None
             or not platform.account_username
-            or not platform.account_password
+            or not (platform.account_password or platform.session_cookie)
             or not platform.team_outsource
         ):
             return RefreshResponse(
-                flash="Platform chưa có đủ tài khoản, mật khẩu hoặc Team Outsource Printerval."
+                flash="Platform chưa có Session Cookie hoặc mật khẩu, hoặc chưa có Team Outsource Printerval."
             )
         crawl_username = platform.account_username
         crawl_password = platform.account_password

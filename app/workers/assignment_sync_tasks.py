@@ -26,13 +26,15 @@ def sync_printerval_assignment_request(request_id: str) -> None:
             logger.error("Printerval assignment request %s not found", request_id)
             return
         platform = session.get(Platform, request.platform_id)
-        if platform is None or not platform.account_password:
+        if platform is None or not (platform.account_password or platform.session_cookie):
             request.lifecycle = "failed"
             request.error_class = "AUTH"
             request.error_message = "Platform credentials are unavailable"
             session.commit()
             return
-        # A real browser fallback matters here specifically: live incident
+        # A real browser fallback matters here specifically when a password is
+        # available. Cookie-only platforms stay HTTP-only, avoiding a pointless
+        # interactive login attempt with no password.
         # 2026-09-09 — a *fresh* httpx login (no persistent browser session) started
         # getting rejected with 403/AUTH after this endpoint had been hit repeatedly in
         # a short window (crawl + manual testing), even though the account/password
@@ -44,20 +46,21 @@ def sync_printerval_assignment_request(request_id: str) -> None:
         profile_dir = f"chrome-profile-{clean_slug}"
         fallback = None
         session_cm = None
-        try:
-            session_cm = playwright_session(profile_dir=profile_dir, headless=True)
-            page = session_cm.__enter__()
-            fallback = PlaywrightPrintervalAdapter(
-                page=page,
-                crawl_username=platform.account_username,
-                crawl_password=platform.account_password,
-            )
-        except Exception:
-            logger.exception(
-                "Printerval assignment request %s: Playwright fallback failed to open, "
-                "continuing HTTP-only", request_id,
-            )
-            session_cm = None
+        if platform.account_password:
+            try:
+                session_cm = playwright_session(profile_dir=profile_dir, headless=True)
+                page = session_cm.__enter__()
+                fallback = PlaywrightPrintervalAdapter(
+                    page=page,
+                    crawl_username=platform.account_username,
+                    crawl_password=platform.account_password,
+                )
+            except Exception:
+                logger.exception(
+                    "Printerval assignment request %s: Playwright fallback failed to open, "
+                    "continuing HTTP-only", request_id,
+                )
+                session_cm = None
         try:
             with PrintervalApiClient(
                 base_url="https://printerval.com",

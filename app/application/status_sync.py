@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import Order, Platform, PlatformSyncState
@@ -119,7 +120,10 @@ def sync_all_platforms(session: Session) -> dict[str, dict]:
     results: dict[str, dict] = {}
     platforms = (
         session.query(Platform)
-        .filter(Platform.is_active.is_(True), Platform.account_password.isnot(None))
+        .filter(
+            Platform.is_active.is_(True),
+            or_(Platform.account_password.isnot(None), Platform.session_cookie.isnot(None)),
+        )
         .all()
     )
     for platform in platforms:

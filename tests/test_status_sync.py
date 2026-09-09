@@ -220,4 +220,33 @@ def test_sync_all_platforms_skips_platforms_without_credentials(db_session):
     results = sync_all_platforms(db_session)
 
     assert results == {}
-    assert db_session.get(PlatformSyncState, platform.id) is None
+
+
+def test_sync_all_platforms_includes_cookie_only_platform(db_session, monkeypatch):
+    platform = Platform(
+        name="Cookie platform",
+        account_username="cookie@printerval.com",
+        account_password=None,
+        session_cookie="laravel_session=valid-cookie",
+        team_outsource="team-cookie",
+        is_active=True,
+    )
+    db_session.add(platform)
+    db_session.commit()
+
+    import app.application.status_sync as status_sync_module
+
+    seen = []
+    monkeypatch.setattr(
+        status_sync_module,
+        "sync_platform_order_statuses",
+        lambda session, candidate: seen.append(candidate.id) or {"checked": 0, "updated": 0, "not_found": 0},
+    )
+
+    results = sync_all_platforms(db_session)
+
+    assert seen == [platform.id]
+    assert results[str(platform.id)]["checked"] == 0
+    state = db_session.get(PlatformSyncState, platform.id)
+    assert state is not None
+    assert state.is_running is False
