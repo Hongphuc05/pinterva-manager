@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
-from app.adapters.db.models import Assignment, Order, Platform, PrintervalAssignmentRequest, ResultVersion, User
+from app.adapters.db.models import Assignment, Order, Platform, PrintervalAssignmentRequest, ResultVersion, User, WorkflowEvent
 from app.adapters.printerval import login_session
 from app.adapters.printerval.api_adapter import PrintervalApiAdapter
 from app.adapters.printerval.api_client import (
@@ -864,3 +864,204 @@ def api_update_printerval_credentials(
         "account_username": platform.account_username,
         "message": f"Đã đăng nhập tài khoản Printerval thành công: {username_clean}",
     }
+
+
+class UpdateOrderStateRequest(BaseModel):
+    state: str
+
+
+@router.patch("/orders/{order_id}/state")
+def api_update_order_state(
+    order_id: str,
+    payload: UpdateOrderStateRequest,
+    user: User = Depends(get_current_user),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    order = None
+    try:
+        order_uuid = uuid.UUID(order_id)
+        order = db.get(Order, order_uuid)
+    except ValueError:
+        pass
+    if order is None:
+        order = db.query(Order).filter(Order.external_order_id == order_id).first()
+
+    if order is None or order.platform_id != platform_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
+
+    raw_state = payload.state.strip().upper()
+    state_mapping = {
+        "DOING": OrderState.IN_PROGRESS,
+        "IN_PROGRESS": OrderState.IN_PROGRESS,
+        "REVIEW": OrderState.QC_PENDING,
+        "QC_PENDING": OrderState.QC_PENDING,
+        "FIX": OrderState.REVISION,
+        "REVISION": OrderState.REVISION,
+        "DONE": OrderState.DONE,
+    }
+    if raw_state not in state_mapping:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Trạng thái không hợp lệ: {payload.state}. Chỉ chấp nhận Doing, Review, Fix, Done.",
+        )
+    target_state = state_mapping[raw_state]
+
+    if user.role == "designer":
+        if target_state not in (OrderState.IN_PROGRESS, OrderState.QC_PENDING):
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "Designer chỉ có quyền chuyển đơn sang Doing (Đang làm) hoặc Review (Chờ duyệt). Chỉ Admin mới có quyền duyệt Done hoặc yêu cầu Fix.",
+            )
+        is_assigned = (
+            db.query(Assignment)
+            .filter(
+                Assignment.order_id == order.id,
+                Assignment.designer_id == user.id,
+                Assignment.status == "approved",
+            )
+            .first()
+            is not None
+        )
+        is_printerval_assigned = (
+            bool(user.printerval_designer_option and order.printerval_designer == user.printerval_designer_option)
+            or bool(user.full_name and order.printerval_designer == user.full_name)
+        )
+        if not (is_assigned or is_printerval_assigned):
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "Bạn chỉ có thể cập nhật trạng thái các đơn hàng được phân công cho bạn.",
+            )
+
+    old_state = order.state
+    order.state = target_state.value
+    event = WorkflowEvent(
+        order_id=order.id,
+        from_state=old_state,
+        to_state=target_state.value,
+        actor_id=user.id,
+        evidence={"source": "status_dropdown", "role": user.role},
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(order)
+
+    return {
+        "ok": True,
+        "order_id": str(order.id),
+        "external_order_id": order.external_order_id,
+        "state": order.state,
+        "message": f"Đã chuyển trạng thái đơn {order.external_order_id} sang {target_state.value}",
+    }
+
+
+class DesignerWorkloadOrderOut(BaseModel):
+    id: str
+    external_order_id: str
+    state: str
+    thumbnail_url: str | None = None
+    deadline_at_ext: str | None = None
+    product_name: str | None = None
+    printerval_designer: str | None = None
+
+
+class DesignerWorkloadOut(BaseModel):
+    id: str
+    username: str
+    full_name: str
+    printerval_designer_option: str | None = None
+    total_orders: int
+    doing_count: int
+    review_count: int
+    fix_count: int
+    done_count: int
+    orders: list[DesignerWorkloadOrderOut]
+
+
+@router.get("/designers/workload", response_model=list[DesignerWorkloadOut])
+def api_designers_workload(
+    user: User = Depends(require_role("admin")),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    designers = (
+        db.query(User)
+        .filter(
+            User.role == "designer",
+            User.active == True,
+            (User.platform_id == platform_id) | (User.platform_id.is_(None)),
+        )
+        .order_by(User.full_name)
+        .all()
+    )
+
+    platform_orders = (
+        db.query(Order)
+        .filter(Order.platform_id == platform_id)
+        .order_by(Order.created_at.desc())
+        .all()
+    )
+
+    assignments = (
+        db.query(Assignment)
+        .filter(Assignment.status == "approved")
+        .all()
+    )
+    order_designer_assignment = {a.order_id: a.designer_id for a in assignments}
+
+    results = []
+    for des in designers:
+        des_orders = []
+        for o in platform_orders:
+            assigned_des_id = order_designer_assignment.get(o.id)
+            is_match = (
+                (assigned_des_id == des.id)
+                or (des.printerval_designer_option and o.printerval_designer == des.printerval_designer_option)
+                or (des.full_name and o.printerval_designer == des.full_name)
+            )
+            if is_match:
+                des_orders.append(o)
+
+        doing_count = sum(1 for o in des_orders if o.state in ("IN_PROGRESS", "ASSIGNED"))
+        review_count = sum(1 for o in des_orders if o.state in ("QC_PENDING", "RESULT_SUBMITTED", "SUBMITTING_TO_SITE"))
+        fix_count = sum(1 for o in des_orders if o.state in ("REVISION", "REVISION_REQUESTED"))
+        done_count = sum(1 for o in des_orders if o.state in ("DONE", "SKIPPED"))
+
+        def state_priority(s: str) -> int:
+            if s in ("QC_PENDING", "RESULT_SUBMITTED"):
+                return 0
+            if s in ("REVISION", "REVISION_REQUESTED"):
+                return 1
+            if s in ("IN_PROGRESS", "ASSIGNED"):
+                return 2
+            return 3
+
+        des_orders.sort(key=lambda o: state_priority(o.state))
+
+        results.append(
+            DesignerWorkloadOut(
+                id=str(des.id),
+                username=des.username,
+                full_name=des.full_name or des.username,
+                printerval_designer_option=des.printerval_designer_option,
+                total_orders=len(des_orders),
+                doing_count=doing_count,
+                review_count=review_count,
+                fix_count=fix_count,
+                done_count=done_count,
+                orders=[
+                    DesignerWorkloadOrderOut(
+                        id=str(o.id),
+                        external_order_id=o.external_order_id,
+                        state=o.state,
+                        thumbnail_url=o.thumbnail_url,
+                        deadline_at_ext=str(o.deadline_at_ext) if o.deadline_at_ext else None,
+                        product_name=o.product_name,
+                        printerval_designer=o.printerval_designer,
+                    )
+                    for o in des_orders
+                ],
+            )
+        )
+
+    return results

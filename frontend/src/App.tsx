@@ -8,9 +8,10 @@ import { OrderStatusPage } from './pages/OrderStatusPage'
 import { OrderDetailPage } from './pages/OrderDetailPage'
 import { PrintervalLoginPage } from './pages/PrintervalLoginPage'
 import { AllocationBoardPage } from './pages/AllocationBoardPage'
-import { MyTasksPage } from './pages/MyTasksPage'
 import { KanbanPage } from './pages/KanbanPage'
 import { UsersPage } from './pages/UsersPage'
+
+import { DesignerBoardPage } from './pages/DesignerBoardPage'
 
 function App() {
   return (
@@ -60,12 +61,16 @@ function App() {
             }
           />
           <Route
-            path="/my-tasks"
+            path="/designer-board"
             element={
               <ProtectedRoute>
-                <MyTasksPage />
+                <DesignerBoardPage />
               </ProtectedRoute>
             }
+          />
+          <Route
+            path="/my-tasks"
+            element={<Navigate to="/orders" replace />}
           />
           <Route path="/kanban" element={<ProtectedRoute><KanbanPage /></ProtectedRoute>} />
           <Route path="/order-status" element={<ProtectedRoute><OrderStatusPage /></ProtectedRoute>} />

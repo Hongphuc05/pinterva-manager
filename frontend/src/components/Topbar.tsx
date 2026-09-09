@@ -28,12 +28,14 @@ export function Topbar() {
 
   function getPageTitle(path: string) {
     if (path.startsWith('/orders/')) return 'Chi Tiết Đơn Hàng'
-    if (path === '/orders') return 'Danh Sách Đơn Hàng'
+    if (path === '/orders') return user?.role === 'designer' ? 'My Tasks' : 'Danh Sách Đơn Hàng'
+    if (path === '/designer-board') return 'Tiến Độ Designer'
     if (path === '/allocation') return 'Phân Bổ Kéo-Thả'
     if (path === '/kanban') return 'Bảng Tiến Độ Kanban'
-    if (path === '/my-tasks') return 'Task Của Tôi'
+    if (path === '/my-tasks') return 'My Tasks'
     if (path === '/printerval-login') return 'Đăng Nhập Printerval'
     if (path === '/order-status') return 'Trạng Thái Đơn'
+    if (path === '/users') return 'Quản Lý Tài Khoản'
     return 'Dashboard'
   }
 

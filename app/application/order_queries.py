@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import Assignment, Order, User, WorkflowEvent
@@ -29,15 +30,29 @@ def list_orders_for_user(
     if designer_id:
         if designer_id == "unassigned":
             subq = session.query(Assignment.order_id).filter(Assignment.status == "approved")
-            query = query.filter(Order.id.not_in(subq))
+            query = query.filter(Order.id.not_in(subq), Order.printerval_designer.is_(None))
         else:
             try:
                 designer_uuid = uuid.UUID(designer_id)
             except ValueError:
                 return []
-            query = query.join(Assignment, Assignment.order_id == Order.id).filter(
-                Assignment.designer_id == designer_uuid, Assignment.status == "approved"
-            )
+            target_user = session.get(User, designer_uuid)
+            printerval_opt = target_user.printerval_designer_option if target_user else None
+            full_name = target_user.full_name if target_user else None
+
+            conds = [
+                Order.id.in_(
+                    session.query(Assignment.order_id).filter(
+                        Assignment.designer_id == designer_uuid,
+                        Assignment.status == "approved",
+                    )
+                )
+            ]
+            if printerval_opt:
+                conds.append(Order.printerval_designer == printerval_opt)
+            if full_name:
+                conds.append(Order.printerval_designer == full_name)
+            query = query.filter(or_(*conds))
 
     if status:
         query = query.filter(Order.state == status)
@@ -80,7 +95,11 @@ def get_order_detail_for_user(session: Session, user: User, order_id: str) -> Or
             )
             .first()
         )
-        if assignment is None:
+        is_printerval_match = (
+            bool(user.printerval_designer_option and order.printerval_designer == user.printerval_designer_option)
+            or bool(user.full_name and order.printerval_designer == user.full_name)
+        )
+        if assignment is None and not is_printerval_match:
             return None
 
     return order

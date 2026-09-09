@@ -5,7 +5,8 @@ import { useAuth } from '../auth/AuthContext'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { ImageModal } from '../components/ImageModal'
 import { TemplateModal, type TemplateJob } from '../components/TemplateModal'
-import { getStatusInfo, STATE_MAP } from '../utils/statusTranslation'
+import { StatusDropdown } from '../components/StatusDropdown'
+import { STATE_MAP } from '../utils/statusTranslation'
 import { 
   Package, 
   Search, 
@@ -420,20 +421,22 @@ export function OrdersListPage() {
               </select>
             </div>
 
-            {/* Filter by Designer */}
-            <select
-              className="text-xs border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 font-medium focus:outline-none focus:border-[#0052CC]"
-              value={designerFilter}
-              onChange={(e) => setDesignerFilter(e.target.value)}
-            >
-              <option value="">Tất cả DES</option>
-              <option value="unassigned">Chưa phân công</option>
-              {usersList.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.full_name || u.username} ({u.role})
-                </option>
-              ))}
-            </select>
+            {/* Filter by Designer (Admin only) */}
+            {isAdmin && (
+              <select
+                className="text-xs border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 font-medium focus:outline-none focus:border-[#0052CC]"
+                value={designerFilter}
+                onChange={(e) => setDesignerFilter(e.target.value)}
+              >
+                <option value="">Tất cả DES</option>
+                <option value="unassigned">Chưa phân công</option>
+                {usersList.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.full_name || u.username} ({u.role})
+                  </option>
+                ))}
+              </select>
+            )}
 
             {/* Filter by Template */}
             <select
@@ -589,7 +592,6 @@ export function OrdersListPage() {
                 </tr>
               ) : (
                 filteredOrders.map((o) => {
-                  const statusInfo = getStatusInfo(o.state)
                   const isSelected = selectedOrderIds.includes(o.id)
                   const isNewlyCrawled = newlyCrawledOrderIds.includes(o.id)
 
@@ -688,14 +690,18 @@ export function OrdersListPage() {
                         </div>
                       </td>
 
-                      {/* Status in Vietnamese */}
+                      {/* Interactive Status Dropdown */}
                       <td className="py-2.5 px-4">
-                        <span
-                          title={statusInfo.description}
-                          className={`inline-block px-2.5 py-1 text-[11px] font-semibold rounded-md border ${statusInfo.badgeClass}`}
-                        >
-                          {statusInfo.label}
-                        </span>
+                        <StatusDropdown
+                          orderId={o.id}
+                          externalOrderId={o.external_order_id}
+                          currentState={o.state}
+                          onStatusChanged={(newState) => {
+                            setOrders((prev) =>
+                              prev.map((item) => (item.id === o.id ? { ...item, state: newState } : item))
+                            )
+                          }}
+                        />
                       </td>
 
                       {/* DES Đảm Nhận */}

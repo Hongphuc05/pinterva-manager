@@ -310,3 +310,65 @@ def test_api_sync_status_serializes_a_real_sync_state_row(client, db_session, mo
     body = resp.json()
     assert body["is_running"] is False
     assert body["last_result"] == {"checked": 2, "updated": 1}
+
+
+def test_api_update_order_state_flow(client, db_session):
+    from app.adapters.db.models import Order, Platform, Assignment
+    from app.api.deps import get_current_platform_id
+
+    platform = Platform(name="P1", account_username="acc1@printerval.com")
+    db_session.add(platform)
+    db_session.flush()
+
+    order = Order(external_order_id="DJ1001", platform_id=platform.id, state="OPEN")
+    db_session.add(order)
+    db_session.commit()
+
+    app = client.app
+    app.dependency_overrides[get_current_platform_id] = lambda: platform.id
+
+    # 1. Admin converts OPEN -> DOING
+    admin = _login(client, db_session, "admin", username="admin_flow")
+    resp = client.patch(f"/api/orders/{order.id}/state", json={"state": "Doing"})
+    assert resp.status_code == 200
+    assert resp.json()["state"] == "IN_PROGRESS"
+
+    # 2. Designer converts DOING -> REVIEW
+    des = _login(client, db_session, "designer", username="des_flow")
+    db_session.add(Assignment(order_id=order.id, designer_id=des.id, status="approved"))
+    db_session.commit()
+
+    resp = client.patch(f"/api/orders/{order.id}/state", json={"state": "Review"})
+    assert resp.status_code == 200
+    assert resp.json()["state"] == "QC_PENDING"
+
+    # 3. Designer attempts to convert to DONE (forbidden!)
+    resp = client.patch(f"/api/orders/{order.id}/state", json={"state": "Done"})
+    assert resp.status_code == 403
+
+    # 4. Admin reviews and requests FIX (REVISION)
+    client.post("/api/login", json={"username": "admin_flow", "password": "s3cret!"})
+    resp = client.patch(f"/api/orders/{order.id}/state", json={"state": "Fix"})
+    assert resp.status_code == 200
+    assert resp.json()["state"] == "REVISION"
+
+    # 5. Designer re-submits to REVIEW
+    client.post("/api/login", json={"username": "des_flow", "password": "s3cret!"})
+    resp = client.patch(f"/api/orders/{order.id}/state", json={"state": "Review"})
+    assert resp.status_code == 200
+    assert resp.json()["state"] == "QC_PENDING"
+
+    # 6. Admin marks DONE
+    client.post("/api/login", json={"username": "admin_flow", "password": "s3cret!"})
+    resp = client.patch(f"/api/orders/{order.id}/state", json={"state": "Done"})
+    assert resp.status_code == 200
+    assert resp.json()["state"] == "DONE"
+
+    # 7. Check workload API
+    resp = client.get("/api/designers/workload")
+    assert resp.status_code == 200
+    workload = resp.json()
+    assert len(workload) >= 1
+    des_stat = next(item for item in workload if item["id"] == str(des.id))
+    assert des_stat["done_count"] == 1
+    assert des_stat["total_orders"] == 1
