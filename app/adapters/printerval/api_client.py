@@ -94,7 +94,9 @@ class PrintervalApiClient:
             "Accept-Language": "en-US,en;q=0.9",
         }
         if self.session_cookie:
-            c_val = self.session_cookie
+            c_val = self.session_cookie.strip().strip('"').strip("'")
+            if c_val.lower().startswith("cookie:"):
+                c_val = c_val[7:].strip()
             if "=" not in c_val:
                 c_val = f"laravel_session={c_val}"
             headers["Cookie"] = c_val
@@ -150,17 +152,21 @@ class PrintervalApiClient:
                     test_res.status_code in (301, 302, 303, 307, 308)
                     and LOGIN_PATH in urlparse(test_res.headers.get("location", "")).path
                 )
-                if test_res.status_code == 200 and not redirected_to_login:
+                is_json = (
+                    "application/json" in test_res.headers.get("content-type", "").lower()
+                    or test_res.text.strip().startswith("{")
+                )
+                if test_res.status_code == 200 and not redirected_to_login and is_json:
                     self._authenticated = True
                     return
             except httpx.HTTPError:
                 pass
-            # If cookie authentication failed and no fallback credentials:
-            if not self.username or not self.password:
-                raise PrintervalApiError(
-                    ErrorClass.AUTH,
-                    "Session Cookie Printerval đã hết hạn. Vui lòng lấy Cookie mới và cập nhật lại.",
-                )
+            # If session cookie probe failed, do not fall back to form login on Cloud datacenter IPs
+            # because form login will be blocked by Cloudflare WAF 403 anyway.
+            raise PrintervalApiError(
+                ErrorClass.AUTH,
+                "Session Cookie Printerval không hợp lệ hoặc đã hết hạn (hoặc dán thiếu/bị cắt ngắn). Vui lòng F12 lấy lại Cookie mới đầy đủ.",
+            )
 
         try:
             form_page = self._client.get(LOGIN_PATH, params={"redirect": ADMIN_PATH})

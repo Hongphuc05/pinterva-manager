@@ -348,9 +348,23 @@ export function PrintervalSettingsModal({ isOpen, onClose }: PrintervalSettingsM
                   rows={3}
                   placeholder="Dán laravel_session=eyJ... hoặc toàn bộ chuỗi Cookie từ DevTools vào đây"
                   value={sessionCookie}
-                  onChange={(e) => setSessionCookie(e.target.value)}
+                  onChange={(e) => {
+                    let cleaned = e.target.value
+                    if (cleaned.toLowerCase().startsWith('cookie:')) {
+                      cleaned = cleaned.slice(7).trim()
+                    }
+                    setSessionCookie(cleaned)
+                  }}
                   className="w-full px-3.5 py-2 text-xs font-mono rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#0052CC]/20 focus:border-[#0052CC] transition-all bg-slate-50/50"
                 />
+                {sessionCookie.trim() && !sessionCookie.includes('=') && !sessionCookie.trim().startsWith('eyJ') && (
+                  <p className="text-[11px] font-semibold text-amber-800 bg-amber-50 p-2.5 rounded-xl border border-amber-300 flex items-start gap-1.5">
+                    <AlertCircle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                    <span>
+                      <strong>Chú ý:</strong> Chuỗi Cookie bạn vừa dán có vẻ bị thiếu phần đầu hoặc bị cắt ngắn (bình thường bắt đầu bằng <code className="font-mono text-amber-950 bg-amber-200/80 px-1 rounded">laravel_session=eyJ...</code> hoặc <code className="font-mono text-amber-950 bg-amber-200/80 px-1 rounded">eyJ...</code>). Hãy bôi đen copy lại toàn bộ giá trị trong DevTools.
+                    </span>
+                  </p>
+                )}
                 <p className="text-[10px] text-slate-400">
                   Khuyên dùng khi deploy web trên Render / Vercel / VPS để không bị Cloudflare WAF chặn.
                 </p>
