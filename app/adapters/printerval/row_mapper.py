@@ -14,6 +14,9 @@ import json
 from datetime import datetime
 from typing import Any
 
+import httpx
+
+from app.adapters.printerval.gallery_scraper import extract_gallery_images_from_html
 from app.adapters.printerval.image_helper import (
     download_and_save_image,
     extract_image_url_from_dict_or_html,
@@ -164,6 +167,72 @@ def extract_external_order_url(row: dict[str, Any]) -> str | None:
     return str(raw).strip() if isinstance(raw, str) and raw.strip() else None
 
 
+def extract_product_sales_url(row: dict[str, Any]) -> str | None:
+    """Extract public product sales page link from row or product info."""
+    for key in ("product_url", "sales_url", "preview_url", "product_link", "url"):
+        val = row.get(key)
+        if val and isinstance(val, str) and ("printerval.com" in val or "/us/" in val or "-p" in val):
+            return val.strip()
+
+    prod = row.get("product")
+    if isinstance(prod, dict):
+        for key in ("url", "link", "product_url", "slug"):
+            val = prod.get(key)
+            if val and isinstance(val, str) and val.strip():
+                if val.startswith("http"):
+                    return val.strip()
+                if val.startswith("/"):
+                    return f"https://printerval.com{val}"
+                return f"https://printerval.com/{val}"
+
+    meta = _meta_data(row)
+    sku_data = _first_sku_data(meta)
+    if sku_data:
+        for key in ("product_url", "url", "link", "sales_url"):
+            val = sku_data.get(key)
+            if val and isinstance(val, str) and val.strip():
+                if val.startswith("http"):
+                    return val.strip()
+                if val.startswith("/"):
+                    return f"https://printerval.com{val}"
+                return f"https://printerval.com/{val}"
+
+    return None
+
+
+def fetch_product_gallery_images(
+    sales_url: str | None,
+    session_cookie: str | None = None,
+    fallback_image_url: str | None = None,
+) -> list[str]:
+    """Fetch product page and parse gallery image URLs. Fallback to fallback_image_url if broken/blocked."""
+    if not sales_url:
+        return [fallback_image_url] if fallback_image_url else []
+    try:
+        abs_url = sales_url if sales_url.startswith("http") else f"https://printerval.com{sales_url}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+        if session_cookie:
+            c_val = session_cookie.strip().strip('"').strip("'")
+            if c_val.lower().startswith("cookie:"):
+                c_val = c_val[7:].strip()
+            headers["Cookie"] = c_val if ("laravel_session=" in c_val or ";" in c_val) else f"laravel_session={c_val}"
+
+        with httpx.Client(timeout=8.0, follow_redirects=True, headers=headers) as client:
+            resp = client.get(abs_url)
+            if resp.status_code == 200 and resp.text:
+                imgs = extract_gallery_images_from_html(resp.text, fallback_image_url)
+                if imgs:
+                    return imgs
+    except Exception:
+        pass
+
+    return [fallback_image_url] if fallback_image_url else []
+
+
 def extract_source_asset_url(row: dict[str, Any]) -> str | None:
     meta = _meta_data(row)
     sku_data = _first_sku_data(meta)
@@ -253,6 +322,7 @@ def parse_order_detail_from_row(
     external_order_id: str,
     platform_id: str | None = None,
     download_images: bool = True,
+    session_cookie: str | None = None,
 ) -> OrderDetailResult:
     product_name, sku, category = parse_product_summary_fields(row)
     meta = _meta_data(row)
@@ -268,6 +338,17 @@ def parse_order_detail_from_row(
         )
         if raw_image_url
         else None
+    )
+
+    sales_url = extract_product_sales_url(row)
+    gallery_images = (
+        fetch_product_gallery_images(
+            sales_url,
+            session_cookie=session_cookie,
+            fallback_image_url=local_path or raw_image_url,
+        )
+        if sales_url
+        else ([local_path or raw_image_url] if (local_path or raw_image_url) else None)
     )
 
     template_jobs = row.get("templateJobs")
@@ -307,4 +388,5 @@ def parse_order_detail_from_row(
         sku_image_url=sku_img,
         external_order_url=ext_order_link,
         source_files=source_files_list,
+        product_image_urls=gallery_images,
     )

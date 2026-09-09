@@ -21,6 +21,7 @@ class OrderSummary(BaseModel):
     external_order_url: str | None = None
     source_files: list[dict] | None = None
     source_download_all_url: str | None = None
+    product_image_urls: list[str] | None = None
 
 
 class DiscoverResult(AdapterResult):
@@ -73,6 +74,7 @@ class OrderDetailResult(AdapterResult):
     external_order_url: str | None = None
     source_files: list[dict] | None = None
     source_download_all_url: str | None = None
+    product_image_urls: list[str] | None = None
 
 
 class WriteResult(AdapterResult):

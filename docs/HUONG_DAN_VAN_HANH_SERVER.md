@@ -12,7 +12,7 @@
 ## 📌 THÔNG TIN HỆ THỐNG
 * **IP Tailscale của PC:** `100.88.171.114`
 * **Tài khoản SSH:** `tacahu@100.88.171.114` (Port `22`)
-* **API URL Công Khai Vĩnh Viễn:** `https://desktop-p259ei0.tailea8fce.ts.net`
+* **API URL qua Tailscale Funnel:** `https://desktop-p259ei0.tailea8fce.ts.net`
 * **Thư mục chạy Server:** `/srv/tacahu`
 * **Thư mục CI/CD Runner:** `~/actions-runner`
 * **Frontend Dashboard:** [https://tacahu-ops.vercel.app](https://tacahu-ops.vercel.app)
@@ -22,9 +22,17 @@
 
 ## 1. KHI PC BẬT LÊN (Sau khi mất điện / khởi động lại)
 
-### ❓ Trả lời câu hỏi: "Chỉ cần SSH từ Mac có được không?"
-* **Nguyên lý:** Khi PC vừa bật, Windows sẽ cấp một IP nội bộ ngẫu nhiên mới cho máy ảo Ubuntu WSL2, đồng thời các dịch vụ ngầm (SSH, Docker, Runner) chưa chạy. Vì vậy, máy Mac **chưa thể SSH vào ngay được** cho đến khi Windows chạy lệnh mở cổng kết nối.
-* **Cách xử lý:** Bạn chỉ cần thực hiện **1 cú click chuột** trên PC, sau đó toàn bộ việc còn lại làm từ Mac!
+### Vì sao SSH có thể timeout ngay sau mất điện?
+
+Khi PC vừa bật, Windows cần thời gian khởi động WSL2. IP nội bộ của WSL2 có thể đổi, sau đó script phải cập nhật Windows port proxy cho SSH, rồi OpenSSH và Docker trong WSL mới sẵn sàng. Trong giai đoạn này, `ssh ...` timeout là bình thường; không phải lỗi username hay SSH key.
+
+Đợi khoảng 2–5 phút sau khi PC lên Windows, rồi từ Mac kiểm tra lại bằng lệnh không mở shell:
+
+```bash
+ssh -o BatchMode=yes -o ConnectTimeout=5 tacahu@100.88.171.114 "hostname"
+```
+
+Nếu lệnh trả về `DESKTOP-P259EI0` thì PC đã sẵn sàng để vận hành từ Mac.
 
 ### Thao tác 1-Click trên PC:
 1. Bạn đã có file `start-server.bat` trên màn hình Desktop của PC.
@@ -34,14 +42,14 @@
 *(Nội dung file `start-server.bat` dự phòng nếu cần tạo lại):*
 ```bat
 @echo off
-echo [1/4] Cap nhat IP WSL va mo Firewall Port 22...
+echo [1/5] Cap nhat IP WSL va mo Firewall Port 22...
 powershell -Command "$wsl_ip = (wsl hostname -I).Trim().Split(' ')[0]; netsh interface portproxy delete v4tov4 listenport=22 listenaddress=0.0.0.0; netsh interface portproxy add v4tov4 listenport=22 listenaddress=0.0.0.0 connectport=22 connectaddress=$wsl_ip; netsh advfirewall firewall add rule name='Allow SSH 22' dir=in action=allow protocol=TCP localport=22"
 
-echo [2/4] Khoi dong OpenSSH va Docker trong WSL...
+echo [2/5] Khoi dong OpenSSH va Docker trong WSL...
 wsl -u root service ssh restart
 wsl -u root service docker restart
 
-echo [3/4] Bat toan bo he thong Tacahu Server...
+echo [3/5] Bat toan bo he thong Tacahu Server...
 wsl -u tacahu bash -c "cd /srv/tacahu && docker compose up -d"
 
 echo [4/5] Bat GitHub Actions Runner cho CI/CD...
@@ -58,16 +66,24 @@ pause
 
 ---
 
-## 2. CÁCH TỰ ĐỘNG HÓA 100% (Không cần đụng vào PC)
+## 2. CÁCH TỰ ĐỘNG HÓA SAU MẤT ĐIỆN
 
-Nếu bạn muốn khi PC có điện và bật lên, server tự chạy hết mà **không cần bấm chuột hay ngồi vào máy PC**:
+Không dùng riêng `shell:startup` cho production: thư mục này chỉ chạy sau khi người dùng Windows đăng nhập, và quyền Administrator có thể bị chặn bởi UAC. Dùng **Task Scheduler** để chạy không cần đăng nhập.
 
-1. Trên PC, nhấn tổ hợp phím `Win + R`, gõ `shell:startup` rồi bấm **Enter** (thư mục Startup tự mở ra).
-2. Bấm chuột phải vào file `start-server.bat` ngoài Desktop ➔ Chọn **Create shortcut** (Tạo lối tắt).
-3. Kéo file Shortcut đó bỏ vào thư mục Startup vừa mở.
-4. Bấm chuột phải vào file Shortcut trong Startup ➔ **Properties** ➔ tab **Shortcut** ➔ bấm nút **Advanced...** ➔ tích chọn **Run as administrator** ➔ bấm **OK**.
+1. Mở **Task Scheduler** trên PC → **Create Task**.
+2. Tab **General**:
+   - Name: `Start Tacahu Server`
+   - Chọn **Run whether user is logged on or not**.
+   - Chọn **Run with highest privileges**.
+3. Tab **Triggers** → **New** → chọn **At startup**.
+4. Tab **Actions** → **New**:
+   - Program/script: đường dẫn đầy đủ tới `start-server.bat`, ví dụ `C:\Users\<Windows-user>\Desktop\start-server.bat`.
+   - Start in: `C:\Users\<Windows-user>\Desktop`.
+5. Tab **Conditions**: bỏ chọn điều kiện chỉ chạy khi cắm điện nếu PC là server cố định.
+6. Tab **Settings**: bật **Run task as soon as possible after a scheduled start is missed**.
+7. Bấm **OK**, nhập mật khẩu Windows nếu được hỏi, rồi chọn **Run** một lần để thử.
 
-👉 *Từ nay, khi có điện lại, PC tự bật vào Windows, file này tự chạy ngầm, bạn chỉ việc ngồi ở quán cafe mở máy Mac lên là dùng!*
+Sau khi test, rút/bật lại nguồn hoặc restart PC; từ Mac chạy lệnh kiểm tra SSH ở phần 1 rồi kiểm tra health ở phần 3.
 
 ---
 
@@ -77,7 +93,13 @@ Mở Terminal trên máy Mac (đảm bảo Tailscale trên Mac đang bật):
 
 ### Bước 1: Đăng nhập SSH vào Server
 ```bash
-ssh tacahu@100.88.171.114
+ssh -tt tacahu@100.88.171.114 'bash -il'
+```
+
+`-tt` cấp terminal và `bash -il` ép mở shell interactive có prompt. Nếu chỉ cần chạy một lệnh thì dùng dạng sau, không cần mở shell:
+
+```bash
+ssh tacahu@100.88.171.114 "cd /srv/tacahu && docker compose ps"
 ```
 
 ### Bước 2: Kiểm tra trạng thái các Container (Health Check)
@@ -90,7 +112,7 @@ cd /srv/tacahu && docker compose ps
   - `tacahu-ops-celery-assignment-1`: Worker chia việc outsource
   - `tacahu-ops-celery-general-1`: Worker crawl & sync
   - `tacahu-ops-celery-beat-1`: Bộ đếm lịch trình tự động
-  - `tacahu-quick-tunnel`: Đường hầm Cloudflare ra Internet
+  - `tacahu-ops-cloudflared-1`: Đường hầm Cloudflare ra Internet
 
 ### Bước 3: Kiểm tra API Backend phản hồi
 ```bash
@@ -98,9 +120,9 @@ curl http://localhost:8000/api/health
 ```
 * Phải trả về: `{"status":"ok"}`.
 
-### Bước 4: Xem đường link Cloudflare Tunnel hiện tại
+### Bước 4: Kiểm tra Cloudflare Tunnel
 ```bash
-docker logs tacahu-quick-tunnel 2>&1 | grep -o 'https://[-a-z0-9.]*trycloudflare.com' | tail -n 1
+cd /srv/tacahu && docker compose logs --tail=100 cloudflared
 ```
 
 ### Bước 5: Xem Log trực tiếp khi cần soi lỗi (Live Logs)
@@ -110,11 +132,11 @@ docker logs tacahu-quick-tunnel 2>&1 | grep -o 'https://[-a-z0-9.]*trycloudflare
   ```
 * **Xem log quét đơn & cập nhật trạng thái Printerval:**
   ```bash
-  cd /srv/tacahu && docker compose logs -f --tail=100 celery_general
+  cd /srv/tacahu && docker compose logs -f --tail=100 celery-general
   ```
 * **Xem log phân công việc:**
   ```bash
-  cd /srv/tacahu && docker compose logs -f --tail=100 celery_assignment
+  cd /srv/tacahu && docker compose logs -f --tail=100 celery-assignment
   ```
 *(Bấm `Ctrl + C` trên bàn phím để thoát xem log).*
 
@@ -176,6 +198,7 @@ cd /srv/tacahu
 docker compose down
 docker compose up -d
 ```
+Không dùng `docker compose down -v`: lệnh đó xóa volumes, có thể làm mất Redis và dữ liệu runtime chưa backup.
 
 ### 4. Khởi động lại máy PC từ xa qua Mac:
 ```bash

@@ -6,6 +6,7 @@ import { DashboardLayout } from '../components/DashboardLayout'
 import { ImageModal } from '../components/ImageModal'
 import { TemplateModal, type TemplateJob } from '../components/TemplateModal'
 import { SourceFilesCard, type SourceFile } from '../components/SourceFilesCard'
+import { ProductGalleryCard } from '../components/ProductGalleryCard'
 import { CustomConfigurationSection } from '../components/CustomConfigurationSection'
 import { StatusDropdown } from '../components/StatusDropdown'
 import { getStatusInfo } from '../utils/statusTranslation'
@@ -70,6 +71,7 @@ type OrderDetail = {
   external_order_url: string | null
   source_files: SourceFile[] | null
   source_download_all_url: string | null
+  product_image_urls?: string[] | null
   printerval_designer: string | null
   printerval_status: string | null
   created_at: string
@@ -100,6 +102,7 @@ export function OrderDetailPage() {
 
   // Modal states
   const [showImageModal, setShowImageModal] = useState(false)
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0)
   const [showTemplateModal, setShowTemplateModal] = useState(false)
   const [showSubmitModal, setShowSubmitModal] = useState(false)
 
@@ -257,8 +260,13 @@ export function OrderDetailPage() {
       <ImageModal
         isOpen={showImageModal}
         onClose={() => setShowImageModal(false)}
-        imageUrl={resolveAssetUrl(order.thumbnail_url) ?? null}
-        altText={order.external_order_id}
+        images={
+          order.product_image_urls && order.product_image_urls.length > 0
+            ? order.product_image_urls
+            : (order.thumbnail_url ? [order.thumbnail_url] : [])
+        }
+        initialIndex={selectedImageIndex}
+        altText={isAdmin ? order.external_order_id : (order.product_name || 'Ảnh sản phẩm')}
       />
 
       {/* Template Modal */}
@@ -384,19 +392,74 @@ export function OrderDetailPage() {
       <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-xs space-y-6">
         <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 pb-6 border-b border-slate-100">
           <div className="flex items-start gap-4">
-            {order.thumbnail_url ? (
-              <img
-                src={resolveAssetUrl(order.thumbnail_url)}
-                alt=""
-                title="Click để xem ảnh to"
-                onClick={() => setShowImageModal(true)}
-                className="h-24 w-24 rounded-xl object-cover border border-slate-200 shadow-2xs shrink-0 cursor-pointer hover:scale-105 transition-transform hover:ring-2 hover:ring-[#0052CC]"
-              />
-            ) : (
-              <div className="h-24 w-24 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 shrink-0">
-                <Package className="h-10 w-10" />
-              </div>
-            )}
+            {(() => {
+              const gallery =
+                order.product_image_urls && order.product_image_urls.length > 0
+                  ? order.product_image_urls
+                  : order.thumbnail_url
+                  ? [order.thumbnail_url]
+                  : []
+              const currentImg =
+                gallery[selectedImageIndex] || gallery[0] || order.thumbnail_url
+
+              if (!currentImg) {
+                return (
+                  <div className="h-24 w-24 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 shrink-0">
+                    <Package className="h-10 w-10" />
+                  </div>
+                )
+              }
+
+              return (
+                <div className="flex flex-col items-center gap-1.5 shrink-0">
+                  <div className="relative group">
+                    <img
+                      src={resolveAssetUrl(currentImg)}
+                      alt=""
+                      title="Click để xem ảnh to"
+                      onClick={() => setShowImageModal(true)}
+                      className="h-24 w-24 rounded-xl object-cover border border-slate-200 shadow-2xs shrink-0 cursor-pointer hover:scale-105 transition-transform hover:ring-2 hover:ring-[#0052CC]"
+                    />
+                    {gallery.length > 1 && (
+                      <span className="absolute bottom-1 right-1 bg-slate-900/80 text-white font-mono text-[9px] px-1 rounded">
+                        {selectedImageIndex + 1}/{gallery.length}
+                      </span>
+                    )}
+                  </div>
+                  {gallery.length > 1 && (
+                    <div className="flex items-center gap-1 max-w-[120px] overflow-x-auto py-0.5">
+                      {gallery.slice(0, 5).map((thumb, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setSelectedImageIndex(idx)
+                          }}
+                          className={`w-4 h-4 rounded border transition-all cursor-pointer overflow-hidden shrink-0 ${
+                            idx === selectedImageIndex
+                              ? 'border-[#0052CC] ring-1 ring-[#0052CC]'
+                              : 'border-slate-300 opacity-60 hover:opacity-100'
+                          }`}
+                          title={`Xem ảnh ${idx + 1}`}
+                        >
+                          <img
+                            src={resolveAssetUrl(thumb)}
+                            alt=""
+                            className="w-full h-full object-cover"
+                          />
+                        </button>
+                      ))}
+                      {gallery.length > 5 && (
+                        <span className="text-[9px] text-slate-400 font-mono">
+                          +{gallery.length - 5}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
             <div className="space-y-1">
               <div className="flex flex-wrap items-center gap-3">
                 {isAdmin ? (
@@ -799,6 +862,18 @@ export function OrderDetailPage() {
               <CustomConfigurationSection entries={order.custom_config.translated_vn} translated />
             )}
           </div>
+        )}
+
+        {/* Product Gallery (All Images) */}
+        {order.product_image_urls && order.product_image_urls.length > 0 && (
+          <ProductGalleryCard
+            images={order.product_image_urls}
+            orderTitle={order.product_name}
+            onSelectImage={(index) => {
+              setSelectedImageIndex(index)
+              setShowImageModal(true)
+            }}
+          />
         )}
 
         {/* These three cards use the same order as Printerval itself. */}

@@ -134,6 +134,7 @@ def list_my_tasks(session: Session, designer_id: uuid.UUID) -> list[dict]:
                     "source_files": order.source_files,
                     "source_download_all_url": order.source_download_all_url,
                     "design_tool_url": order.design_tool_url,
+                    "product_image_urls": order.product_image_urls or ([order.thumbnail_url] if order.thumbnail_url else []),
                 },
                 "result_versions": history,
             }

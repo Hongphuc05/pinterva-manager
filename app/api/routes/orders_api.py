@@ -66,6 +66,7 @@ class OrderSummaryOut(BaseModel):
     external_order_url: str | None = None
     source_files: list[dict] | None = None
     source_download_all_url: str | None = None
+    product_image_urls: list[str] | None = None
     printerval_designer: str | None = None
     printerval_assignment_lifecycle: str | None = None
     printerval_assignment_error: str | None = None
@@ -115,6 +116,7 @@ class OrderDetailOut(BaseModel):
     external_order_url: str | None = None
     source_files: list[dict] | None = None
     source_download_all_url: str | None = None
+    product_image_urls: list[str] | None = None
     printerval_designer: str | None = None
     printerval_status: str | None = None
     created_at: datetime
@@ -615,6 +617,8 @@ def api_order_detail(
         .first()
     )
     order_out = OrderDetailOut.model_validate(order)
+    if not order_out.product_image_urls and order.thumbnail_url:
+        order_out.product_image_urls = [order.thumbnail_url]
     if assignment:
         asgn_obj, des_user = assignment
         order_out.assigned_designer_name = des_user.full_name or des_user.username

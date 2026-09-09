@@ -105,6 +105,8 @@ def discover_waiting_orders_with_summaries(
                 existing_order.source_files = summary.source_files
             if summary.source_download_all_url:
                 existing_order.source_download_all_url = summary.source_download_all_url
+            if summary.product_image_urls:
+                existing_order.product_image_urls = summary.product_image_urls
             if summary.template_jobs:
                 existing_order.template_jobs = summary.template_jobs
                 existing_order.has_template = True
@@ -192,6 +194,7 @@ def scan_orders_fast(
                     printerval_designer=summary.designer,
                     printerval_designer_synced_at=datetime.now(UTC) if summary.designer else None,
                     printerval_status=summary.status.lower(),
+                    product_image_urls=summary.product_image_urls,
                 )
                 session.add(order)
                 added += 1
@@ -203,6 +206,8 @@ def scan_orders_fast(
                     order.printerval_designer = None
                 order.printerval_status = summary.status.lower()
                 order.thumbnail_url = summary.thumbnail_url or order.thumbnail_url
+                if summary.product_image_urls:
+                    order.product_image_urls = summary.product_image_urls
                 updated += 1
 
             # The fast list endpoint already contains the complete order payload.
@@ -237,6 +242,8 @@ def scan_orders_fast(
                     order.external_order_url = detail.external_order_url
                 if detail.source_files:
                     order.source_files = detail.source_files
+                if detail.product_image_urls:
+                    order.product_image_urls = detail.product_image_urls
         if not result.cursor:
             break
         cursor = result.cursor
@@ -294,6 +301,7 @@ def _claim_one_order(
             external_order_url=summary.external_order_url if summary else None,
             source_files=summary.source_files if summary else None,
             source_download_all_url=summary.source_download_all_url if summary else None,
+            product_image_urls=summary.product_image_urls if summary else None,
             template_jobs=summary.template_jobs if summary else None,
             has_template=summary.has_template if summary else False,
         )
@@ -472,6 +480,8 @@ def _apply_order_detail_result(order: Order, detail_result) -> None:
         order.source_files = detail_result.source_files
     if detail_result.source_download_all_url:
         order.source_download_all_url = detail_result.source_download_all_url
+    if detail_result.product_image_urls:
+        order.product_image_urls = detail_result.product_image_urls
 
 
 def refresh_order_detail(session: Session, adapter: PrintervalAdapter, order: Order) -> dict:

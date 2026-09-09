@@ -9,6 +9,10 @@ from playwright.sync_api import Page
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from app.adapters.playwright_support import capture_evidence
+from app.adapters.printerval.gallery_scraper import (
+    PLAYWRIGHT_EXTRACT_GALLERY_SNIPPET,
+    extract_gallery_images_from_html,
+)
 from app.adapters.printerval.image_helper import download_and_save_image
 from app.adapters.printerval.interface import ALL_JOB_TYPES
 from app.adapters.printerval.models import (
@@ -339,6 +343,31 @@ def _extract_row_thumbnail_url(row) -> str | None:
     return None
 
 
+def _extract_row_sales_url(row) -> str | None:
+    """Find product sales page link in the row, e.g. a[href*="/us/"], a[href*="-p"] or parent of product preview image."""
+    sales_link = row.locator('a[href*="/us/"], a[ng-href*="/us/"], a[href*="-p"]').first
+    if sales_link.count() > 0:
+        url = sales_link.get_attribute("href") or sales_link.get_attribute("ng-href")
+        if url and url.strip():
+            return url.strip()
+
+    img = row.locator('img[alt*="Discover product"], .sb-design-thumbnail img').first
+    if img.count() > 0:
+        parent_a = img.locator('xpath=ancestor::a').first
+        if parent_a.count() > 0:
+            url = parent_a.get_attribute("href") or parent_a.get_attribute("ng-href")
+            if url and url.strip():
+                return url.strip()
+
+    heading_link = row.locator("h5 a, a:has(h5)").first
+    if heading_link.count() > 0:
+        url = heading_link.get_attribute("href") or heading_link.get_attribute("ng-href")
+        if url and url.strip():
+            return url.strip()
+
+    return None
+
+
 def _extract_row_has_template(row) -> bool:
     if row.locator(".label.label-success:has-text('template')").count() > 0:
         return True
@@ -370,6 +399,18 @@ class PlaywrightPrintervalAdapter:
         # a cache miss (different order, or discover_orders in between) just falls back
         # to a fresh search, so this can never serve a stale/wrong row.
         self._last_row_cache: tuple[str, object] | None = None
+
+    def _fetch_gallery_images(self, sales_url: str, fallback_image_url: str | None = None) -> list[str]:
+        if not sales_url:
+            return [fallback_image_url] if fallback_image_url else []
+        try:
+            res = self.page.evaluate(PLAYWRIGHT_EXTRACT_GALLERY_SNIPPET, sales_url)
+            if isinstance(res, dict) and res.get("success") and res.get("images"):
+                return res["images"]
+        except Exception:
+            pass
+
+        return [fallback_image_url] if fallback_image_url else []
 
     def list_designer_options(self, external_order_id: str) -> DesignerOptionsResult:
         """Read the platform-wide Designer filter options from Printerval."""
@@ -611,6 +652,13 @@ class PlaywrightPrintervalAdapter:
         if has_template:
             template_jobs = self._extract_template_jobs_from_modal(row)
 
+        sales_url = _extract_row_sales_url(row)
+        product_image_urls = None
+        if sales_url:
+            product_image_urls = self._fetch_gallery_images(sales_url, fallback_image_url=thumbnail_url or raw_url)
+        elif thumbnail_url or raw_url:
+            product_image_urls = [thumbnail_url or raw_url]
+
         return OrderDetailResult(
             success=True,
             external_order_id=external_order_id,
@@ -640,6 +688,7 @@ class PlaywrightPrintervalAdapter:
             external_order_url=external_order_url,
             source_files=source_files if source_files else None,
             source_download_all_url=source_download_all_url,
+            product_image_urls=product_image_urls,
         )
 
     def _extract_template_jobs_from_modal(self, row) -> list[dict] | None:

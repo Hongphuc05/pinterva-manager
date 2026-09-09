@@ -232,6 +232,7 @@ class PrintervalApiAdapter:
             external_order_id,
             platform_id=platform_id,
             download_images=self.download_images,
+            session_cookie=self.api_client.session_cookie,
         )
 
     def set_designer(self, external_order_id: str, designer_option: str) -> WriteResult:

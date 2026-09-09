@@ -62,6 +62,7 @@ class TaskOrderOut(BaseModel):
     source_files: list[dict] | None = None
     source_download_all_url: str | None = None
     design_tool_url: str | None = None
+    product_image_urls: list[str] | None = None
 
 
 class DesignerTaskOut(BaseModel):
