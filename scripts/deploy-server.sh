@@ -145,6 +145,12 @@ if [[ ! -f .env ]]; then
   exit 4
 fi
 
+if grep -q "^APP_VERSION=" .env; then
+  sed -i "s/^APP_VERSION=.*/APP_VERSION=${APP_VERSION}/" .env
+else
+  echo "APP_VERSION=${APP_VERSION}" >> .env
+fi
+
 export APP_VERSION="$APP_VERSION"
 export APP_SOURCE_DIR="./app"
 export DATA_DIR="./data"
@@ -159,6 +165,7 @@ fi
 
 echo "==> Building tacahu-backend:${APP_VERSION}..."
 "${COMPOSE_ARGS[@]}" build
+docker tag "tacahu-backend:${APP_VERSION}" tacahu-backend:latest 2>/dev/null || true
 
 echo "==> Running Alembic migrations..."
 MIGRATE_ARGS=(docker compose -f compose.yaml --env-file .env --profile migration)
