@@ -247,18 +247,8 @@ def extract_source_asset_url(row: dict[str, Any]) -> str | None:
 def extract_source_files(row: dict[str, Any]) -> list[dict[str, str]] | None:
     """Extract list of customer uploaded source images/files."""
     sources: list[dict[str, str]] = []
-    
-    # 1. From row.get("designs")
-    designs = row.get("designs")
-    if isinstance(designs, list):
-        for item in designs:
-            if isinstance(item, dict):
-                url = item.get("url") or item.get("image_url") or item.get("file_url")
-                name = item.get("name") or item.get("file_name") or (url.split("/")[-1] if url else "source.jpg")
-                if url:
-                    sources.append({"name": str(name), "url": str(url)})
 
-    # 2. From the SKU's own `configurations` — the customer's raw personalization
+    # 1. From the SKU's own `configurations` — the customer's raw personalization
     # uploads (e.g. "Your Photo 1".."Your Photo N"), distinct from `designs` above
     # (the designer's finished/composited output). This is the block the live site's
     # own "SOURCE" panel shows — confirmed 2026-09-08 against a real row whose
@@ -274,6 +264,53 @@ def extract_source_files(row: dict[str, Any]) -> list[dict[str, str]] | None:
             config = None
     else:
         config = raw_config
+
+    def source_name(url: str) -> str:
+        return url.split("?", 1)[0].rstrip("/").split("/")[-1] or "source"
+
+    def sources_from_config_list(key: str) -> list[dict[str, str]]:
+        """Read the list-backed configuration fields used by Printerval SOURCE.
+
+        The API serializes ``layers`` as a JSON string.  Each layer is one row in
+        Printerval's SOURCE card, even when several rows intentionally point at
+        the same upload URL.  Returning this list first preserves that cardinality;
+        recursively scanning every nested URL would incorrectly count metadata
+        such as ``upload_image_url`` a second time.
+        """
+        if not isinstance(config, dict):
+            return []
+        value = config.get(key)
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except (TypeError, ValueError):
+                return []
+        if not isinstance(value, list):
+            return []
+
+        result: list[dict[str, str]] = []
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            url = item.get("value")
+            if isinstance(url, str) and url.strip().lower().startswith(("http://", "https://")):
+                clean_url = url.strip()
+                result.append({"name": source_name(clean_url), "url": clean_url})
+        return result
+
+    # On the live DJ3976109 payload, `layers` contains exactly the 22 entries
+    # shown in Printerval's SOURCE card.  Do not mix `options` or `designs` into
+    # this result: those fields are configuration/UI metadata, not extra SOURCE rows.
+    layer_sources = sources_from_config_list("layers")
+    if layer_sources:
+        return layer_sources
+
+    # Some products have simple uploads but no canvas-layer configuration.  Their
+    # `options` list is the equivalent authoritative source list.
+    option_sources = sources_from_config_list("options")
+    if option_sources:
+        return option_sources
+
     def collect_configuration_images(entry: Any, label: str | None = None) -> None:
         """The live site uses both `{photo: {type, value}}` and
         `{images: [{type, value}, ...]}`.  SOURCE lists every image in either
@@ -293,6 +330,16 @@ def extract_source_files(row: dict[str, Any]) -> list[dict[str, str]] | None:
     if isinstance(config, dict):
         for key, entry in config.items():
             collect_configuration_images(entry, str(key))
+
+    # 2. From row.get("designs") when no configuration-level source list exists.
+    designs = row.get("designs")
+    if isinstance(designs, list):
+        for item in designs:
+            if isinstance(item, dict):
+                url = item.get("url") or item.get("image_url") or item.get("file_url")
+                name = item.get("name") or item.get("file_name") or (url.split("/")[-1] if url else "source.jpg")
+                if url:
+                    sources.append({"name": str(name), "url": str(url)})
 
     # 3. From custom_design_files / attachments
     attachments = row.get("custom_design_files") or row.get("attachments") or row.get("source_files")

@@ -159,6 +159,45 @@ def test_extract_source_files_includes_every_image_inside_images_array():
     ]
 
 
+def test_extract_source_files_preserves_every_serialized_configuration_layer():
+    """`layers` is the authoritative SOURCE list, including repeated uploads.
+
+    Printerval keeps this field JSON-encoded inside the outer JSON-encoded
+    `configurations` value.  The UI's SOURCE card has one row per layer, so
+    duplicates must remain duplicates and option metadata must not inflate the
+    count.
+    """
+    layers = [
+        {"name": f"photo {index}", "value": f"https://assets.printerval.com/upload-{index % 2}.png"}
+        for index in range(22)
+    ]
+    row = {
+        "designs": [{"name": "finished.png", "url": "https://assets.printerval.com/finished.png"}],
+        "meta_data": json.dumps(
+            {
+                "product_skus": {
+                    "sku": {
+                        "configurations": json.dumps(
+                            {
+                                "layers": json.dumps(layers),
+                                "options": json.dumps(
+                                    [{"name": "Upload", "value": "https://assets.printerval.com/upload-0.png"}]
+                                ),
+                            }
+                        )
+                    }
+                }
+            }
+        ),
+    }
+
+    sources = extract_source_files(row)
+
+    assert sources is not None
+    assert len(sources) == 22
+    assert [source["url"] for source in sources] == [layer["value"] for layer in layers]
+
+
 def test_parse_order_detail_from_row_personalized(monkeypatch):
     monkeypatch.setattr(
         "app.adapters.printerval.row_mapper.download_and_save_image", lambda *a, **k: None
