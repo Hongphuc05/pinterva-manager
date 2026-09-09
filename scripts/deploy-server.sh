@@ -149,6 +149,9 @@ export APP_VERSION="$APP_VERSION"
 export APP_SOURCE_DIR="./app"
 export DATA_DIR="./data"
 
+mkdir -p "$DATA_DIR/crawled_assets" "$DATA_DIR/order_assets" "$DATA_DIR/platform_data" "$DATA_DIR/playwright-evidence" "$DATA_DIR/credentials"
+chmod -R 777 "$DATA_DIR"
+
 COMPOSE_ARGS=(docker compose -f compose.yaml --env-file .env)
 if [[ "$DEPLOY_WITH_TUNNEL" == "true" ]]; then
   COMPOSE_ARGS+=(--profile tunnel)
