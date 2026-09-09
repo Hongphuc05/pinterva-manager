@@ -371,7 +371,7 @@ export function OrderHistoryPage() {
                             {item.thumbnail_url ? (
                               <img
                                 src={resolveAssetUrl(item.thumbnail_url)}
-                                alt={item.external_order_id}
+                                alt={isAdmin ? item.external_order_id : (item.product_name || 'Đơn hàng')}
                                 className="w-10 h-10 object-cover rounded-lg border border-gray-100 flex-shrink-0"
                               />
                             ) : (
@@ -380,17 +380,29 @@ export function OrderHistoryPage() {
                               </div>
                             )}
                             <div className="max-w-[200px]">
-                              <Link
-                                to={`/orders/${item.order_id}`}
-                                className="font-bold text-gray-900 hover:text-[#0052CC] truncate block text-sm"
-                                title={item.external_order_id}
-                              >
-                                #{item.external_order_id}
-                              </Link>
-                              {item.product_name && (
-                                <p className="text-xs text-gray-400 truncate" title={item.product_name}>
-                                  {item.product_name}
-                                </p>
+                              {isAdmin ? (
+                                <>
+                                  <Link
+                                    to={`/orders/${item.order_id}`}
+                                    className="font-bold text-gray-900 hover:text-[#0052CC] truncate block text-sm font-mono"
+                                    title={item.external_order_id}
+                                  >
+                                    #{item.external_order_id}
+                                  </Link>
+                                  {item.product_name && (
+                                    <p className="text-xs text-gray-400 truncate" title={item.product_name}>
+                                      {item.product_name}
+                                    </p>
+                                  )}
+                                </>
+                              ) : (
+                                <Link
+                                  to={`/orders/${item.order_id}`}
+                                  className="font-bold text-gray-900 hover:text-[#0052CC] line-clamp-2 block text-xs"
+                                  title={item.product_name || 'Đơn hàng'}
+                                >
+                                  {item.product_name || 'Đơn thiết kế'}
+                                </Link>
                               )}
                             </div>
                           </div>

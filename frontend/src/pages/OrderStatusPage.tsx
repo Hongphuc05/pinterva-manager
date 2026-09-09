@@ -5,7 +5,7 @@ import { useAuth } from '../auth/AuthContext'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { useSyncStatus } from '../hooks/useSyncStatus'
 import { getStatusInfo, getPrintervalStatusInfo } from '../utils/statusTranslation'
-import { Package, RefreshCw, Radio, Loader2, UserPlus, X, User, AlertTriangle } from 'lucide-react'
+import { Package, RefreshCw, Radio, Loader2, UserPlus, X, User, AlertTriangle, Search, Filter } from 'lucide-react'
 
 type OrderRow = {
   id: string
@@ -51,6 +51,10 @@ export function OrderStatusPage() {
   const [bulkPrintervalDesigner, setBulkPrintervalDesigner] = useState('')
   const [bulkPrintervalStatus, setBulkPrintervalStatus] = useState('Doing')
   const [bulkApplying, setBulkApplying] = useState(false)
+
+  const [searchQuery, setSearchQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [designerFilter, setDesignerFilter] = useState('')
 
   const [editingOrder, setEditingOrder] = useState<OrderRow | null>(null)
   const [editDesignerId, setEditDesignerId] = useState('')
@@ -149,8 +153,41 @@ export function OrderStatusPage() {
     )
   }
 
+  // Filter logic matching OrdersListPage
+  const filteredOrders = orders.filter((o) => {
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase()
+      const matches =
+        o.external_order_id.toLowerCase().includes(q) ||
+        (o.product_name && o.product_name.toLowerCase().includes(q)) ||
+        (o.assigned_designer_name && o.assigned_designer_name.toLowerCase().includes(q)) ||
+        (o.printerval_designer && o.printerval_designer.toLowerCase().includes(q))
+      if (!matches) return false
+    }
+
+    if (statusFilter) {
+      const pStatus = (o.printerval_status || '').toLowerCase()
+      const target = statusFilter.toLowerCase()
+      if (pStatus !== target && o.state.toLowerCase() !== target) return false
+    }
+
+    if (designerFilter) {
+      if (designerFilter === 'unassigned') {
+        if (o.assigned_designer_name || o.printerval_designer) return false
+      } else {
+        const desUser = usersList.find((u) => u.id === designerFilter)
+        if (desUser) {
+          const name = desUser.full_name || desUser.username
+          if (o.assigned_designer_name !== name && o.printerval_designer !== name) return false
+        }
+      }
+    }
+
+    return true
+  })
+
   function handleSelectAll(checked: boolean) {
-    setSelectedOrderIds(checked ? orders.map((o) => o.id) : [])
+    setSelectedOrderIds(checked ? filteredOrders.map((o) => o.id) : [])
   }
 
   useEffect(() => {
@@ -205,7 +242,7 @@ export function OrderStatusPage() {
   }
 
   async function handleBulkApply() {
-    if (!bulkPrintervalDesigner || selectedOrderIds.length === 0) return
+    if (selectedOrderIds.length === 0 || !bulkPrintervalStatus) return
     setBulkApplying(true)
     try {
       const res = await apiFetch<{ queued_count: number }>('/orders/bulk-printerval-assignment', {
@@ -213,7 +250,7 @@ export function OrderStatusPage() {
         body: JSON.stringify({
           order_ids: selectedOrderIds,
           designer_id: bulkDesignerId || null,
-          printerval_designer: bulkPrintervalDesigner,
+          printerval_designer: bulkPrintervalDesigner || null,
           printerval_status: bulkPrintervalStatus,
         }),
       })
@@ -264,6 +301,73 @@ export function OrderStatusPage() {
         </div>
       )}
 
+      {/* Filter Bar & Search */}
+      <div className="rounded-xl border border-[hsl(var(--border))] bg-white p-4 shadow-xs space-y-3">
+        <div className="flex flex-col md:flex-row items-center justify-between gap-4 flex-wrap">
+          {/* Search Box */}
+          <div className="relative w-full md:w-72">
+            <Search className="h-4 w-4 absolute left-3.5 top-3 text-slate-400" />
+            <input
+              type="text"
+              placeholder={isAdmin ? "Tìm theo Mã Đơn, Tên SP, DES..." : "Tìm theo Tên Đơn, Tên SP..."}
+              className="w-full pl-10 pr-4 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0052CC] bg-slate-50"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+
+          {/* Filters */}
+          <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
+            <div className="flex items-center gap-1.5">
+              <Filter className="h-3.5 w-3.5 text-slate-400" />
+              <select
+                className="text-xs border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 font-medium focus:outline-none focus:border-[#0052CC]"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+              >
+                <option value="">Tất cả Trạng Thái</option>
+                <option value="doing">Doing (Đang làm)</option>
+                <option value="review">Review (Chờ duyệt)</option>
+                <option value="fix">Fix (Cần sửa)</option>
+                <option value="done">Done (Hoàn thành)</option>
+                <option value="waiting">Waiting (Chờ làm)</option>
+              </select>
+            </div>
+
+            {/* Filter by Designer (Admin only) */}
+            {isAdmin && (
+              <select
+                className="text-xs border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 font-medium focus:outline-none focus:border-[#0052CC]"
+                value={designerFilter}
+                onChange={(e) => setDesignerFilter(e.target.value)}
+              >
+                <option value="">Tất cả DES</option>
+                <option value="unassigned">Chưa phân công</option>
+                {usersList.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.full_name || u.username} ({u.role})
+                  </option>
+                ))}
+              </select>
+            )}
+
+            {(searchQuery || statusFilter || designerFilter) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery('')
+                  setStatusFilter('')
+                  setDesignerFilter('')
+                }}
+                className="text-xs text-slate-500 hover:text-slate-800 underline font-medium cursor-pointer px-2"
+              >
+                Xóa bộ lọc
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
       {/* Bulk Action Bar */}
       {isAdmin && selectedOrderIds.length > 0 && (
         <div className="bg-[#0052CC] text-white px-5 py-3 rounded-xl shadow-lg flex flex-wrap items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2 border border-blue-400/30">
@@ -296,7 +400,7 @@ export function OrderStatusPage() {
               className="bg-white text-slate-800 text-xs font-semibold px-3 py-1.5 rounded-lg border border-white/30 focus:outline-none shadow-xs disabled:opacity-60"
             >
               <option value="">
-                {loadingPrintervalOptions ? 'Đang tải DES Printerval...' : '-- Chọn DES Printerval --'}
+                {loadingPrintervalOptions ? 'Đang tải DES Printerval...' : '-- Giữ nguyên DES / Chọn DES Printerval --'}
               </option>
               {printervalDesigners.map((d) => <option key={d} value={d}>{d}</option>)}
             </select>
@@ -306,15 +410,15 @@ export function OrderStatusPage() {
               disabled={loadingPrintervalOptions}
               className="bg-white text-slate-800 text-xs font-semibold px-3 py-1.5 rounded-lg border border-white/30 focus:outline-none shadow-xs disabled:opacity-60"
             >
-              {(printervalStatuses.length ? printervalStatuses : ['Doing']).map((s) => <option key={s} value={s}>{s}</option>)}
+              {(printervalStatuses.length ? printervalStatuses : ['Doing', 'Review', 'Fix', 'Done']).map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
             <button
               onClick={handleBulkApply}
-              disabled={!bulkPrintervalDesigner || bulkApplying || loadingPrintervalOptions}
+              disabled={selectedOrderIds.length === 0 || !bulkPrintervalStatus || bulkApplying || loadingPrintervalOptions}
               className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-[#0052CC] bg-white hover:bg-slate-100 rounded-lg shadow-sm transition-all disabled:opacity-50 cursor-pointer"
             >
               {bulkApplying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
-              <span>Sửa {selectedOrderIds.length} Đơn</span>
+              <span>Đổi Trạng Thái {selectedOrderIds.length} Đơn</span>
             </button>
             <button
               onClick={() => setSelectedOrderIds([])}
@@ -335,14 +439,14 @@ export function OrderStatusPage() {
                   <th className="py-3 px-3 w-10 text-center">
                     <input
                       type="checkbox"
-                      checked={orders.length > 0 && orders.every((o) => selectedOrderIds.includes(o.id))}
+                      checked={filteredOrders.length > 0 && filteredOrders.every((o) => selectedOrderIds.includes(o.id))}
                       onChange={(e) => handleSelectAll(e.target.checked)}
                       className="rounded border-slate-300 text-[#0052CC] focus:ring-[#0052CC] h-3.5 w-3.5 cursor-pointer"
                     />
                   </th>
                 )}
                 <th className="py-3 px-4 w-14 text-center">Ảnh</th>
-                <th className="py-3 px-4">Mã Đơn</th>
+                <th className="py-3 px-4">{isAdmin ? 'Mã Đơn' : 'Tên Đơn Hàng'}</th>
                 <th className="py-3 px-4">Trạng Thái Nội Bộ</th>
                 <th className="py-3 px-4">Trạng Thái Printerval</th>
                 <th className="py-3 px-4">DES</th>
@@ -351,7 +455,7 @@ export function OrderStatusPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
-              {orders.length === 0 ? (
+              {filteredOrders.length === 0 ? (
                 <tr>
                   <td colSpan={isAdmin ? 8 : 6} className="py-12 text-center text-slate-400">
                     <Package className="h-10 w-10 mx-auto mb-2 opacity-30" />
@@ -359,7 +463,7 @@ export function OrderStatusPage() {
                   </td>
                 </tr>
               ) : (
-                orders.map((o) => {
+                filteredOrders.map((o) => {
                   const internal = getStatusInfo(o.state)
                   const site = getPrintervalStatusInfo(o.printerval_status)
                   const isPending = o.printerval_assignment_lifecycle === 'pending'
@@ -380,7 +484,7 @@ export function OrderStatusPage() {
                         {o.thumbnail_url ? (
                           <img
                             src={resolveAssetUrl(o.thumbnail_url)}
-                            alt={o.external_order_id}
+                            alt={isAdmin ? o.external_order_id : (o.product_name || 'Đơn thiết kế')}
                             className="h-10 w-10 rounded-lg object-cover border border-slate-200 mx-auto"
                           />
                         ) : (
@@ -389,10 +493,23 @@ export function OrderStatusPage() {
                           </div>
                         )}
                       </td>
-                      <td className="py-2.5 px-4 font-mono font-semibold text-[#0052CC]">
-                        <Link to={`/orders/${o.id}`} className="hover:underline">
-                          {o.external_order_id}
-                        </Link>
+                      <td className="py-2.5 px-4 font-semibold text-[#0052CC]">
+                        {isAdmin ? (
+                          <div>
+                            <Link to={`/orders/${o.id}`} className="hover:underline font-mono">
+                              {o.external_order_id}
+                            </Link>
+                            {o.product_name && (
+                              <p className="text-[11px] text-slate-500 font-normal line-clamp-1 mt-0.5" title={o.product_name}>
+                                {o.product_name}
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <Link to={`/orders/${o.id}`} className="hover:underline line-clamp-2" title={o.product_name || 'Chi tiết đơn hàng'}>
+                            {o.product_name || 'Đơn thiết kế'}
+                          </Link>
+                        )}
                       </td>
                       <td className="py-2.5 px-4">
                         <span
@@ -401,6 +518,7 @@ export function OrderStatusPage() {
                         >
                           {internal.label}
                         </span>
+
                       </td>
                       <td className="py-2.5 px-4">
                         <span className="inline-flex items-center gap-1.5">

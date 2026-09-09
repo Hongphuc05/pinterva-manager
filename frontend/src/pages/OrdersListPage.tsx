@@ -737,7 +737,7 @@ export function OrdersListPage() {
                   </th>
                 )}
                 <th className="py-3 px-4 w-14 text-center">Ảnh</th>
-                <th className="py-3 px-4">Mã Đơn Hàng</th>
+                <th className="py-3 px-4">{isAdmin ? 'Mã Đơn Hàng' : 'Tên Đơn Hàng'}</th>
                 <th className="py-3 px-4">Trạng Thái</th>
                 <th className="py-3 px-4">DES Đảm Nhận</th>
                 <th className="py-3 px-4">Template</th>
@@ -787,7 +787,7 @@ export function OrdersListPage() {
                         {o.thumbnail_url ? (
                           <img
                             src={resolveAssetUrl(o.thumbnail_url)}
-                            alt={o.external_order_id}
+                            alt={isAdmin ? o.external_order_id : (o.product_name || 'Đơn thiết kế')}
                             title="Click để xem ảnh to"
                             onClick={() => setSelectedImage(resolveAssetUrl(o.thumbnail_url) ?? null)}
                             className="h-10 w-10 rounded-lg object-cover border border-slate-200 mx-auto shadow-2xs cursor-pointer hover:scale-105 transition-transform hover:ring-2 hover:ring-[#0052CC]"
@@ -799,15 +799,22 @@ export function OrdersListPage() {
                         )}
                       </td>
 
-                      {/* Order Code */}
-                      <td className="py-2.5 px-4 font-mono font-semibold text-[#0052CC]">
+                      {/* Order Code / Product Name */}
+                      <td className="py-2.5 px-4 font-semibold text-[#0052CC]">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <Link
                             to={`/orders/${o.id}`}
                             onClick={() => isNewlyCrawled && dismissHighlight(o.id)}
                             className="hover:underline flex items-center gap-1"
+                            title={o.product_name || o.external_order_id}
                           >
-                            <span>{o.external_order_id}</span>
+                            {isAdmin ? (
+                              <span className="font-mono">{o.external_order_id}</span>
+                            ) : (
+                              <span className="line-clamp-2 text-xs font-semibold text-slate-800 hover:text-[#0052CC]">
+                                {o.product_name || 'Đơn thiết kế'}
+                              </span>
+                            )}
                           </Link>
                           {isNewlyCrawled && (
                             <span
@@ -822,6 +829,11 @@ export function OrdersListPage() {
                             </span>
                           )}
                         </div>
+                        {isAdmin && o.product_name && (
+                          <p className="text-[11px] text-slate-500 font-normal line-clamp-1 mt-0.5" title={o.product_name}>
+                            {o.product_name}
+                          </p>
+                        )}
                         <div className="flex items-center gap-2 mt-1 flex-wrap">
                           {o.sku_image_url && (
                             <a
@@ -835,7 +847,7 @@ export function OrdersListPage() {
                               <ExternalLink className="h-2.5 w-2.5" />
                             </a>
                           )}
-                          {o.external_order_url && (
+                          {isAdmin && o.external_order_url && (
                             <a
                               href={o.external_order_url}
                               target="_blank"

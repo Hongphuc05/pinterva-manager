@@ -226,8 +226,11 @@ class PrintervalAssignmentResponse(BaseModel):
     lifecycle: str
 
 
-class BulkPrintervalAssignmentPayload(PrintervalAssignmentPayload):
+class BulkPrintervalAssignmentPayload(BaseModel):
     order_ids: list[str]
+    designer_id: str | None = None
+    printerval_designer: str | None = None
+    printerval_status: str = "Doing"
 
 
 class BulkPrintervalAssignmentResponse(BaseModel):
@@ -508,8 +511,8 @@ def api_bulk_printerval_assignment(
         designer = db.get(User, designer_id)
         if designer is None or not designer.active:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Designer not found")
-    if not payload.printerval_designer.strip():
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Printerval Designer is required")
+
+    has_printerval_designer = bool(payload.printerval_designer and payload.printerval_designer.strip())
     if payload.printerval_status not in PRINTERVAL_STATUSES:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid Printerval status")
     try:
@@ -525,7 +528,54 @@ def api_bulk_printerval_assignment(
             "Mỗi đơn phải thuộc platform đang chọn",
         )
 
-    requests: list[PrintervalAssignmentRequest] = []
+    # If Printerval Designer is provided, use the full request lifecycle
+    if has_printerval_designer:
+        requests: list[PrintervalAssignmentRequest] = []
+        for order in orders:
+            if designer is not None:
+                assignment = db.query(Assignment).filter(Assignment.order_id == order.id).one_or_none()
+                if assignment is None:
+                    db.add(Assignment(order_id=order.id, designer_id=designer.id, status="approved"))
+                else:
+                    assignment.designer_id = designer.id
+                    assignment.status = "approved"
+                order.state = OrderState.WAITING.value
+            try:
+                requests.append(
+                    create_request(
+                        db,
+                        order=order,
+                        internal_designer=designer or user,
+                        platform_id=platform_id,
+                        designer_option=payload.printerval_designer.strip(),
+                        target_status=payload.printerval_status,
+                    )
+                )
+            except PrintervalAssignmentValidationError as exc:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+        from app.workers.assignment_sync_tasks import sync_printerval_assignment_request
+
+        for request in requests:
+            sync_printerval_assignment_request.delay(str(request.id))
+        return BulkPrintervalAssignmentResponse(
+            request_ids=[request.id for request in requests],
+            queued_count=len(requests),
+        )
+
+    # Status-only update (or with optional internal designer change)
+    from app.workers.assignment_sync_tasks import sync_order_review_to_printerval_task
+
+    status_state_map = {
+        "Doing": OrderState.IN_PROGRESS,
+        "Review": OrderState.QC_PENDING,
+        "Fix": OrderState.REVISION,
+        "Done": OrderState.DONE,
+        "Waiting": OrderState.WAITING,
+        "Skipped": OrderState.DONE,
+    }
+    mapped_state = status_state_map.get(payload.printerval_status)
+
     for order in orders:
         if designer is not None:
             assignment = db.query(Assignment).filter(Assignment.order_id == order.id).one_or_none()
@@ -534,28 +584,18 @@ def api_bulk_printerval_assignment(
             else:
                 assignment.designer_id = designer.id
                 assignment.status = "approved"
-            order.state = OrderState.WAITING.value
-        try:
-            requests.append(
-                create_request(
-                    db,
-                    order=order,
-                    internal_designer=designer or user,
-                    platform_id=platform_id,
-                    designer_option=payload.printerval_designer,
-                    target_status=payload.printerval_status,
-                )
-            )
-        except PrintervalAssignmentValidationError as exc:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+        if mapped_state:
+            order.state = mapped_state.value
+        order.printerval_status = payload.printerval_status.lower()
+        order.printerval_status_synced_at = datetime.now(UTC)
 
-    from app.workers.assignment_sync_tasks import sync_printerval_assignment_request
+        # Trigger background task to push status to Printerval via direct HTTP API
+        sync_order_review_to_printerval_task.delay(str(order.id), None, payload.printerval_status)
 
-    for request in requests:
-        sync_printerval_assignment_request.delay(str(request.id))
+    db.commit()
     return BulkPrintervalAssignmentResponse(
-        request_ids=[request.id for request in requests],
-        queued_count=len(requests),
+        request_ids=[],
+        queued_count=len(orders),
     )
 
 

@@ -1,0 +1,22 @@
+name: Deploy to Self-Hosted PC Server
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Sync code to /srv/tacahu and restart containers
+        run: |
+          echo "🚀 Deploying latest code to /srv/tacahu..."
+          cp compose.yaml /srv/tacahu/compose.yaml
+          rsync -av --delete app/ /srv/tacahu/app/
+          cd /srv/tacahu
+          docker compose up -d --build
+          echo "✅ Deployment successful! Current containers:"
+          docker compose ps

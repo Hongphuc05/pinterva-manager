@@ -399,7 +399,11 @@ export function OrderDetailPage() {
             )}
             <div className="space-y-1">
               <div className="flex flex-wrap items-center gap-3">
-                <h1 className="text-xl font-bold font-mono text-[#0052CC]">{order.external_order_id}</h1>
+                {isAdmin ? (
+                  <h1 className="text-xl font-bold font-mono text-[#0052CC]">{order.external_order_id}</h1>
+                ) : (
+                  <h1 className="text-xl font-bold text-slate-900">{order.product_name || 'Đơn hàng thiết kế'}</h1>
+                )}
                 <StatusDropdown
                   orderId={order.id}
                   currentState={order.state}
@@ -425,7 +429,9 @@ export function OrderDetailPage() {
                   </span>
                 )}
               </div>
-              <p className="text-sm font-semibold text-slate-800 mt-1">{order.product_name ?? 'Đơn hàng 2D Custom'}</p>
+              {isAdmin && (
+                <p className="text-sm font-semibold text-slate-800 mt-1">{order.product_name ?? 'Đơn hàng 2D Custom'}</p>
+              )}
               <div className="flex flex-wrap items-center gap-4 mt-2 text-xs text-slate-500 font-mono">
                 <span>SKU: <strong className="text-slate-700">{order.sku ?? '-'}</strong></span>
                 <span>•</span>
@@ -444,7 +450,7 @@ export function OrderDetailPage() {
                     </a>
                   </>
                 )}
-                {order.external_order_url && (
+                {isAdmin && order.external_order_url && (
                   <>
                     <span>•</span>
                     <a
