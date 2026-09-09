@@ -55,7 +55,7 @@ def test_download_asset_returns_failure_and_writes_nothing_on_non_ok_response(
     tmp_path, monkeypatch
 ):
     monkeypatch.setattr(pa, "capture_evidence", lambda page, label: {})
-    monkeypatch.setattr(pa, "_search_and_get_row", lambda page, order_id: _FakeRow())
+    monkeypatch.setattr(pa, "_search_and_get_row", lambda *_args: _FakeRow())
     monkeypatch.chdir(tmp_path)
 
     response = _FakeRequestResponse(ok=False, status=403, body=b"cdn error body")
@@ -78,19 +78,26 @@ def test_search_and_get_row_cached_reuses_the_same_order_and_refetches_on_a_diff
     once per order, not twice, since each used to do its own full _search_and_get_row."""
     calls = []
 
-    def _fake_search(page, order_id):
-        calls.append(order_id)
+    def _fake_search(page, order_id, username=None, password=None):
+        calls.append((order_id, username, password))
         return _FakeRow()
 
     monkeypatch.setattr(pa, "_search_and_get_row", _fake_search)
-    adapter = pa.PlaywrightPrintervalAdapter(page=_FakePage(None))
+    adapter = pa.PlaywrightPrintervalAdapter(
+        page=_FakePage(None),
+        crawl_username="platform@example.com",
+        crawl_password="platform-password",
+    )
 
     row_a1 = adapter._search_and_get_row_cached("DJ0000001")
     row_a2 = adapter._search_and_get_row_cached("DJ0000001")  # same order -> cache hit
     adapter._search_and_get_row_cached("DJ0000002")  # different order -> cache miss
 
     assert row_a1 is row_a2
-    assert calls == ["DJ0000001", "DJ0000002"]
+    assert calls == [
+        ("DJ0000001", "platform@example.com", "platform-password"),
+        ("DJ0000002", "platform@example.com", "platform-password"),
+    ]
 
 
 class _FakeRowNoSourceLink:
@@ -110,7 +117,7 @@ def test_download_asset_succeeds_with_no_local_path_when_order_has_no_source_lin
     download — that must not be treated as a VALIDATION failure (which previously
     dead-lettered the order forever, before get_order_detail ever ran and filled in
     its real thumbnail/template/sku)."""
-    monkeypatch.setattr(pa, "_search_and_get_row", lambda page, order_id: _FakeRowNoSourceLink())
+    monkeypatch.setattr(pa, "_search_and_get_row", lambda *_args: _FakeRowNoSourceLink())
     monkeypatch.chdir(tmp_path)
 
     adapter = pa.PlaywrightPrintervalAdapter(page=_FakePage(None))
@@ -156,7 +163,7 @@ def test_set_designer_verify_failure_after_successful_save_is_unknown_outcome(mo
 
     calls = {"n": 0}
 
-    def fake_search(page, order_id):
+    def fake_search(page, order_id, *_credentials):
         calls["n"] += 1
         if calls["n"] == 1:
             # Already the target value, so set_designer skips straight to the

@@ -45,7 +45,7 @@ export function Sidebar() {
           <PackageCheck className="h-6 w-6 text-white" />
         </div>
         <div>
-          <h1 className="font-bold text-base tracking-tight text-white leading-none">Pinterval Ops</h1>
+          <h1 className="font-bold text-base tracking-tight text-white leading-none">Tacahu Ops</h1>
           <p className="text-[11px] text-blue-100/70 mt-1 font-medium">System Dashboard V1</p>
         </div>
       </div>

@@ -24,8 +24,10 @@ def is_session_open() -> bool:
 def start_session() -> None:
     global _login_session
     if not is_session_open():
-        # This is the one explicit interactive login flow, so it may show Chrome.
-        playwright_cm, context, page = open_playwright_session(headless=False)
+        # Background and legacy login endpoints must not open a visible Chrome
+        # window. Authentication is performed from each platform's configured
+        # credentials by the current crawl/sync flows.
+        playwright_cm, context, page = open_playwright_session(headless=True)
         page.goto(ADMIN_URL)
         _login_session = {"playwright_cm": playwright_cm, "context": context}
 

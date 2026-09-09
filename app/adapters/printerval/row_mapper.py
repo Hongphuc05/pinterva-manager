@@ -87,10 +87,15 @@ def _parse_custom_config(sku_data: dict[str, Any] | None) -> CustomConfig | None
         config = raw_config
     if not isinstance(config, dict) or not config:
         return None
-    original = [CustomConfigEntry(key=str(k), value=str(v)) for k, v in config.items()]
+    # Keep nested image/text arrays valid JSON. `str(list)` creates Python syntax,
+    # which made downstream clients treat an entire configuration group as one value.
+    def serialize(value: Any) -> str:
+        return json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else str(value)
+
+    original = [CustomConfigEntry(key=str(k), value=serialize(v)) for k, v in config.items()]
     raw_translated = sku_data.get("translated_configurations")
     translated = (
-        [CustomConfigEntry(key=str(k), value=str(v)) for k, v in raw_translated.items()]
+        [CustomConfigEntry(key=str(k), value=serialize(v)) for k, v in raw_translated.items()]
         if isinstance(raw_translated, dict)
         else []
     )
@@ -200,12 +205,25 @@ def extract_source_files(row: dict[str, Any]) -> list[dict[str, str]] | None:
             config = None
     else:
         config = raw_config
+    def collect_configuration_images(entry: Any, label: str | None = None) -> None:
+        """The live site uses both `{photo: {type, value}}` and
+        `{images: [{type, value}, ...]}`.  SOURCE lists every image in either
+        shape, including repeated filenames, so do not deduplicate here."""
+        if isinstance(entry, dict):
+            if entry.get("type") == "image":
+                url = entry.get("value") or entry.get("src")
+                if isinstance(url, str) and url.strip():
+                    sources.append({"name": label or url.rstrip("/").split("/")[-1], "url": url.strip()})
+            else:
+                for nested_key, nested in entry.items():
+                    collect_configuration_images(nested, str(nested_key))
+        elif isinstance(entry, list):
+            for nested in entry:
+                collect_configuration_images(nested)
+
     if isinstance(config, dict):
         for key, entry in config.items():
-            if isinstance(entry, dict) and entry.get("type") == "image":
-                url = entry.get("value")
-                if isinstance(url, str) and url.strip():
-                    sources.append({"name": str(key), "url": url.strip()})
+            collect_configuration_images(entry, str(key))
 
     # 3. From custom_design_files / attachments
     attachments = row.get("custom_design_files") or row.get("attachments") or row.get("source_files")

@@ -5,6 +5,7 @@ import uuid
 
 from sqlalchemy.orm import Session
 
+from app.adapters.db.models import Platform
 from app.adapters.db.session import SessionLocal
 from app.adapters.playwright_support import playwright_session
 from app.adapters.printerval.interface import ALL_JOB_TYPES, NTTH_DESIGNER_OPTION, PrintervalAdapter
@@ -105,23 +106,30 @@ def crawl_and_claim() -> None:
     # beyond this one logger.
     logger.disabled = False
 
+    session = SessionLocal()
     try:
-        # Scheduled crawling must never open a visible Chrome window for operators.
-        session_cm = playwright_session(headless=True)
-        page = session_cm.__enter__()
-    except Exception:
-        logger.exception("crawl_and_claim: Playwright session failed to open, skipping this cycle")
-        return
-
-    try:
-        adapter = PlaywrightPrintervalAdapter(page=page)
-        session = SessionLocal()
-        try:
-            summary = run_crawl_cycle(session, adapter)
-            logger.info("crawl_and_claim cycle summary: %s", summary)
-        except Exception:
-            logger.exception("crawl_and_claim: cycle raised an unexpected exception mid-run")
-        finally:
-            session.close()
+        platforms = (
+            session.query(Platform)
+            .filter(
+                Platform.is_active.is_(True),
+                Platform.account_password.isnot(None),
+                Platform.team_outsource.isnot(None),
+            )
+            .all()
+        )
+        for platform in platforms:
+            profile_dir = "chrome-profile-" + platform.account_username.replace("@", "_").replace(".", "_")
+            try:
+                # Scheduled crawling stays hidden, but is always scoped to one platform.
+                with playwright_session(profile_dir=profile_dir, headless=True) as page:
+                    adapter = PlaywrightPrintervalAdapter(
+                        page=page,
+                        crawl_username=platform.account_username,
+                        crawl_password=platform.account_password,
+                    )
+                    summary = run_crawl_cycle(session, adapter, platform_id=platform.id)
+                    logger.info("crawl_and_claim platform %s: %s", platform.account_username, summary)
+            except Exception:
+                logger.exception("crawl_and_claim: cycle failed for platform %s", platform.id)
     finally:
-        session_cm.__exit__(None, None, None)
+        session.close()

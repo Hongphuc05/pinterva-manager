@@ -8,6 +8,9 @@ from app.application.order_queries import (
 from app.domain.models import OrderState
 
 
+import uuid
+
+
 def _make_user(db_session, role, username):
     user = User(
         username=username, full_name=username, role=role,
@@ -19,7 +22,7 @@ def _make_user(db_session, role, username):
 
 
 def test_list_orders_for_user_admin_sees_all(db_session):
-    admin = _make_user(db_session, "admin", "admin1")
+    admin = _make_user(db_session, "admin", "admin_q1")
     db_session.add(Order(external_order_id="DJ1", state=OrderState.DISCOVERED.value))
     db_session.add(Order(external_order_id="DJ2", state=OrderState.DISCOVERED.value))
     db_session.commit()
@@ -29,11 +32,11 @@ def test_list_orders_for_user_admin_sees_all(db_session):
     assert {o.external_order_id for o in orders} == {"DJ1", "DJ2"}
 
 
-def test_list_orders_for_user_designer_sees_all_platform_orders(db_session):
-    designer = _make_user(db_session, "designer", "designer1")
-    other_designer = _make_user(db_session, "designer", "designer2")
-    o1 = Order(external_order_id="DJ1", state=OrderState.DISCOVERED.value)
-    o2 = Order(external_order_id="DJ2", state=OrderState.DISCOVERED.value)
+def test_list_orders_for_user_designer_only_sees_own_orders(db_session):
+    designer = _make_user(db_session, "designer", "designer_q2a")
+    other_designer = _make_user(db_session, "designer", "designer_q2b")
+    o1 = Order(external_order_id="DJ1", state=OrderState.OPEN.value)
+    o2 = Order(external_order_id="DJ2", state=OrderState.OPEN.value)
     db_session.add_all([o1, o2])
     db_session.commit()
     db_session.add(Assignment(order_id=o1.id, designer_id=designer.id, status="approved"))
@@ -42,14 +45,14 @@ def test_list_orders_for_user_designer_sees_all_platform_orders(db_session):
 
     orders = list_orders_for_user(db_session, designer)
 
-    assert {o.external_order_id for o in orders} == {"DJ1", "DJ2"}
+    assert {o.external_order_id for o in orders} == {"DJ1"}
 
 
 def test_list_orders_for_user_designer_with_designer_id_filter(db_session):
-    designer = _make_user(db_session, "designer", "designer1")
-    other_designer = _make_user(db_session, "designer", "designer2")
-    o1 = Order(external_order_id="DJ1", state=OrderState.DISCOVERED.value)
-    o2 = Order(external_order_id="DJ2", state=OrderState.DISCOVERED.value)
+    designer = _make_user(db_session, "designer", "designer_q3a")
+    other_designer = _make_user(db_session, "designer", "designer_q3b")
+    o1 = Order(external_order_id="DJ1", state=OrderState.OPEN.value)
+    o2 = Order(external_order_id="DJ2", state=OrderState.OPEN.value)
     db_session.add_all([o1, o2])
     db_session.commit()
     db_session.add(Assignment(order_id=o1.id, designer_id=designer.id, status="approved"))
@@ -61,16 +64,21 @@ def test_list_orders_for_user_designer_with_designer_id_filter(db_session):
     assert [o.external_order_id for o in orders] == ["DJ1"]
 
 
-def test_get_order_detail_for_user_designer_can_view_any_platform_order(db_session):
-    designer = _make_user(db_session, "designer", "designer1")
-    order = Order(external_order_id="DJ1", state=OrderState.DISCOVERED.value)
+def test_get_order_detail_for_user_designer_cannot_view_unassigned_order(db_session):
+    designer = _make_user(db_session, "designer", "designer_q4")
+    order = Order(external_order_id="DJ1", state=OrderState.OPEN.value)
     db_session.add(order)
     db_session.commit()
 
-    result = get_order_detail_for_user(db_session, designer, str(order.id))
+    unassigned_result = get_order_detail_for_user(db_session, designer, str(order.id))
+    assert unassigned_result is None
 
-    assert result is not None
-    assert result.external_order_id == "DJ1"
+    db_session.add(Assignment(order_id=order.id, designer_id=designer.id, status="approved"))
+    db_session.commit()
+
+    assigned_result = get_order_detail_for_user(db_session, designer, str(order.id))
+    assert assigned_result is not None
+    assert assigned_result.external_order_id == "DJ1"
 
 
 def test_get_order_detail_for_user_invalid_uuid_returns_none(db_session):

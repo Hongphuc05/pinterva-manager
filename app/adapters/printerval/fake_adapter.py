@@ -38,6 +38,8 @@ class _FakeOrder:
     priority_label: str | None = None
     custom_config: CustomConfig | None = None
     design_tool_url: str | None = None
+    template_jobs: list[dict] | None = None
+    checksum: str = "fakechecksum"
 
 
 class FakePrintervalAdapter:
@@ -110,6 +112,7 @@ class FakePrintervalAdapter:
             priority_label=order.priority_label,
             custom_config=order.custom_config,
             design_tool_url=order.design_tool_url,
+            template_jobs=order.template_jobs,
         )
 
     def set_designer(self, external_order_id: str, designer_option: str) -> WriteResult:
@@ -163,5 +166,5 @@ class FakePrintervalAdapter:
             success=True,
             external_order_id=external_order_id,
             local_path=f"/tmp/fake-assets/{external_order_id}.png",
-            checksum="fakechecksum",
+            checksum=order.checksum,
         )

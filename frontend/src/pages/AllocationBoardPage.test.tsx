@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { BrowserRouter } from 'react-router-dom'
 import { AuthProvider } from '../auth/AuthContext'
+import { PlatformProvider } from '../auth/PlatformContext'
 import { AllocationBoardPage } from './AllocationBoardPage'
 
 describe('AllocationBoardPage', () => {
@@ -14,6 +15,9 @@ describe('AllocationBoardPage', () => {
             ok: true, status: 200,
             json: async () => ({ id: '1', role: 'admin', full_name: 'Admin' }),
           })
+        }
+        if (url.includes('/api/platforms')) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ platforms: [] }) })
         }
         if (url.includes('/api/allocation/board')) {
           return Promise.resolve({
@@ -35,12 +39,14 @@ describe('AllocationBoardPage', () => {
     render(
       <BrowserRouter>
         <AuthProvider>
-          <AllocationBoardPage />
+          <PlatformProvider>
+            <AllocationBoardPage />
+          </PlatformProvider>
         </AuthProvider>
       </BrowserRouter>
     )
-    fireEvent.change(screen.getByPlaceholderText('Batch ID'), { target: { value: 'b1' } })
-    fireEvent.click(screen.getByText('Tải'))
+    fireEvent.change(screen.getByPlaceholderText(/Batch ID/i), { target: { value: 'b1' } })
+    fireEvent.click(screen.getByRole('button', { name: /Tải Bảng/i }))
     await waitFor(() => expect(screen.getByText('DJ1')).toBeInTheDocument())
     expect(screen.getByText(/Nam/)).toBeInTheDocument()
   })
@@ -52,6 +58,9 @@ describe('AllocationBoardPage', () => {
           ok: true, status: 200,
           json: async () => ({ id: 'd1', role: 'designer', full_name: 'Nam' }),
         })
+      }
+      if (url.includes('/api/platforms')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ platforms: [] }) })
       }
       if (url.includes('/api/allocation/offer')) {
         return Promise.resolve({
@@ -74,14 +83,16 @@ describe('AllocationBoardPage', () => {
     render(
       <BrowserRouter>
         <AuthProvider>
-          <AllocationBoardPage />
+          <PlatformProvider>
+            <AllocationBoardPage />
+          </PlatformProvider>
         </AuthProvider>
       </BrowserRouter>
     )
-    fireEvent.change(screen.getByPlaceholderText('Batch ID'), { target: { value: 'b1' } })
-    fireEvent.click(screen.getByText('Tải'))
-    await waitFor(() => expect(screen.getByText('Nhận')).toBeInTheDocument())
-    fireEvent.click(screen.getByText('Nhận'))
+    fireEvent.change(screen.getByPlaceholderText(/Batch ID/i), { target: { value: 'b1' } })
+    fireEvent.click(screen.getByRole('button', { name: /Tải Bảng/i }))
+    await waitFor(() => expect(screen.getByText('Đăng ký nhận')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('Đăng ký nhận'))
     await waitFor(() =>
       expect(fetch).toHaveBeenCalledWith('/api/allocation/offer', expect.anything())
     )
@@ -94,6 +105,9 @@ describe('AllocationBoardPage', () => {
           ok: true, status: 200,
           json: async () => ({ id: 'a2', role: 'admin', full_name: 'Second admin' }),
         })
+      }
+      if (url.includes('/api/platforms')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ platforms: [] }) })
       }
       if (url.includes('/api/approvals/ap1/decide')) {
         return Promise.resolve({
@@ -128,14 +142,17 @@ describe('AllocationBoardPage', () => {
     render(
       <BrowserRouter>
         <AuthProvider>
-          <AllocationBoardPage />
+          <PlatformProvider>
+            <AllocationBoardPage />
+          </PlatformProvider>
         </AuthProvider>
       </BrowserRouter>
     )
-    fireEvent.change(screen.getByPlaceholderText('Batch ID'), { target: { value: 'b1' } })
-    fireEvent.click(screen.getByText('Tải'))
-    await waitFor(() => expect(screen.getByText('Approve')).toBeInTheDocument())
-    fireEvent.click(screen.getByText('Approve'))
+    fireEvent.change(screen.getByPlaceholderText(/Batch ID/i), { target: { value: 'b1' } })
+    fireEvent.click(screen.getByRole('button', { name: /Tải Bảng/i }))
+    await waitFor(() => expect(screen.getByText('Duyệt')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('Duyệt'))
     await waitFor(() => expect(screen.getByText(/First admin/)).toBeInTheDocument())
   })
 })
+

@@ -3,6 +3,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, status
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import allocation_api as allocation_api_routes
 from app.api.routes import auth as auth_routes
@@ -13,13 +14,33 @@ from app.api.routes import orders_api as orders_api_routes
 from app.api.routes import platforms_api as platforms_api_routes
 from app.api.routes import protected_example
 from app.api.routes import users_api as users_api_routes
+from app.config import get_settings
 
 FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 CRAWLED_ASSETS_DIR = Path(__file__).resolve().parent.parent.parent / "crawled_assets"
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Pinterval Ops Dashboard")
+    app = FastAPI(title="Tacahu Ops Dashboard")
+    settings = get_settings()
+    allowed_origins = [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
+    if "*" in allowed_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origin_regex=r"https://.*\.vercel\.app|http://localhost:\d+",
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+    elif allowed_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=allowed_origins,
+            allow_origin_regex=r"https://.*\.vercel\.app|http://localhost:\d+",
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
     app.include_router(health_routes.router, prefix="/api")
     app.include_router(auth_routes.router, prefix="/api")
     app.include_router(users_api_routes.router, prefix="/api")

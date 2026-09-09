@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -178,8 +179,7 @@ def scan_orders_fast(
                 .one_or_none()
             )
             if order is None:
-                session.add(
-                    Order(
+                order = Order(
                         external_order_id=summary.external_order_id,
                         platform_id=platform_id,
                         state=OrderState.OPEN.value,
@@ -189,16 +189,53 @@ def scan_orders_fast(
                         product_category=summary.product_category,
                         template_jobs=summary.template_jobs,
                         has_template=bool(summary.template_jobs),
-                        printerval_designer=summary.designer,
+                        # The list API's designer_email is order metadata, not the
+                        # visible Designer selection.  Only an explicit assignment
+                        # write may populate this mirror.
+                        printerval_designer=None,
                         printerval_status=summary.status.lower(),
                     )
-                )
+                session.add(order)
                 added += 1
             else:
-                order.printerval_designer = summary.designer or order.printerval_designer
+                if order.printerval_designer and "@" in order.printerval_designer:
+                    order.printerval_designer = None
                 order.printerval_status = summary.status.lower()
                 order.thumbnail_url = summary.thumbnail_url or order.thumbnail_url
                 updated += 1
+
+            # The fast list endpoint already contains the complete order payload.
+            # Parse it from the adapter cache to persist resource files, custom
+            # configuration, dates and source images in this same HTTP crawl.
+            detail = adapter.get_order_detail(summary.external_order_id, platform_id=str(platform_id))
+            if detail.success:
+                if detail.product_name:
+                    order.product_name = detail.product_name
+                if detail.thumbnail_url:
+                    order.thumbnail_url = detail.thumbnail_url
+                if detail.sku:
+                    order.sku = detail.sku
+                if detail.product_category:
+                    order.product_category = detail.product_category
+                order.product_variants = [variant.model_dump() for variant in detail.product_variants]
+                order.has_template = detail.has_template
+                if detail.template_jobs:
+                    order.template_jobs = detail.template_jobs
+                order.multiple_design = detail.multiple_design
+                order.double_sided = detail.double_sided
+                order.created_at_ext = detail.created_at
+                order.order_created_at_ext = detail.order_created_at
+                order.deadline_at_ext = detail.deadline_at
+                order.note_outsource = detail.note_outsource
+                order.order_note = detail.order_note
+                order.custom_config = detail.custom_config.model_dump() if detail.custom_config else None
+                order.design_tool_url = detail.design_tool_url
+                if detail.sku_image_url:
+                    order.sku_image_url = detail.sku_image_url
+                if detail.external_order_url:
+                    order.external_order_url = detail.external_order_url
+                if detail.source_files:
+                    order.source_files = detail.source_files
         if not result.cursor:
             break
         cursor = result.cursor
@@ -387,6 +424,115 @@ def retry_failed_claims(
     return {"batch_id": str(batch.id), "claimed": claimed, "failed": failed}
 
 
+def _apply_order_detail_result(order: Order, detail_result) -> None:
+    """Copy a successful get_order_detail result onto an Order — shared by
+    import_claimed_orders (first import) and refresh_order_detail (re-fetch for an
+    order already past that point, e.g. the mother site added a template later).
+    Only overwrite what discover-time already captured (from the list API response)
+    when the detail scrape actually found a value — Playwright's DOM extraction can
+    legitimately come back empty for a field (selector didn't match this row's
+    layout) and must not blank out a value we already have, just because it ran
+    second."""
+    if detail_result.status:
+        order.printerval_status = detail_result.status.lower()
+        order.printerval_status_synced_at = datetime.now(UTC)
+    if detail_result.designer:
+        order.printerval_designer = detail_result.designer
+        order.printerval_designer_synced_at = datetime.now(UTC)
+    if detail_result.product_name:
+        order.product_name = detail_result.product_name
+    if detail_result.thumbnail_url:
+        order.thumbnail_url = detail_result.thumbnail_url
+    if detail_result.sku:
+        order.sku = detail_result.sku
+    if detail_result.product_category:
+        order.product_category = detail_result.product_category
+    order.product_variants = [v.model_dump() for v in detail_result.product_variants]
+    order.has_template = detail_result.has_template
+    if detail_result.template_jobs:
+        order.template_jobs = detail_result.template_jobs
+    order.multiple_design = detail_result.multiple_design
+    order.double_sided = detail_result.double_sided
+    order.priority_label = detail_result.priority_label
+    order.created_at_ext = detail_result.created_at
+    order.order_created_at_ext = detail_result.order_created_at
+    order.deadline_at_ext = detail_result.deadline_at
+    order.note_outsource = detail_result.note_outsource
+    order.order_note = detail_result.order_note
+    order.custom_config = (
+        detail_result.custom_config.model_dump() if detail_result.custom_config else None
+    )
+    order.design_tool_url = detail_result.design_tool_url
+    if detail_result.sku_image_url:
+        order.sku_image_url = detail_result.sku_image_url
+    if detail_result.external_order_url:
+        order.external_order_url = detail_result.external_order_url
+    if detail_result.source_files:
+        order.source_files = detail_result.source_files
+    if detail_result.source_download_all_url:
+        order.source_download_all_url = detail_result.source_download_all_url
+
+
+def refresh_order_detail(session: Session, adapter: PrintervalAdapter, order: Order) -> dict:
+    """Re-fetch and overwrite an order's full detail (template, source files, images,
+    deadline, product info...) from Printerval, regardless of its current internal
+    state. Unlike import_claimed_orders (first import, gated on state, transitions
+    OPEN -> OPEN via apply_transition), this never touches Order.state — it's a pure
+    metadata refresh for an order the mother site changed *after* the one-time import
+    (e.g. a template added later), triggered on demand from the "Trạng Thái Đơn" tab.
+
+    Not idempotency-key-gated: like retry_failed_claims, a manual "refresh now" click
+    is a genuinely new request each time, and re-running this is always safe — it only
+    overwrites fields with fresh reads, never creates a duplicate side effect (the one
+    OrderAsset row is only added when the checksum actually changed, see below).
+    """
+    order_platform_id = str(order.platform_id) if order.platform_id else None
+    detail_result = with_retry(
+        lambda: adapter.get_order_detail(order.external_order_id, platform_id=order_platform_id)
+    )
+    if not detail_result.success:
+        session.add(
+            DeadLetter(
+                source="crawl.refresh_order_detail",
+                payload={"order_id": order.external_order_id, "stage": "get_order_detail"},
+                error_class=detail_result.error_class or "BUG",
+            )
+        )
+        return {"success": False, "stage": "get_order_detail"}
+
+    _apply_order_detail_result(order, detail_result)
+
+    # Asset image downloading is best-effort during a metadata refresh — an un-downloadable
+    # source image or transient 404 on an asset URL must not fail the overall order update.
+    try:
+        asset_result = adapter.download_asset(order.external_order_id, platform_id=order_platform_id)
+        if asset_result and asset_result.success and asset_result.local_path:
+            latest_asset = (
+                session.query(OrderAsset)
+                .filter_by(order_id=order.id)
+                .order_by(OrderAsset.id.desc())
+                .first()
+            )
+            if latest_asset is None or latest_asset.checksum != asset_result.checksum:
+                session.add(
+                    OrderAsset(
+                        order_id=order.id,
+                        source_image_ref=asset_result.local_path,
+                        checksum=asset_result.checksum,
+                        storage_location=asset_result.local_path,
+                    )
+                )
+    except Exception as exc:
+        logger.warning(
+            "download_asset non-fatal exception during refresh_order_detail for %s: %s",
+            order.external_order_id,
+            exc,
+        )
+
+    session.commit()
+    return {"success": True}
+
+
 def import_claimed_orders(session: Session, adapter: PrintervalAdapter) -> dict:
     """Download+verify the asset for every Order that has a confirmed successful claim
     (a `printerval`-source ExternalObservation row — written only when claim_batch's
@@ -467,43 +613,7 @@ def import_claimed_orders(session: Session, adapter: PrintervalAdapter) -> dict:
                     )
                 )
 
-            # Only overwrite what discover-time already captured (from the list API
-            # response) when the detail scrape actually found a value — Playwright's
-            # DOM extraction can legitimately come back empty for a field (selector
-            # didn't match this row's layout) and must not blank out a value we
-            # already have, just because it ran second.
-            if detail_result.product_name:
-                order.product_name = detail_result.product_name
-            if detail_result.thumbnail_url:
-                order.thumbnail_url = detail_result.thumbnail_url
-            if detail_result.sku:
-                order.sku = detail_result.sku
-            if detail_result.product_category:
-                order.product_category = detail_result.product_category
-            order.product_variants = [v.model_dump() for v in detail_result.product_variants]
-            order.has_template = detail_result.has_template
-            if detail_result.template_jobs:
-                order.template_jobs = detail_result.template_jobs
-            order.multiple_design = detail_result.multiple_design
-            order.double_sided = detail_result.double_sided
-            order.priority_label = detail_result.priority_label
-            order.created_at_ext = detail_result.created_at
-            order.order_created_at_ext = detail_result.order_created_at
-            order.deadline_at_ext = detail_result.deadline_at
-            order.note_outsource = detail_result.note_outsource
-            order.order_note = detail_result.order_note
-            order.custom_config = (
-                detail_result.custom_config.model_dump() if detail_result.custom_config else None
-            )
-            order.design_tool_url = detail_result.design_tool_url
-            if detail_result.sku_image_url:
-                order.sku_image_url = detail_result.sku_image_url
-            if detail_result.external_order_url:
-                order.external_order_url = detail_result.external_order_url
-            if detail_result.source_files:
-                order.source_files = detail_result.source_files
-            if detail_result.source_download_all_url:
-                order.source_download_all_url = detail_result.source_download_all_url
+            _apply_order_detail_result(order, detail_result)
 
             apply_transition(
                 session,

@@ -111,6 +111,36 @@ def test_sync_platform_order_statuses_tries_the_last_known_status_first(db_sessi
     assert seen_statuses == ["review"]  # matched on the very first (hinted) try
 
 
+def test_sync_platform_order_statuses_does_not_treat_designer_email_as_assignee(db_session):
+    platform = Platform(name="P1", account_username="acc1@printerval.com", team_outsource="team-a")
+    db_session.add(platform)
+    db_session.flush()
+    order = Order(
+        external_order_id="DJ1001",
+        platform_id=platform.id,
+        state="DISCOVERED",
+        # Simulates a value written before designer_email was identified as order
+        # metadata rather than the Printerval Designer dropdown selection.
+        printerval_designer="fish.311021@gmail.com",
+    )
+    db_session.add(order)
+    db_session.commit()
+
+    client = _mock_client(
+        {
+            "DJ1001": {
+                "id": 1001,
+                "status": "waiting",
+                "attributes": {"designer_email": "fish.311021@gmail.com"},
+            }
+        }
+    )
+    sync_platform_order_statuses(db_session, platform, api_client=client)
+
+    assert order.printerval_designer is None
+    assert order.printerval_designer_synced_at is not None
+
+
 def test_sync_all_platforms_tracks_running_state_and_result(db_session, monkeypatch):
     platform = Platform(
         name="P1",

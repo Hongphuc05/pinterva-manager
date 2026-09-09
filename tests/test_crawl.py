@@ -12,6 +12,7 @@ from app.application.crawl import (
     export_platform_orders_csv,
     find_unclaimed_order_ids,
     import_claimed_orders,
+    refresh_order_detail,
 )
 from app.domain.models import OrderState
 
@@ -427,3 +428,66 @@ def test_export_platform_orders_csv_is_a_fresh_deduplicated_snapshot(db_session,
 
     other_platform_dir = tmp_path / "platform_data" / str(uuid.uuid4())
     assert not other_platform_dir.exists()
+
+
+def test_refresh_order_detail_picks_up_a_template_added_after_the_original_import(db_session):
+    """The operator's exact scenario: an order was already claimed+imported with no
+    template; the mother site adds one later. import_claimed_orders never runs again
+    for this order (gated on state) — refresh_order_detail is the only thing that
+    picks up the change, on demand, regardless of the order's current state."""
+    adapter = FakePrintervalAdapter()
+    _seed_waiting_order(adapter, "DJ0000001", has_template=False, template_jobs=None)
+    order = Order(
+        external_order_id="DJ0000001",
+        state=OrderState.IN_PROGRESS.value,  # already past the one-time import step
+        has_template=False,
+        template_jobs=None,
+    )
+    db_session.add(order)
+    db_session.commit()
+
+    # Mother site adds a template later.
+    adapter._orders["DJ0000001"].has_template = True
+    adapter._orders["DJ0000001"].template_jobs = [{"provider_name": "C-EZ"}]
+
+    result = refresh_order_detail(db_session, adapter, order)
+
+    assert result == {"success": True}
+    assert order.state == OrderState.IN_PROGRESS.value  # never touched
+    assert order.has_template is True
+    assert order.template_jobs == [{"provider_name": "C-EZ"}]
+
+
+def test_refresh_order_detail_dead_letters_on_download_failure_without_touching_the_order(db_session):
+    adapter = FakePrintervalAdapter()
+    order = Order(external_order_id="DJ0000002", state=OrderState.IN_PROGRESS.value, product_name="Old Name")
+    db_session.add(order)
+    db_session.commit()
+    # Never added to the adapter -> download_asset fails VALIDATION.
+
+    result = refresh_order_detail(db_session, adapter, order)
+
+    assert result == {"success": False, "stage": "get_order_detail"}
+    assert order.product_name == "Old Name"
+    dead_letters = db_session.query(DeadLetter).filter_by(source="crawl.refresh_order_detail").all()
+    assert len(dead_letters) == 1
+    assert dead_letters[0].payload["stage"] == "get_order_detail"
+
+
+def test_refresh_order_detail_does_not_duplicate_the_asset_row_when_checksum_is_unchanged(db_session):
+    adapter = FakePrintervalAdapter()
+    _seed_waiting_order(adapter, "DJ0000003")
+    order = Order(external_order_id="DJ0000003", state=OrderState.IN_PROGRESS.value)
+    db_session.add(order)
+    db_session.commit()
+
+    refresh_order_detail(db_session, adapter, order)
+    refresh_order_detail(db_session, adapter, order)  # nothing changed on the site
+
+    assert db_session.query(OrderAsset).filter_by(order_id=order.id).count() == 1
+
+    # Now the site's file genuinely changes -> a new OrderAsset row is recorded.
+    adapter._orders["DJ0000003"].checksum = "a-different-checksum"
+    refresh_order_detail(db_session, adapter, order)
+
+    assert db_session.query(OrderAsset).filter_by(order_id=order.id).count() == 2

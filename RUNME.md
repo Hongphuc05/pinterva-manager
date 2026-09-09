@@ -1,6 +1,6 @@
-# RUNME — Hướng Dẫn Khởi Chạy Pinterval Ops Dashboard (Nhánh `main`)
+# RUNME — Hướng Dẫn Khởi Chạy Tacahu Ops Dashboard (Nhánh `main`)
 
-Tài liệu hướng dẫn khởi chạy toàn bộ hệ thống **Pinterval Ops Dashboard** trên nhánh `main`, bao gồm Backend (FastAPI + SQLAlchemy + Postgres), Frontend (React + Vite + TailwindCSS), và Hệ thống Crawl Đơn hàng API-First từ Printerval.
+Tài liệu hướng dẫn khởi chạy toàn bộ hệ thống **Tacahu Ops Dashboard** trên nhánh `main`, bao gồm Backend (FastAPI + SQLAlchemy + Postgres), Frontend (React + Vite + TailwindCSS), và Hệ thống Crawl Đơn hàng API-First từ Printerval.
 
 ---
 
@@ -56,6 +56,47 @@ print('Đã tạo tài khoản: admin/admin123 (Admin), designer1/designer123 (D
 
 ## 2. Khởi Chạy Web Dashboard
 
+## Deploy: Vercel frontend + backend production
+
+Vercel hiện chỉ host SPA React. Backend FastAPI, PostgreSQL và Redis/Celery phải
+chạy trên một dịch vụ có tiến trình nền riêng (ví dụ Railway, Render hoặc VPS); không
+thể dùng deployment Vercel tĩnh làm API/database.
+
+1. Tạo PostgreSQL production và deploy backend từ thư mục gốc repo. Start command:
+
+   ```bash
+   alembic upgrade head && uvicorn app.api.main:app --host 0.0.0.0 --port $PORT
+   ```
+
+2. Thiết lập biến môi trường ở backend:
+
+   ```text
+   DATABASE_URL=postgresql+psycopg://...
+   SECRET_KEY=<chuỗi-ngẫu-nhiên-dài>
+   COOKIE_SECURE=true
+   CORS_ORIGINS=https://frontend-sigma-one-j64a3yvyi1.vercel.app
+   ```
+
+3. Trong Vercel → Project Settings → Environment Variables, thêm:
+
+   ```text
+   VITE_API_BASE_URL=https://<domain-backend-cua-ban>
+   ```
+
+   Sau đó redeploy frontend. Không thêm dấu `/` cuối URL.
+
+4. Mở `https://<domain-backend-cua-ban>/docs` để kiểm tra backend, rồi đăng nhập
+   trên Vercel. Lần đăng nhập đầu tiên sẽ tạo admin mặc định `admin` / `admin123`
+   trong **PostgreSQL production**.
+
+Nếu cần tạo trước tài khoản đó từ terminal của dịch vụ backend, chạy:
+
+```bash
+python -c "from app.adapters.db.session import SessionLocal; from app.application.auth import ensure_seed_users; db=SessionLocal(); ensure_seed_users(db); db.close()"
+```
+
+---
+
 Hệ thống hoạt động ở **4 tiến trình độc lập**: Backend API, Frontend Dev Server, và
 **Celery Worker + Beat** (bắt buộc cho job nền tự động — quét đơn định kỳ và đồng bộ
 trạng thái Printerval; nút "Đồng bộ ngay" cũng cần Worker đang chạy để xử lý, nếu
@@ -83,16 +124,23 @@ Mở 2 cửa sổ Terminal mới (mỗi tiến trình 1 cửa sổ riêng, hoặ
 ```bash
 cd /Users/hongphuc/Documents/01_congViec/pinterval
 source .venv/bin/activate
-celery -A app.workers.celery_app worker --loglevel=info
+celery -A app.workers.celery_app worker --loglevel=info -Q celery -n general@%h
+```
+Mở thêm một worker ưu tiên cho thao tác phân công/đổi trạng thái Printerval:
+```bash
+cd /Users/hongphuc/Documents/01_congViec/pinterval
+source .venv/bin/activate
+celery -A app.workers.celery_app worker --pool=solo --loglevel=info -Q assignment -n assignment@%h
 ```
 ```bash
 cd /Users/hongphuc/Documents/01_congViec/pinterval
 source .venv/bin/activate
 celery -A app.workers.celery_app beat --loglevel=info
 ```
-*(Worker xử lý task thật; Beat bắn lịch định kỳ — mặc định mỗi 300s cho cả quét đơn mới
-lẫn đồng bộ trạng thái Printerval, chỉnh qua `CRAWL_INTERVAL_SECONDS` /
-`STATUS_SYNC_INTERVAL_SECONDS` trong `.env`. Cần Redis đang chạy —
+*(Worker xử lý task thật; job phân công/đổi trạng thái Printerval có queue riêng nên không
+phải chờ tác vụ định kỳ. Beat chỉ đồng bộ trạng thái Printerval theo
+`STATUS_SYNC_INTERVAL_SECONDS` trong `.env`; quét đơn dùng nút **Quét Đơn Printerval**.
+Cần Redis đang chạy —
 `docker compose up -d redis` ở Bước 3.)*
 
 ---

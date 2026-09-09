@@ -15,6 +15,8 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.models import Order, Platform, PlatformSyncState
 from app.adapters.printerval.api_client import PrintervalApiClient
+from app.adapters.printerval.row_mapper import parse_order_detail_from_row
+from app.application.crawl import _apply_order_detail_result
 
 
 def _status_guess_order(last_known: str | None) -> tuple[str, ...]:
@@ -29,14 +31,20 @@ def _status_guess_order(last_known: str | None) -> tuple[str, ...]:
 
 
 def _row_designer(row: dict) -> str | None:
-    """Extract the visible Designer label without guessing an internal mapping."""
-    for key in ("designer", "designer_name", "designer_email"):
+    """Extract a visible Designer *label*, never the order's contact metadata.
+
+    Printerval's order API includes ``attributes.designer_email`` even when its
+    Designer dropdown is empty.  That email identifies a contact on the order; it
+    is not an option selected in the Designer dropdown and must not be shown as the
+    Printerval assignee in our dashboard.
+    """
+    for key in ("designer", "designer_name"):
         value = row.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
     attributes = row.get("attributes")
     if isinstance(attributes, dict):
-        for key in ("designer", "designer_name", "designer_email"):
+        for key in ("designer", "designer_name"):
             value = attributes.get(key)
             if isinstance(value, str) and value.strip():
                 return value.strip()
@@ -47,7 +55,8 @@ def sync_platform_order_statuses(
     session: Session, platform: Platform, api_client: PrintervalApiClient | None = None
 ) -> dict:
     """Look up each Order we already track for this platform (one find_order call
-    each, hinted by its last-known status) and update Order.printerval_status.
+    each, hinted by its last-known status) and update Order.printerval_status,
+    printerval_designer, and full order details (source, template, notes, etc.).
 
     Deliberately scoped to OUR orders, not a bulk page-through of Printerval's full
     history: an established account can have thousands of "done" orders alone — a
@@ -82,8 +91,20 @@ def sync_platform_order_statuses(
             if found_designer and found_designer != order.printerval_designer:
                 order.printerval_designer = found_designer
                 order.printerval_designer_synced_at = datetime.now(UTC)
+            elif not found_designer and order.printerval_designer and "@" in order.printerval_designer:
+                # Repair values written by the former designer_email mapping.  Do
+                # not erase real labels when this lightweight list endpoint simply
+                # omits the dropdown value.
+                order.printerval_designer = None
+                order.printerval_designer_synced_at = datetime.now(UTC)
             order.printerval_status_synced_at = datetime.now(UTC)
 
+            # Re-apply full detail metadata (source files, template jobs, custom config, notes, deadlines)
+            detail_result = parse_order_detail_from_row(row, order.external_order_id, platform_id=str(platform.id))
+            if detail_result.success:
+                _apply_order_detail_result(order, detail_result)
+
+        session.commit()
         return {"checked": len(orders), "updated": updated, "not_found": not_found}
     finally:
         if owns_client:

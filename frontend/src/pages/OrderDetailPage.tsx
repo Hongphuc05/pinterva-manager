@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { apiFetch, ApiError } from '../api/client'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { ImageModal } from '../components/ImageModal'
 import { TemplateModal, type TemplateJob } from '../components/TemplateModal'
 import { SourceFilesCard, type SourceFile } from '../components/SourceFilesCard'
+import { CustomConfigurationSection } from '../components/CustomConfigurationSection'
 import { getStatusInfo } from '../utils/statusTranslation'
 import { 
   ArrowLeft, 
@@ -14,9 +15,19 @@ import {
   ExternalLink, 
   History, 
   AlertCircle,
-  Sliders,
-  User
+  User,
+  Send,
+  Play,
+  CheckSquare
 } from 'lucide-react'
+
+type ResultVersion = {
+  id: string
+  drive_url: string
+  version_marker: number
+  submitted_at: string | null
+  qc_feedback: string | null
+}
 
 type OrderDetail = {
   id: string
@@ -39,6 +50,9 @@ type OrderDetail = {
   } | null
   template_jobs: TemplateJob[] | null
   assigned_designer_name: string | null
+  assignment_id?: string | null
+  sub_status?: string | null
+  result_versions?: ResultVersion[]
   design_tool_url: string | null
   sku_image_url: string | null
   external_order_url: string | null
@@ -52,6 +66,8 @@ type OrderDetail = {
 type WorkflowEvent = { created_at: string; from_state: string | null; to_state: string }
 type LoadState = 'loading' | 'loaded' | 'not-found' | 'error'
 
+const subStatusLabels = { doing: 'Đang làm', fixing: 'Đang sửa', done: 'Đã xong' }
+
 export function OrderDetailPage() {
   const { id } = useParams<{ id: string }>()
   const [order, setOrder] = useState<OrderDetail | null>(null)
@@ -62,9 +78,14 @@ export function OrderDetailPage() {
   const [showImageModal, setShowImageModal] = useState(false)
   const [showTemplateModal, setShowTemplateModal] = useState(false)
 
-  useEffect(() => {
+  // Task execution states
+  const [driveUrl, setDriveUrl] = useState('')
+  const [busyAssignment, setBusyAssignment] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null)
+
+  async function loadOrderDetail() {
     if (!id) return
-    setStatus('loading')
     apiFetch<{ order: OrderDetail; history: WorkflowEvent[] }>(`/orders/${id}`)
       .then((data) => {
         setOrder(data.order)
@@ -74,7 +95,75 @@ export function OrderDetailPage() {
       .catch((e) => {
         setStatus(e instanceof ApiError && e.status === 404 ? 'not-found' : 'error')
       })
+  }
+
+  useEffect(() => {
+    setStatus('loading')
+    loadOrderDetail()
   }, [id])
+
+  async function changeSubStatus(subStatusKey: keyof typeof subStatusLabels) {
+    if (!order?.assignment_id) return
+    setBusyAssignment(true)
+    setActionError(null)
+    setActionSuccess(null)
+    try {
+      await apiFetch(`/assignments/${order.assignment_id}/sub-status`, {
+        method: 'PATCH',
+        body: JSON.stringify({ sub_status: subStatusKey, request_id: crypto.randomUUID() }),
+      })
+      setActionSuccess(`Đã cập nhật tiến độ: ${subStatusLabels[subStatusKey]}`)
+      await loadOrderDetail()
+    } catch (caught) {
+      setActionError(caught instanceof ApiError ? caught.message : 'Không thể cập nhật tiến độ.')
+    } finally {
+      setBusyAssignment(false)
+    }
+  }
+
+  async function handleStartTask() {
+    if (!order?.assignment_id) return
+    setBusyAssignment(true)
+    setActionError(null)
+    setActionSuccess(null)
+    try {
+      await apiFetch(`/assignments/${order.assignment_id}/start`, {
+        method: 'POST',
+        body: JSON.stringify({ request_id: crypto.randomUUID() }),
+      })
+      setActionSuccess('Đã chuyển trạng thái bắt đầu thực hiện task.')
+      await loadOrderDetail()
+    } catch (caught) {
+      setActionError(caught instanceof ApiError ? caught.message : 'Không thể chuyển trạng thái.')
+    } finally {
+      setBusyAssignment(false)
+    }
+  }
+
+  async function handleSubmitResults(e: FormEvent) {
+    e.preventDefault()
+    if (!order?.assignment_id) return
+    if (!driveUrl.trim()) {
+      setActionError('Hãy nhập link Google Drive kết quả trước khi nộp.')
+      return
+    }
+    setBusyAssignment(true)
+    setActionError(null)
+    setActionSuccess(null)
+    try {
+      await apiFetch(`/assignments/${order.assignment_id}/results`, {
+        method: 'POST',
+        body: JSON.stringify({ drive_url: driveUrl.trim(), request_id: crypto.randomUUID() }),
+      })
+      setActionSuccess('Nộp bài QC thành công!')
+      setDriveUrl('')
+      await loadOrderDetail()
+    } catch (caught) {
+      setActionError(caught instanceof ApiError ? caught.message : 'Không nộp được kết quả.')
+    } finally {
+      setBusyAssignment(false)
+    }
+  }
 
   if (status === 'loading') {
     return (
@@ -99,6 +188,8 @@ export function OrderDetailPage() {
   }
 
   const statusInfo = getStatusInfo(order.state)
+  const canStart = order.state === 'ASSIGNED' || order.state === 'REVISION_REQUESTED'
+  const canSubmit = order.state === 'IN_PROGRESS'
 
   return (
     <DashboardLayout>
@@ -128,6 +219,20 @@ export function OrderDetailPage() {
           <span>Quay lại danh sách đơn hàng</span>
         </Link>
       </div>
+
+      {/* Alerts */}
+      {actionSuccess && (
+        <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold flex items-center justify-between shadow-xs">
+          <span>{actionSuccess}</span>
+          <button onClick={() => setActionSuccess(null)} className="text-emerald-600 hover:text-emerald-900 font-bold cursor-pointer">X</button>
+        </div>
+      )}
+      {actionError && (
+        <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs font-semibold flex items-center justify-between shadow-xs">
+          <span>{actionError}</span>
+          <button onClick={() => setActionError(null)} className="text-red-600 hover:text-red-900 font-bold cursor-pointer">X</button>
+        </div>
+      )}
 
       {/* Main Card Header */}
       <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-xs space-y-6">
@@ -258,6 +363,105 @@ export function OrderDetailPage() {
           </div>
         </div>
 
+        {/* Designer Task Actions Block (Rendered if assignment_id exists) */}
+        {order.assignment_id && (
+          <div className="p-5 rounded-xl bg-blue-50/40 border border-blue-200 space-y-4">
+            <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+              <CheckSquare className="h-4 w-4 text-[#0052CC]" />
+              <span>Nhiệm Vụ & Tiến Độ Thiết Kế</span>
+            </h3>
+
+            {/* Progress Control Buttons */}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-slate-600">Cập nhật tiến độ:</span>
+                {(Object.keys(subStatusLabels) as (keyof typeof subStatusLabels)[]).map((st) => (
+                  <button
+                    key={st}
+                    type="button"
+                    disabled={busyAssignment || order.sub_status === st}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors border cursor-pointer ${
+                      order.sub_status === st
+                        ? 'bg-[#0052CC] text-white border-[#0052CC] shadow-2xs'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                    } disabled:opacity-50`}
+                    onClick={() => changeSubStatus(st)}
+                  >
+                    {subStatusLabels[st]}
+                  </button>
+                ))}
+              </div>
+
+              {canStart && (
+                <button
+                  type="button"
+                  disabled={busyAssignment}
+                  className="px-4 py-2 text-xs font-semibold text-white bg-[#0052CC] hover:bg-[#0041A3] rounded-lg transition-colors shadow-2xs flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                  onClick={handleStartTask}
+                >
+                  <Play className="h-3.5 w-3.5 fill-current" />
+                  <span>{order.state === 'REVISION_REQUESTED' ? 'Bắt đầu sửa theo QC' : 'Bắt đầu thực hiện'}</span>
+                </button>
+              )}
+            </div>
+
+            {/* Submit Drive Link Form */}
+            {canSubmit && (
+              <form
+                className="flex flex-col sm:flex-row gap-3 pt-3 border-t border-blue-100"
+                onSubmit={handleSubmitResults}
+              >
+                <input
+                  type="url"
+                  required
+                  className="flex-1 px-3.5 py-2 text-xs rounded-xl border border-slate-300 bg-white font-mono focus:outline-none focus:border-[#0052CC]"
+                  placeholder="https://drive.google.com/file/d/..."
+                  value={driveUrl}
+                  onChange={(e) => setDriveUrl(e.target.value)}
+                />
+                <button
+                  type="submit"
+                  disabled={busyAssignment}
+                  className="px-5 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-colors shadow-2xs flex items-center justify-center gap-1.5 disabled:opacity-50 shrink-0 cursor-pointer"
+                >
+                  <Send className="h-3.5 w-3.5" />
+                  <span>Nộp Bài QC</span>
+                </button>
+              </form>
+            )}
+
+            {/* History of Submitted Versions */}
+            {order.result_versions && order.result_versions.length > 0 && (
+              <div className="pt-3 border-t border-blue-100 space-y-2">
+                <h4 className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <History className="h-3.5 w-3.5 text-slate-500" />
+                  <span>Lịch sử các bản đã nộp ({order.result_versions.length})</span>
+                </h4>
+                <div className="space-y-2">
+                  {order.result_versions.map((version) => (
+                    <div key={version.id} className="p-3 rounded-lg bg-white border border-slate-200 flex items-center justify-between text-xs">
+                      <a
+                        href={version.drive_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-mono font-bold text-[#0052CC] hover:underline flex items-center gap-1"
+                      >
+                        <span>Bản v{version.version_marker}</span>
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                      {version.qc_feedback && (
+                        <p className="text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 text-[11px] font-medium">
+                          QC Feedback: {version.qc_feedback}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Specifications Grid */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
           <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
@@ -293,12 +497,6 @@ export function OrderDetailPage() {
           </div>
         </div>
 
-        {/* Customer Source Files */}
-        <SourceFilesCard
-          sourceFiles={order.source_files}
-          downloadAllUrl={order.source_download_all_url}
-        />
-
         {/* Notes */}
         {(order.order_note || order.note_outsource) && (
           <div className="p-4 rounded-xl bg-blue-50/50 border border-blue-100 text-xs space-y-2">
@@ -315,56 +513,21 @@ export function OrderDetailPage() {
           </div>
         )}
 
-        {/* Custom Config Entries */}
+        {/* Custom configuration mirrors Printerval's two configuration tables. */}
         {order.custom_config && order.custom_config.original && order.custom_config.original.length > 0 && (
           <div className="space-y-3 pt-4 border-t border-slate-100">
-            <h3 className="text-xs font-bold text-slate-800 flex items-center gap-1.5 uppercase tracking-wider">
-              <Sliders className="h-4 w-4 text-[#0052CC]" />
-              <span>Cấu Hình Custom (Custom Configurations)</span>
-            </h3>
-            <div className="rounded-xl border border-slate-200 overflow-hidden">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-semibold text-slate-500 uppercase">
-                    <th className="py-2.5 px-4 w-1/3">Thuộc Tính</th>
-                    <th className="py-2.5 px-4">Giá Trị</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 font-mono text-slate-700">
-                  {order.custom_config.original.map((entry, i) => (
-                    <tr key={i} className="hover:bg-slate-50/50">
-                      <td className="py-2 px-4 font-semibold text-slate-600">{entry.key}</td>
-                      <td className="py-2 px-4 text-[#0052CC]">{entry.value}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <CustomConfigurationSection entries={order.custom_config.original} />
             {order.custom_config.translated_vn && order.custom_config.translated_vn.length > 0 && (
-              <div className="rounded-xl border border-indigo-200 overflow-hidden">
-                <div className="px-4 py-2 bg-indigo-50 text-[11px] font-semibold text-indigo-700 uppercase">
-                  Bản dịch tiếng Việt
-                </div>
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-semibold text-slate-500 uppercase">
-                      <th className="py-2.5 px-4 w-1/3">Thuộc Tính</th>
-                      <th className="py-2.5 px-4">Giá Trị</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 font-mono text-slate-700">
-                    {order.custom_config.translated_vn.map((entry, i) => (
-                      <tr key={i} className="hover:bg-slate-50/50">
-                        <td className="py-2 px-4 font-semibold text-slate-600">{entry.key}</td>
-                        <td className="py-2 px-4 text-[#0052CC]">{entry.value}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <CustomConfigurationSection entries={order.custom_config.translated_vn} translated />
             )}
           </div>
         )}
+
+        {/* These three cards use the same order as Printerval itself. */}
+        <SourceFilesCard
+          sourceFiles={order.source_files}
+          downloadAllUrl={order.source_download_all_url}
+        />
 
         {/* Workflow History Audit Table */}
         <div className="space-y-3 pt-4 border-t border-slate-100">

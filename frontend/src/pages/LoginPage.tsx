@@ -34,7 +34,7 @@ export function LoginPage() {
           <div className="inline-flex p-3 bg-white/20 rounded-2xl backdrop-blur-md mb-3 shadow-inner">
             <PackageCheck className="h-8 w-8 text-white" />
           </div>
-          <h1 className="text-2xl font-bold tracking-tight">Pinterval Ops</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Tacahu Ops</h1>
           <p className="text-xs text-blue-100 mt-1 font-medium">Hệ Thống Điều Hành & Phân Đơn Nội Bộ V1</p>
         </div>
 

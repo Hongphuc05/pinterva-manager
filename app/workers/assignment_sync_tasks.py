@@ -6,6 +6,8 @@ import uuid
 from app.adapters.db.models import Order, Platform, PrintervalAssignmentRequest, User
 from app.adapters.db.session import SessionLocal
 from app.adapters.playwright_support import playwright_session
+from app.adapters.printerval.api_adapter import PrintervalApiAdapter
+from app.adapters.printerval.api_client import PrintervalApiClient
 from app.adapters.printerval.playwright_adapter import PlaywrightPrintervalAdapter
 from app.application.assignment_sync import sync_assignment_to_printerval
 from app.application.printerval_assignment_requests import execute_request
@@ -30,16 +32,44 @@ def sync_printerval_assignment_request(request_id: str) -> None:
             request.error_message = "Platform credentials are unavailable"
             session.commit()
             return
-        account_slug = platform.account_username.replace("@", "_").replace(".", "_")
-        profile_dir = "chrome-profile-" + account_slug
-        # Chrome real is required by the known Cloudflare behaviour for write flows.
-        with playwright_session(profile_dir=profile_dir, headless=True) as page:
-            adapter = PlaywrightPrintervalAdapter(
+        # A real browser fallback matters here specifically: live incident
+        # 2026-09-09 — a *fresh* httpx login (no persistent browser session) started
+        # getting rejected with 403/AUTH after this endpoint had been hit repeatedly in
+        # a short window (crawl + manual testing), even though the account/password
+        # were correct — while the persistent Chrome profile (already logged in, no
+        # fresh login needed per call) kept working. Without a fallback, that one
+        # rejected login permanently failed the whole Designer+Status write with no
+        # automatic recovery.
+        clean_slug = platform.account_username.replace("@", "_").replace(".", "_").replace("+", "_")
+        profile_dir = f"chrome-profile-{clean_slug}"
+        fallback = None
+        session_cm = None
+        try:
+            session_cm = playwright_session(profile_dir=profile_dir, headless=True)
+            page = session_cm.__enter__()
+            fallback = PlaywrightPrintervalAdapter(
                 page=page,
                 crawl_username=platform.account_username,
                 crawl_password=platform.account_password,
             )
-            execute_request(session, adapter, request)
+        except Exception:
+            logger.exception(
+                "Printerval assignment request %s: Playwright fallback failed to open, "
+                "continuing HTTP-only", request_id,
+            )
+            session_cm = None
+        try:
+            with PrintervalApiClient(
+                base_url="https://printerval.com",
+                username=platform.account_username,
+                password=platform.account_password,
+                team_outsource=platform.team_outsource,
+            ) as client:
+                adapter = PrintervalApiAdapter(client, fallback_adapter=fallback, download_images=False)
+                execute_request(session, adapter, request)
+        finally:
+            if session_cm is not None:
+                session_cm.__exit__(None, None, None)
     except Exception:
         logger.exception("Printerval assignment request %s crashed", request_id)
     finally:

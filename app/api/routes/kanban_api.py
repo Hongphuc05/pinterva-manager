@@ -11,6 +11,13 @@ from app.application.kanban import list_kanban
 router = APIRouter()
 
 
+class KanbanAlertOut(BaseModel):
+    kind: str
+    label: str
+    detail: str
+    occurred_at: str | None
+
+
 class KanbanCardOut(BaseModel):
     id: str
     external_order_id: str
@@ -20,7 +27,7 @@ class KanbanCardOut(BaseModel):
     job_type: str | None
     designer_name: str | None
     deadline_at_ext: str | None
-    alerts: list[str]
+    alerts: list[KanbanAlertOut]
 
 
 class KanbanColumnOut(BaseModel):

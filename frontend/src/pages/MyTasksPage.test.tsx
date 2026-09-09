@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import { BrowserRouter } from 'react-router-dom'
 import { AuthProvider } from '../auth/AuthContext'
+import { PlatformProvider } from '../auth/PlatformContext'
 import { MyTasksPage } from './MyTasksPage'
 
 const activeTask = {
@@ -16,7 +17,7 @@ const activeTask = {
 describe('MyTasksPage', () => {
   beforeEach(() => {
     vi.stubGlobal('crypto', { randomUUID: () => 'request-id' })
-    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
       if (url.includes('/api/me')) {
         return Promise.resolve({
           ok: true, status: 200,
@@ -26,34 +27,28 @@ describe('MyTasksPage', () => {
       if (url.includes('/api/my-tasks')) {
         return Promise.resolve({ ok: true, status: 200, json: async () => ({ tasks: [activeTask] }) })
       }
-      if (url.includes('/api/assignments/a1/results')) {
-        expect(init?.method).toBe('POST')
-        expect(init?.body).toContain('known-file')
-        return Promise.resolve({
-          ok: true, status: 200,
-          json: async () => ({ assignment_id: 'a1', state: 'QC_PENDING', result_version_id: 'r1' }),
-        })
+      if (url.includes('/api/platforms')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ platforms: [] }) })
       }
       return Promise.reject(new Error(`unexpected fetch: ${url}`))
     }))
   })
 
-  it('renders a designer task and submits its Drive link', async () => {
+  it('renders basic designer task card with link to details page', async () => {
     render(
       <BrowserRouter>
         <AuthProvider>
-          <MyTasksPage />
+          <PlatformProvider>
+            <MyTasksPage />
+          </PlatformProvider>
         </AuthProvider>
       </BrowserRouter>
     )
 
     await waitFor(() => expect(screen.getByText('TASK-1')).toBeInTheDocument())
-    fireEvent.change(screen.getByPlaceholderText('Link Google Drive kết quả'), {
-      target: { value: 'https://drive.google.com/file/d/known-file/view' },
-    })
-    fireEvent.click(screen.getByText('Nộp kết quả'))
-    await waitFor(() =>
-      expect(fetch).toHaveBeenCalledWith('/api/assignments/a1/results', expect.anything())
-    )
+    expect(screen.getByText('Blue tee')).toBeInTheDocument()
+    const detailLink = screen.getByRole('link', { name: /Xem Chi Tiết & Nộp Bài/i })
+    expect(detailLink).toHaveAttribute('href', '/orders/o1')
   })
 })
+

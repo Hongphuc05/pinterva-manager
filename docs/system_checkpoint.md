@@ -7,7 +7,7 @@
 ---
 
 ## 1. Project Overview & Architecture
-Pinterval Ops Dashboard is a management system for e-commerce Print-on-Demand (POD) fulfillment operations. It connects with Printerval's outsource POD portal to crawl waiting design jobs, manage order statuses, parse product templates/PSD links, assign jobs to designers, and track fulfillment lifecycles.
+Tacahu Ops Dashboard is a management system for e-commerce Print-on-Demand (POD) fulfillment operations. It connects with Printerval's outsource POD portal to crawl waiting design jobs, manage order statuses, parse product templates/PSD links, assign jobs to designers, and track fulfillment lifecycles.
 
 ### Tech Stack:
 - **Backend**: Python 3.12, FastAPI, SQLAlchemy 2.0 (PostgreSQL), Alembic migrations, PyJWT & Passlib/Bcrypt, Playwright / HTTPX.

@@ -139,6 +139,22 @@ export function OrdersListPage() {
       .finally(() => setLoadingPrintervalOptions(false))
   }, [selectedOrderIds])
 
+  async function refreshPrintervalDesignerOptions() {
+    setLoadingPrintervalOptions(true)
+    try {
+      const result = await apiFetch<{ designers: string[]; statuses: string[] }>(
+        '/platforms/printerval-options/refresh',
+        { method: 'POST' }
+      )
+      setPrintervalDesigners(result.designers)
+      setPrintervalStatuses(result.statuses)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Không cập nhật được Designer Printerval.')
+    } finally {
+      setLoadingPrintervalOptions(false)
+    }
+  }
+
   function dismissHighlight(orderId: string) {
     setNewlyCrawledOrderIds((prev) => prev.filter((id) => id !== orderId))
   }
@@ -468,6 +484,14 @@ export function OrdersListPage() {
           </div>
 
           <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={refreshPrintervalDesignerOptions}
+              disabled={loadingPrintervalOptions}
+              className="px-3 py-1.5 text-xs font-bold text-white border border-white/40 rounded-lg hover:bg-white/10 disabled:opacity-60"
+            >
+              Cập nhật lựa chọn Printerval
+            </button>
             <select
               value={bulkDesignerId}
               onChange={(e) => setBulkDesignerId(e.target.value)}
@@ -702,7 +726,12 @@ export function OrdersListPage() {
                           <p className="mt-1 text-[10px] font-medium text-slate-500">
                             Printerval: {o.printerval_designer || '—'}
                             {o.printerval_status ? ` · ${o.printerval_status}` : ''}
-                            {o.printerval_assignment_lifecycle === 'pending' ? ' · đang đồng bộ' : ''}
+                            {o.printerval_assignment_lifecycle === 'pending' && (
+                              <span className="inline-flex items-center gap-1">
+                                <span> · đang đồng bộ</span>
+                                <Loader2 className="h-3 w-3 animate-spin text-[#0052CC]" aria-label="Đang đồng bộ Printerval" />
+                              </span>
+                            )}
                           </p>
                         )}
                       </td>
@@ -811,6 +840,14 @@ export function OrdersListPage() {
                 <label className="text-xs font-bold text-slate-700 block">
                   Designer trên Printerval <span className="text-red-500">*</span>
                 </label>
+                <button
+                  type="button"
+                  onClick={refreshPrintervalDesignerOptions}
+                  disabled={loadingPrintervalOptions}
+                  className="mb-1 text-[11px] font-semibold text-[#0052CC] hover:underline disabled:opacity-50"
+                >
+                  Cập nhật lựa chọn từ Printerval
+                </button>
                 <select
                   required
                   value={selectedPrintervalDesigner}

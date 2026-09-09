@@ -10,6 +10,7 @@ def _platform() -> Platform:
         account_username="mother@example.com",
         account_password="stored-secret",
         team_outsource="2D",
+        printerval_designer_options=["Nguyễn Thị Thuý Hường - 2D Prin"],
     )
 
 

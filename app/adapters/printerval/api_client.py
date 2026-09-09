@@ -21,6 +21,7 @@ from app.adapters.errors import ErrorClass
 LOGIN_PATH = "/outsource/pod/login"
 FIND_PATH = "/outsource/pod/design-job/find"
 ADMIN_PATH = "/central/outsource/pod/design-job/admin"
+DESIGNER_OPTIONS_URL = "https://central.api.printerval.com/designer_outsource"
 
 
 class PrintervalApiConfigurationError(ValueError):
@@ -262,12 +263,69 @@ class PrintervalApiClient:
                 return rows[0]
         return None
 
+    def list_designer_options(self) -> list[str]:
+        """Read Designer labels for this client's own outsourced team via HTTP."""
+        self._validate_configuration()
+        try:
+            response = self._client.get(
+                DESIGNER_OPTIONS_URL,
+                params={"page_size": "-1", "filters": f"team={self.team_outsource}"},
+            )
+        except httpx.HTTPError as exc:
+            raise PrintervalApiError(
+                ErrorClass.TRANSIENT_NETWORK,
+                "Designer options request failed",
+                retryable=True,
+            ) from exc
+        if response.status_code in (401, 403):
+            try:
+                self.login()
+                response = self._client.get(
+                    DESIGNER_OPTIONS_URL,
+                    params={"page_size": "-1", "filters": f"team={self.team_outsource}"},
+                )
+            except Exception:
+                pass
+        if response.status_code >= 400:
+            error_class, retryable = _classify_http_status(response.status_code)
+            raise PrintervalApiError(
+                error_class,
+                "Designer options request was rejected",
+                retryable=retryable,
+            )
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise PrintervalApiError(
+                ErrorClass.EXTERNAL_CHANGED,
+                "Designer options response was not JSON",
+            ) from exc
+        rows = payload.get("result") if isinstance(payload, dict) else None
+        if payload.get("status") != "successful" or not isinstance(rows, list):
+            raise PrintervalApiError(
+                ErrorClass.EXTERNAL_CHANGED,
+                "Designer options response changed or was rejected",
+            )
+        options = list(
+            dict.fromkeys(
+                name.strip()
+                for row in rows
+                if isinstance(row, dict)
+                and isinstance((name := row.get("full_name")), str)
+                and name.strip()
+            )
+        )
+        if not options:
+            raise PrintervalApiError(
+                ErrorClass.EXTERNAL_CHANGED,
+                "Designer options response had no usable Designer",
+            )
+        return options
+
     def _fetch_find_rows(self, params: dict[str, str], *, error_context: str) -> list[dict[str, Any]]:
         """Shared GET+validate+parse for `/design-job/find` — used by both the
         Waiting-queue page fetch and the single-order search."""
         self._validate_configuration()
-        if not self._authenticated:
-            self.login()
         response = self._find_with_one_reauthentication(params)
         if response.status_code >= 400:
             error_class, retryable = _classify_http_status(response.status_code)
@@ -309,7 +367,10 @@ class PrintervalApiClient:
         if response.status_code not in (401, 403) and not redirected_to_login:
             return response
         self._authenticated = False
-        self.login()
+        try:
+            self.login()
+        except PrintervalApiError:
+            pass
         try:
             return self._client.get(FIND_PATH, params=params)
         except httpx.HTTPError as exc:

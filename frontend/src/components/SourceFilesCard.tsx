@@ -13,8 +13,9 @@ type Props = {
 
 export function SourceFilesCard({ sourceFiles, downloadAllUrl }: Props) {
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null)
+  const files = sourceFiles ?? []
 
-  if ((!sourceFiles || sourceFiles.length === 0) && !downloadAllUrl) {
+  if (files.length === 0) {
     return null
   }
 
@@ -24,7 +25,32 @@ export function SourceFilesCard({ sourceFiles, downloadAllUrl }: Props) {
     setTimeout(() => setCopiedIndex(null), 2000)
   }
 
-  const filesCount = sourceFiles ? sourceFiles.length : 0
+  const filesCount = files.length
+
+  async function downloadAll() {
+    if (downloadAllUrl) {
+      window.open(downloadAllUrl, '_blank', 'noopener,noreferrer')
+      return
+    }
+    // The API list endpoint has no archive URL. Download each source as a file from
+    // this one explicit action. A CDN that disallows CORS falls back to its own tab.
+    for (const file of files) {
+      try {
+        const response = await fetch(file.url)
+        if (!response.ok) throw new Error('source download failed')
+        const objectUrl = URL.createObjectURL(await response.blob())
+        const link = document.createElement('a')
+        link.href = objectUrl
+        link.download = file.name
+        document.body.appendChild(link)
+        link.click()
+        link.remove()
+        URL.revokeObjectURL(objectUrl)
+      } catch {
+        window.open(file.url, '_blank', 'noopener,noreferrer')
+      }
+    }
+  }
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-xs">
@@ -42,10 +68,10 @@ export function SourceFilesCard({ sourceFiles, downloadAllUrl }: Props) {
       </div>
 
       {/* List of files */}
-      {sourceFiles && sourceFiles.length > 0 && (
-        <div className="p-3 space-y-2 divide-y divide-slate-100 max-h-60 overflow-y-auto">
-          {sourceFiles.map((file, i) => (
-            <div key={i} className="pt-2 first:pt-0 flex items-center justify-between gap-2 text-xs">
+      {files.length > 0 && (
+        <div className="max-h-80 divide-y divide-slate-100 overflow-y-auto">
+          {files.map((file, i) => (
+            <div key={i} className="flex items-center justify-between gap-2 px-4 py-3 text-xs">
               <a
                 href={file.url}
                 target="_blank"
@@ -75,17 +101,16 @@ export function SourceFilesCard({ sourceFiles, downloadAllUrl }: Props) {
       )}
 
       {/* Download All Button */}
-      {downloadAllUrl && (
+      {(downloadAllUrl || filesCount > 0) && (
         <div className="p-3 bg-slate-50 border-t border-slate-100">
-          <a
-            href={downloadAllUrl}
-            target="_blank"
-            rel="noopener noreferrer"
+          <button
+            type="button"
+            onClick={downloadAll}
             className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-xs font-bold text-white bg-[#0052CC] hover:bg-[#0041A3] rounded-xl shadow-2xs transition-colors cursor-pointer"
           >
             <Download className="h-4 w-4" />
             <span>Download tất cả</span>
-          </a>
+          </button>
         </div>
       )}
     </div>

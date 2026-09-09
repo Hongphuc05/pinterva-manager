@@ -280,14 +280,23 @@ version.
 - **Telegram không còn trong V1.** Có thể thêm lại ở V2 làm kênh **thông báo phụ**
   (push notification khi có task mới/QC mới) — không có nút bấm thao tác, mọi hành động
   vẫn bắt buộc làm trên web.
-- **Tab "Trạng Thái Đơn" (2026-09-08, đã chốt):** mirror **một chiều, chỉ đọc** trạng
-  thái thật trên Printerval (`Order.printerval_status`, 6 giá trị waiting/doing/review/
-  fix/confirm/done) vào web, đồng bộ bằng job nền theo lịch (`status_sync_interval_seconds`,
-  mặc định 300s, xem `app/application/status_sync.py`) + nút "Đồng bộ ngay" thủ công.
-  **Không có** nút đổi trạng thái/gán designer từ tab này ghi ngược lên Printerval —
-  đã cân nhắc và từ chối phương án đó vì vi phạm trực tiếp bất biến #5/#7 và §3 C5
-  ("chỉ Approve QC mới bao giờ chạm tới Printerval"). Muốn đổi gì thật vẫn phải qua
-  Allocation (C2/C3) và QC (C5) như cũ.
+- **Tab "Trạng Thái Đơn" (2026-09-08, mirror một chiều; quyết định đảo lại 2026-09-09):**
+  cột `Order.printerval_status` (6 giá trị waiting/doing/review/fix/confirm/done) vẫn
+  đồng bộ **một chiều** bằng job nền theo lịch (`status_sync_interval_seconds`, mặc định
+  300s, xem `app/application/status_sync.py`) + nút "Đồng bộ ngay" thủ công — job đó
+  KHÔNG ghi gì lên Printerval, chỉ đọc.
+  **2026-09-09 — đảo lại quyết định trước đó (đã từng ghi "không có nút đổi từ tab
+  này"):** operator yêu cầu tường minh có nút sửa Designer + trạng thái Printerval ngay
+  tại tab này (đơn lẻ và chọn nhiều/bulk). Đã làm, tái dùng đúng cơ chế
+  `PrintervalAssignmentRequest`/`create_request`/`execute_request` (xem
+  `app/application/printerval_assignment_requests.py`) mà `OrdersListPage` đã dùng —
+  KHÔNG phải một đường ghi mới/song song. Ghi chú để không lặp lại nhầm lẫn cũ: hành
+  động này vẫn đi qua state có audit riêng (`printerval_assignment_requests`, lifecycle
+  `pending → succeeded/failed/unknown_outcome`), không phải ghi thẳng DOM/API không kiểm
+  soát; nó KHÔNG thay `Order.state` nội bộ (chỉ set `printerval_designer`/
+  `printerval_status` mirror + tạo `Assignment` nội bộ tương ứng) — quy trình chính thức
+  C2/C3/C5 vẫn là nơi duy nhất quyết định workflow, tab này chỉ là lối tắt cho
+  admin sửa nhanh khi cần (đơn cũ đã claim trước khi có hệ thống, sai sót cần chỉnh tay).
 
 ## 11. Error handling, retry và reconciliation
 

@@ -1,4 +1,4 @@
-# Pinterval Ops Dashboard
+# Tacahu Ops Dashboard
 
 Web dashboard nội bộ điều phối order 2D outsource — xem `claude.md` và
 `docs/superpowers/specs/2026-09-06-web-dashboard-design.md` để hiểu kiến trúc đầy đủ.

@@ -3,7 +3,12 @@ import pytest
 
 from app.adapters.errors import ErrorClass
 from app.adapters.printerval.api_adapter import PrintervalApiAdapter
-from app.adapters.printerval.api_client import FIND_PATH, LOGIN_PATH, PrintervalApiClient
+from app.adapters.printerval.api_client import (
+    DESIGNER_OPTIONS_URL,
+    FIND_PATH,
+    LOGIN_PATH,
+    PrintervalApiClient,
+)
 from app.adapters.printerval.fake_adapter import FakePrintervalAdapter
 
 
@@ -43,6 +48,40 @@ def test_discover_orders_success():
     assert res.success is True
     assert len(res.orders) == 2
     assert [o.external_order_id for o in res.orders] == ["DJ101", "DJ102"]
+
+
+def test_list_designer_options_reads_the_platform_scoped_http_endpoint():
+    def handler(request):
+        if request.method == "GET" and request.url.path == LOGIN_PATH:
+            return httpx.Response(200, text='<input type="hidden" name="_token" value="csrf-123">')
+        if request.method == "POST" and request.url.path == LOGIN_PATH:
+            return httpx.Response(302, headers={"location": "/admin"})
+        if str(request.url).startswith(DESIGNER_OPTIONS_URL):
+            assert request.url.params["filters"] == "team=team-a"
+            return httpx.Response(
+                200,
+                json={
+                    "status": "successful",
+                    "result": [
+                        {"full_name": "Custom A"},
+                        {"full_name": "Custom B"},
+                        {"full_name": "Custom A"},
+                    ],
+                },
+            )
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    api_client = PrintervalApiClient(
+        base_url="https://printerval.test",
+        username="operator@example.test",
+        password="password123",
+        team_outsource="team-a",
+        client=httpx.Client(
+            base_url="https://printerval.test",
+            transport=httpx.MockTransport(handler),
+        ),
+    )
+    assert api_client.list_designer_options() == ["Custom A", "Custom B"]
 
 
 def test_discover_orders_prefixes_a_bare_numeric_row_id_with_dj():

@@ -29,9 +29,9 @@ describe('LoginPage', () => {
       </BrowserRouter>
     )
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'Đăng nhập' })).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: 'Tacahu Ops' })).toBeInTheDocument()
     )
-    expect(screen.getByPlaceholderText('Tên đăng nhập')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('Ví dụ: admin hoặc designer1')).toBeInTheDocument()
   })
 
   it('shows an error on failed login', async () => {
@@ -57,13 +57,14 @@ describe('LoginPage', () => {
         </AuthProvider>
       </BrowserRouter>
     )
-    await waitFor(() => screen.getByPlaceholderText('Tên đăng nhập'))
-    fireEvent.change(screen.getByPlaceholderText('Tên đăng nhập'), { target: { value: 'x' } })
-    fireEvent.change(screen.getByPlaceholderText('Mật khẩu'), { target: { value: 'y' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Đăng nhập' }))
+    await waitFor(() => screen.getByPlaceholderText('Ví dụ: admin hoặc designer1'))
+    fireEvent.change(screen.getByPlaceholderText('Ví dụ: admin hoặc designer1'), { target: { value: 'x' } })
+    fireEvent.change(screen.getByPlaceholderText('••••••••'), { target: { value: 'y' } })
+    fireEvent.click(screen.getByRole('button', { name: /Đăng Nhập Hệ Thống/i }))
 
     await waitFor(() =>
       expect(screen.getByText('Sai tên đăng nhập hoặc mật khẩu')).toBeInTheDocument()
     )
   })
 })
+

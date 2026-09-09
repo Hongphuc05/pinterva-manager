@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     # refreshes in the background — separate from crawl_interval_seconds since it's a
     # much cheaper, purely-read HTTP job (no Playwright), safe to run more often.
     status_sync_interval_seconds: int = 300
+    # Comma-separated browser origins permitted to call the JSON API.  Kept explicit
+    # because the Vercel SPA and API are separate production origins.
+    cors_origins: str = "http://localhost:5173"
     # These are server-side credentials only.  The SPA must never receive them.
     # They stay optional here so a normal local/test boot does not require a live
     # Printerval account; PrintervalApiClient validates them when it is used.

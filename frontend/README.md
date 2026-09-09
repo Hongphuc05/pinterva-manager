@@ -1,4 +1,4 @@
-# Pinterval Ops Dashboard — frontend
+# Tacahu Ops Dashboard — frontend
 
 React + TypeScript + Vite SPA cho web dashboard vận hành nội bộ. Backend là FastAPI
 JSON API (`../app/api`), auth qua session cookie (không JWT/OAuth).

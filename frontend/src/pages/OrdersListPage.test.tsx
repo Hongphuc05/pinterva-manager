@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import { BrowserRouter } from 'react-router-dom'
 import { AuthProvider } from '../auth/AuthContext'
+import { PlatformProvider } from '../auth/PlatformContext'
 import { OrdersListPage } from './OrdersListPage'
 
 describe('OrdersListPage', () => {
@@ -15,6 +16,9 @@ describe('OrdersListPage', () => {
             status: 200,
             json: async () => ({ id: '1', role: 'admin', full_name: 'Admin' }),
           })
+        }
+        if (url.includes('/api/platforms')) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ platforms: [] }) })
         }
         if (url.includes('/api/orders')) {
           return Promise.resolve({
@@ -45,11 +49,15 @@ describe('OrdersListPage', () => {
     render(
       <BrowserRouter>
         <AuthProvider>
-          <OrdersListPage />
+          <PlatformProvider>
+            <OrdersListPage />
+          </PlatformProvider>
         </AuthProvider>
       </BrowserRouter>
     )
     await waitFor(() => expect(screen.getByText('DJ1')).toBeInTheDocument())
-    expect(screen.getByText('SKU1')).toBeInTheDocument()
+    expect(screen.getByText('Chờ phân công')).toBeInTheDocument()
   })
 })
+
+

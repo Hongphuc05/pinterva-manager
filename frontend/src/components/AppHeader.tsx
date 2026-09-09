@@ -15,7 +15,7 @@ export function AppHeader() {
   return (
     <header className="flex justify-between items-center p-4 border-b bg-gray-50">
       <Link to="/orders" className="font-bold">
-        Pinterval Ops
+        Tacahu Ops
       </Link>
       <div className="flex items-center gap-4 text-sm">
         {user.role === 'admin' && (

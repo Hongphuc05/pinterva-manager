@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
-from app.adapters.db.models import ExternalObservation, Order, PrintervalAssignmentRequest, User
+from app.adapters.db.models import ExternalObservation, Order, Platform, PrintervalAssignmentRequest, User
 from app.adapters.playwright_support import with_retry
 from app.adapters.printerval.interface import PrintervalAdapter
 from app.application.operations import run_idempotent
@@ -65,30 +65,22 @@ def execute_request(
     ).hexdigest()
 
     def _do() -> dict:
-        options_result = adapter.list_designer_options(order.external_order_id)
-        if not options_result.success:
+        platform = session.get(Platform, request.platform_id)
+        available_designers = platform.printerval_designer_options if platform else None
+        if not available_designers:
             return _fail(
                 request,
-                options_result.error_class or "BUG",
-                "Could not load the Printerval Designer list",
-                options_result.evidence,
+                "VALIDATION",
+                "Printerval Designer cache has not been loaded for this platform",
+                {},
             )
-        if request.designer_option not in options_result.options:
+        if request.designer_option not in available_designers:
             return _fail(
                 request,
                 "EXTERNAL_CHANGED",
                 "Selected Printerval Designer is no longer available for this platform",
-                {"available_designers": options_result.options},
+                {"available_designers": available_designers},
             )
-        snapshot = adapter.get_order_detail(order.external_order_id)
-        if not snapshot.success:
-            return _fail(
-                request,
-                snapshot.error_class or "BUG",
-                "Could not read external order",
-                snapshot.evidence,
-            )
-
         designer_result = with_retry(
             lambda: adapter.set_designer(order.external_order_id, request.designer_option)
         )
@@ -108,7 +100,7 @@ def execute_request(
                 source="printerval.assignment_request",
                 external_id=order.external_order_id,
                 observed_state=request.observed_designer,
-                evidence={"before": {"designer": snapshot.designer, "status": snapshot.status}},
+                evidence={"request": {"designer": request.designer_option, "status": request.target_status}},
             )
         )
 
@@ -126,7 +118,7 @@ def execute_request(
         request.lifecycle = "succeeded"
         request.error_class = None
         request.error_message = None
-        request.evidence = {"before": {"designer": snapshot.designer, "status": snapshot.status}}
+        request.evidence = {"request": {"designer": request.designer_option, "status": request.target_status}}
         order.printerval_designer = request.observed_designer
         order.printerval_designer_synced_at = datetime.now(UTC)
         order.printerval_status = (

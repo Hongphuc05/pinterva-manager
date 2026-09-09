@@ -149,28 +149,16 @@ def _note_outsource_group(row):
     return row.locator(".note[aria-hidden='false']").first
 
 
-def _search_and_get_row(page: Page, external_order_id: str):
+def _search_and_get_row(
+    page: Page,
+    external_order_id: str,
+    crawl_username: str | None = None,
+    crawl_password: str | None = None,
+):
     """Navigate to the admin page and search for one order by its DJ code
     across all statuses, returning its table row.
     """
-    page.goto(ADMIN_URL)
-    page.wait_for_load_state("domcontentloaded")
-    if "login" in page.url.lower() or page.locator("input[name='username']").count() > 0 or page.locator("input[name='email']").count() > 0:
-        from app.config import get_settings
-        settings = get_settings()
-        if settings.printerval_username and settings.printerval_password:
-            user_input = page.locator("input[name='username'], input[name='email'], input[type='email']").first
-            if user_input.count() > 0:
-                user_input.fill(settings.printerval_username)
-            pass_input = page.locator("input[name='password'], input[type='password']").first
-            if pass_input.count() > 0:
-                pass_input.fill(settings.printerval_password)
-            submit_btn = page.locator("button[type='submit'], input[type='submit'], button:has-text('Login'), button:has-text('Đăng nhập')").first
-            if submit_btn.count() > 0:
-                submit_btn.click()
-                page.wait_for_load_state("domcontentloaded")
-            page.goto(ADMIN_URL)
-            page.wait_for_load_state("domcontentloaded")
+    _open_admin_page(page, crawl_username, crawl_password)
 
     clean_id = external_order_id.replace("DJ", "").replace("dj", "").strip()
     search_input = page.get_by_placeholder("Search products...")
@@ -223,10 +211,41 @@ def _search_and_get_row(page: Page, external_order_id: str):
             pass
 
     if row.count() == 0:
-        raise _OrderNotFoundError(
-            f"No row found for order {external_order_id} after search"
-        )
+        raise _OrderNotFoundError(f"No row found for order {external_order_id} after search")
     return row
+
+
+def _open_admin_page(
+    page: Page,
+    crawl_username: str | None = None,
+    crawl_password: str | None = None,
+) -> None:
+    """Open the outsourced-job page authenticated as the supplied platform."""
+    # Profiles are retained for Cloudflare, but they may have been authenticated as
+    # a different mother account by an earlier action. Writes must never inherit that
+    # session, otherwise one platform can change another platform's orders.
+    if not crawl_username or not crawl_password:
+        raise PermissionError("Platform Printerval credentials are required")
+    page.context.clear_cookies()
+    page.goto(ADMIN_URL)
+    page.wait_for_load_state("domcontentloaded")
+    if (
+        "login" in page.url.lower()
+        or page.locator("input[name='username']").count() > 0
+        or page.locator("input[name='email']").count() > 0
+    ):
+        user_input = page.locator("input[name='username'], input[name='email'], input[type='email']").first
+        if user_input.count() > 0:
+            user_input.fill(crawl_username)
+        pass_input = page.locator("input[name='password'], input[type='password']").first
+        if pass_input.count() > 0:
+            pass_input.fill(crawl_password)
+        submit_btn = page.loc("button[type='submit'], input[type='submit'], button:has-text('Login'), button:has-text('Đăng nhập')").first
+        if submit_btn.count() > 0:
+            submit_btn.click()
+            page.wait_for_load_state("domcontentloaded")
+        page.goto(ADMIN_URL)
+        page.wait_for_load_state("domcontentloaded")
 
 
 def _parse_short_datetime(raw: str) -> datetime | None:
@@ -353,17 +372,37 @@ class PlaywrightPrintervalAdapter:
         self._last_row_cache: tuple[str, object] | None = None
 
     def list_designer_options(self, external_order_id: str) -> DesignerOptionsResult:
-        """Read the exact visible Designer labels for this platform and order."""
+        """Read the platform-wide Designer filter options from Printerval."""
         try:
-            row = self._search_and_get_row_cached(external_order_id)
-            selects = row.locator("select")
-            if selects.count() < 1:
-                raise LookupError("No Designer <select> found")
-            labels = [label.strip() for label in selects.nth(0).locator("option").all_inner_texts()]
+            _open_admin_page(self.page, self.crawl_username, self.crawl_password)
+            self.page.wait_for_function(
+                """() => [...document.querySelectorAll('select')].some((select) => {
+                    const labels = [...select.options].map((option) => option.textContent.trim().toLowerCase());
+                    return labels.includes('tất cả designer') && labels.length > 2;
+                })""",
+                timeout=10_000,
+            )
+            selects = self.page.locator("select")
+            designer_select = next(
+                (
+                    selects.nth(index)
+                    for index in range(selects.count())
+                    if any(
+                        label.strip().lower() in {"tất cả designer", "all designer"}
+                        for label in selects.nth(index).locator("option").all_inner_texts()
+                    )
+                ),
+                None,
+            )
+            if designer_select is None:
+                raise LookupError("No platform Designer filter found")
+            labels = [label.strip() for label in designer_select.locator("option").all_inner_texts()]
             options = [
                 label
                 for label in labels
-                if label and label.lower() not in {"choose designer", "chưa chia cho ai"}
+                if label
+                and label.lower()
+                not in {"all designer", "tất cả designer", "choose designer", "chưa chia cho ai"}
             ]
             if not options:
                 raise LookupError("Designer <select> has no selectable options")
@@ -391,26 +430,7 @@ class PlaywrightPrintervalAdapter:
         # (filter.dateFrom/dateTo) have never been driven by this adapter, only read
         # about. Silently not applied on this path (see api_adapter.py's docstring).
         page = self.page
-        page.goto(ADMIN_URL)
-        page.wait_for_load_state("domcontentloaded")
-        if "login" in page.url.lower() or page.locator("input[name='username']").count() > 0 or page.locator("input[name='email']").count() > 0:
-            from app.config import get_settings
-            settings = get_settings()
-            user = self.crawl_username or settings.printerval_username
-            pwd = self.crawl_password or settings.printerval_password
-            if user and pwd:
-                user_input = page.locator("input[name='username'], input[name='email'], input[type='email']").first
-                if user_input.count() > 0:
-                    user_input.fill(user)
-                pass_input = page.locator("input[name='password'], input[type='password']").first
-                if pass_input.count() > 0:
-                    pass_input.fill(pwd)
-                submit_btn = page.locator("button[type='submit'], input[type='submit'], button:has-text('Login'), button:has-text('Đăng nhập')").first
-                if submit_btn.count() > 0:
-                    submit_btn.click()
-                    page.wait_for_load_state("domcontentloaded")
-                page.goto(ADMIN_URL)
-                page.wait_for_load_state("domcontentloaded")
+        _open_admin_page(page, self.crawl_username, self.crawl_password)
         try:
             status_select = _find_select_by_option_text(page, status)
             status_select.select_option(label=status, force=True)
@@ -679,7 +699,12 @@ class PlaywrightPrintervalAdapter:
     def _search_and_get_row_cached(self, external_order_id: str):
         if self._last_row_cache is not None and self._last_row_cache[0] == external_order_id:
             return self._last_row_cache[1]
-        row = _search_and_get_row(self.page, external_order_id)
+        row = _search_and_get_row(
+            self.page,
+            external_order_id,
+            self.crawl_username,
+            self.crawl_password,
+        )
         self._last_row_cache = (external_order_id, row)
         return row
 
@@ -765,7 +790,7 @@ class PlaywrightPrintervalAdapter:
     def set_designer(self, external_order_id: str, designer_option: str) -> WriteResult:
         page = self.page
         try:
-            row = _search_and_get_row(page, external_order_id)
+            row = _search_and_get_row(page, external_order_id, self.crawl_username, self.crawl_password)
             selects = row.locator("select")
             if selects.count() < 1:
                 raise LookupError(f"No Designer <select> found for order {external_order_id}")
@@ -810,7 +835,7 @@ class PlaywrightPrintervalAdapter:
             # rather than trusting the same in-page <select> we just changed
             # — a live incident proved a save can silently not persist while
             # the in-page DOM still looks changed.
-            fresh_row = _search_and_get_row(page, external_order_id)
+            fresh_row = _search_and_get_row(page, external_order_id, self.crawl_username, self.crawl_password)
             fresh_selects = fresh_row.locator("select")
             observed = (
                 _selected_option_text(fresh_selects.nth(0)) if fresh_selects.count() >= 1 else None
@@ -836,7 +861,7 @@ class PlaywrightPrintervalAdapter:
     def set_status(self, external_order_id: str, target_status: str) -> WriteResult:
         page = self.page
         try:
-            row = _search_and_get_row(page, external_order_id)
+            row = _search_and_get_row(page, external_order_id, self.crawl_username, self.crawl_password)
             selects = row.locator("select")
             if selects.count() < 2:
                 raise LookupError(f"No Status <select> found for order {external_order_id}")
@@ -866,7 +891,7 @@ class PlaywrightPrintervalAdapter:
         # found".
         try:
             # Genuine fresh-state check (see set_designer for why).
-            fresh_row = _search_and_get_row(page, external_order_id)
+            fresh_row = _search_and_get_row(page, external_order_id, self.crawl_username, self.crawl_password)
             fresh_selects = fresh_row.locator("select")
             observed = (
                 _selected_option_text(fresh_selects.nth(1)) if fresh_selects.count() >= 2 else None
@@ -892,7 +917,7 @@ class PlaywrightPrintervalAdapter:
     def attach_result_link(self, external_order_id: str, drive_url: str) -> WriteResult:
         page = self.page
         try:
-            row = _search_and_get_row(page, external_order_id)
+            row = _search_and_get_row(page, external_order_id, self.crawl_username, self.crawl_password)
             note_group = _note_outsource_group(row)
             if note_group.count() == 0:
                 raise LookupError(f"No Note outsource field found for order {external_order_id}")
@@ -937,7 +962,7 @@ class PlaywrightPrintervalAdapter:
             # this is exactly the check that caught the original incident,
             # where the save silently didn't persist while the in-page
             # textarea still showed the new value.
-            fresh_row = _search_and_get_row(page, external_order_id)
+            fresh_row = _search_and_get_row(page, external_order_id, self.crawl_username, self.crawl_password)
             observed = _note_outsource_group(fresh_row).locator("textarea").input_value()
         except Exception:
             evidence = capture_evidence(

@@ -7,7 +7,10 @@ import { Columns3, AlertTriangle, User, ChevronRight, Package } from 'lucide-rea
 type Card = {
   id: string; external_order_id: string; state: string; product_name: string | null
   thumbnail_url: string | null; job_type: string | null; designer_name: string | null
-  deadline_at_ext: string | null; alerts: string[]
+  deadline_at_ext: string | null; alerts: KanbanAlert[]
+}
+type KanbanAlert = {
+  kind: string; label: string; detail: string; occurred_at: string | null
 }
 type Column = { id: string; title: string; cards: Card[] }
 
@@ -15,6 +18,7 @@ export function KanbanPage() {
   const [columns, setColumns] = useState<Column[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [expandedAlert, setExpandedAlert] = useState<string | null>(null)
 
   useEffect(() => {
     setLoading(true)
@@ -143,12 +147,53 @@ export function KanbanPage() {
                       {/* Alerts / Warnings */}
                       {card.alerts.length > 0 && (
                         <div className="flex flex-wrap gap-1 pt-1">
-                          {card.alerts.map((alert) => (
-                            <span key={alert} className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-red-50 text-red-700 border border-red-200 text-[10px] font-semibold">
-                              <AlertTriangle className="h-3 w-3" />
-                              <span>{alert}</span>
-                            </span>
-                          ))}
+                          {card.alerts.map((alert) => {
+                            const alertId = `${card.id}-${alert.kind}`
+                            const isExpanded = expandedAlert === alertId
+                            const occurredAt = alert.occurred_at
+                              ? new Date(alert.occurred_at).toLocaleString('vi-VN')
+                              : null
+                            return (
+                              <div key={alertId} className="relative">
+                                <span
+                                  role="button"
+                                  tabIndex={0}
+                                  title={alert.detail}
+                                  aria-expanded={isExpanded}
+                                  onClick={(event) => {
+                                    event.preventDefault()
+                                    event.stopPropagation()
+                                    setExpandedAlert(isExpanded ? null : alertId)
+                                  }}
+                                  onKeyDown={(event) => {
+                                    if (event.key === 'Enter' || event.key === ' ') {
+                                      event.preventDefault()
+                                      event.stopPropagation()
+                                      setExpandedAlert(isExpanded ? null : alertId)
+                                    }
+                                  }}
+                                  className="inline-flex cursor-pointer items-center gap-1 px-2 py-0.5 rounded bg-red-50 text-red-700 border border-red-200 text-[10px] font-semibold hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-300"
+                                >
+                                  <AlertTriangle className="h-3 w-3" />
+                                  <span>{alert.label}</span>
+                                </span>
+                                {isExpanded && (
+                                  <div
+                                    role="status"
+                                    onClick={(event) => {
+                                      event.preventDefault()
+                                      event.stopPropagation()
+                                    }}
+                                    className="absolute z-20 left-0 top-full mt-1 w-64 rounded-lg border border-red-200 bg-white p-3 text-left shadow-lg"
+                                  >
+                                    <p className="text-[11px] font-semibold text-red-800">{alert.label}</p>
+                                    <p className="mt-1 text-[11px] leading-relaxed text-slate-600">{alert.detail}</p>
+                                    {occurredAt && <p className="mt-2 text-[10px] text-slate-400">Ghi nhận: {occurredAt}</p>}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })}
                         </div>
                       )}
                     </Link>

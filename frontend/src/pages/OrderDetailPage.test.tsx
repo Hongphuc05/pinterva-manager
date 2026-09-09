@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import { AuthProvider } from '../auth/AuthContext'
+import { PlatformProvider } from '../auth/PlatformContext'
 import { OrderDetailPage } from './OrderDetailPage'
 
 describe('OrderDetailPage', () => {
@@ -43,11 +45,15 @@ describe('OrderDetailPage', () => {
 
   it('renders order fields', async () => {
     render(
-      <MemoryRouter initialEntries={['/orders/a1']}>
-        <Routes>
-          <Route path="/orders/:id" element={<OrderDetailPage />} />
-        </Routes>
-      </MemoryRouter>
+      <AuthProvider>
+        <PlatformProvider>
+          <MemoryRouter initialEntries={['/orders/a1']}>
+            <Routes>
+              <Route path="/orders/:id" element={<OrderDetailPage />} />
+            </Routes>
+          </MemoryRouter>
+        </PlatformProvider>
+      </AuthProvider>
     )
     await waitFor(() => expect(screen.getByText(/Test Mug/)).toBeInTheDocument())
     expect(screen.getByText(/SKU1/)).toBeInTheDocument()

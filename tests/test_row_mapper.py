@@ -132,6 +132,33 @@ def test_extract_source_files_text_only_configuration_yields_nothing_extra():
     ]  # falls through to the single-image fallback, same as extract_source_asset_url
 
 
+def test_extract_source_files_includes_every_image_inside_images_array():
+    row = {
+        "meta_data": json.dumps(
+            {
+                "product_skus": {
+                    "sku": {
+                        "configurations": json.dumps(
+                            {
+                                "images": [
+                                    {"type": "image", "value": "https://assets.printerval.com/one.png"},
+                                    {"type": "image", "value": "https://assets.printerval.com/two.png"},
+                                ],
+                                "texts": [{"text": "Emma"}],
+                            }
+                        )
+                    }
+                }
+            }
+        )
+    }
+
+    assert extract_source_files(row) == [
+        {"name": "one.png", "url": "https://assets.printerval.com/one.png"},
+        {"name": "two.png", "url": "https://assets.printerval.com/two.png"},
+    ]
+
+
 def test_parse_order_detail_from_row_personalized(monkeypatch):
     monkeypatch.setattr(
         "app.adapters.printerval.row_mapper.download_and_save_image", lambda *a, **k: None

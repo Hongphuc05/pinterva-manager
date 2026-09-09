@@ -24,6 +24,11 @@ class Platform(Base):
     # OTHER platform (last login's team_outsource clobbered the global value). Per
     # platform is the root-cause fix.
     team_outsource: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    printerval_designer_options: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    printerval_status_options: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    printerval_options_synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, server_default=text("true"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -328,6 +333,7 @@ class DeadLetter(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class PlatformSyncState(Base):
