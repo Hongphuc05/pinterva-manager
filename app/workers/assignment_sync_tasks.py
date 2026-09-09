@@ -64,6 +64,7 @@ def sync_printerval_assignment_request(request_id: str) -> None:
                 username=platform.account_username,
                 password=platform.account_password,
                 team_outsource=platform.team_outsource,
+                session_cookie=platform.session_cookie,
             ) as client:
                 adapter = PrintervalApiAdapter(client, fallback_adapter=fallback, download_images=False)
                 execute_request(session, adapter, request)

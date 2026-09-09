@@ -79,21 +79,31 @@ class PrintervalApiClient:
         username: str | None,
         password: str | None,
         team_outsource: str | None,
+        session_cookie: str | None = None,
         client: httpx.Client | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.username = username
         self.password = password
         self.team_outsource = team_outsource
+        self.session_cookie = session_cookie.strip() if session_cookie and session_cookie.strip() else None
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+        if self.session_cookie:
+            c_val = self.session_cookie
+            if "=" not in c_val:
+                c_val = f"laravel_session={c_val}"
+            headers["Cookie"] = c_val
+
         self._client = client or httpx.Client(
             base_url=self.base_url,
             follow_redirects=False,
             timeout=httpx.Timeout(30.0),
-            headers={
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9",
-            },
+            headers=headers,
         )
         self._authenticated = False
 
@@ -107,18 +117,13 @@ class PrintervalApiClient:
         self.close()
 
     def _validate_configuration(self) -> None:
-        missing = [
-            name
-            for name, value in (
-                ("PRINTERVAL_USERNAME", self.username),
-                ("PRINTERVAL_PASSWORD", self.password),
-                ("PRINTERVAL_TEAM_OUTSOURCE", self.team_outsource),
-            )
-            if value is None or not str(value).strip()
-        ]
-        if missing:
+        if not self.team_outsource or not self.team_outsource.strip():
             raise PrintervalApiConfigurationError(
-                "Printerval API crawl is not configured: " + ", ".join(missing)
+                "Printerval API crawl is not configured: PRINTERVAL_TEAM_OUTSOURCE"
+            )
+        if not self.session_cookie and (not self.username or not self.password):
+            raise PrintervalApiConfigurationError(
+                "Printerval API crawl requires either a Session Cookie or Username/Password"
             )
 
     @staticmethod
@@ -129,6 +134,34 @@ class PrintervalApiClient:
 
     def login(self) -> None:
         self._validate_configuration()
+        if self.session_cookie:
+            # Validate existing session cookie via lightweight API call
+            try:
+                test_res = self._client.get(
+                    FIND_PATH,
+                    params={
+                        "page_size": "1",
+                        "page_id": "0",
+                        "status": "waiting",
+                        "team_outsource": self.team_outsource or "",
+                    },
+                )
+                redirected_to_login = (
+                    test_res.status_code in (301, 302, 303, 307, 308)
+                    and LOGIN_PATH in urlparse(test_res.headers.get("location", "")).path
+                )
+                if test_res.status_code == 200 and not redirected_to_login:
+                    self._authenticated = True
+                    return
+            except httpx.HTTPError:
+                pass
+            # If cookie authentication failed and no fallback credentials:
+            if not self.username or not self.password:
+                raise PrintervalApiError(
+                    ErrorClass.AUTH,
+                    "Session Cookie Printerval đã hết hạn. Vui lòng lấy Cookie mới và cập nhật lại.",
+                )
+
         try:
             form_page = self._client.get(LOGIN_PATH, params={"redirect": ADMIN_PATH})
         except httpx.HTTPError as exc:

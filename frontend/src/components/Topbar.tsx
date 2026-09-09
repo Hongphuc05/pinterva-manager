@@ -89,6 +89,22 @@ export function Topbar() {
         </span>
       </div>
 
+      {/* Persistent Warning Banner for Expired Session Cookie / Sync Error */}
+      {syncStatus?.last_error && user.role === 'admin' && (
+        <div className="hidden md:flex items-center gap-2 bg-amber-50 border border-amber-300 text-amber-900 px-3 py-1 rounded-xl text-xs font-medium">
+          <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
+          <span className="truncate max-w-sm" title={syncStatus.last_error}>
+            {syncStatus.last_error}
+          </span>
+          <button
+            onClick={() => setShowSettingsModal(true)}
+            className="ml-1 px-2 py-0.5 bg-amber-600 text-white rounded font-bold text-[10px] hover:bg-amber-700 transition-colors cursor-pointer shrink-0"
+          >
+            Cập nhật Cookie
+          </button>
+        </div>
+      )}
+
       {/* Toast Notification Banner */}
       {flashMessage && (
         <div className={`fixed top-4 right-6 z-50 p-3 px-4 rounded-xl text-xs font-semibold shadow-lg flex items-center gap-2.5 transition-all animate-in fade-in slide-in-from-top-2 ${

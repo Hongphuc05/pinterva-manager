@@ -18,6 +18,8 @@ class PlatformOut(BaseModel):
     id: uuid.UUID
     name: str
     account_username: str
+    team_outsource: str | None = None
+    session_cookie: str | None = None
     is_active: bool
     created_at: datetime
 

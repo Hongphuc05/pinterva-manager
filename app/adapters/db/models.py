@@ -24,6 +24,7 @@ class Platform(Base):
     # OTHER platform (last login's team_outsource clobbered the global value). Per
     # platform is the root-cause fix.
     team_outsource: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    session_cookie: Mapped[str | None] = mapped_column(Text, nullable=True)
     printerval_designer_options: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     printerval_status_options: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     printerval_options_synced_at: Mapped[datetime | None] = mapped_column(

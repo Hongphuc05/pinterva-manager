@@ -71,6 +71,7 @@ def sync_platform_order_statuses(
         username=platform.account_username,
         password=platform.account_password,
         team_outsource=platform.team_outsource,
+        session_cookie=platform.session_cookie,
     )
     try:
         orders = session.query(Order).filter(Order.platform_id == platform.id).all()

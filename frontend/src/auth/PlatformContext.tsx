@@ -6,6 +6,8 @@ export interface Platform {
   id: string
   name: string
   account_username: string
+  team_outsource?: string
+  session_cookie?: string
   is_active: boolean
   created_at: string
 }
@@ -39,16 +41,18 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setIsLoading(true)
     try {
       const list = await apiFetch<Platform[]>('/platforms')
-      setPlatforms(list)
+      if (Array.isArray(list)) {
+        setPlatforms(list)
 
-      const savedId = localStorage.getItem('activePlatformId')
-      let matched = list.find((p) => p.id === savedId)
-      if (!matched && list.length > 0) {
-        matched = list[0]
-      }
-      if (matched) {
-        setActivePlatformState(matched)
-        localStorage.setItem('activePlatformId', matched.id)
+        const savedId = localStorage.getItem('activePlatformId')
+        let matched = list.find((p) => p.id === savedId)
+        if (!matched && list.length > 0) {
+          matched = list[0]
+        }
+        if (matched) {
+          setActivePlatformState(matched)
+          localStorage.setItem('activePlatformId', matched.id)
+        }
       }
     } catch (err) {
       console.error('Failed to fetch platforms:', err)

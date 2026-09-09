@@ -320,6 +320,7 @@ def api_refresh_order_detail(
         username=platform.account_username,
         password=platform.account_password,
         team_outsource=platform.team_outsource,
+        session_cookie=platform.session_cookie,
     ) as api_client:
         adapter = PrintervalApiAdapter(api_client=api_client, download_images=True)
         result = refresh_order_detail(db, adapter, order)
@@ -370,6 +371,7 @@ def api_refresh_printerval_options(
             username=platform.account_username,
             password=platform.account_password,
             team_outsource=platform.team_outsource,
+            session_cookie=platform.session_cookie,
         ) as client:
             designers = client.list_designer_options()
     except (PrintervalApiConfigurationError, PrintervalApiError) as exc:
@@ -581,6 +583,7 @@ def api_orders_refresh(
             username=crawl_username,
             password=crawl_password,
             team_outsource=crawl_team_outsource,
+            session_cookie=platform.session_cookie,
         ) as api_client:
             adapter = PrintervalApiAdapter(api_client=api_client, download_images=False)
             summary = scan_orders_fast(
@@ -780,8 +783,9 @@ def api_bulk_assign_orders(
 
 class UpdatePrintervalCredentialsRequest(BaseModel):
     username: str
-    password: str
+    password: str | None = None
     team_outsource: str | None = None
+    session_cookie: str | None = None
 
 
 @router.post("/orders/printerval-credentials")
@@ -793,19 +797,18 @@ def api_update_printerval_credentials(
     from app.adapters.db.models import Platform
 
     username_clean = payload.username.strip()
-    password_clean = payload.password.strip()
+    password_clean = payload.password.strip() if payload.password else None
     team_outsource_clean = payload.team_outsource.strip() if payload.team_outsource else None
+    session_cookie_clean = payload.session_cookie.strip() if payload.session_cookie else None
 
     # Verify these credentials actually work against the real site BEFORE saving
-    # anything — a real incident: a wrong password sat silently in the DB (saved with
-    # no verification) and only surfaced as a mysterious "crawl thất bại" much later,
-    # during an unrelated crawl attempt on a different day.
     settings = get_settings()
     probe_client = PrintervalApiClient(
         base_url=settings.printerval_api_base_url,
         username=username_clean,
         password=password_clean,
         team_outsource=team_outsource_clean,
+        session_cookie=session_cookie_clean,
     )
     try:
         probe_client.login()
@@ -814,26 +817,19 @@ def api_update_printerval_credentials(
     except PrintervalApiError as exc:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            f"Không đăng nhập được vào Printerval bằng tài khoản '{username_clean}': {exc}. "
-            "Kiểm tra lại username/mật khẩu.",
+            f"Xác thực Printerval cho tài khoản '{username_clean}' không thành công: {exc}. "
+            "Kiểm tra lại Session Cookie hoặc username/mật khẩu.",
         )
     try:
-        # login succeeding only proves username/password — team_outsource only gets
-        # validated by the find endpoint, which a wrong value doesn't error on (it
-        # just returns 0 rows), so this is a best-effort check, not a guarantee.
         probe_client.discover_waiting_page(page_size=1)
     except PrintervalApiError as exc:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            f"Đăng nhập thành công nhưng Team Outsource có vẻ không đúng: {exc}",
+            f"Xác thực thành công nhưng Team Outsource có vẻ không đúng: {exc}",
         )
     finally:
         probe_client.close()
 
-    # Get or create Platform for this mother account. Credentials (incl. team_outsource,
-    # which scopes Printerval's find endpoint per account) are stored on the Platform row
-    # itself, never in process-wide os.environ/Settings — that global state was clobbered
-    # by whichever account logged in last, breaking crawl for every other platform.
     platform = (
         db.query(Platform)
         .filter(Platform.account_username == username_clean)
@@ -845,13 +841,17 @@ def api_update_printerval_credentials(
             account_username=username_clean,
             account_password=password_clean,
             team_outsource=team_outsource_clean,
+            session_cookie=session_cookie_clean,
             is_active=True,
         )
         db.add(platform)
     else:
-        platform.account_password = password_clean
+        if password_clean:
+            platform.account_password = password_clean
         if team_outsource_clean:
             platform.team_outsource = team_outsource_clean
+        if session_cookie_clean:
+            platform.session_cookie = session_cookie_clean
         platform.is_active = True
 
     db.commit()

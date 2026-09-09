@@ -15,17 +15,23 @@ export function PrintervalSettingsModal({ isOpen, onClose }: PrintervalSettingsM
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [teamOutsource, setTeamOutsource] = useState('')
+  const [sessionCookie, setSessionCookie] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [successMsg, setSuccessMsg] = useState('')
   const [showTeamOutsourceHelp, setShowTeamOutsourceHelp] = useState(false)
+  const [showCookieHelp, setShowCookieHelp] = useState(false)
 
   if (!isOpen) return null
 
   async function handleLoginNewAccount(e: React.FormEvent) {
     e.preventDefault()
-    if (!username.trim() || !password.trim() || !teamOutsource.trim()) {
-      setError('Vui lòng nhập đầy đủ tên tài khoản, mật khẩu và Team Outsource của Printerval!')
+    if (!username.trim() || !teamOutsource.trim()) {
+      setError('Vui lòng nhập đầy đủ Email / Username và Team Outsource của Printerval!')
+      return
+    }
+    if (!password.trim() && !sessionCookie.trim()) {
+      setError('Vui lòng nhập Mật khẩu HOẶC Session Cookie Printerval (laravel_session)!')
       return
     }
     setError('')
@@ -43,12 +49,13 @@ export function PrintervalSettingsModal({ isOpen, onClose }: PrintervalSettingsM
         method: 'POST',
         body: JSON.stringify({
           username: username.trim(),
-          password: password.trim(),
+          password: password.trim() || undefined,
           team_outsource: teamOutsource.trim(),
+          session_cookie: sessionCookie.trim() || undefined,
         }),
       })
 
-      setSuccessMsg(res.message || 'Đã đăng nhập tài khoản Printerval mới thành công!')
+      setSuccessMsg(res.message || 'Đã cập nhật / đăng nhập tài khoản Printerval thành công!')
       await refreshPlatforms()
 
       // Set active platform to the newly logged in account
@@ -63,7 +70,7 @@ export function PrintervalSettingsModal({ isOpen, onClose }: PrintervalSettingsM
       if (err instanceof ApiError) {
         setError(err.message)
       } else {
-        setError('Có lỗi xảy ra khi đăng nhập tài khoản Printerval mới.')
+        setError('Có lỗi xảy ra khi đăng nhập / cập nhật tài khoản Printerval.')
       }
     } finally {
       setLoading(false)
@@ -123,12 +130,12 @@ export function PrintervalSettingsModal({ isOpen, onClose }: PrintervalSettingsM
             }`}
           >
             <Plus className="h-3.5 w-3.5" />
-            <span>Đăng Nhập Acc Mẹ Mới</span>
+            <span>Cập Nhật / Đăng Nhập Acc Mẹ</span>
           </button>
         </div>
 
         {/* Modal Body */}
-        <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+        <div className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
           {error && (
             <div className="p-3 text-xs font-semibold text-red-700 bg-red-50 rounded-xl border border-red-200 flex items-center gap-2">
               <AlertCircle className="h-4 w-4 shrink-0" />
@@ -147,7 +154,7 @@ export function PrintervalSettingsModal({ isOpen, onClose }: PrintervalSettingsM
           {activeTab === 'switch' && (
             <div className="space-y-3">
               <p className="text-xs text-slate-500 font-medium">
-                Chọn một tài khoản mẹ Printerval bên dưới để chuyển workspace. Mỗi tài khoản mẹ chứa toàn bộ dữ liệu đơn hàng, phân công và cài đặt biệt lập hoàn toàn.
+                Chọn một tài khoản mẹ Printerval bên dưới để chuyển workspace hoặc bấm "Cập nhật Cookie" nếu tài khoản bị hết hạn đăng nhập.
               </p>
 
               <div className="space-y-2">
@@ -172,16 +179,35 @@ export function PrintervalSettingsModal({ isOpen, onClose }: PrintervalSettingsM
                           )}
                         </div>
                         <p className="font-mono text-slate-500 text-[11px]">{p.account_username}</p>
+                        {p.team_outsource && (
+                          <p className="text-[10px] text-slate-400">Team Outsource: <span className="font-semibold text-slate-600">{p.team_outsource}</span></p>
+                        )}
                       </div>
 
-                      {!isCurrent && (
+                      <div className="flex items-center gap-1.5">
                         <button
-                          onClick={() => setActivePlatform(p)}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-[#0052CC] hover:bg-[#0041A3] rounded-lg transition-colors cursor-pointer shadow-2xs"
+                          type="button"
+                          onClick={() => {
+                            setUsername(p.account_username)
+                            setTeamOutsource(p.team_outsource || '')
+                            setSessionCookie(p.session_cookie || '')
+                            setActiveTab('new')
+                          }}
+                          className="px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer border border-slate-200"
+                          title="Cập nhật Session Cookie hoặc Mật khẩu"
                         >
-                          <span>Chuyển sang Acc này</span>
+                          Cập nhật Cookie
                         </button>
-                      )}
+
+                        {!isCurrent && (
+                          <button
+                            onClick={() => setActivePlatform(p)}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-[#0052CC] hover:bg-[#0041A3] rounded-lg transition-colors cursor-pointer shadow-2xs"
+                          >
+                            <span>Chuyển Acc</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
                   )
                 })}
@@ -189,7 +215,13 @@ export function PrintervalSettingsModal({ isOpen, onClose }: PrintervalSettingsM
 
               <div className="pt-2 text-center">
                 <button
-                  onClick={() => setActiveTab('new')}
+                  onClick={() => {
+                    setUsername('')
+                    setPassword('')
+                    setTeamOutsource('')
+                    setSessionCookie('')
+                    setActiveTab('new')
+                  }}
                   className="text-xs font-bold text-[#0052CC] hover:underline cursor-pointer inline-flex items-center gap-1"
                 >
                   <Plus className="h-3.5 w-3.5" />
@@ -199,13 +231,13 @@ export function PrintervalSettingsModal({ isOpen, onClose }: PrintervalSettingsM
             </div>
           )}
 
-          {/* TAB 2: REGISTER NEW ACC MẸ */}
+          {/* TAB 2: REGISTER / UPDATE ACC MẸ */}
           {activeTab === 'new' && (
             <form onSubmit={handleLoginNewAccount} className="space-y-4">
               <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 space-y-1">
-                <p className="font-bold">🔑 Đăng nhập Acc Mẹ Printerval Mới</p>
+                <p className="font-bold">🔑 Cập Nhật / Đăng Nhập Acc Mẹ Printerval</p>
                 <p className="text-[11px] text-amber-800">
-                  Khi đăng nhập tài khoản mẹ mới, hệ thống sẽ tự động tạo một Workspace riêng biệt cho tài khoản này trong CSDL.
+                  Nhập Session Cookie Printerval (laravel_session) thu thập từ F12 DevTools để hệ thống crawl đơn nhanh chóng & bỏ qua Cloudflare WAF.
                 </p>
               </div>
 
@@ -219,18 +251,18 @@ export function PrintervalSettingsModal({ isOpen, onClose }: PrintervalSettingsM
                   placeholder="ví dụ: seller_us_02@printerval.com"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#0052CC]/20 focus:border-[#0052CC] transition-all"
+                  className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#0052CC]/20 focus:border-[#0052CC] transition-all font-mono"
                 />
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700 block">
-                  Mật khẩu Printerval <span className="text-red-500">*</span>
+                <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                  <span>Mật khẩu Printerval</span>
+                  <span className="text-[10px] text-slate-400 font-normal">(Không bắt buộc nếu đã nhập Session Cookie)</span>
                 </label>
                 <input
                   type="password"
-                  required
-                  placeholder="Nhập mật khẩu..."
+                  placeholder="Nhập mật khẩu (tùy chọn)..."
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#0052CC]/20 focus:border-[#0052CC] transition-all"
@@ -269,9 +301,9 @@ export function PrintervalSettingsModal({ isOpen, onClose }: PrintervalSettingsM
                 </p>
 
                 {showTeamOutsourceHelp && (
-                  <div className="absolute z-10 top-full mt-1 left-0 right-0 p-3 bg-slate-800 text-slate-100 rounded-xl shadow-xl text-[11px] space-y-1.5">
+                  <div className="absolute z-20 top-full mt-1 left-0 right-0 p-3 bg-slate-800 text-slate-100 rounded-xl shadow-xl text-[11px] space-y-1.5 border border-slate-700">
                     <div className="flex items-center justify-between">
-                      <p className="font-bold flex items-center gap-1">
+                      <p className="font-bold flex items-center gap-1 text-amber-400">
                         <HelpCircle className="h-3.5 w-3.5" />
                         Cách lấy Team Outsource
                       </p>
@@ -284,14 +316,69 @@ export function PrintervalSettingsModal({ isOpen, onClose }: PrintervalSettingsM
                       </button>
                     </div>
                     <ol className="list-decimal list-inside space-y-1 text-slate-200">
-                      <li>Đăng nhập trực tiếp trên trình duyệt (không qua web này) vào printerval.com bằng đúng tài khoản mẹ này.</li>
-                      <li>Vào trang: printerval.com/central/outsource/pod/design-job/admin</li>
-                      <li>Mở DevTools (F12) → tab Network.</li>
-                      <li>Nhấn F5 (hoặc tải lại trang).</li>
-                      <li>Tìm dòng request có tên dạng: <code className="bg-slate-700 px-1 rounded">count?team_outsource=...</code></li>
-                      <li>Giá trị đứng ngay sau chữ <code className="bg-slate-700 px-1 rounded">team_outsource=</code> chính là giá trị cần điền (hoặc xem ở tiêu đề trang: "Quản lí công việc - Team ...").</li>
+                      <li>Đăng nhập trực tiếp trên trình duyệt vào printerval.com bằng tài khoản mẹ.</li>
+                      <li>Vào trang: <code className="bg-slate-700 px-1 rounded text-cyan-300">printerval.com/central/outsource/pod/design-job/admin</code></li>
+                      <li>Mở DevTools (F12) → tab Network → F5 tải lại trang.</li>
+                      <li>Tìm dòng request có tên dạng: <code className="bg-slate-700 px-1 rounded text-amber-300">count?team_outsource=...</code></li>
+                      <li>Giá trị ngay sau <code className="bg-slate-700 px-1 rounded">team_outsource=</code> chính là giá trị cần điền.</li>
                     </ol>
-                    <p className="text-slate-400 italic">Không đoán theo tên tài khoản — mỗi acc mẹ có 1 giá trị riêng, đoán sai sẽ khiến quét đơn âm thầm trả về 0 kết quả.</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Session Cookie Input Field */}
+              <div className="space-y-1 relative">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                    <span>Session Cookie Printerval</span>
+                    <span className="text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-full border border-emerald-200 font-semibold">
+                      Khuyên dùng trên Cloud
+                    </span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowCookieHelp((v) => !v)}
+                    className="text-[#0052CC] hover:underline text-xs font-semibold cursor-pointer inline-flex items-center gap-1"
+                  >
+                    <HelpCircle className="h-3.5 w-3.5" />
+                    <span>Cách lấy Cookie?</span>
+                  </button>
+                </div>
+                <textarea
+                  rows={3}
+                  placeholder="Dán laravel_session=eyJ... hoặc toàn bộ chuỗi Cookie từ DevTools vào đây"
+                  value={sessionCookie}
+                  onChange={(e) => setSessionCookie(e.target.value)}
+                  className="w-full px-3.5 py-2 text-xs font-mono rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#0052CC]/20 focus:border-[#0052CC] transition-all bg-slate-50/50"
+                />
+                <p className="text-[10px] text-slate-400">
+                  Khuyên dùng khi deploy web trên Render / Vercel / VPS để không bị Cloudflare WAF chặn.
+                </p>
+
+                {showCookieHelp && (
+                  <div className="absolute z-20 top-full mt-1 left-0 right-0 p-3.5 bg-slate-900 text-slate-100 rounded-xl shadow-xl text-[11px] space-y-2 border border-slate-700 animate-in fade-in duration-150">
+                    <div className="flex items-center justify-between border-b border-slate-700 pb-1.5">
+                      <p className="font-bold text-amber-400 flex items-center gap-1.5">
+                        <HelpCircle className="h-4 w-4" />
+                        Hướng dẫn lấy Session Cookie (laravel_session)
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setShowCookieHelp(false)}
+                        className="text-slate-400 hover:text-white cursor-pointer"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                    <ol className="list-decimal list-inside space-y-1.5 text-slate-200">
+                      <li>Đăng nhập trực tiếp trên trình duyệt vào <b>printerval.com</b> bằng tài khoản mẹ này.</li>
+                      <li>Vào trang: <code className="bg-slate-800 text-emerald-300 px-1 py-0.5 rounded font-mono text-[10px]">printerval.com/central/outsource/pod/design-job/admin</code></li>
+                      <li>Nhấn <b>F12</b> (mở DevTools) → Chọn tab <b>Network</b>.</li>
+                      <li>Nhấn <b>F5</b> để tải lại trang.</li>
+                      <li>Tìm dòng request có tên: <code className="bg-slate-800 text-amber-300 px-1 py-0.5 rounded font-mono text-[10px]">count?team_outsource=...</code> (hoặc <code className="bg-slate-800 text-amber-300 px-1 py-0.5 rounded font-mono text-[10px]">find</code>).</li>
+                      <li>Click vào dòng request đó → Chọn tab <b>Headers</b> → Mục <b>Request Headers</b>.</li>
+                      <li>Tìm thuộc tính <b>Cookie</b>, copy chuỗi <code className="bg-slate-800 text-cyan-300 px-1 py-0.5 rounded font-mono text-[10px]">laravel_session=...</code> (hoặc toàn bộ chuỗi Cookie) và dán vào ô trên.</li>
+                    </ol>
                   </div>
                 )}
               </div>
@@ -310,7 +397,7 @@ export function PrintervalSettingsModal({ isOpen, onClose }: PrintervalSettingsM
                   className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-colors shadow-2xs disabled:opacity-50 cursor-pointer"
                 >
                   {loading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                  <span>{loading ? 'Đang đăng nhập...' : 'Đăng Nhập & Chuyển Workspace'}</span>
+                  <span>{loading ? 'Đang xác thực...' : 'Lưu & Kích Hoạt Workspace'}</span>
                 </button>
               </div>
             </form>
