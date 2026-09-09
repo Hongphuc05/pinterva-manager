@@ -79,6 +79,31 @@ def test_extract_product_sales_url():
     assert extract_product_sales_url(row_with_slug) == "https://printerval.com/taylor-2024-calendar-p3736161"
 
 
+def test_extract_product_sales_url_builds_clickable_preview_url_from_api_ids():
+    """The API separates product slug/id and SKU id, while the preview click URL
+    needs both the ``-p`` suffix and the ``spid`` query parameter."""
+    row = {
+        "product_id": 2749120720,
+        "product": {
+            "slug": "sn-lax-poke-chill-mint-cartoon-bubble-style-leather-bags-gift-for-her",
+            "id": 2749120720,
+        },
+        "meta_data": json.dumps(
+            {
+                "product_skus": {
+                    "3419826043": {"product_sku_id": 3419826043},
+                }
+            }
+        ),
+    }
+
+    assert extract_product_sales_url(row) == (
+        "https://printerval.com/"
+        "sn-lax-poke-chill-mint-cartoon-bubble-style-leather-bags-gift-for-her-p2749120720"
+        "?spid=3419826043"
+    )
+
+
 def test_fetch_product_gallery_images_success():
     sample_html = """
     <div class="product-gallery">

@@ -9,7 +9,16 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from app.adapters.db.models import Assignment, Order, Platform, PrintervalAssignmentRequest, ResultVersion, User, WorkflowEvent
+from app.adapters.db.models import (
+    Assignment,
+    Order,
+    Platform,
+    PlatformSyncState,
+    PrintervalAssignmentRequest,
+    ResultVersion,
+    User,
+    WorkflowEvent,
+)
 from app.adapters.printerval import login_session
 from app.adapters.printerval.api_adapter import PrintervalApiAdapter
 from app.adapters.printerval.api_client import (
@@ -1037,6 +1046,7 @@ def api_update_printerval_credentials(
             is_active=True,
         )
         db.add(platform)
+        db.flush()  # Allocate the UUID before looking up its optional sync state.
     else:
         if password_clean:
             platform.account_password = password_clean
@@ -1045,6 +1055,14 @@ def api_update_printerval_credentials(
         if session_cookie_clean:
             platform.session_cookie = session_cookie_clean
         platform.is_active = True
+
+    # The yellow banner represents the *last background sync failure*, not the
+    # current credential form.  A successful probe above proves the submitted
+    # credentials and team can read Printerval now, so leaving a stale failure here
+    # incorrectly tells the operator that this new cookie is still broken.
+    sync_state = db.get(PlatformSyncState, platform.id)
+    if sync_state is not None:
+        sync_state.last_error = None
 
     db.commit()
     db.refresh(platform)

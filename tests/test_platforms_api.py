@@ -4,7 +4,7 @@ import pytest
 import uuid
 from fastapi.testclient import TestClient
 
-from app.adapters.db.models import Platform, User, Order
+from app.adapters.db.models import Order, Platform, PlatformSyncState, User
 from app.api.deps import get_db
 from app.api.main import create_app
 from app.application.auth import hash_password
@@ -130,6 +130,48 @@ def test_printerval_credentials_persist_team_outsource_per_platform_not_env(clie
     # The whole point: logging into account 2 must not have overwritten account 1's
     # persisted value via a shared global.
     assert "PRINTERVAL_TEAM_OUTSOURCE" not in os.environ
+
+
+def test_successful_cookie_update_clears_stale_platform_sync_error(client, db_session, monkeypatch):
+    """The top-bar warning is driven by PlatformSyncState.last_error.  It must not
+    survive a successful credential verification for that same platform."""
+    from app.adapters.printerval.api_client import PrintervalApiClient
+
+    platform = Platform(
+        name="Cookie platform",
+        account_username="cookie@printerval.com",
+        account_password="old-password",
+        team_outsource="team-cookie",
+        session_cookie="old-cookie",
+    )
+    db_session.add(platform)
+    db_session.flush()
+    db_session.add(
+        PlatformSyncState(
+            platform_id=platform.id,
+            last_error="UPDATE statement on table 'orders' expected to update 1 row(s); 0 were matched.",
+        )
+    )
+    db_session.commit()
+
+    monkeypatch.setattr(PrintervalApiClient, "login", lambda self: None)
+    monkeypatch.setattr(PrintervalApiClient, "discover_waiting_page", lambda self, **k: None)
+    monkeypatch.setattr(PrintervalApiClient, "close", lambda self: None)
+    _, token = _login(client, db_session, "admin", "admin_clear_cookie_warning")
+
+    response = client.post(
+        "/api/orders/printerval-credentials",
+        json={
+            "username": "cookie@printerval.com",
+            "password": "new-password",
+            "team_outsource": "team-cookie",
+            "session_cookie": "new-cookie",
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert db_session.get(PlatformSyncState, platform.id).last_error is None
 
 
 def test_printerval_credentials_rejects_a_login_that_fails_against_the_real_site(client, db_session, monkeypatch):

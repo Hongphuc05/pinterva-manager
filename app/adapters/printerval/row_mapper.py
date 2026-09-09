@@ -176,7 +176,7 @@ def extract_product_sales_url(row: dict[str, Any]) -> str | None:
 
     prod = row.get("product")
     if isinstance(prod, dict):
-        for key in ("url", "link", "product_url", "slug"):
+        for key in ("url", "link", "product_url"):
             val = prod.get(key)
             if val and isinstance(val, str) and val.strip():
                 if val.startswith("http"):
@@ -184,6 +184,23 @@ def extract_product_sales_url(row: dict[str, Any]) -> str | None:
                 if val.startswith("/"):
                     return f"https://printerval.com{val}"
                 return f"https://printerval.com/{val}"
+
+        # The fast design-job API returns a slug, product id and SKU id separately.
+        # The clickable product preview on Printerval combines them as
+        # ``<slug>-p<product_id>?spid=<product_sku_id>``.  A bare slug loads a
+        # generic page and only exposes its thumbnail, which is why gallery imports
+        # previously stopped at one image.
+        slug = prod.get("slug")
+        product_id = prod.get("id") or row.get("product_id")
+        meta = _meta_data(row)
+        sku_data = _first_sku_data(meta)
+        sku_id = sku_data.get("product_sku_id") if sku_data else None
+        if isinstance(slug, str) and slug.strip():
+            clean_slug = slug.strip().rstrip("/")
+            if product_id and f"-p{product_id}" not in clean_slug:
+                clean_slug = f"{clean_slug}-p{product_id}"
+            url = f"https://printerval.com/{clean_slug}"
+            return f"{url}?spid={sku_id}" if sku_id else url
 
     meta = _meta_data(row)
     sku_data = _first_sku_data(meta)
