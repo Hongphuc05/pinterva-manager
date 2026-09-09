@@ -145,3 +145,68 @@ def sync_assignment_to_printerval_task(order_id: str, designer_id: str) -> None:
             session_cm.__exit__(None, None, None)
     finally:
         session.close()
+
+
+@celery_app.task(name="app.workers.assignment_sync_tasks.sync_order_review_to_printerval_task")
+def sync_order_review_to_printerval_task(order_id: str, note_outsource: str, target_status: str = "Review") -> None:
+    """Sync an order's Note Outsource (Drive link or instructions) and target status ("Review") to Printerval."""
+    from datetime import UTC, datetime
+
+    logger.disabled = False
+    session = SessionLocal()
+    try:
+        order = session.get(Order, uuid.UUID(order_id))
+        if order is None:
+            logger.error("sync_order_review_to_printerval_task: order %s not found", order_id)
+            return
+
+        platform = session.get(Platform, order.platform_id) if order.platform_id else None
+        if platform is None or not platform.account_password:
+            logger.error(
+                "sync_order_review_to_printerval_task: platform credentials missing for order %s",
+                order.external_order_id,
+            )
+            return
+
+        clean_slug = platform.account_username.replace("@", "_").replace(".", "_").replace("+", "_")
+        profile_dir = f"chrome-profile-{clean_slug}"
+        try:
+            session_cm = playwright_session(profile_dir=profile_dir, headless=True)
+            page = session_cm.__enter__()
+        except Exception:
+            logger.exception(
+                "sync_order_review_to_printerval_task: Playwright session failed to open for order %s",
+                order.external_order_id,
+            )
+            return
+
+        try:
+            adapter = PlaywrightPrintervalAdapter(
+                page=page,
+                crawl_username=platform.account_username,
+                crawl_password=platform.account_password,
+            )
+            # 1. Update note outsource on Printerval if text provided
+            if note_outsource and note_outsource.strip():
+                try:
+                    res_note = adapter.attach_result_link(order.external_order_id, note_outsource.strip())
+                    logger.info("attach_result_link for %s: %s", order.external_order_id, res_note)
+                except Exception:
+                    logger.exception("Failed attach_result_link for %s", order.external_order_id)
+
+            # 2. Update status on Printerval
+            if target_status:
+                try:
+                    res_status = adapter.set_status(order.external_order_id, target_status)
+                    logger.info("set_status (%s) for %s: %s", target_status, order.external_order_id, res_status)
+                    if res_status.success:
+                        order.printerval_status = target_status.lower()
+                        order.printerval_status_synced_at = datetime.now(UTC)
+                        session.commit()
+                except Exception:
+                    logger.exception("Failed set_status for %s", order.external_order_id)
+        finally:
+            session_cm.__exit__(None, None, None)
+    finally:
+        session.close()
+

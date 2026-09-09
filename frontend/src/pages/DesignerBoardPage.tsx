@@ -12,12 +12,13 @@ import {
   Clock, 
   AlertCircle, 
   Check, 
-  Flame, 
   ChevronRight,
   CheckCheck,
-  History
+  History,
+  RefreshCw
 } from 'lucide-react'
 import { OrderHistoryTimelineModal } from '../components/OrderHistoryTimelineModal'
+import { AdminFixActionModal } from '../components/AdminFixActionModal'
 
 type DesignerOrder = {
   id: string
@@ -27,6 +28,9 @@ type DesignerOrder = {
   deadline_at_ext: string | null
   product_name: string | null
   printerval_designer: string | null
+  note_outsource?: string | null
+  previous_note_outsource?: string | null
+  fix_approved_by_admin?: boolean
 }
 
 type DesignerWorkload = {
@@ -49,8 +53,16 @@ export function DesignerBoardPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [filterMode, setFilterMode] = useState<'all' | 'needs_review' | 'has_fix' | 'active'>('all')
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
-  const [actionLoadingId, setActionLoadingId] = useState<string | null>(null)
   const [showDoneColumn, setShowDoneColumn] = useState(true)
+  const [syncingPrinterval, setSyncingPrinterval] = useState(false)
+  const [fixActionModal, setFixActionModal] = useState<{
+    isOpen: boolean
+    orderId: string
+    externalOrderId: string
+    mode: 'approve' | 'reject'
+    currentNote?: string | null
+    previousNote?: string | null
+  } | null>(null)
   const [historyModalOrder, setHistoryModalOrder] = useState<{
     id: string
     external_order_id: string
@@ -80,19 +92,25 @@ export function DesignerBoardPage() {
     }
   }
 
-  async function handleQuickState(orderId: string, newState: 'DONE' | 'REVISION') {
-    setActionLoadingId(orderId)
+  async function handleSyncPrintervalStatus(orderIds?: string[]) {
+    setSyncingPrinterval(true)
     try {
-      await apiFetch(`/orders/${orderId}/state`, {
-        method: 'PATCH',
-        body: JSON.stringify({ state: newState }),
-      })
+      const res = await apiFetch<{ synced_count: number; updated_count: number; message: string }>(
+        '/orders/sync-printerval-status',
+        {
+          method: 'POST',
+          body: JSON.stringify(orderIds && orderIds.length > 0 ? { order_ids: orderIds } : {}),
+        }
+      )
       await loadWorkload()
       window.dispatchEvent(new CustomEvent('orders-updated'))
+      if (res.updated_count > 0) {
+        // notification or silent update
+      }
     } catch (err: any) {
-      alert(err.message || 'Lỗi khi cập nhật trạng thái đơn.')
+      alert(err.message || 'Lỗi khi đồng bộ trạng thái từ Printerval')
     } finally {
-      setActionLoadingId(null)
+      setSyncingPrinterval(false)
     }
   }
 
@@ -135,13 +153,25 @@ export function DesignerBoardPage() {
             </p>
           </div>
 
-          <button
-            onClick={loadWorkload}
-            className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold bg-white hover:bg-slate-50 text-slate-700 rounded-xl border border-slate-200 shadow-2xs transition-all cursor-pointer"
-          >
-            <RotateCcw className="h-3.5 w-3.5 text-slate-500" />
-            <span>Làm Mới Dữ Liệu</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handleSyncPrintervalStatus()}
+              disabled={syncingPrinterval}
+              className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-xl border border-purple-200 shadow-2xs transition-all cursor-pointer disabled:opacity-50"
+              title="Quét kiểm tra trạng thái các đơn Review / Fix trực tiếp từ Printerval"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 text-purple-600 ${syncingPrinterval ? 'animate-spin' : ''}`} />
+              <span>{syncingPrinterval ? 'Đang quét Printerval...' : 'Đồng Bộ Printerval'}</span>
+            </button>
+
+            <button
+              onClick={loadWorkload}
+              className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold bg-white hover:bg-slate-50 text-slate-700 rounded-xl border border-slate-200 shadow-2xs transition-all cursor-pointer"
+            >
+              <RotateCcw className="h-3.5 w-3.5 text-slate-500" />
+              <span>Làm Mới</span>
+            </button>
+          </div>
         </div>
 
         {error && (
@@ -462,16 +492,29 @@ export function DesignerBoardPage() {
                           </div>
                         </div>
 
-                        {/* 2. Review Column (Cần Admin duyệt - Nổi bật) */}
+                        {/* 2. Review Column (Chờ Printerval QC duyệt) */}
                         <div className="space-y-3">
                           <div className="flex items-center justify-between pb-2 border-b border-purple-200">
                             <span className="text-xs font-bold text-purple-800 flex items-center gap-1.5">
                               <span className="h-2 w-2 rounded-full bg-purple-500 animate-pulse"></span>
                               <span>Review (Chờ Duyệt)</span>
                             </span>
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-purple-100 text-purple-800">
-                              {reviewOrders.length}
-                            </span>
+                            <div className="flex items-center gap-1.5">
+                              {reviewOrders.length > 0 && (
+                                <button
+                                  type="button"
+                                  disabled={syncingPrinterval}
+                                  onClick={() => handleSyncPrintervalStatus(reviewOrders.map((o) => o.id))}
+                                  className="p-1 text-purple-600 hover:bg-purple-100 rounded transition-colors disabled:opacity-50"
+                                  title="Làm mới trạng thái các đơn này từ Printerval"
+                                >
+                                  <RefreshCw className={`h-3 w-3 ${syncingPrinterval ? 'animate-spin' : ''}`} />
+                                </button>
+                              )}
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-purple-100 text-purple-800">
+                                {reviewOrders.length}
+                              </span>
+                            </div>
                           </div>
 
                           <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
@@ -517,42 +560,38 @@ export function DesignerBoardPage() {
                                     </div>
                                   </div>
 
-                                  {/* Quick Admin Actions for Review */}
-                                  <div className="pt-1.5 border-t border-purple-100 flex items-center gap-1.5">
-                                    <button
-                                      onClick={() => handleQuickState(o.id, 'DONE')}
-                                      disabled={actionLoadingId === o.id}
-                                      className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1 text-[11px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-all shadow-2xs cursor-pointer disabled:opacity-50"
-                                      title="Duyệt bài hoàn thành (Done)"
-                                    >
-                                      <Check className="h-3 w-3" />
-                                      <span>Duyệt Done</span>
-                                    </button>
+                                  {/* Review status notice - Decisions handled automatically by Printerval */}
+                                  <div className="pt-1.5 border-t border-purple-100 flex items-center justify-between">
+                                    <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-purple-100/80 text-purple-800 text-[11px] font-medium">
+                                      <Clock className="h-3 w-3 text-purple-600 animate-pulse" />
+                                      <span>Chờ Printerval QC duyệt</span>
+                                    </div>
 
-                                    <button
-                                      onClick={() => handleQuickState(o.id, 'REVISION')}
-                                      disabled={actionLoadingId === o.id}
-                                      className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1 text-[11px] font-bold text-white bg-orange-500 hover:bg-orange-600 rounded-lg transition-all shadow-2xs cursor-pointer disabled:opacity-50"
-                                      title="Yêu cầu Des sửa lại bài (Fix)"
-                                    >
-                                      <Flame className="h-3 w-3" />
-                                      <span>Bắt Fix</span>
-                                    </button>
-
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        setHistoryModalOrder({
-                                          id: o.id,
-                                          external_order_id: o.external_order_id,
-                                          product_name: o.product_name,
-                                        })
-                                      }
-                                      className="p-1 text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors"
-                                      title="Xem lịch sử tiến độ đơn"
-                                    >
-                                      <History className="h-3.5 w-3.5" />
-                                    </button>
+                                    <div className="flex items-center gap-1">
+                                      <button
+                                        type="button"
+                                        disabled={syncingPrinterval}
+                                        onClick={() => handleSyncPrintervalStatus([o.id])}
+                                        className="p-1 text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors disabled:opacity-50"
+                                        title="Kiểm tra kết quả QC từ Printerval"
+                                      >
+                                        <RefreshCw className={`h-3 w-3 ${syncingPrinterval ? 'animate-spin' : ''}`} />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setHistoryModalOrder({
+                                            id: o.id,
+                                            external_order_id: o.external_order_id,
+                                            product_name: o.product_name,
+                                          })
+                                        }
+                                        className="p-1 text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors"
+                                        title="Xem lịch sử tiến độ đơn"
+                                      >
+                                        <History className="h-3.5 w-3.5" />
+                                      </button>
+                                    </div>
                                   </div>
                                 </div>
                               ))
@@ -567,9 +606,22 @@ export function DesignerBoardPage() {
                               <span className="h-2 w-2 rounded-full bg-orange-500"></span>
                               <span>Fix (Cần Sửa Lại)</span>
                             </span>
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-orange-100 text-orange-800">
-                              {fixOrders.length}
-                            </span>
+                            <div className="flex items-center gap-1.5">
+                              {fixOrders.length > 0 && (
+                                <button
+                                  type="button"
+                                  disabled={syncingPrinterval}
+                                  onClick={() => handleSyncPrintervalStatus(fixOrders.map((o) => o.id))}
+                                  className="p-1 text-orange-600 hover:bg-orange-100 rounded transition-colors disabled:opacity-50"
+                                  title="Làm mới trạng thái các đơn này từ Printerval"
+                                >
+                                  <RefreshCw className={`h-3 w-3 ${syncingPrinterval ? 'animate-spin' : ''}`} />
+                                </button>
+                              )}
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-orange-100 text-orange-800">
+                                {fixOrders.length}
+                              </span>
+                            </div>
                           </div>
 
                           <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
@@ -597,12 +649,23 @@ export function DesignerBoardPage() {
                                       </div>
                                     )}
                                     <div className="flex-1 min-w-0">
-                                      <Link
-                                        to={`/orders/${o.id}`}
-                                        className="text-xs font-mono font-bold text-[#0052CC] hover:underline truncate block"
-                                      >
-                                        {o.external_order_id}
-                                      </Link>
+                                      <div className="flex items-center justify-between gap-1">
+                                        <Link
+                                          to={`/orders/${o.id}`}
+                                          className="text-xs font-mono font-bold text-[#0052CC] hover:underline truncate block"
+                                        >
+                                          {o.external_order_id}
+                                        </Link>
+                                        {o.fix_approved_by_admin ? (
+                                          <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-emerald-100 text-emerald-800 shrink-0">
+                                            Đã gửi Des
+                                          </span>
+                                        ) : (
+                                          <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-100 text-amber-800 shrink-0">
+                                            Chờ duyệt
+                                          </span>
+                                        )}
+                                      </div>
                                       <p className="text-[10px] text-slate-500 truncate mt-0.5">
                                         {o.product_name || 'Đơn 2D Custom'}
                                       </p>
@@ -614,35 +677,80 @@ export function DesignerBoardPage() {
                                       )}
                                     </div>
                                   </div>
-                                  <div className="pt-1 flex items-center justify-between">
-                                    <StatusDropdown
-                                      orderId={o.id}
-                                      externalOrderId={o.external_order_id}
-                                      currentState={o.state}
-                                    />
-                                    <div className="flex items-center gap-1.5">
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          setHistoryModalOrder({
-                                            id: o.id,
-                                            external_order_id: o.external_order_id,
-                                            product_name: o.product_name,
-                                          })
-                                        }
-                                        className="p-1 text-slate-400 hover:text-orange-600 hover:bg-orange-50 rounded transition-colors"
-                                        title="Xem lịch sử tiến độ đơn"
-                                      >
-                                        <History className="h-3.5 w-3.5" />
-                                      </button>
-                                      <Link
-                                        to={`/orders/${o.id}`}
-                                        className="text-[10px] text-[#0052CC] font-semibold hover:underline flex items-center gap-0.5"
-                                      >
-                                        <span>Xem</span>
-                                        <ChevronRight className="h-2.5 w-2.5" />
-                                      </Link>
+
+                                  {/* Note outsource preview if any */}
+                                  {o.note_outsource && (
+                                    <div className="p-2 rounded-lg bg-white/90 border border-orange-200/70 text-[11px] text-slate-700 max-h-24 overflow-y-auto whitespace-pre-wrap break-all leading-relaxed">
+                                      <span className="font-semibold text-orange-900 block mb-0.5 text-[10px]">
+                                        Ghi chú QC Printerval:
+                                      </span>
+                                      {o.note_outsource}
                                     </div>
+                                  )}
+
+                                  {/* Admin Actions for Fix */}
+                                  <div className="pt-1.5 border-t border-orange-200 flex items-center gap-1.5">
+                                    {!o.fix_approved_by_admin ? (
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setFixActionModal({
+                                              isOpen: true,
+                                              orderId: o.id,
+                                              externalOrderId: o.external_order_id,
+                                              mode: 'approve',
+                                              currentNote: o.note_outsource || '',
+                                              previousNote: o.previous_note_outsource || '',
+                                            })
+                                          }
+                                          className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1 text-[11px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-all shadow-2xs cursor-pointer"
+                                          title="Duyệt yêu cầu fix và gửi vào Todo của Designer"
+                                        >
+                                          <Check className="h-3 w-3" />
+                                          <span>Duyệt gửi Des</span>
+                                        </button>
+
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setFixActionModal({
+                                              isOpen: true,
+                                              orderId: o.id,
+                                              externalOrderId: o.external_order_id,
+                                              mode: 'reject',
+                                              currentNote: o.note_outsource || '',
+                                              previousNote: o.previous_note_outsource || '',
+                                            })
+                                          }
+                                          className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1 text-[11px] font-bold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg transition-all shadow-2xs cursor-pointer"
+                                          title="Hủy Fix, kiểm tra lại link cũ và trả lại Review trên Printerval"
+                                        >
+                                          <RotateCcw className="h-3 w-3" />
+                                          <span>Hủy trả Review</span>
+                                        </button>
+                                      </>
+                                    ) : (
+                                      <div className="flex-1 text-[11px] text-emerald-700 font-medium flex items-center gap-1">
+                                        <CheckCheck className="h-3.5 w-3.5" />
+                                        <span>Đang trong Todo của Des</span>
+                                      </div>
+                                    )}
+
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setHistoryModalOrder({
+                                          id: o.id,
+                                          external_order_id: o.external_order_id,
+                                          product_name: o.product_name,
+                                        })
+                                      }
+                                      className="p-1 text-slate-400 hover:text-orange-600 hover:bg-orange-50 rounded transition-colors"
+                                      title="Xem lịch sử tiến độ đơn"
+                                    >
+                                      <History className="h-3.5 w-3.5" />
+                                    </button>
                                   </div>
                                 </div>
                               ))
@@ -761,6 +869,22 @@ export function DesignerBoardPage() {
           orderId={historyModalOrder.id}
           externalOrderId={historyModalOrder.external_order_id}
           productName={historyModalOrder.product_name}
+        />
+      )}
+
+      {fixActionModal && (
+        <AdminFixActionModal
+          isOpen={fixActionModal.isOpen}
+          onClose={() => setFixActionModal(null)}
+          orderId={fixActionModal.orderId}
+          externalOrderId={fixActionModal.externalOrderId}
+          mode={fixActionModal.mode}
+          currentNote={fixActionModal.currentNote || ''}
+          previousNote={fixActionModal.previousNote}
+          onSuccess={() => {
+            loadWorkload()
+            window.dispatchEvent(new CustomEvent('orders-updated'))
+          }}
         />
       )}
     </DashboardLayout>

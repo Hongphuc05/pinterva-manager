@@ -55,7 +55,15 @@ def list_orders_for_user(
             query = query.filter(or_(*conds))
 
     if status:
-        query = query.filter(Order.state == status)
+        if status.upper() == "TODO":
+            query = query.filter(
+                or_(
+                    Order.state.in_(["WAITING", "ASSIGNED"]),
+                    (Order.state.in_(["REVISION", "FIX"]) & (Order.fix_approved_by_admin == True)),
+                )
+            )
+        else:
+            query = query.filter(Order.state == status)
 
     if batch_id:
         try:

@@ -21,7 +21,9 @@ import {
   UserPlus,
   X,
   Loader2,
-  ExternalLink
+  ExternalLink,
+  RefreshCw,
+  AlertTriangle
 } from 'lucide-react'
 
 type OrderSummary = {
@@ -43,6 +45,9 @@ type OrderSummary = {
   printerval_status: string | null
   printerval_assignment_lifecycle: string | null
   created_at: string
+  note_outsource?: string | null
+  previous_note_outsource?: string | null
+  fix_approved_by_admin?: boolean
 }
 
 type UserOption = {
@@ -64,6 +69,8 @@ export function OrdersListPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [flash, setFlash] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [activeDesignerTab, setActiveDesignerTab] = useState<'todo' | 'doing' | 'review' | 'all'>('todo')
+  const [syncingPrinterval, setSyncingPrinterval] = useState(false)
 
   // Highlight state for newly crawled jobs
   const [newlyCrawledOrderIds, setNewlyCrawledOrderIds] = useState<string[]>([])
@@ -276,8 +283,45 @@ export function OrdersListPage() {
     return () => window.removeEventListener('orders-updated', handleOrdersUpdated)
   }, [statusFilter, batchFilter, designerFilter])
 
+  async function handleSyncPrintervalStatus() {
+    setSyncingPrinterval(true)
+    try {
+      const res = await apiFetch<{ synced_count: number; updated_count: number; message: string }>(
+        '/orders/sync-printerval-status',
+        { method: 'POST', body: JSON.stringify({}) }
+      )
+      await loadOrders()
+      setFlash(res.message || 'Đã đồng bộ trạng thái đơn từ Printerval.')
+    } catch (err: any) {
+      setError(err?.message || 'Lỗi khi đồng bộ từ Printerval.')
+    } finally {
+      setSyncingPrinterval(false)
+    }
+  }
+
+  // Calculate Designer Workflow groups
+  const todoOrders = orders.filter(
+    (o) =>
+      ['WAITING', 'ASSIGNED', 'OPEN_FOR_ALLOCATION', 'DISCOVERED', 'PENDING'].includes(o.state.toUpperCase()) ||
+      (['REVISION', 'REVISION_REQUESTED'].includes(o.state.toUpperCase()) && o.fix_approved_by_admin)
+  )
+  const doingOrders = orders.filter((o) => ['IN_PROGRESS'].includes(o.state.toUpperCase()))
+  const reviewOrders = orders.filter((o) =>
+    ['QC_PENDING', 'RESULT_SUBMITTED', 'SUBMITTING_TO_SITE'].includes(o.state.toUpperCase())
+  )
+
+  const baseOrders = !isAdmin
+    ? activeDesignerTab === 'todo'
+      ? todoOrders
+      : activeDesignerTab === 'doing'
+      ? doingOrders
+      : activeDesignerTab === 'review'
+      ? reviewOrders
+      : orders
+    : orders
+
   // Filter client-side search & template filters
-  const filteredOrders = orders.filter((o) => {
+  const filteredOrders = baseOrders.filter((o) => {
     if (searchQuery) {
       const q = searchQuery.toLowerCase()
       const matches =
@@ -345,48 +389,144 @@ export function OrdersListPage() {
         </div>
       )}
 
-      {/* KPI Summary Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="rounded-xl border border-[hsl(var(--border))] bg-white p-5 shadow-xs flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Tổng Đơn Hàng</p>
-            <h3 className="text-2xl font-bold font-mono text-slate-800 mt-1">{totalCount}</h3>
-          </div>
-          <div className="p-3 bg-blue-50 text-blue-600 rounded-xl">
-            <Package className="h-6 w-6" />
-          </div>
-        </div>
+      {/* Designer Workflow Tabs (Only for Designer) */}
+      {!isAdmin && (
+        <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="flex items-center gap-2 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
+            <button
+              type="button"
+              onClick={() => setActiveDesignerTab('todo')}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
+                activeDesignerTab === 'todo'
+                  ? 'bg-amber-500 text-white border-amber-500 shadow-2xs'
+                  : 'bg-amber-50/60 text-amber-900 border-amber-200 hover:bg-amber-100/70'
+              }`}
+            >
+              <span>📌 Việc Cần Làm (Todo)</span>
+              <span
+                className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
+                  activeDesignerTab === 'todo' ? 'bg-white/20 text-white' : 'bg-amber-200/80 text-amber-900'
+                }`}
+              >
+                {todoOrders.length}
+              </span>
+            </button>
 
-        <div className="rounded-xl border border-[hsl(var(--border))] bg-white p-5 shadow-xs flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Mới / Chờ Phân Bổ</p>
-            <h3 className="text-2xl font-bold font-mono text-amber-600 mt-1">{openCount}</h3>
-          </div>
-          <div className="p-3 bg-amber-50 text-amber-600 rounded-xl">
-            <Clock className="h-6 w-6" />
-          </div>
-        </div>
+            <button
+              type="button"
+              onClick={() => setActiveDesignerTab('doing')}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
+                activeDesignerTab === 'doing'
+                  ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                  : 'bg-blue-50/60 text-blue-900 border-blue-200 hover:bg-blue-100/70'
+              }`}
+            >
+              <span>⚡ Đang Làm (Doing)</span>
+              <span
+                className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
+                  activeDesignerTab === 'doing' ? 'bg-white/20 text-white' : 'bg-blue-200/80 text-blue-900'
+                }`}
+              >
+                {doingOrders.length}
+              </span>
+            </button>
 
-        <div className="rounded-xl border border-[hsl(var(--border))] bg-white p-5 shadow-xs flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Đang Thực Hiện</p>
-            <h3 className="text-2xl font-bold font-mono text-blue-600 mt-1">{inProgressCount}</h3>
-          </div>
-          <div className="p-3 bg-blue-50 text-blue-600 rounded-xl">
-            <Layers className="h-6 w-6" />
-          </div>
-        </div>
+            <button
+              type="button"
+              onClick={() => setActiveDesignerTab('review')}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
+                activeDesignerTab === 'review'
+                  ? 'bg-purple-600 text-white border-purple-600 shadow-2xs'
+                  : 'bg-purple-50/60 text-purple-900 border-purple-200 hover:bg-purple-100/70'
+              }`}
+            >
+              <span>🕒 Chờ Duyệt (Review)</span>
+              <span
+                className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
+                  activeDesignerTab === 'review' ? 'bg-white/20 text-white' : 'bg-purple-200/80 text-purple-900'
+                }`}
+              >
+                {reviewOrders.length}
+              </span>
+            </button>
 
-        <div className="rounded-xl border border-[hsl(var(--border))] bg-white p-5 shadow-xs flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Đã Hoàn Thành / Claim</p>
-            <h3 className="text-2xl font-bold font-mono text-emerald-600 mt-1">{doneCount}</h3>
+            <button
+              type="button"
+              onClick={() => setActiveDesignerTab('all')}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
+                activeDesignerTab === 'all'
+                  ? 'bg-slate-800 text-white border-slate-800 shadow-2xs'
+                  : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+              }`}
+            >
+              <span>Tất Cả Nhiệm Vụ</span>
+              <span
+                className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
+                  activeDesignerTab === 'all' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+                }`}
+              >
+                {orders.length}
+              </span>
+            </button>
           </div>
-          <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl">
-            <CheckCircle2 className="h-6 w-6" />
+
+          <button
+            type="button"
+            onClick={handleSyncPrintervalStatus}
+            disabled={syncingPrinterval}
+            className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-xl border border-purple-200 shadow-2xs transition-all cursor-pointer shrink-0 disabled:opacity-50"
+            title="Đồng bộ kết quả duyệt/fix từ Printerval"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 text-purple-600 ${syncingPrinterval ? 'animate-spin' : ''}`} />
+            <span>{syncingPrinterval ? 'Đang đồng bộ...' : 'Làm Mới Từ Printerval'}</span>
+          </button>
+        </div>
+      )}
+
+      {/* KPI Summary Cards Grid (For Admin) */}
+      {isAdmin && (
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="rounded-xl border border-[hsl(var(--border))] bg-white p-5 shadow-xs flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Tổng Đơn Hàng</p>
+              <h3 className="text-2xl font-bold font-mono text-slate-800 mt-1">{totalCount}</h3>
+            </div>
+            <div className="p-3 bg-blue-50 text-blue-600 rounded-xl">
+              <Package className="h-6 w-6" />
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-[hsl(var(--border))] bg-white p-5 shadow-xs flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Mới / Chờ Phân Bổ</p>
+              <h3 className="text-2xl font-bold font-mono text-amber-600 mt-1">{openCount}</h3>
+            </div>
+            <div className="p-3 bg-amber-50 text-amber-600 rounded-xl">
+              <Clock className="h-6 w-6" />
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-[hsl(var(--border))] bg-white p-5 shadow-xs flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Đang Thực Hiện</p>
+              <h3 className="text-2xl font-bold font-mono text-blue-600 mt-1">{inProgressCount}</h3>
+            </div>
+            <div className="p-3 bg-blue-50 text-blue-600 rounded-xl">
+              <Layers className="h-6 w-6" />
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-[hsl(var(--border))] bg-white p-5 shadow-xs flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Đã Hoàn Thành / Claim</p>
+              <h3 className="text-2xl font-bold font-mono text-emerald-600 mt-1">{doneCount}</h3>
+            </div>
+            <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl">
+              <CheckCircle2 className="h-6 w-6" />
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Filter Bar & Search */}
       <div className="rounded-xl border border-[hsl(var(--border))] bg-white p-4 shadow-xs space-y-3">
@@ -688,6 +828,19 @@ export function OrdersListPage() {
                             </span>
                           )}
                         </div>
+
+                        {/* Note Outsource Preview for Fix orders */}
+                        {o.state === 'REVISION' && o.note_outsource && (
+                          <div className="mt-2 p-2.5 rounded-lg bg-orange-50 border border-orange-200 text-[11px] text-orange-950 font-normal">
+                            <div className="font-bold flex items-center gap-1 text-orange-900 mb-1">
+                              <AlertTriangle className="h-3 w-3 text-orange-600 shrink-0" />
+                              <span>QC Printerval yêu cầu sửa:</span>
+                            </div>
+                            <div className="whitespace-pre-wrap break-all leading-relaxed text-slate-800 max-h-24 overflow-y-auto">
+                              {o.note_outsource}
+                            </div>
+                          </div>
+                        )}
                       </td>
 
                       {/* Interactive Status Dropdown */}

@@ -387,3 +387,95 @@ def test_api_update_order_state_flow(client, db_session):
     assert resp.status_code == 200
     single_hist = resp.json()
     assert len(single_hist) >= 4
+
+
+def test_api_approve_and_reject_fix_flow(client, db_session):
+    import uuid
+    from app.adapters.db.models import Assignment, Order, Platform, User
+    from app.api.deps import get_current_platform_id
+    from app.domain.models import OrderState
+
+    platform = Platform(
+        id=uuid.uuid4(),
+        name="Test Fix Platform",
+        account_username="fix_test@example.com",
+        account_password="password123",
+        team_outsource="2D",
+    )
+    db_session.add(platform)
+    db_session.flush()
+
+    app = client.app
+    app.dependency_overrides[get_current_platform_id] = lambda: platform.id
+
+    admin = _login(client, db_session, "admin", username="admin_fix_test")
+    des = _login(client, db_session, "designer", username="des_fix_test")
+
+    order = Order(
+        id=uuid.uuid4(),
+        platform_id=platform.id,
+        external_order_id="DJ_FIX_001",
+        state=OrderState.IN_PROGRESS.value,
+        note_outsource="",
+    )
+    db_session.add(order)
+    db_session.flush()
+
+    asgn = Assignment(
+        id=uuid.uuid4(),
+        order_id=order.id,
+        designer_id=des.id,
+        status="approved",
+    )
+    db_session.add(asgn)
+    db_session.commit()
+
+    # 1. Designer submits with drive_url -> Review
+    client.post("/api/login", json={"username": "des_fix_test", "password": "s3cret!"})
+    resp = client.patch(
+        f"/api/orders/{order.id}/state",
+        json={"state": "Review", "drive_url": "https://drive.google.com/test_fix_v1"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["state"] == "QC_PENDING"
+    assert data["note_outsource"] == "https://drive.google.com/test_fix_v1"
+
+    # 2. Printerval returns Fix with new note outsource
+    db_session.refresh(order)
+    order.state = OrderState.REVISION.value
+    order.note_outsource = "fix https://prnt.sc/test1234 lech mau áo"
+    order.fix_approved_by_admin = False
+    db_session.commit()
+
+    # 3. Admin approves fix for designer
+    client.post("/api/login", json={"username": "admin_fix_test", "password": "s3cret!"})
+    resp = client.post(
+        f"/api/orders/{order.id}/approve-fix",
+        json={"note_outsource": "fix https://prnt.sc/test1234 lech mau áo - admin verified"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["fix_approved_by_admin"] is True
+    assert "admin verified" in data["note_outsource"]
+
+    # 4. Check TODO filter returns this order
+    resp = client.get("/api/orders?status=TODO")
+    assert resp.status_code == 200
+    todo_orders = resp.json()["orders"]
+    assert any(o["id"] == str(order.id) for o in todo_orders)
+
+    # 5. Admin rejects fix to review
+    resp = client.post(
+        f"/api/orders/{order.id}/reject-fix-to-review",
+        json={"note_outsource": "https://drive.google.com/test_fix_v1 - mau da dung voi mockup"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["state"] == "QC_PENDING"
+    assert "mau da dung voi mockup" in data["note_outsource"]
+
+    db_session.refresh(order)
+    assert order.state == OrderState.QC_PENDING.value
+    assert order.fix_approved_by_admin is False
+

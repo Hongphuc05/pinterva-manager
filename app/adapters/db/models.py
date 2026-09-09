@@ -120,6 +120,12 @@ class Order(Base):
     note_outsource: Mapped[str] = mapped_column(
         Text, nullable=False, default="", server_default=text("''")
     )
+    previous_note_outsource: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
+    fix_approved_by_admin: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false"), nullable=False
+    )
     order_note: Mapped[str] = mapped_column(
         Text, nullable=False, default="", server_default=text("''")
     )

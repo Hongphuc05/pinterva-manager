@@ -25,8 +25,11 @@ import {
   Check,
   UserPlus,
   CheckCircle2,
-  ArrowRight
+  ArrowRight,
+  Flame,
+  RotateCcw
 } from 'lucide-react'
+import { AdminFixActionModal } from '../components/AdminFixActionModal'
 
 type ResultVersion = {
   id: string
@@ -50,6 +53,8 @@ type OrderDetail = {
   double_sided: boolean
   deadline_at_ext: string | null
   note_outsource: string
+  previous_note_outsource?: string | null
+  fix_approved_by_admin?: boolean
   order_note: string
   custom_config: {
     original: { key: string; value: string }[]
@@ -103,6 +108,10 @@ export function OrderDetailPage() {
   const [busyAssignment, setBusyAssignment] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [actionSuccess, setActionSuccess] = useState<string | null>(null)
+  const [fixActionModal, setFixActionModal] = useState<{
+    isOpen: boolean
+    mode: 'approve' | 'reject'
+  } | null>(null)
 
   async function loadOrderDetail() {
     if (!id) return
@@ -166,7 +175,7 @@ export function OrderDetailPage() {
       }
       await apiFetch(`/orders/${order.id}/state`, {
         method: 'PATCH',
-        body: JSON.stringify({ state: 'QC_PENDING' }),
+        body: JSON.stringify({ state: 'QC_PENDING', drive_url: driveUrl.trim() }),
       })
       setActionSuccess('Nộp bài QC và chuyển sang Review (Chờ duyệt) thành công!')
       window.dispatchEvent(new CustomEvent('orders-updated'))
@@ -502,6 +511,63 @@ export function OrderDetailPage() {
               <span>Nhiệm Vụ & Tiến Độ Thiết Kế</span>
             </h3>
 
+            {/* Fix Notice Banner if order is in REVISION */}
+            {isFix && (
+              <div className="p-4 rounded-xl bg-orange-50 border border-orange-200 text-xs text-orange-950 space-y-2.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="font-bold flex items-center gap-1.5 text-orange-900">
+                    <Flame className="h-4 w-4 text-orange-600" />
+                    <span>Yêu Cầu Sửa Bài (QC Printerval):</span>
+                    {order.fix_approved_by_admin ? (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800">
+                        Admin đã duyệt gửi Designer sửa
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800">
+                        Chờ Admin duyệt gửi Des
+                      </span>
+                    )}
+                  </div>
+                  {isAdmin && (
+                    <div className="flex items-center gap-2">
+                      {!order.fix_approved_by_admin ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setFixActionModal({ isOpen: true, mode: 'approve' })}
+                            className="px-3 py-1 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-2xs cursor-pointer flex items-center gap-1"
+                          >
+                            <Check className="h-3 w-3" />
+                            <span>Duyệt gửi Des</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setFixActionModal({ isOpen: true, mode: 'reject' })}
+                            className="px-3 py-1 text-xs font-bold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg shadow-2xs cursor-pointer flex items-center gap-1"
+                          >
+                            <RotateCcw className="h-3 w-3" />
+                            <span>Hủy trả Review</span>
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setFixActionModal({ isOpen: true, mode: 'reject' })}
+                          className="px-2.5 py-1 text-xs font-semibold text-slate-600 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg cursor-pointer"
+                        >
+                          Đổi ý: Hủy trả Review
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div className="whitespace-pre-wrap break-all leading-relaxed font-sans text-slate-800 bg-white/90 p-3 rounded-lg border border-orange-200/80">
+                  {order.note_outsource || 'Chưa có ghi chú cụ thể từ QC.'}
+                </div>
+              </div>
+            )}
+
             {/* Progress Control Buttons: Des only has Doing and Review! */}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2.5 flex-wrap">
@@ -833,6 +899,21 @@ export function OrderDetailPage() {
           </div>
         </div>
       </div>
+      {fixActionModal && order && (
+        <AdminFixActionModal
+          isOpen={fixActionModal.isOpen}
+          onClose={() => setFixActionModal(null)}
+          orderId={order.id}
+          externalOrderId={order.external_order_id}
+          mode={fixActionModal.mode}
+          currentNote={order.note_outsource}
+          previousNote={order.previous_note_outsource}
+          onSuccess={() => {
+            loadOrderDetail()
+            window.dispatchEvent(new CustomEvent('orders-updated'))
+          }}
+        />
+      )}
     </DashboardLayout>
   )
 }

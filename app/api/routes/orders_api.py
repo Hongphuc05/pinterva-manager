@@ -58,6 +58,9 @@ class OrderSummaryOut(BaseModel):
     # site from here (see app/application/status_sync.py).
     printerval_status: str | None = None
     printerval_status_synced_at: datetime | None = None
+    note_outsource: str = ""
+    previous_note_outsource: str | None = None
+    fix_approved_by_admin: bool = False
     sku_image_url: str | None = None
     external_order_url: str | None = None
     source_files: list[dict] | None = None
@@ -97,6 +100,8 @@ class OrderDetailOut(BaseModel):
     priority_label: str | None
     deadline_at_ext: datetime | None
     note_outsource: str
+    previous_note_outsource: str | None = None
+    fix_approved_by_admin: bool = False
     order_note: str
     custom_config: dict | None
     template_jobs: list[dict] | None = None
@@ -1010,6 +1015,8 @@ def api_update_printerval_credentials(
 
 class UpdateOrderStateRequest(BaseModel):
     state: str
+    drive_url: str | None = None
+    note_outsource: str | None = None
 
 
 @router.patch("/orders/{order_id}/state")
@@ -1080,6 +1087,13 @@ def api_update_order_state(
     old_state = order.state
     order.state = target_state.value
 
+    submitted_link = (payload.drive_url or "").strip()
+    submitted_note = (payload.note_outsource or "").strip()
+    if submitted_link:
+        order.note_outsource = submitted_link
+    elif submitted_note:
+        order.note_outsource = submitted_note
+
     actor_name = user.full_name or user.username
     des_name = None
     curr_assignment = (
@@ -1094,6 +1108,18 @@ def api_update_order_state(
     if not des_name and order.printerval_designer:
         des_name = order.printerval_designer
 
+    # Record submitted version if drive link provided
+    if submitted_link and curr_assignment:
+        v_count = db.query(ResultVersion).filter(ResultVersion.assignment_id == curr_assignment.id).count()
+        rv = ResultVersion(
+            assignment_id=curr_assignment.id,
+            drive_url=submitted_link,
+            version_marker=v_count + 1,
+            submitted_at=datetime.now(UTC),
+            validated=True,
+        )
+        db.add(rv)
+
     if target_state == OrderState.IN_PROGRESS:
         if old_state in (OrderState.QC_PENDING.value, "REVIEW"):
             action_type = "REVERT_TO_DOING"
@@ -1104,9 +1130,17 @@ def api_update_order_state(
     elif target_state == OrderState.QC_PENDING:
         action_type = "SUBMIT_REVIEW"
         desc = f"{'Designer ' + actor_name if user.role == 'designer' else actor_name} nộp bài và chuyển sang Review (Chờ duyệt)"
+        order.fix_approved_by_admin = False
+        # Sync Review status & Note outsource to Printerval
+        try:
+            from app.workers.assignment_sync_tasks import sync_order_review_to_printerval_task
+            sync_order_review_to_printerval_task.delay(str(order.id), order.note_outsource, "Review")
+        except Exception:
+            pass
     elif target_state == OrderState.REVISION:
         action_type = "REQUEST_FIX"
         desc = f"{'Admin ' + actor_name if user.role == 'admin' else actor_name} kiểm tra bài và yêu cầu sửa lại (Fix)"
+        order.fix_approved_by_admin = False
     elif target_state == OrderState.DONE:
         action_type = "APPROVE_DONE"
         desc = f"{'Admin ' + actor_name if user.role == 'admin' else actor_name} kiểm tra và duyệt hoàn thành đơn hàng (Done)"
@@ -1117,19 +1151,25 @@ def api_update_order_state(
         action_type = "CHANGE_STATE"
         desc = f"{actor_name} chuyển trạng thái từ {old_state or 'Mới'} sang {target_state.value}"
 
+    evidence_payload = {
+        "action": action_type,
+        "actor_name": actor_name,
+        "actor_role": user.role,
+        "designer_name": des_name,
+        "description": desc,
+        "source": "status_update",
+    }
+    if submitted_link:
+        evidence_payload["drive_link"] = submitted_link
+    elif order.note_outsource:
+        evidence_payload["drive_link"] = order.note_outsource
+
     event = WorkflowEvent(
         order_id=order.id,
         from_state=old_state,
         to_state=target_state.value,
         actor_id=user.id,
-        evidence={
-            "action": action_type,
-            "actor_name": actor_name,
-            "actor_role": user.role,
-            "designer_name": des_name,
-            "description": desc,
-            "source": "status_update",
-        },
+        evidence=evidence_payload,
     )
     db.add(event)
     db.commit()
@@ -1140,7 +1180,297 @@ def api_update_order_state(
         "order_id": str(order.id),
         "external_order_id": order.external_order_id,
         "state": order.state,
+        "note_outsource": order.note_outsource,
         "message": f"Đã chuyển trạng thái đơn {order.external_order_id} sang {target_state.value}",
+    }
+
+
+class ApproveFixRequest(BaseModel):
+    note_outsource: str | None = None
+
+
+@router.post("/orders/{order_id}/approve-fix")
+def api_approve_fix(
+    order_id: str,
+    payload: ApproveFixRequest,
+    user: User = Depends(require_role("admin")),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    order = None
+    try:
+        order_uuid = uuid.UUID(order_id)
+        order = db.get(Order, order_uuid)
+    except ValueError:
+        pass
+    if order is None:
+        order = db.query(Order).filter(Order.external_order_id == order_id).first()
+
+    if order is None or order.platform_id != platform_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
+
+    if payload.note_outsource and payload.note_outsource.strip():
+        order.note_outsource = payload.note_outsource.strip()
+
+    order.state = OrderState.REVISION.value
+    order.fix_approved_by_admin = True
+
+    admin_name = user.full_name or user.username
+    event = WorkflowEvent(
+        order_id=order.id,
+        from_state=OrderState.REVISION.value,
+        to_state=OrderState.REVISION.value,
+        actor_id=user.id,
+        evidence={
+            "action": "APPROVE_FIX_FOR_DESIGNER",
+            "actor_name": admin_name,
+            "actor_role": user.role,
+            "description": f"Admin {admin_name} duyệt note sửa và gửi xuống Todo cho Designer",
+            "note_outsource": order.note_outsource,
+        },
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(order)
+
+    return {
+        "ok": True,
+        "order_id": str(order.id),
+        "external_order_id": order.external_order_id,
+        "fix_approved_by_admin": True,
+        "note_outsource": order.note_outsource,
+        "message": "Đã duyệt và gửi yêu cầu sửa bài xuống cho Designer.",
+    }
+
+
+class RejectFixRequest(BaseModel):
+    note_outsource: str
+
+
+@router.post("/orders/{order_id}/reject-fix-to-review")
+def api_reject_fix_to_review(
+    order_id: str,
+    payload: RejectFixRequest,
+    user: User = Depends(require_role("admin")),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    order = None
+    try:
+        order_uuid = uuid.UUID(order_id)
+        order = db.get(Order, order_uuid)
+    except ValueError:
+        pass
+    if order is None:
+        order = db.query(Order).filter(Order.external_order_id == order_id).first()
+
+    if order is None or order.platform_id != platform_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
+
+    order.previous_note_outsource = order.note_outsource
+    if payload.note_outsource and payload.note_outsource.strip():
+        order.note_outsource = payload.note_outsource.strip()
+
+    old_state = order.state
+    order.state = OrderState.QC_PENDING.value
+    order.fix_approved_by_admin = False
+
+    admin_name = user.full_name or user.username
+    event = WorkflowEvent(
+        order_id=order.id,
+        from_state=old_state,
+        to_state=OrderState.QC_PENDING.value,
+        actor_id=user.id,
+        evidence={
+            "action": "REJECT_FIX_TO_REVIEW",
+            "actor_name": admin_name,
+            "actor_role": user.role,
+            "description": f"Admin {admin_name} hủy Fix, chỉnh lại note outsource và trả về Review trên Printerval",
+            "note_outsource": order.note_outsource,
+        },
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(order)
+
+    # Sync to Printerval in background
+    try:
+        from app.workers.assignment_sync_tasks import sync_order_review_to_printerval_task
+        sync_order_review_to_printerval_task.delay(str(order.id), order.note_outsource, "Review")
+    except Exception:
+        pass
+
+    return {
+        "ok": True,
+        "order_id": str(order.id),
+        "external_order_id": order.external_order_id,
+        "state": order.state,
+        "note_outsource": order.note_outsource,
+        "message": "Đã hủy Fix, cập nhật note outsource và chuyển lại trạng thái Review trên Printerval.",
+    }
+
+
+class SyncPrintervalStatusPayload(BaseModel):
+    order_ids: list[str] | None = None
+    state: str | None = None
+
+
+@router.post("/orders/sync-printerval-status")
+def api_sync_printerval_status(
+    payload: SyncPrintervalStatusPayload,
+    user: User = Depends(get_current_user),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    from app.adapters.printerval.api_client import PrintervalApiClient
+    from app.application.status_sync import _status_guess_order
+
+    platform = db.get(Platform, platform_id)
+    if platform is None or not (platform.account_username and (platform.account_password or platform.session_cookie)):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Chưa cấu hình tài khoản hoặc cookie Printerval cho platform hiện tại.",
+        )
+
+    # Build query for target orders
+    query = db.query(Order).filter(Order.platform_id == platform_id)
+    if user.role == "designer":
+        asgn_order_ids = (
+            db.query(Assignment.order_id)
+            .filter(Assignment.designer_id == user.id, Assignment.status != "cancelled")
+            .subquery()
+        )
+        query = query.filter(
+            or_(
+                Order.id.in_(asgn_order_ids),
+                Order.printerval_designer == user.printerval_designer_option,
+                Order.printerval_designer == user.full_name,
+            )
+        )
+
+    if payload.order_ids:
+        raw_ids = [s.strip() for s in payload.order_ids if s.strip()]
+        u_ids = []
+        ext_ids = []
+        for rid in raw_ids:
+            try:
+                u_ids.append(uuid.UUID(rid))
+            except ValueError:
+                ext_ids.append(rid)
+        query = query.filter(or_(Order.id.in_(u_ids), Order.external_order_id.in_(ext_ids)))
+    elif payload.state:
+        st = payload.state.strip().upper()
+        if st in ("REVIEW", "QC_PENDING"):
+            query = query.filter(Order.state == OrderState.QC_PENDING.value)
+        elif st in ("FIX", "REVISION"):
+            query = query.filter(Order.state == OrderState.REVISION.value)
+        elif st in ("DOING", "IN_PROGRESS"):
+            query = query.filter(Order.state == OrderState.IN_PROGRESS.value)
+        elif st in ("WAITING", "ASSIGNED"):
+            query = query.filter(Order.state.in_([OrderState.WAITING.value, "ASSIGNED"]))
+        elif st == "TODO":
+            query = query.filter(
+                or_(
+                    Order.state.in_([OrderState.WAITING.value, "ASSIGNED"]),
+                    (Order.state.in_([OrderState.REVISION.value, "FIX"]) & (Order.fix_approved_by_admin == True)),
+                )
+            )
+
+    orders = query.all()
+    if not orders:
+        return {"ok": True, "checked_count": 0, "updated_count": 0, "message": "Không có đơn hàng nào cần kiểm tra."}
+
+    client = PrintervalApiClient(
+        base_url="https://printerval.com",
+        username=platform.account_username,
+        password=platform.account_password,
+        team_outsource=platform.team_outsource,
+        session_cookie=platform.session_cookie,
+    )
+    updated_count = 0
+    now_utc = datetime.now(UTC)
+    try:
+        for o in orders:
+            try:
+                row = client.find_order(o.external_order_id, statuses=_status_guess_order(o.printerval_status))
+            except Exception:
+                continue
+            if row is None:
+                continue
+
+            found_status = row.get("status")
+            attributes = row.get("attributes") or {}
+            found_outsource_note = str(attributes.get("outsource_note") or "").strip()
+
+            norm_status = (found_status or "").upper()
+            state_changed = False
+            old_st = o.state
+
+            # If Printerval returns Done -> Done
+            if norm_status == "DONE" and o.state != OrderState.DONE.value:
+                o.state = OrderState.DONE.value
+                state_changed = True
+                event = WorkflowEvent(
+                    order_id=o.id,
+                    from_state=old_st,
+                    to_state=OrderState.DONE.value,
+                    actor_id=user.id,
+                    evidence={
+                        "action": "APPROVE_DONE",
+                        "actor_name": "Printerval",
+                        "description": "Printerval đã duyệt hoàn thành đơn hàng (Done)",
+                    },
+                )
+                db.add(event)
+
+            # If Printerval returns Fix -> Fix (needs Admin review)
+            elif norm_status == "FIX" and o.state != OrderState.REVISION.value:
+                o.state = OrderState.REVISION.value
+                o.previous_note_outsource = o.note_outsource
+                if found_outsource_note:
+                    o.note_outsource = found_outsource_note
+                o.fix_approved_by_admin = False
+                state_changed = True
+                event = WorkflowEvent(
+                    order_id=o.id,
+                    from_state=old_st,
+                    to_state=OrderState.REVISION.value,
+                    actor_id=user.id,
+                    evidence={
+                        "action": "REQUEST_FIX",
+                        "actor_name": "Printerval",
+                        "description": f"Printerval trả về Fix với note: {found_outsource_note or 'Không có note'}",
+                        "note_outsource": found_outsource_note,
+                    },
+                )
+                db.add(event)
+
+            elif found_outsource_note and found_outsource_note != o.note_outsource:
+                if norm_status == "FIX":
+                    o.previous_note_outsource = o.note_outsource
+                    o.note_outsource = found_outsource_note
+                    updated_count += 1
+                elif not o.note_outsource:
+                    o.note_outsource = found_outsource_note
+                    updated_count += 1
+
+            if found_status and found_status.lower() != o.printerval_status:
+                o.printerval_status = found_status.lower()
+                o.printerval_status_synced_at = now_utc
+                updated_count += 1
+            elif state_changed:
+                o.printerval_status_synced_at = now_utc
+                updated_count += 1
+
+        db.commit()
+    finally:
+        client.close()
+
+    return {
+        "ok": True,
+        "checked_count": len(orders),
+        "updated_count": updated_count,
+        "message": f"Đã kiểm tra {len(orders)} đơn hàng từ Printerval, cập nhật {updated_count} thay đổi.",
     }
 
 
@@ -1152,6 +1482,9 @@ class DesignerWorkloadOrderOut(BaseModel):
     deadline_at_ext: str | None = None
     product_name: str | None = None
     printerval_designer: str | None = None
+    note_outsource: str = ""
+    previous_note_outsource: str | None = None
+    fix_approved_by_admin: bool = False
 
 
 class DesignerWorkloadOut(BaseModel):
@@ -1252,6 +1585,9 @@ def api_designers_workload(
                         deadline_at_ext=str(o.deadline_at_ext) if o.deadline_at_ext else None,
                         product_name=o.product_name,
                         printerval_designer=o.printerval_designer,
+                        note_outsource=o.note_outsource or "",
+                        previous_note_outsource=o.previous_note_outsource,
+                        fix_approved_by_admin=o.fix_approved_by_admin,
                     )
                     for o in des_orders
                 ],
