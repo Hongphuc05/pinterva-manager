@@ -22,7 +22,10 @@ import {
   CheckSquare,
   Lock,
   Loader2,
-  Check
+  Check,
+  UserPlus,
+  CheckCircle2,
+  ArrowRight
 } from 'lucide-react'
 
 type ResultVersion = {
@@ -67,7 +70,19 @@ type OrderDetail = {
   created_at: string
 }
 
-type WorkflowEvent = { created_at: string; from_state: string | null; to_state: string }
+type WorkflowEvent = {
+  id?: string
+  created_at: string
+  from_state: string | null
+  to_state: string
+  actor_id?: string | null
+  actor_name?: string | null
+  actor_role?: string | null
+  action?: string | null
+  description?: string | null
+  designer_name?: string | null
+  evidence?: any
+}
 type LoadState = 'loading' | 'loaded' | 'not-found' | 'error'
 
 export function OrderDetailPage() {
@@ -713,40 +728,108 @@ export function OrderDetailPage() {
         />
 
         {/* Workflow History Audit Table */}
-        <div className="space-y-3 pt-4 border-t border-slate-100">
-          <h3 className="text-xs font-bold text-slate-800 flex items-center gap-1.5 uppercase tracking-wider">
-            <History className="h-4 w-4 text-[#0052CC]" />
-            <span>Lịch Sử Chuyển Trạng Thái (Audit History)</span>
-          </h3>
-          <div className="rounded-xl border border-slate-200 overflow-hidden">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-semibold text-slate-500 uppercase">
-                  <th className="py-2.5 px-4">Thời Gian</th>
-                  <th className="py-2.5 px-4">Từ Trạng Thái</th>
-                  <th className="py-2.5 px-4">Đến Trạng Thái</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 font-mono text-xs">
-                {history.length === 0 ? (
-                  <tr>
-                    <td colSpan={3} className="py-6 text-center text-slate-400">Chưa có bản ghi lịch sử</td>
-                  </tr>
-                ) : (
-                  history.map((e, i) => {
-                    const fromInfo = e.from_state ? getStatusInfo(e.from_state) : null
-                    const toInfo = getStatusInfo(e.to_state)
-                    return (
-                      <tr key={i} className="hover:bg-slate-50/50">
-                        <td className="py-2.5 px-4 text-slate-500">{new Date(e.created_at).toLocaleString('vi-VN')}</td>
-                        <td className="py-2.5 px-4 text-slate-600">{fromInfo ? fromInfo.label : <span className="text-slate-300">-</span>}</td>
-                        <td className="py-2.5 px-4 font-bold text-[#0052CC]">{toInfo.label}</td>
-                      </tr>
-                    )
-                  })
-                )}
-              </tbody>
-            </table>
+        <div className="space-y-4 pt-4 border-t border-slate-100">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-bold text-slate-800 flex items-center gap-1.5 uppercase tracking-wider">
+              <History className="h-4 w-4 text-[#0052CC]" />
+              <span>Lịch Sử Tiến Độ & Hoạt Động (Audit Trail)</span>
+            </h3>
+            <span className="text-xs font-medium text-slate-400">
+              {history.length} sự kiện
+            </span>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 overflow-hidden bg-white shadow-2xs">
+            {history.length === 0 ? (
+              <div className="py-8 text-center text-slate-400 text-xs">
+                Chưa có bản ghi lịch sử nào cho đơn này
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {history.map((e, i) => {
+                  const fromInfo = e.from_state ? getStatusInfo(e.from_state) : null
+                  const toInfo = getStatusInfo(e.to_state)
+                  const act = (e.action || '').toUpperCase()
+                  const isDone = act === 'APPROVE_DONE'
+                  const isFix = act === 'REQUEST_FIX'
+                  const isReview = act === 'SUBMIT_REVIEW'
+                  const isAssign = act === 'ASSIGN' || act === 'REASSIGN'
+                  const isDoing = act === 'START_DOING' || act === 'REVERT_TO_DOING'
+                  const driveLink = e.evidence?.drive_link || (e.evidence?.note?.includes('http') ? e.evidence.note : null)
+
+                  return (
+                    <div key={i} className="p-4 hover:bg-slate-50/60 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+                      <div className="flex items-start gap-3">
+                        <div className={`mt-0.5 w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                          isDone ? 'bg-emerald-100 text-emerald-700' :
+                          isFix ? 'bg-amber-100 text-amber-700' :
+                          isReview ? 'bg-purple-100 text-purple-700' :
+                          isAssign ? 'bg-blue-100 text-blue-700' :
+                          isDoing ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'
+                        }`}>
+                          {isDone ? <CheckCircle2 className="w-4 h-4" /> :
+                           isFix ? <AlertCircle className="w-4 h-4" /> :
+                           isReview ? <Send className="w-4 h-4" /> :
+                           isAssign ? <UserPlus className="w-4 h-4" /> :
+                           <Clock className="w-4 h-4" />}
+                        </div>
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-semibold text-slate-900">
+                              {e.description || `Chuyển trạng thái sang ${toInfo.label}`}
+                            </span>
+                            {e.actor_name && (
+                              <span className="text-[11px] text-slate-500 flex items-center gap-1">
+                                <span>bởi</span>
+                                <span className="font-medium text-slate-700">{e.actor_name}</span>
+                                {e.actor_role && (
+                                  <span className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded ${
+                                    e.actor_role === 'admin' ? 'bg-rose-50 text-rose-600' : 'bg-blue-50 text-blue-600'
+                                  }`}>
+                                    {e.actor_role}
+                                  </span>
+                                )}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 text-[11px] text-slate-500 flex-wrap">
+                            <span>{new Date(e.created_at).toLocaleString('vi-VN')}</span>
+                            <span>•</span>
+                            <div className="flex items-center gap-1">
+                              {fromInfo ? (
+                                <span className={`px-1.5 py-0.5 rounded text-[10px] border ${fromInfo.badgeClass}`}>
+                                  {fromInfo.label}
+                                </span>
+                              ) : (
+                                <span className="px-1.5 py-0.5 rounded text-[10px] bg-slate-100 text-slate-500 border border-slate-200">Mới</span>
+                              )}
+                              <ArrowRight className="w-3 h-3 text-slate-400" />
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] border ${toInfo.badgeClass}`}>
+                                {toInfo.label}
+                              </span>
+                            </div>
+                            {driveLink && (
+                              <>
+                                <span>•</span>
+                                <a
+                                  href={driveLink}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center gap-0.5 text-blue-600 hover:underline font-medium"
+                                >
+                                  <ExternalLink className="w-3 h-3" />
+                                  <span>Link nộp bài</span>
+                                </a>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         </div>
       </div>

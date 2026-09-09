@@ -12,6 +12,7 @@ import { KanbanPage } from './pages/KanbanPage'
 import { UsersPage } from './pages/UsersPage'
 
 import { DesignerBoardPage } from './pages/DesignerBoardPage'
+import { OrderHistoryPage } from './pages/OrderHistoryPage'
 
 function App() {
   return (
@@ -65,6 +66,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <DesignerBoardPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/order-history"
+            element={
+              <ProtectedRoute>
+                <OrderHistoryPage />
               </ProtectedRoute>
             }
           />

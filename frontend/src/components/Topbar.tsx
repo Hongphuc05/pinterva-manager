@@ -30,6 +30,7 @@ export function Topbar() {
     if (path.startsWith('/orders/')) return 'Chi Tiết Đơn Hàng'
     if (path === '/orders') return user?.role === 'designer' ? 'My Tasks' : 'Danh Sách Đơn Hàng'
     if (path === '/designer-board') return 'Tiến Độ Designer'
+    if (path === '/order-history') return user?.role === 'designer' ? 'Lịch Sử Của Tôi' : 'Lịch Sử Hoạt Động & Tiến Độ'
     if (path === '/allocation') return 'Phân Bổ Kéo-Thả'
     if (path === '/kanban') return 'Bảng Tiến Độ Kanban'
     if (path === '/my-tasks') return 'My Tasks'

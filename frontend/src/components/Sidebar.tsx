@@ -9,7 +9,8 @@ import {
   UserCheck,
   ShieldAlert,
   Users,
-  Radio
+  Radio,
+  History
 } from 'lucide-react'
 
 export function Sidebar() {
@@ -23,6 +24,7 @@ export function Sidebar() {
   const adminNav = [
     { label: 'Danh Sách Đơn Hàng', path: '/orders', icon: ListOrdered },
     { label: 'Tiến Độ Designer', path: '/designer-board', icon: UserCheck },
+    { label: 'Lịch Sử Tiến Độ', path: '/order-history', icon: History },
     { label: 'Phân Bổ Kéo-Thả', path: '/allocation', icon: Kanban },
     { label: 'Bảng Tiến Độ Kanban', path: '/kanban', icon: Columns3 },
     { label: 'Trạng Thái Đơn', path: '/order-status', icon: Radio },
@@ -32,6 +34,7 @@ export function Sidebar() {
 
   const designerNav = [
     { label: 'My Tasks', path: '/orders', icon: ListOrdered },
+    { label: 'Lịch Sử Của Tôi', path: '/order-history', icon: History },
   ]
 
   const navItems = isAdmin ? adminNav : designerNav

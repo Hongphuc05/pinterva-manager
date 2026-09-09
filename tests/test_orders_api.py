@@ -372,3 +372,18 @@ def test_api_update_order_state_flow(client, db_session):
     des_stat = next(item for item in workload if item["id"] == str(des.id))
     assert des_stat["done_count"] == 1
     assert des_stat["total_orders"] == 1
+
+    # 8. Check orders history API
+    resp = client.get("/api/orders-history")
+    assert resp.status_code == 200
+    hist_data = resp.json()
+    assert hist_data["total"] >= 1
+    assert len(hist_data["items"]) >= 1
+    # Check that events have descriptions
+    assert any("Admin" in (item.get("description") or "") or "Designer" in (item.get("description") or "") for item in hist_data["items"])
+
+    # 9. Check single order history API
+    resp = client.get(f"/api/orders/{order.id}/history")
+    assert resp.status_code == 200
+    single_hist = resp.json()
+    assert len(single_hist) >= 4

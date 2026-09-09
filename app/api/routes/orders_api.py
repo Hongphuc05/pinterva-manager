@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import math
 import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import Assignment, Order, Platform, PrintervalAssignmentRequest, ResultVersion, User, WorkflowEvent
@@ -115,9 +117,43 @@ class OrderDetailOut(BaseModel):
 
 class WorkflowEventOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
+    id: str | None = None
     created_at: datetime
-    from_state: str | None
+    from_state: str | None = None
     to_state: str
+    actor_id: str | None = None
+    actor_name: str | None = None
+    actor_role: str | None = None
+    action: str | None = None
+    description: str | None = None
+    designer_name: str | None = None
+    evidence: dict | None = None
+
+
+class OrderHistoryItemOut(BaseModel):
+    id: str
+    created_at: datetime
+    order_id: str
+    external_order_id: str
+    product_name: str | None = None
+    thumbnail_url: str | None = None
+    from_state: str | None = None
+    to_state: str
+    actor_id: str | None = None
+    actor_name: str | None = None
+    actor_role: str | None = None
+    action: str | None = None
+    description: str | None = None
+    designer_name: str | None = None
+    evidence: dict | None = None
+
+
+class OrderHistoryListResponse(BaseModel):
+    items: list[OrderHistoryItemOut]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
 
 
 class OrderDetailResponse(BaseModel):
@@ -549,9 +585,49 @@ def api_order_detail(
         ]
 
 
+    actor_ids = {e.actor_id for e in history if e.actor_id}
+    actors_map = {}
+    if actor_ids:
+        users = db.query(User).filter(User.id.in_(actor_ids)).all()
+        actors_map = {u.id: (u.full_name or u.username, u.role) for u in users}
+
+    history_out = []
+    for e in history:
+        actor_info = actors_map.get(e.actor_id)
+        actor_name = (e.evidence or {}).get("actor_name") or (actor_info[0] if actor_info else None)
+        actor_role = (e.evidence or {}).get("actor_role") or (actor_info[1] if actor_info else None)
+        action = (e.evidence or {}).get("action")
+        designer_name = (e.evidence or {}).get("designer_name")
+        description = (e.evidence or {}).get("description")
+
+        if not description:
+            from_st = e.from_state or "Mới"
+            to_st = e.to_state
+            if action == "ASSIGN":
+                description = f"{actor_name or 'Admin'} phân công đơn hàng cho {designer_name or 'Designer'}"
+            else:
+                actor_label = f" ({actor_name})" if actor_name else ""
+                description = f"Chuyển trạng thái từ {from_st} sang {to_st}{actor_label}"
+
+        history_out.append(
+            WorkflowEventOut(
+                id=str(e.id),
+                created_at=e.created_at,
+                from_state=e.from_state,
+                to_state=e.to_state,
+                actor_id=str(e.actor_id) if e.actor_id else None,
+                actor_name=actor_name,
+                actor_role=actor_role,
+                action=action,
+                description=description,
+                designer_name=designer_name,
+                evidence=e.evidence,
+            )
+        )
+
     return OrderDetailResponse(
         order=order_out,
-        history=[WorkflowEventOut.model_validate(e) for e in history],
+        history=history_out,
     )
 
 
@@ -681,7 +757,12 @@ def api_assign_order(
         .filter(Assignment.order_id == order.id)
         .one_or_none()
     )
+    old_designer_name = None
     if existing_assignment:
+        if existing_assignment.designer_id:
+            old_des = db.get(User, existing_assignment.designer_id)
+            if old_des:
+                old_designer_name = old_des.full_name or old_des.username
         existing_assignment.designer_id = designer.id
         existing_assignment.status = "approved"
     else:
@@ -692,7 +773,34 @@ def api_assign_order(
         )
         db.add(new_assignment)
 
+    old_state = order.state
     order.state = OrderState.WAITING.value
+
+    des_name = designer.full_name or designer.username
+    admin_name = user.full_name or user.username
+    is_reassign = existing_assignment is not None and old_designer_name and old_designer_name != des_name
+    action_type = "REASSIGN" if is_reassign else "ASSIGN"
+    if is_reassign:
+        desc = f"Admin {admin_name} phân công lại từ {old_designer_name} sang {des_name} (chuyển về Waiting)"
+    else:
+        desc = f"Admin {admin_name} phân công đơn cho {des_name} (chuyển về Waiting)"
+
+    event = WorkflowEvent(
+        order_id=order.id,
+        from_state=old_state,
+        to_state=OrderState.WAITING.value,
+        actor_id=user.id,
+        evidence={
+            "action": action_type,
+            "actor_name": admin_name,
+            "actor_role": user.role,
+            "designer_id": str(designer.id),
+            "designer_name": des_name,
+            "old_designer_name": old_designer_name,
+            "description": desc,
+        },
+    )
+    db.add(event)
     db.commit()
 
     synced_message = _trigger_printerval_assignment_sync(order, designer)
@@ -743,13 +851,21 @@ def api_bulk_assign_orders(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng phù hợp")
 
     updated_count = 0
+    des_name = designer.full_name or designer.username
+    admin_name = user.full_name or user.username
+
     for order in orders:
         existing_assignment = (
             db.query(Assignment)
             .filter(Assignment.order_id == order.id)
             .one_or_none()
         )
+        old_designer_name = None
         if existing_assignment:
+            if existing_assignment.designer_id:
+                old_des = db.get(User, existing_assignment.designer_id)
+                if old_des:
+                    old_designer_name = old_des.full_name or old_des.username
             existing_assignment.designer_id = designer.id
             existing_assignment.status = "approved"
         else:
@@ -759,8 +875,34 @@ def api_bulk_assign_orders(
                 status="approved",
             )
             db.add(new_assignment)
+
+        old_state = order.state
         order.state = OrderState.WAITING.value
         updated_count += 1
+
+        is_reassign = existing_assignment is not None and old_designer_name and old_designer_name != des_name
+        action_type = "REASSIGN" if is_reassign else "ASSIGN"
+        if is_reassign:
+            desc = f"Admin {admin_name} phân công lại từ {old_designer_name} sang {des_name} (chuyển về Waiting)"
+        else:
+            desc = f"Admin {admin_name} phân công hàng loạt cho {des_name} (chuyển về Waiting)"
+
+        event = WorkflowEvent(
+            order_id=order.id,
+            from_state=old_state,
+            to_state=OrderState.WAITING.value,
+            actor_id=user.id,
+            evidence={
+                "action": action_type,
+                "actor_name": admin_name,
+                "actor_role": user.role,
+                "designer_id": str(designer.id),
+                "designer_name": des_name,
+                "old_designer_name": old_designer_name,
+                "description": desc,
+            },
+        )
+        db.add(event)
 
     db.commit()
 
@@ -937,12 +1079,57 @@ def api_update_order_state(
 
     old_state = order.state
     order.state = target_state.value
+
+    actor_name = user.full_name or user.username
+    des_name = None
+    curr_assignment = (
+        db.query(Assignment)
+        .filter(Assignment.order_id == order.id, Assignment.status != "cancelled")
+        .first()
+    )
+    if curr_assignment and curr_assignment.designer_id:
+        des_user = db.get(User, curr_assignment.designer_id)
+        if des_user:
+            des_name = des_user.full_name or des_user.username
+    if not des_name and order.printerval_designer:
+        des_name = order.printerval_designer
+
+    if target_state == OrderState.IN_PROGRESS:
+        if old_state in (OrderState.QC_PENDING.value, "REVIEW"):
+            action_type = "REVERT_TO_DOING"
+            desc = f"{'Designer ' + actor_name if user.role == 'designer' else actor_name} chuyển lại về Doing (Đang làm) để chỉnh sửa bài"
+        else:
+            action_type = "START_DOING"
+            desc = f"{'Designer ' + actor_name if user.role == 'designer' else actor_name} bắt đầu làm thiết kế (Doing)"
+    elif target_state == OrderState.QC_PENDING:
+        action_type = "SUBMIT_REVIEW"
+        desc = f"{'Designer ' + actor_name if user.role == 'designer' else actor_name} nộp bài và chuyển sang Review (Chờ duyệt)"
+    elif target_state == OrderState.REVISION:
+        action_type = "REQUEST_FIX"
+        desc = f"{'Admin ' + actor_name if user.role == 'admin' else actor_name} kiểm tra bài và yêu cầu sửa lại (Fix)"
+    elif target_state == OrderState.DONE:
+        action_type = "APPROVE_DONE"
+        desc = f"{'Admin ' + actor_name if user.role == 'admin' else actor_name} kiểm tra và duyệt hoàn thành đơn hàng (Done)"
+    elif target_state == OrderState.WAITING:
+        action_type = "SET_WAITING"
+        desc = f"{actor_name} chuyển trạng thái đơn về Waiting (Chờ làm)"
+    else:
+        action_type = "CHANGE_STATE"
+        desc = f"{actor_name} chuyển trạng thái từ {old_state or 'Mới'} sang {target_state.value}"
+
     event = WorkflowEvent(
         order_id=order.id,
         from_state=old_state,
         to_state=target_state.value,
         actor_id=user.id,
-        evidence={"source": "status_dropdown", "role": user.role},
+        evidence={
+            "action": action_type,
+            "actor_name": actor_name,
+            "actor_role": user.role,
+            "designer_name": des_name,
+            "description": desc,
+            "source": "status_update",
+        },
     )
     db.add(event)
     db.commit()
@@ -1072,3 +1259,193 @@ def api_designers_workload(
         )
 
     return results
+
+
+@router.get("/orders-history", response_model=OrderHistoryListResponse)
+def api_get_orders_history(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(30, ge=1, le=100),
+    search: str | None = None,
+    order_id: str | None = None,
+    designer_id: str | None = None,
+    action: str | None = None,
+    user: User = Depends(get_current_user),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    query = (
+        db.query(WorkflowEvent, Order)
+        .join(Order, Order.id == WorkflowEvent.order_id)
+        .filter(Order.platform_id == platform_id)
+    )
+
+    if user.role == "designer":
+        asgn_order_ids = (
+            db.query(Assignment.order_id)
+            .filter(Assignment.designer_id == user.id, Assignment.status != "cancelled")
+            .subquery()
+        )
+        query = query.filter(
+            or_(
+                Order.id.in_(asgn_order_ids),
+                Order.printerval_designer == user.printerval_designer_option,
+                Order.printerval_designer == user.full_name,
+            )
+        )
+
+    if order_id and order_id.strip():
+        clean_oid = order_id.strip()
+        try:
+            o_uuid = uuid.UUID(clean_oid)
+            query = query.filter(Order.id == o_uuid)
+        except ValueError:
+            query = query.filter(Order.external_order_id.ilike(f"%{clean_oid}%"))
+
+    if search and search.strip():
+        term = f"%{search.strip()}%"
+        query = query.filter(
+            or_(
+                Order.external_order_id.ilike(term),
+                Order.product_name.ilike(term),
+                WorkflowEvent.from_state.ilike(term),
+                WorkflowEvent.to_state.ilike(term),
+                WorkflowEvent.evidence["description"].astext.ilike(term),
+                WorkflowEvent.evidence["actor_name"].astext.ilike(term),
+                WorkflowEvent.evidence["designer_name"].astext.ilike(term),
+            )
+        )
+
+    if action and action.strip() and action != "ALL":
+        query = query.filter(WorkflowEvent.evidence["action"].astext == action.strip())
+
+    if designer_id and designer_id.strip() and designer_id != "ALL":
+        try:
+            d_uuid = uuid.UUID(designer_id.strip())
+            d_user = db.get(User, d_uuid)
+            if d_user:
+                d_name = d_user.full_name or d_user.username
+                query = query.filter(
+                    or_(
+                        WorkflowEvent.evidence["designer_id"].astext == str(d_uuid),
+                        WorkflowEvent.evidence["designer_name"].astext == d_name,
+                        WorkflowEvent.actor_id == d_uuid,
+                    )
+                )
+        except ValueError:
+            pass
+
+    total = query.count()
+    offset = (page - 1) * page_size
+    results = query.order_by(WorkflowEvent.created_at.desc()).offset(offset).limit(page_size).all()
+
+    actor_ids = {event.actor_id for event, _ in results if event.actor_id}
+    actors_map = {}
+    if actor_ids:
+        users = db.query(User).filter(User.id.in_(actor_ids)).all()
+        actors_map = {u.id: (u.full_name or u.username, u.role) for u in users}
+
+    items = []
+    for event, order in results:
+        actor_info = actors_map.get(event.actor_id)
+        actor_name = (event.evidence or {}).get("actor_name") or (actor_info[0] if actor_info else None)
+        actor_role = (event.evidence or {}).get("actor_role") or (actor_info[1] if actor_info else None)
+        action_type = (event.evidence or {}).get("action")
+        designer_name = (event.evidence or {}).get("designer_name")
+        desc = (event.evidence or {}).get("description")
+        if not desc:
+            from_st = event.from_state or "Mới"
+            desc = f"Chuyển trạng thái từ {from_st} sang {event.to_state}"
+            if actor_name:
+                desc += f" bởi {actor_name}"
+
+        items.append(
+            OrderHistoryItemOut(
+                id=str(event.id),
+                created_at=event.created_at,
+                order_id=str(order.id),
+                external_order_id=order.external_order_id,
+                product_name=order.product_name,
+                thumbnail_url=order.thumbnail_url,
+                from_state=event.from_state,
+                to_state=event.to_state,
+                actor_id=str(event.actor_id) if event.actor_id else None,
+                actor_name=actor_name,
+                actor_role=actor_role,
+                action=action_type,
+                description=desc,
+                designer_name=designer_name,
+                evidence=event.evidence,
+            )
+        )
+
+    total_pages = max(1, math.ceil(total / page_size))
+    return OrderHistoryListResponse(
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+    )
+
+
+@router.get("/orders/{order_id}/history", response_model=list[WorkflowEventOut])
+def api_get_single_order_history(
+    order_id: str,
+    user: User = Depends(get_current_user),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    order = None
+    try:
+        order_uuid = uuid.UUID(order_id)
+        order = db.get(Order, order_uuid)
+    except ValueError:
+        pass
+    if order is None:
+        order = db.query(Order).filter(Order.external_order_id == order_id).first()
+
+    if order is None or order.platform_id != platform_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
+
+    history = get_order_history(db, str(order.id))
+    actor_ids = {e.actor_id for e in history if e.actor_id}
+    actors_map = {}
+    if actor_ids:
+        users = db.query(User).filter(User.id.in_(actor_ids)).all()
+        actors_map = {u.id: (u.full_name or u.username, u.role) for u in users}
+
+    history_out = []
+    for e in history:
+        actor_info = actors_map.get(e.actor_id)
+        actor_name = (e.evidence or {}).get("actor_name") or (actor_info[0] if actor_info else None)
+        actor_role = (e.evidence or {}).get("actor_role") or (actor_info[1] if actor_info else None)
+        action = (e.evidence or {}).get("action")
+        designer_name = (e.evidence or {}).get("designer_name")
+        description = (e.evidence or {}).get("description")
+
+        if not description:
+            from_st = e.from_state or "Mới"
+            to_st = e.to_state
+            if action == "ASSIGN":
+                description = f"{actor_name or 'Admin'} phân công đơn hàng cho {designer_name or 'Designer'}"
+            else:
+                actor_label = f" ({actor_name})" if actor_name else ""
+                description = f"Chuyển trạng thái từ {from_st} sang {to_st}{actor_label}"
+
+        history_out.append(
+            WorkflowEventOut(
+                id=str(e.id),
+                created_at=e.created_at,
+                from_state=e.from_state,
+                to_state=e.to_state,
+                actor_id=str(e.actor_id) if e.actor_id else None,
+                actor_name=actor_name,
+                actor_role=actor_role,
+                action=action,
+                description=description,
+                designer_name=designer_name,
+                evidence=e.evidence,
+            )
+        )
+
+    return history_out

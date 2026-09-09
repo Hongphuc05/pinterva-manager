@@ -14,8 +14,10 @@ import {
   Check, 
   Flame, 
   ChevronRight,
-  CheckCheck
+  CheckCheck,
+  History
 } from 'lucide-react'
+import { OrderHistoryTimelineModal } from '../components/OrderHistoryTimelineModal'
 
 type DesignerOrder = {
   id: string
@@ -49,6 +51,11 @@ export function DesignerBoardPage() {
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null)
   const [showDoneColumn, setShowDoneColumn] = useState(true)
+  const [historyModalOrder, setHistoryModalOrder] = useState<{
+    id: string
+    external_order_id: string
+    product_name?: string | null
+  } | null>(null)
 
   useEffect(() => {
     loadWorkload()
@@ -425,13 +432,29 @@ export function DesignerBoardPage() {
                                       externalOrderId={o.external_order_id}
                                       currentState={o.state}
                                     />
-                                    <Link
-                                      to={`/orders/${o.id}`}
-                                      className="text-[10px] text-[#0052CC] font-semibold hover:underline flex items-center gap-0.5"
-                                    >
-                                      <span>Xem</span>
-                                      <ChevronRight className="h-2.5 w-2.5" />
-                                    </Link>
+                                    <div className="flex items-center gap-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setHistoryModalOrder({
+                                            id: o.id,
+                                            external_order_id: o.external_order_id,
+                                            product_name: o.product_name,
+                                          })
+                                        }
+                                        className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                                        title="Xem lịch sử tiến độ đơn"
+                                      >
+                                        <History className="h-3.5 w-3.5" />
+                                      </button>
+                                      <Link
+                                        to={`/orders/${o.id}`}
+                                        className="text-[10px] text-[#0052CC] font-semibold hover:underline flex items-center gap-0.5"
+                                      >
+                                        <span>Xem</span>
+                                        <ChevronRight className="h-2.5 w-2.5" />
+                                      </Link>
+                                    </div>
                                   </div>
                                 </div>
                               ))
@@ -515,6 +538,21 @@ export function DesignerBoardPage() {
                                       <Flame className="h-3 w-3" />
                                       <span>Bắt Fix</span>
                                     </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setHistoryModalOrder({
+                                          id: o.id,
+                                          external_order_id: o.external_order_id,
+                                          product_name: o.product_name,
+                                        })
+                                      }
+                                      className="p-1 text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors"
+                                      title="Xem lịch sử tiến độ đơn"
+                                    >
+                                      <History className="h-3.5 w-3.5" />
+                                    </button>
                                   </div>
                                 </div>
                               ))
@@ -582,13 +620,29 @@ export function DesignerBoardPage() {
                                       externalOrderId={o.external_order_id}
                                       currentState={o.state}
                                     />
-                                    <Link
-                                      to={`/orders/${o.id}`}
-                                      className="text-[10px] text-[#0052CC] font-semibold hover:underline flex items-center gap-0.5"
-                                    >
-                                      <span>Xem</span>
-                                      <ChevronRight className="h-2.5 w-2.5" />
-                                    </Link>
+                                    <div className="flex items-center gap-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setHistoryModalOrder({
+                                            id: o.id,
+                                            external_order_id: o.external_order_id,
+                                            product_name: o.product_name,
+                                          })
+                                        }
+                                        className="p-1 text-slate-400 hover:text-orange-600 hover:bg-orange-50 rounded transition-colors"
+                                        title="Xem lịch sử tiến độ đơn"
+                                      >
+                                        <History className="h-3.5 w-3.5" />
+                                      </button>
+                                      <Link
+                                        to={`/orders/${o.id}`}
+                                        className="text-[10px] text-[#0052CC] font-semibold hover:underline flex items-center gap-0.5"
+                                      >
+                                        <span>Xem</span>
+                                        <ChevronRight className="h-2.5 w-2.5" />
+                                      </Link>
+                                    </div>
                                   </div>
                                 </div>
                               ))
@@ -650,12 +704,28 @@ export function DesignerBoardPage() {
                                         <CheckCheck className="h-3 w-3" />
                                         <span>Đã xong</span>
                                       </span>
-                                      <Link
-                                        to={`/orders/${o.id}`}
-                                        className="text-[10px] text-slate-400 hover:text-slate-700 font-semibold hover:underline"
-                                      >
-                                        Chi tiết
-                                      </Link>
+                                      <div className="flex items-center gap-1.5">
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setHistoryModalOrder({
+                                              id: o.id,
+                                              external_order_id: o.external_order_id,
+                                              product_name: o.product_name,
+                                            })
+                                          }
+                                          className="p-1 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded transition-colors"
+                                          title="Xem lịch sử tiến độ đơn"
+                                        >
+                                          <History className="h-3.5 w-3.5" />
+                                        </button>
+                                        <Link
+                                          to={`/orders/${o.id}`}
+                                          className="text-[10px] text-slate-400 hover:text-slate-700 font-semibold hover:underline"
+                                        >
+                                          Chi tiết
+                                        </Link>
+                                      </div>
                                     </div>
                                   </div>
                                 ))
@@ -683,6 +753,16 @@ export function DesignerBoardPage() {
         onClose={() => setSelectedImage(null)}
         imageUrl={selectedImage}
       />
+
+      {historyModalOrder && (
+        <OrderHistoryTimelineModal
+          isOpen={!!historyModalOrder}
+          onClose={() => setHistoryModalOrder(null)}
+          orderId={historyModalOrder.id}
+          externalOrderId={historyModalOrder.external_order_id}
+          productName={historyModalOrder.product_name}
+        />
+      )}
     </DashboardLayout>
   )
 }
