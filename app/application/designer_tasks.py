@@ -212,8 +212,8 @@ def submit_result(
 ) -> dict:
     def _do() -> dict:
         assignment, order = _owned_task(session, assignment_id, designer_id, lock=True)
-        if order.state != OrderState.IN_PROGRESS.value:
-            raise ValueError("task must be in progress before submitting a result")
+        if order.state not in (OrderState.IN_PROGRESS.value, OrderState.WAITING.value, OrderState.REVISION.value):
+            raise ValueError(f"Task must be in progress, waiting, or revision to submit (current state: {order.state})")
         _verify_drive(drive_adapter, drive_url)
         latest_marker = (
             session.query(func.max(ResultVersion.version_marker))
