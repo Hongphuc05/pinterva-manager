@@ -1,4 +1,5 @@
 import { X, ExternalLink, FileText, Download } from 'lucide-react'
+import { resolveAssetUrl } from '../api/client'
 
 export type PsdFile = {
   url?: string
@@ -91,7 +92,7 @@ export function TemplateModal({ isOpen, onClose, templateJobs, orderId }: Templa
                       >
                         {psd.image_url ? (
                           <img
-                            src={psd.image_url}
+                            src={resolveAssetUrl(psd.image_url)}
                             alt="PSD Preview"
                             className="h-24 w-24 rounded-lg object-cover border border-slate-200 shrink-0"
                           />

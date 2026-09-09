@@ -1,0 +1,54 @@
+# Git and IDE
+.git
+.github
+.claude
+.gemini
+.idea
+.vscode
+
+# Virtual environments and dependencies
+.venv
+venv
+ENV/
+env/
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.ruff_cache
+.mypy_cache
+
+# Secrets and environment files
+.env
+.env.*
+!.env.example
+credentials
+*.pem
+*.key
+*.token
+cookies.txt
+
+# Frontend (hosted independently on Vercel)
+frontend/
+
+# Runtime and persistent directories
+chrome-profile*
+playwright-evidence
+crawled_assets
+order_assets
+platform_data
+backups
+logs
+*.log
+*.pid
+*.db
+celerybeat-schedule*
+
+# Build artifacts and dumps
+dist
+build
+*.egg-info
+crawled_orders.csv
+*.dump
+*.sql

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ApiError, apiFetch } from '../api/client'
+import { ApiError, apiFetch, resolveAssetUrl } from '../api/client'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { Columns3, AlertTriangle, User, ChevronRight, Package } from 'lucide-react'
 
@@ -114,7 +114,7 @@ export function KanbanPage() {
                     >
                       <div className="flex items-start gap-3">
                         {card.thumbnail_url ? (
-                          <img src={card.thumbnail_url} alt="" className="h-12 w-12 rounded-lg object-cover border border-slate-200 shrink-0" />
+                          <img src={resolveAssetUrl(card.thumbnail_url)} alt="" className="h-12 w-12 rounded-lg object-cover border border-slate-200 shrink-0" />
                         ) : (
                           <div className="h-12 w-12 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 shrink-0">
                             <Package className="h-6 w-6" />

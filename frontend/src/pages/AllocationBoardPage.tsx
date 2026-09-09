@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { DndContext, type DragEndEvent, useDraggable, useDroppable } from '@dnd-kit/core'
-import { ApiError, apiFetch } from '../api/client'
+import { ApiError, apiFetch, resolveAssetUrl } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { 
@@ -59,7 +59,7 @@ function OrderCard({ order }: { order: BoardOrder }) {
           <GripVertical className="h-4 w-4" />
         </div>
         {order.thumbnail_url ? (
-          <img src={order.thumbnail_url} alt="" className="h-10 w-10 rounded-lg object-cover border border-slate-200 shrink-0" />
+          <img src={resolveAssetUrl(order.thumbnail_url)} alt="" className="h-10 w-10 rounded-lg object-cover border border-slate-200 shrink-0" />
         ) : (
           <div className="h-10 w-10 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 shrink-0">
             <Package className="h-5 w-5" />

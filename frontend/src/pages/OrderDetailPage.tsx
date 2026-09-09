@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { apiFetch, ApiError } from '../api/client'
+import { apiFetch, ApiError, resolveAssetUrl } from '../api/client'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { ImageModal } from '../components/ImageModal'
 import { TemplateModal, type TemplateJob } from '../components/TemplateModal'
@@ -197,7 +197,7 @@ export function OrderDetailPage() {
       <ImageModal
         isOpen={showImageModal}
         onClose={() => setShowImageModal(false)}
-        imageUrl={order.thumbnail_url}
+        imageUrl={resolveAssetUrl(order.thumbnail_url) ?? null}
         altText={order.external_order_id}
       />
 
@@ -240,7 +240,7 @@ export function OrderDetailPage() {
           <div className="flex items-start gap-4">
             {order.thumbnail_url ? (
               <img
-                src={order.thumbnail_url}
+                src={resolveAssetUrl(order.thumbnail_url)}
                 alt=""
                 title="Click để xem ảnh to"
                 onClick={() => setShowImageModal(true)}
