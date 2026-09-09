@@ -48,6 +48,7 @@ export function DesignerBoardPage() {
   const [filterMode, setFilterMode] = useState<'all' | 'needs_review' | 'has_fix' | 'active'>('all')
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null)
+  const [showDoneColumn, setShowDoneColumn] = useState(true)
 
   useEffect(() => {
     loadWorkload()
@@ -258,6 +259,20 @@ export function DesignerBoardPage() {
             >
               Đang có việc
             </button>
+
+            <div className="h-4 w-px bg-slate-200 mx-1 hidden sm:block" />
+
+            <button
+              onClick={() => setShowDoneColumn(!showDoneColumn)}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
+                showDoneColumn
+                  ? 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200'
+                  : 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
+              }`}
+              title="Chuyển đổi giữa 4 cột (gồm Done) và 3 cột (Doing-Review-Fix)"
+            >
+              <span>{showDoneColumn ? 'Ẩn Cột Done (3 Cột)' : 'Hiện Cột Done (4 Cột)'}</span>
+            </button>
           </div>
         </div>
 
@@ -286,7 +301,7 @@ export function DesignerBoardPage() {
                 ['REVISION', 'REVISION_REQUESTED'].includes(o.state.toUpperCase())
               )
               const doingOrders = des.orders.filter((o) =>
-                ['IN_PROGRESS', 'ASSIGNED'].includes(o.state.toUpperCase())
+                ['IN_PROGRESS', 'ASSIGNED', 'WAITING', 'PENDING'].includes(o.state.toUpperCase())
               )
               const doneOrders = des.orders.filter((o) =>
                 ['DONE', 'SKIPPED'].includes(o.state.toUpperCase())
@@ -349,12 +364,86 @@ export function DesignerBoardPage() {
                         Hiện chưa có đơn hàng nào được phân công cho Designer này.
                       </div>
                     ) : (
-                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                        {/* 1. Review Column (Cần Admin duyệt - Nổi bật) */}
+                      <div className={`grid grid-cols-1 ${showDoneColumn ? 'md:grid-cols-2 lg:grid-cols-4' : 'md:grid-cols-3'} gap-4`}>
+                        {/* 1. Doing Column (Đang làm) */}
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between pb-2 border-b border-blue-200">
+                            <span className="text-xs font-bold text-blue-800 flex items-center gap-1.5">
+                              <span className="h-2 w-2 rounded-full bg-blue-500"></span>
+                              <span>Doing (Đang Làm)</span>
+                            </span>
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-blue-100 text-blue-800">
+                              {doingOrders.length}
+                            </span>
+                          </div>
+
+                          <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
+                            {doingOrders.length === 0 ? (
+                              <div className="p-4 rounded-xl border border-dashed border-slate-200 text-center text-[11px] text-slate-400">
+                                Không có đơn đang làm
+                              </div>
+                            ) : (
+                              doingOrders.map((o) => (
+                                <div
+                                  key={o.id}
+                                  className="p-3 rounded-xl border border-blue-100 bg-white hover:bg-blue-50/30 transition-all shadow-2xs space-y-2"
+                                >
+                                  <div className="flex items-start gap-2.5">
+                                    {o.thumbnail_url ? (
+                                      <img
+                                        src={resolveAssetUrl(o.thumbnail_url)}
+                                        alt=""
+                                        onClick={() => setSelectedImage(o.thumbnail_url)}
+                                        className="h-10 w-10 rounded-lg object-cover border border-slate-200 shrink-0 cursor-pointer hover:scale-105 transition-transform"
+                                      />
+                                    ) : (
+                                      <div className="h-10 w-10 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 shrink-0">
+                                        <Package className="h-4 w-4" />
+                                      </div>
+                                    )}
+                                    <div className="flex-1 min-w-0">
+                                      <Link
+                                        to={`/orders/${o.id}`}
+                                        className="text-xs font-mono font-bold text-[#0052CC] hover:underline truncate block"
+                                      >
+                                        {o.external_order_id}
+                                      </Link>
+                                      <p className="text-[10px] text-slate-500 truncate mt-0.5">
+                                        {o.product_name || 'Đơn 2D Custom'}
+                                      </p>
+                                      {o.deadline_at_ext && (
+                                        <p className="text-[10px] text-slate-400 font-mono mt-0.5 flex items-center gap-1">
+                                          <Clock className="h-2.5 w-2.5" />
+                                          <span>{o.deadline_at_ext}</span>
+                                        </p>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="pt-1 flex items-center justify-between">
+                                    <StatusDropdown
+                                      orderId={o.id}
+                                      externalOrderId={o.external_order_id}
+                                      currentState={o.state}
+                                    />
+                                    <Link
+                                      to={`/orders/${o.id}`}
+                                      className="text-[10px] text-[#0052CC] font-semibold hover:underline flex items-center gap-0.5"
+                                    >
+                                      <span>Xem</span>
+                                      <ChevronRight className="h-2.5 w-2.5" />
+                                    </Link>
+                                  </div>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        </div>
+
+                        {/* 2. Review Column (Cần Admin duyệt - Nổi bật) */}
                         <div className="space-y-3">
                           <div className="flex items-center justify-between pb-2 border-b border-purple-200">
                             <span className="text-xs font-bold text-purple-800 flex items-center gap-1.5">
-                              <span className="h-2 w-2 rounded-full bg-purple-500"></span>
+                              <span className="h-2 w-2 rounded-full bg-purple-500 animate-pulse"></span>
                               <span>Review (Chờ Duyệt)</span>
                             </span>
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-purple-100 text-purple-800">
@@ -433,7 +522,7 @@ export function DesignerBoardPage() {
                           </div>
                         </div>
 
-                        {/* 2. Fix Column (Cần Des sửa) */}
+                        {/* 3. Fix Column (Cần Des sửa) */}
                         <div className="space-y-3">
                           <div className="flex items-center justify-between pb-2 border-b border-orange-200">
                             <span className="text-xs font-bold text-orange-800 flex items-center gap-1.5">
@@ -479,74 +568,12 @@ export function DesignerBoardPage() {
                                       <p className="text-[10px] text-slate-500 truncate mt-0.5">
                                         {o.product_name || 'Đơn 2D Custom'}
                                       </p>
-                                    </div>
-                                  </div>
-                                  <div className="pt-1 flex items-center justify-between">
-                                    <StatusDropdown
-                                      orderId={o.id}
-                                      externalOrderId={o.external_order_id}
-                                      currentState={o.state}
-                                    />
-                                    <Link
-                                      to={`/orders/${o.id}`}
-                                      className="text-[10px] text-[#0052CC] font-semibold hover:underline flex items-center gap-0.5"
-                                    >
-                                      <span>Xem</span>
-                                      <ChevronRight className="h-2.5 w-2.5" />
-                                    </Link>
-                                  </div>
-                                </div>
-                              ))
-                            )}
-                          </div>
-                        </div>
-
-                        {/* 3. Doing Column (Đang làm) */}
-                        <div className="space-y-3">
-                          <div className="flex items-center justify-between pb-2 border-b border-blue-200">
-                            <span className="text-xs font-bold text-blue-800 flex items-center gap-1.5">
-                              <span className="h-2 w-2 rounded-full bg-blue-500"></span>
-                              <span>Doing (Đang Làm)</span>
-                            </span>
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-blue-100 text-blue-800">
-                              {doingOrders.length}
-                            </span>
-                          </div>
-
-                          <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
-                            {doingOrders.length === 0 ? (
-                              <div className="p-4 rounded-xl border border-dashed border-slate-200 text-center text-[11px] text-slate-400">
-                                Không có đơn đang làm
-                              </div>
-                            ) : (
-                              doingOrders.map((o) => (
-                                <div
-                                  key={o.id}
-                                  className="p-3 rounded-xl border border-blue-100 bg-white hover:bg-blue-50/30 transition-all shadow-2xs space-y-2"
-                                >
-                                  <div className="flex items-start gap-2.5">
-                                    {o.thumbnail_url ? (
-                                      <img
-                                        src={resolveAssetUrl(o.thumbnail_url)}
-                                        alt=""
-                                        onClick={() => setSelectedImage(o.thumbnail_url)}
-                                        className="h-10 w-10 rounded-lg object-cover border border-slate-200 shrink-0 cursor-pointer"
-                                      />
-                                    ) : (
-                                      <div className="h-10 w-10 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 shrink-0">
-                                        <Package className="h-4 w-4" />
-                                      </div>
-                                    )}
-                                    <div className="flex-1 min-w-0">
-                                      <Link
-                                        to={`/orders/${o.id}`}
-                                        className="text-xs font-mono font-bold text-[#0052CC] hover:underline truncate block"
-                                      >
-                                        {o.external_order_id}
-                                      </Link>
-                                      <p className="text-[10px] text-slate-500 truncate mt-0.5">
-                                        {o.product_name || 'Đơn 2D Custom'}
-                                      </p>
+                                      {o.deadline_at_ext && (
+                                        <p className="text-[10px] text-slate-400 font-mono mt-0.5 flex items-center gap-1">
+                                          <Clock className="h-2.5 w-2.5" />
+                                          <span>{o.deadline_at_ext}</span>
+                                        </p>
+                                      )}
                                     </div>
                                   </div>
                                   <div className="pt-1 flex items-center justify-between">
@@ -570,75 +597,77 @@ export function DesignerBoardPage() {
                         </div>
 
                         {/* 4. Done Column (Đã xong) */}
-                        <div className="space-y-3">
-                          <div className="flex items-center justify-between pb-2 border-b border-emerald-200">
-                            <span className="text-xs font-bold text-emerald-800 flex items-center gap-1.5">
-                              <span className="h-2 w-2 rounded-full bg-emerald-500"></span>
-                              <span>Done (Hoàn Thành)</span>
-                            </span>
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-100 text-emerald-800">
-                              {doneOrders.length}
-                            </span>
-                          </div>
+                        {showDoneColumn && (
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between pb-2 border-b border-emerald-200">
+                              <span className="text-xs font-bold text-emerald-800 flex items-center gap-1.5">
+                                <span className="h-2 w-2 rounded-full bg-emerald-500"></span>
+                                <span>Done (Hoàn Thành)</span>
+                              </span>
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-100 text-emerald-800">
+                                {doneOrders.length}
+                              </span>
+                            </div>
 
-                          <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
-                            {doneOrders.length === 0 ? (
-                              <div className="p-4 rounded-xl border border-dashed border-slate-200 text-center text-[11px] text-slate-400">
-                                Chưa có đơn hoàn thành
-                              </div>
-                            ) : (
-                              doneOrders.slice(0, 10).map((o) => (
-                                <div
-                                  key={o.id}
-                                  className="p-3 rounded-xl border border-emerald-100 bg-white hover:bg-emerald-50/20 transition-all shadow-2xs space-y-2"
-                                >
-                                  <div className="flex items-start gap-2.5">
-                                    {o.thumbnail_url ? (
-                                      <img
-                                        src={resolveAssetUrl(o.thumbnail_url)}
-                                        alt=""
-                                        onClick={() => setSelectedImage(o.thumbnail_url)}
-                                        className="h-10 w-10 rounded-lg object-cover border border-slate-200 shrink-0 cursor-pointer"
-                                      />
-                                    ) : (
-                                      <div className="h-10 w-10 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 shrink-0">
-                                        <Package className="h-4 w-4" />
+                            <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
+                              {doneOrders.length === 0 ? (
+                                <div className="p-4 rounded-xl border border-dashed border-slate-200 text-center text-[11px] text-slate-400">
+                                  Chưa có đơn hoàn thành
+                                </div>
+                              ) : (
+                                doneOrders.slice(0, 10).map((o) => (
+                                  <div
+                                    key={o.id}
+                                    className="p-3 rounded-xl border border-emerald-100 bg-white hover:bg-emerald-50/20 transition-all shadow-2xs space-y-2"
+                                  >
+                                    <div className="flex items-start gap-2.5">
+                                      {o.thumbnail_url ? (
+                                        <img
+                                          src={resolveAssetUrl(o.thumbnail_url)}
+                                          alt=""
+                                          onClick={() => setSelectedImage(o.thumbnail_url)}
+                                          className="h-10 w-10 rounded-lg object-cover border border-slate-200 shrink-0 cursor-pointer"
+                                        />
+                                      ) : (
+                                        <div className="h-10 w-10 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 shrink-0">
+                                          <Package className="h-4 w-4" />
+                                        </div>
+                                      )}
+                                      <div className="flex-1 min-w-0">
+                                        <Link
+                                          to={`/orders/${o.id}`}
+                                          className="text-xs font-mono font-bold text-emerald-700 hover:underline truncate block"
+                                        >
+                                          {o.external_order_id}
+                                        </Link>
+                                        <p className="text-[10px] text-slate-400 truncate mt-0.5">
+                                          {o.product_name || 'Đơn 2D Custom'}
+                                        </p>
                                       </div>
-                                    )}
-                                    <div className="flex-1 min-w-0">
+                                    </div>
+                                    <div className="pt-1 flex items-center justify-between">
+                                      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md border border-emerald-200">
+                                        <CheckCheck className="h-3 w-3" />
+                                        <span>Đã xong</span>
+                                      </span>
                                       <Link
                                         to={`/orders/${o.id}`}
-                                        className="text-xs font-mono font-bold text-emerald-700 hover:underline truncate block"
+                                        className="text-[10px] text-slate-400 hover:text-slate-700 font-semibold hover:underline"
                                       >
-                                        {o.external_order_id}
+                                        Chi tiết
                                       </Link>
-                                      <p className="text-[10px] text-slate-400 truncate mt-0.5">
-                                        {o.product_name || 'Đơn 2D Custom'}
-                                      </p>
                                     </div>
                                   </div>
-                                  <div className="pt-1 flex items-center justify-between">
-                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md border border-emerald-200">
-                                      <CheckCheck className="h-3 w-3" />
-                                      <span>Đã xong</span>
-                                    </span>
-                                    <Link
-                                      to={`/orders/${o.id}`}
-                                      className="text-[10px] text-slate-400 hover:text-slate-700 font-semibold hover:underline"
-                                    >
-                                      Chi tiết
-                                    </Link>
-                                  </div>
+                                ))
+                              )}
+                              {doneOrders.length > 10 && (
+                                <div className="text-center text-[10px] text-slate-400 pt-1 font-medium">
+                                  + {doneOrders.length - 10} đơn hoàn thành khác
                                 </div>
-                              ))
-                            )}
-                            {doneOrders.length > 10 && (
-                              <div className="text-center text-[10px] text-slate-400 pt-1 font-medium">
-                                + {doneOrders.length - 10} đơn hoàn thành khác
-                              </div>
-                            )}
+                              )}
+                            </div>
                           </div>
-                        </div>
+                        )}
                       </div>
                     )}
                   </div>
