@@ -1,0 +1,74 @@
+# Local development only. It builds the same Dockerfile locally; production Compose
+# never contains `build:` and always pulls an immutable registry image.
+services:
+  api:
+    build: .
+    image: pinterval-ops-backend:dev
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/pinterval
+      REDIS_URL: redis://redis:6379/0
+      COOKIE_SECURE: "false"
+      CORS_ORIGINS: http://localhost:5173
+    depends_on:
+      db:
+        condition: service_healthy
+  celery-general:
+    build: .
+    image: pinterval-ops-backend:dev
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/pinterval
+      REDIS_URL: redis://redis:6379/0
+      COOKIE_SECURE: "false"
+      CORS_ORIGINS: http://localhost:5173
+    depends_on:
+      db:
+        condition: service_healthy
+  celery-assignment:
+    build: .
+    image: pinterval-ops-backend:dev
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/pinterval
+      REDIS_URL: redis://redis:6379/0
+      COOKIE_SECURE: "false"
+      CORS_ORIGINS: http://localhost:5173
+    depends_on:
+      db:
+        condition: service_healthy
+  celery-beat:
+    build: .
+    image: pinterval-ops-backend:dev
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/pinterval
+      REDIS_URL: redis://redis:6379/0
+      COOKIE_SECURE: "false"
+      CORS_ORIGINS: http://localhost:5173
+    depends_on:
+      db:
+        condition: service_healthy
+  migrate:
+    build: .
+    image: pinterval-ops-backend:dev
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/pinterval
+      REDIS_URL: redis://redis:6379/0
+      COOKIE_SECURE: "false"
+      CORS_ORIGINS: http://localhost:5173
+    depends_on:
+      db:
+        condition: service_healthy
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: pinterval
+    volumes:
+      - dev_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pinterval"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+volumes:
+  dev_postgres_data:

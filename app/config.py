@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     # Comma-separated browser origins permitted to call the JSON API.  Kept explicit
     # because the Vercel SPA and API are separate production origins.
     cors_origins: str = "http://localhost:5173"
+    # Optional and deliberately separate from CORS_ORIGINS: production should use an
+    # exact origin, while a preview deployment can opt in to a narrowly-scoped regex.
+    cors_origin_regex: str | None = None
     # These are server-side credentials only.  The SPA must never receive them.
     # They stay optional here so a normal local/test boot does not require a live
     # Printerval account; PrintervalApiClient validates them when it is used.

@@ -25,3 +25,10 @@ DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/pinterval_tes
 ```bash
 ruff check .
 ```
+
+## Production-like Docker runtime
+
+The frontend remains on Vercel. Backend production uses a prebuilt GHCR image through
+`compose.yaml`; it never builds source code on the server. See
+[docs/SERVER_HANDOFF.md](docs/SERVER_HANDOFF.md) for the new-PC checklist and
+[docs/SELF_HOSTED_PRODUCTION.md](docs/SELF_HOSTED_PRODUCTION.md) for local validation.

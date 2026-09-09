@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import random
 import time
 from collections.abc import Callable
@@ -9,11 +10,25 @@ from pathlib import Path
 
 from playwright.sync_api import Page, sync_playwright
 
-EVIDENCE_DIR = Path("playwright-evidence")
+EVIDENCE_DIR = Path(os.environ.get("PLAYWRIGHT_EVIDENCE_DIR", "playwright-evidence"))
+
+
+def _profile_path(profile_dir: str) -> Path:
+    """Keep browser sessions on a persistent volume when running in Docker.
+
+    The default preserves the existing local-development layout.  Production Compose
+    sets PLAYWRIGHT_PROFILE_ROOT to a mounted directory, so every per-platform
+    profile survives an image/container replacement without mounting application
+    source code.
+    """
+    path = Path(profile_dir)
+    if path.is_absolute():
+        return path
+    return Path(os.environ.get("PLAYWRIGHT_PROFILE_ROOT", ".")) / path
 
 
 def cleanup_profile_locks(profile_dir: str = "chrome-profile") -> None:
-    path = Path(profile_dir)
+    path = _profile_path(profile_dir)
     if path.exists():
         for lock_name in ["SingletonLock", "SingletonSocket", "SingletonCookie"]:
             lock_file = path / lock_name
@@ -37,12 +52,16 @@ def open_playwright_session(profile_dir: str = "chrome-profile", headless: bool 
     the browser and a second, later one closing it; a single `with` block can't span
     two separate request/response cycles.
     """
+    resolved_profile_dir = _profile_path(profile_dir)
     cleanup_profile_locks(profile_dir)
     playwright_cm = sync_playwright()
     p = playwright_cm.__enter__()
+    # Unset keeps the existing local Chrome channel. An explicitly empty value uses
+    # Playwright's bundled Chromium, which is what the production image contains.
+    browser_channel = os.environ.get("PLAYWRIGHT_BROWSER_CHANNEL", "chrome") or None
     context = p.chromium.launch_persistent_context(
-        profile_dir,
-        channel="chrome",
+        str(resolved_profile_dir),
+        channel=browser_channel,
         headless=headless,
         args=["--disable-blink-features=AutomationControlled"],
     )
