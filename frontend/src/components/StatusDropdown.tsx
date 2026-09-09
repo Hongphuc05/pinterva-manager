@@ -14,6 +14,13 @@ export type StatusOption = {
 
 export const STATUS_OPTIONS: StatusOption[] = [
   {
+    key: 'WAITING',
+    label: 'Waiting',
+    badgeClass: 'bg-slate-100 text-slate-700 border-slate-300',
+    dotColor: 'bg-slate-400',
+    description: 'Chờ Designer bắt đầu làm',
+  },
+  {
     key: 'IN_PROGRESS',
     label: 'Doing',
     badgeClass: 'bg-blue-100 text-blue-800 border-blue-300',
@@ -90,10 +97,11 @@ export function StatusDropdown({
   const normalizedState = localState.toUpperCase()
   let currentOpt = STATUS_OPTIONS.find((opt) => {
     if (opt.key === normalizedState) return true
-    if (opt.key === 'IN_PROGRESS' && normalizedState === 'ASSIGNED') return true
-    if (opt.key === 'QC_PENDING' && (normalizedState === 'RESULT_SUBMITTED' || normalizedState === 'SUBMITTING_TO_SITE')) return true
-    if (opt.key === 'REVISION' && normalizedState === 'REVISION_REQUESTED') return true
-    if (opt.key === 'DONE' && normalizedState === 'SKIPPED') return true
+    if (opt.key === 'WAITING' && (normalizedState === 'ASSIGNED' || normalizedState === 'WAITING')) return true
+    if (opt.key === 'IN_PROGRESS' && (normalizedState === 'DOING' || normalizedState === 'IN_PROGRESS')) return true
+    if (opt.key === 'QC_PENDING' && (normalizedState === 'REVIEW' || normalizedState === 'RESULT_SUBMITTED' || normalizedState === 'SUBMITTING_TO_SITE')) return true
+    if (opt.key === 'REVISION' && (normalizedState === 'FIX' || normalizedState === 'REVISION_REQUESTED')) return true
+    if (opt.key === 'DONE' && (normalizedState === 'SKIPPED' || normalizedState === 'DONE')) return true
     return false
   })
 

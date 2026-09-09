@@ -1,11 +1,13 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { apiFetch, ApiError, resolveAssetUrl } from '../api/client'
+import { useAuth } from '../auth/AuthContext'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { ImageModal } from '../components/ImageModal'
 import { TemplateModal, type TemplateJob } from '../components/TemplateModal'
 import { SourceFilesCard, type SourceFile } from '../components/SourceFilesCard'
 import { CustomConfigurationSection } from '../components/CustomConfigurationSection'
+import { StatusDropdown } from '../components/StatusDropdown'
 import { getStatusInfo } from '../utils/statusTranslation'
 import { 
   ArrowLeft, 
@@ -17,7 +19,6 @@ import {
   AlertCircle,
   User,
   Send,
-  Play,
   CheckSquare
 } from 'lucide-react'
 
@@ -66,10 +67,10 @@ type OrderDetail = {
 type WorkflowEvent = { created_at: string; from_state: string | null; to_state: string }
 type LoadState = 'loading' | 'loaded' | 'not-found' | 'error'
 
-const subStatusLabels = { doing: 'Đang làm', fixing: 'Đang sửa', done: 'Đã xong' }
-
 export function OrderDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
   const [order, setOrder] = useState<OrderDetail | null>(null)
   const [history, setHistory] = useState<WorkflowEvent[]>([])
   const [status, setStatus] = useState<LoadState>('loading')
@@ -102,39 +103,31 @@ export function OrderDetailPage() {
     loadOrderDetail()
   }, [id])
 
-  async function changeSubStatus(subStatusKey: keyof typeof subStatusLabels) {
-    if (!order?.assignment_id) return
+  async function handleUpdateState(newState: string) {
+    if (!order) return
     setBusyAssignment(true)
     setActionError(null)
     setActionSuccess(null)
     try {
-      await apiFetch(`/assignments/${order.assignment_id}/sub-status`, {
+      await apiFetch(`/orders/${order.id}/state`, {
         method: 'PATCH',
-        body: JSON.stringify({ sub_status: subStatusKey, request_id: crypto.randomUUID() }),
+        body: JSON.stringify({ state: newState }),
       })
-      setActionSuccess(`Đã cập nhật tiến độ: ${subStatusLabels[subStatusKey]}`)
+      const stateLabel =
+        newState === 'IN_PROGRESS'
+          ? 'Doing (Đang làm)'
+          : newState === 'QC_PENDING'
+          ? 'Review (Chờ duyệt)'
+          : newState === 'REVISION'
+          ? 'Fix (Cần sửa)'
+          : newState === 'DONE'
+          ? 'Done (Hoàn thành)'
+          : 'Waiting (Chờ làm)'
+      setActionSuccess(`Đã cập nhật tiến độ: ${stateLabel}`)
+      window.dispatchEvent(new CustomEvent('orders-updated'))
       await loadOrderDetail()
-    } catch (caught) {
-      setActionError(caught instanceof ApiError ? caught.message : 'Không thể cập nhật tiến độ.')
-    } finally {
-      setBusyAssignment(false)
-    }
-  }
-
-  async function handleStartTask() {
-    if (!order?.assignment_id) return
-    setBusyAssignment(true)
-    setActionError(null)
-    setActionSuccess(null)
-    try {
-      await apiFetch(`/assignments/${order.assignment_id}/start`, {
-        method: 'POST',
-        body: JSON.stringify({ request_id: crypto.randomUUID() }),
-      })
-      setActionSuccess('Đã chuyển trạng thái bắt đầu thực hiện task.')
-      await loadOrderDetail()
-    } catch (caught) {
-      setActionError(caught instanceof ApiError ? caught.message : 'Không thể chuyển trạng thái.')
+    } catch (caught: any) {
+      setActionError(caught?.message || 'Không thể cập nhật tiến độ.')
     } finally {
       setBusyAssignment(false)
     }
@@ -142,7 +135,7 @@ export function OrderDetailPage() {
 
   async function handleSubmitResults(e: FormEvent) {
     e.preventDefault()
-    if (!order?.assignment_id) return
+    if (!order) return
     if (!driveUrl.trim()) {
       setActionError('Hãy nhập link Google Drive kết quả trước khi nộp.')
       return
@@ -151,15 +144,22 @@ export function OrderDetailPage() {
     setActionError(null)
     setActionSuccess(null)
     try {
-      await apiFetch(`/assignments/${order.assignment_id}/results`, {
-        method: 'POST',
-        body: JSON.stringify({ drive_url: driveUrl.trim(), request_id: crypto.randomUUID() }),
+      if (order.assignment_id) {
+        await apiFetch(`/assignments/${order.assignment_id}/results`, {
+          method: 'POST',
+          body: JSON.stringify({ drive_url: driveUrl.trim(), request_id: crypto.randomUUID() }),
+        })
+      }
+      await apiFetch(`/orders/${order.id}/state`, {
+        method: 'PATCH',
+        body: JSON.stringify({ state: 'QC_PENDING' }),
       })
-      setActionSuccess('Nộp bài QC thành công!')
+      setActionSuccess('Nộp bài QC và chuyển sang Review thành công!')
       setDriveUrl('')
+      window.dispatchEvent(new CustomEvent('orders-updated'))
       await loadOrderDetail()
-    } catch (caught) {
-      setActionError(caught instanceof ApiError ? caught.message : 'Không nộp được kết quả.')
+    } catch (caught: any) {
+      setActionError(caught?.message || 'Không nộp được kết quả.')
     } finally {
       setBusyAssignment(false)
     }
@@ -187,9 +187,11 @@ export function OrderDetailPage() {
     )
   }
 
-  const statusInfo = getStatusInfo(order.state)
-  const canStart = order.state === 'ASSIGNED' || order.state === 'REVISION_REQUESTED'
-  const canSubmit = order.state === 'IN_PROGRESS'
+  const normState = (order.state || '').toUpperCase()
+  const isDoing = normState === 'IN_PROGRESS' || normState === 'DOING'
+  const isReview = normState === 'QC_PENDING' || normState === 'REVIEW' || normState === 'RESULT_SUBMITTED'
+  const isFix = normState === 'REVISION' || normState === 'FIX' || normState === 'REVISION_REQUESTED'
+  const isDone = normState === 'DONE' || normState === 'SKIPPED'
 
   return (
     <DashboardLayout>
@@ -254,12 +256,14 @@ export function OrderDetailPage() {
             <div className="space-y-1">
               <div className="flex flex-wrap items-center gap-3">
                 <h1 className="text-xl font-bold font-mono text-[#0052CC]">{order.external_order_id}</h1>
-                <span
-                  title={statusInfo.description}
-                  className={`px-3 py-1 rounded-md text-xs font-bold border ${statusInfo.badgeClass}`}
-                >
-                  {statusInfo.label}
-                </span>
+                <StatusDropdown
+                  orderId={order.id}
+                  currentState={order.state}
+                  onStatusChanged={(newState) => {
+                    setOrder((prev) => prev ? { ...prev, state: newState } : null)
+                    loadOrderDetail()
+                  }}
+                />
 
                 {order.assigned_designer_name && (
                   <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-blue-50 text-[#0052CC] text-xs font-semibold border border-blue-100">
@@ -363,50 +367,86 @@ export function OrderDetailPage() {
           </div>
         </div>
 
-        {/* Designer Task Actions Block (Rendered if assignment_id exists) */}
-        {order.assignment_id && (
+        {/* Designer Task Actions Block */}
+        {(order.assignment_id || order.printerval_designer || isAdmin) && (
           <div className="p-5 rounded-xl bg-blue-50/40 border border-blue-200 space-y-4">
             <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
               <CheckSquare className="h-4 w-4 text-[#0052CC]" />
               <span>Nhiệm Vụ & Tiến Độ Thiết Kế</span>
             </h3>
 
-            {/* Progress Control Buttons */}
+            {/* Progress Control Buttons: Des only has Doing and Review! */}
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2.5 flex-wrap">
                 <span className="text-xs font-semibold text-slate-600">Cập nhật tiến độ:</span>
-                {(Object.keys(subStatusLabels) as (keyof typeof subStatusLabels)[]).map((st) => (
-                  <button
-                    key={st}
-                    type="button"
-                    disabled={busyAssignment || order.sub_status === st}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors border cursor-pointer ${
-                      order.sub_status === st
-                        ? 'bg-[#0052CC] text-white border-[#0052CC] shadow-2xs'
-                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                    } disabled:opacity-50`}
-                    onClick={() => changeSubStatus(st)}
-                  >
-                    {subStatusLabels[st]}
-                  </button>
-                ))}
-              </div>
 
-              {canStart && (
+                {/* 1. DOING Button */}
                 <button
                   type="button"
-                  disabled={busyAssignment}
-                  className="px-4 py-2 text-xs font-semibold text-white bg-[#0052CC] hover:bg-[#0041A3] rounded-lg transition-colors shadow-2xs flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
-                  onClick={handleStartTask}
+                  disabled={busyAssignment || isDoing}
+                  className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer flex items-center gap-1.5 ${
+                    isDoing
+                      ? 'bg-blue-600 text-white border-blue-600 shadow-2xs ring-2 ring-blue-400/20'
+                      : 'bg-white text-blue-700 border-blue-200 hover:bg-blue-50'
+                  } disabled:opacity-50`}
+                  onClick={() => handleUpdateState('IN_PROGRESS')}
                 >
-                  <Play className="h-3.5 w-3.5 fill-current" />
-                  <span>{order.state === 'REVISION_REQUESTED' ? 'Bắt đầu sửa theo QC' : 'Bắt đầu thực hiện'}</span>
+                  <span className={`h-2 w-2 rounded-full ${isDoing ? 'bg-white' : 'bg-blue-500'}`} />
+                  <span>Doing (Đang làm)</span>
                 </button>
-              )}
+
+                {/* 2. REVIEW Button */}
+                <button
+                  type="button"
+                  disabled={busyAssignment || isReview}
+                  className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer flex items-center gap-1.5 ${
+                    isReview
+                      ? 'bg-purple-600 text-white border-purple-600 shadow-2xs ring-2 ring-purple-400/20'
+                      : 'bg-white text-purple-700 border-purple-200 hover:bg-purple-50'
+                  } disabled:opacity-50`}
+                  onClick={() => handleUpdateState('QC_PENDING')}
+                >
+                  <span className={`h-2 w-2 rounded-full ${isReview ? 'bg-white' : 'bg-purple-500'}`} />
+                  <span>Review (Chờ duyệt)</span>
+                </button>
+
+                {/* If Admin, show Fix and Done buttons as well */}
+                {isAdmin && (
+                  <>
+                    <button
+                      type="button"
+                      disabled={busyAssignment || isFix}
+                      className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer flex items-center gap-1.5 ${
+                        isFix
+                          ? 'bg-orange-600 text-white border-orange-600 shadow-2xs'
+                          : 'bg-white text-orange-700 border-orange-200 hover:bg-orange-50'
+                      } disabled:opacity-50`}
+                      onClick={() => handleUpdateState('REVISION')}
+                    >
+                      <span className={`h-2 w-2 rounded-full ${isFix ? 'bg-white' : 'bg-orange-500'}`} />
+                      <span>Fix (Cần sửa)</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={busyAssignment || isDone}
+                      className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer flex items-center gap-1.5 ${
+                        isDone
+                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
+                          : 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50'
+                      } disabled:opacity-50`}
+                      onClick={() => handleUpdateState('DONE')}
+                    >
+                      <span className={`h-2 w-2 rounded-full ${isDone ? 'bg-white' : 'bg-emerald-500'}`} />
+                      <span>Done (Hoàn thành)</span>
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
 
             {/* Submit Drive Link Form */}
-            {canSubmit && (
+            {!isDone && (
               <form
                 className="flex flex-col sm:flex-row gap-3 pt-3 border-t border-blue-100"
                 onSubmit={handleSubmitResults}
@@ -425,7 +465,7 @@ export function OrderDetailPage() {
                   className="px-5 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-colors shadow-2xs flex items-center justify-center gap-1.5 disabled:opacity-50 shrink-0 cursor-pointer"
                 >
                   <Send className="h-3.5 w-3.5" />
-                  <span>Nộp Bài QC</span>
+                  <span>Nộp Bài QC & Chuyển Review</span>
                 </button>
               </form>
             )}

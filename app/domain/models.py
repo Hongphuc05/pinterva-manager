@@ -12,7 +12,9 @@ class LegacyOrderStateMeta(EnumMeta):
             "REASSIGNMENT_REQUIRED",
         }:
             return cls.OPEN
-        if val_upper in {"ASSIGNED", "IN_PROGRESS"}:
+        if val_upper in {"WAITING", "ASSIGNED"}:
+            return cls.WAITING
+        if val_upper in {"IN_PROGRESS"}:
             return cls.IN_PROGRESS
         if val_upper in {"RESULT_SUBMITTED", "QC_PENDING", "SUBMITTING_TO_SITE"}:
             return cls.QC_PENDING
@@ -29,6 +31,7 @@ class LegacyOrderStateMeta(EnumMeta):
 
 class OrderState(StrEnum, metaclass=LegacyOrderStateMeta):
     OPEN = "OPEN"
+    WAITING = "WAITING"
     IN_PROGRESS = "IN_PROGRESS"
     QC_PENDING = "QC_PENDING"
     REVISION = "REVISION"
@@ -48,7 +51,9 @@ class OrderState(StrEnum, metaclass=LegacyOrderStateMeta):
                 "REASSIGNMENT_REQUIRED",
             }:
                 return cls.OPEN
-            if val_upper in {"ASSIGNED", "IN_PROGRESS"}:
+            if val_upper in {"WAITING", "ASSIGNED"}:
+                return cls.WAITING
+            if val_upper in {"IN_PROGRESS"}:
                 return cls.IN_PROGRESS
             if val_upper in {"RESULT_SUBMITTED", "QC_PENDING", "SUBMITTING_TO_SITE"}:
                 return cls.QC_PENDING

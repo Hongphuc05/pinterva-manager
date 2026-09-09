@@ -7,9 +7,17 @@ from app.domain.models import OrderState
 # only ever calling apply_transition() out of EXCEPTION from that explicit recovery
 # command, never automatically.
 ALLOWED_TRANSITIONS: dict[OrderState, set[OrderState]] = {
-    OrderState.OPEN: {OrderState.IN_PROGRESS, OrderState.CANCELLED, OrderState.EXCEPTION},
+    OrderState.OPEN: {OrderState.WAITING, OrderState.IN_PROGRESS, OrderState.CANCELLED, OrderState.EXCEPTION},
+    OrderState.WAITING: {
+        OrderState.IN_PROGRESS,
+        OrderState.QC_PENDING,
+        OrderState.OPEN,
+        OrderState.CANCELLED,
+        OrderState.EXCEPTION,
+    },
     OrderState.IN_PROGRESS: {
         OrderState.QC_PENDING,
+        OrderState.WAITING,
         OrderState.OPEN,
         OrderState.CANCELLED,
         OrderState.EXCEPTION,
@@ -17,16 +25,19 @@ ALLOWED_TRANSITIONS: dict[OrderState, set[OrderState]] = {
     OrderState.QC_PENDING: {
         OrderState.DONE,
         OrderState.REVISION,
+        OrderState.IN_PROGRESS,
+        OrderState.WAITING,
         OrderState.CANCELLED,
         OrderState.EXCEPTION,
     },
     OrderState.REVISION: {
         OrderState.IN_PROGRESS,
         OrderState.QC_PENDING,
+        OrderState.WAITING,
         OrderState.CANCELLED,
         OrderState.EXCEPTION,
     },
-    OrderState.DONE: {OrderState.EXCEPTION},
+    OrderState.DONE: {OrderState.EXCEPTION, OrderState.REVISION},
     OrderState.CANCELLED: {OrderState.EXCEPTION},
     OrderState.EXCEPTION: set(OrderState),
 }

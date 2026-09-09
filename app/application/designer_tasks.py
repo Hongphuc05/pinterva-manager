@@ -19,6 +19,7 @@ from app.application.order_transitions import apply_transition
 from app.domain.models import OrderState
 
 ACTIVE_TASK_STATES = {
+    OrderState.WAITING.value,
     OrderState.IN_PROGRESS.value,
     OrderState.REVISION.value,
 }

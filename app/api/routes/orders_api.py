@@ -424,7 +424,7 @@ def api_printerval_assignment(
         else:
             assignment.designer_id = designer.id
             assignment.status = "approved"
-        order.state = OrderState.IN_PROGRESS.value
+        order.state = OrderState.WAITING.value
     try:
         request = create_request(
             db,
@@ -492,7 +492,7 @@ def api_bulk_printerval_assignment(
             else:
                 assignment.designer_id = designer.id
                 assignment.status = "approved"
-            order.state = OrderState.IN_PROGRESS.value
+            order.state = OrderState.WAITING.value
         try:
             requests.append(
                 create_request(
@@ -692,7 +692,7 @@ def api_assign_order(
         )
         db.add(new_assignment)
 
-    order.state = OrderState.IN_PROGRESS.value
+    order.state = OrderState.WAITING.value
     db.commit()
 
     synced_message = _trigger_printerval_assignment_sync(order, designer)
@@ -759,7 +759,7 @@ def api_bulk_assign_orders(
                 status="approved",
             )
             db.add(new_assignment)
-        order.state = OrderState.IN_PROGRESS.value
+        order.state = OrderState.WAITING.value
         updated_count += 1
 
     db.commit()
@@ -892,6 +892,8 @@ def api_update_order_state(
 
     raw_state = payload.state.strip().upper()
     state_mapping = {
+        "WAITING": OrderState.WAITING,
+        "ASSIGNED": OrderState.WAITING,
         "DOING": OrderState.IN_PROGRESS,
         "IN_PROGRESS": OrderState.IN_PROGRESS,
         "REVIEW": OrderState.QC_PENDING,
@@ -903,15 +905,15 @@ def api_update_order_state(
     if raw_state not in state_mapping:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            f"Trạng thái không hợp lệ: {payload.state}. Chỉ chấp nhận Doing, Review, Fix, Done.",
+            f"Trạng thái không hợp lệ: {payload.state}. Chỉ chấp nhận Waiting, Doing, Review, Fix, Done.",
         )
     target_state = state_mapping[raw_state]
 
     if user.role == "designer":
-        if target_state not in (OrderState.IN_PROGRESS, OrderState.QC_PENDING):
+        if target_state not in (OrderState.WAITING, OrderState.IN_PROGRESS, OrderState.QC_PENDING):
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN,
-                "Designer chỉ có quyền chuyển đơn sang Doing (Đang làm) hoặc Review (Chờ duyệt). Chỉ Admin mới có quyền duyệt Done hoặc yêu cầu Fix.",
+                "Designer chỉ có quyền chuyển đơn sang Waiting, Doing (Đang làm) hoặc Review (Chờ duyệt). Chỉ Admin mới có quyền duyệt Done hoặc yêu cầu Fix.",
             )
         is_assigned = (
             db.query(Assignment)
@@ -971,6 +973,7 @@ class DesignerWorkloadOut(BaseModel):
     full_name: str
     printerval_designer_option: str | None = None
     total_orders: int
+    waiting_count: int = 0
     doing_count: int
     review_count: int
     fix_count: int
@@ -1022,7 +1025,8 @@ def api_designers_workload(
             if is_match:
                 des_orders.append(o)
 
-        doing_count = sum(1 for o in des_orders if o.state in ("IN_PROGRESS", "ASSIGNED"))
+        waiting_count = sum(1 for o in des_orders if o.state in ("WAITING", "OPEN"))
+        doing_count = sum(1 for o in des_orders if o.state in ("IN_PROGRESS", "ASSIGNED") and o.state != "WAITING")
         review_count = sum(1 for o in des_orders if o.state in ("QC_PENDING", "RESULT_SUBMITTED", "SUBMITTING_TO_SITE"))
         fix_count = sum(1 for o in des_orders if o.state in ("REVISION", "REVISION_REQUESTED"))
         done_count = sum(1 for o in des_orders if o.state in ("DONE", "SKIPPED"))
@@ -1032,9 +1036,11 @@ def api_designers_workload(
                 return 0
             if s in ("REVISION", "REVISION_REQUESTED"):
                 return 1
-            if s in ("IN_PROGRESS", "ASSIGNED"):
+            if s == "IN_PROGRESS":
                 return 2
-            return 3
+            if s in ("WAITING", "ASSIGNED", "OPEN"):
+                return 3
+            return 4
 
         des_orders.sort(key=lambda o: state_priority(o.state))
 
@@ -1045,6 +1051,7 @@ def api_designers_workload(
                 full_name=des.full_name or des.username,
                 printerval_designer_option=des.printerval_designer_option,
                 total_orders=len(des_orders),
+                waiting_count=waiting_count,
                 doing_count=doing_count,
                 review_count=review_count,
                 fix_count=fix_count,
