@@ -86,6 +86,18 @@ def test_parse_product_summary_fields():
     assert category == "Mesh Football Jerseys"
 
 
+def test_parse_product_summary_fields_prefers_task_sku_over_generic_product_sku():
+    row = {
+        "product": {"name": "Raglan", "sku": "GENERIC-SKU", "category_name": "Football"},
+        "meta_data": json.dumps(
+            {"product_skus": {"one": {"product_sku": "P27172826-DE-UNI-XL-R-t1710IFp"}}}
+        ),
+    }
+    _, sku, category = parse_product_summary_fields(row)
+    assert sku == "P27172826-DE-UNI-XL-R-t1710IFp"
+    assert category == "Football"
+
+
 def test_extract_source_asset_url_only_for_personalized_orders():
     assert extract_source_asset_url(PERSONALIZED_ROW) == "https://assets.printerval.com/source.jpg"
     assert extract_source_asset_url(PLAIN_ROW) is None

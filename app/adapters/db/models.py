@@ -3,7 +3,17 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, String, Text, UniqueConstraint, func, text
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -25,6 +35,10 @@ class Platform(Base):
     # platform is the root-cause fix.
     team_outsource: Mapped[str | None] = mapped_column(String(128), nullable=True)
     session_cookie: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # A scoped secret used only by the operator's CopyImage Chrome extension to
+    # upload a product gallery captured in their already-authenticated browser.
+    # Store a digest, never the bearer token itself.
+    gallery_bridge_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     printerval_designer_options: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     printerval_status_options: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     printerval_options_synced_at: Mapped[datetime | None] = mapped_column(

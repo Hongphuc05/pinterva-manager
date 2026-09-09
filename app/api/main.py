@@ -26,7 +26,15 @@ def create_app() -> FastAPI:
     allowed_origins = [
         origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()
     ]
-    origin_regex = settings.cors_origin_regex or None
+    # CopyImage posts a gallery from the operator's authenticated Chrome session.
+    # It uses a platform-scoped bearer token, so allowing Chrome extension origins
+    # does not grant browser extensions access to the normal web API.
+    extension_origin_regex = r"chrome-extension://[a-z0-9]+"
+    origin_regex = (
+        f"(?:{settings.cors_origin_regex})|(?:{extension_origin_regex})"
+        if settings.cors_origin_regex
+        else extension_origin_regex
+    )
     if "*" in allowed_origins:
         app.add_middleware(
             CORSMiddleware,

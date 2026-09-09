@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Printerval Admin POD Tool",
+  "version": "13.0",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js" },
+  "action": {},
+  "options_page": "options.html",
+  "content_scripts": [
+    {
+      "matches": ["https://*.printerval.com/*", "https://printerval.com/*"],
+      "js": ["content.js"]
+    }
+  ]
+}

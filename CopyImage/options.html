@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="vi"><head><meta charset="utf-8" /><title>Cài đặt CopyImage</title><style>
+body { font:14px system-ui,sans-serif; max-width:620px; margin:32px auto; color:#1e293b; } label { display:block; margin-top:16px; font-weight:600; } input { box-sizing:border-box; width:100%; padding:10px; margin-top:6px; border:1px solid #cbd5e1; border-radius:6px; } button { margin-top:18px; padding:10px 14px; border:0; border-radius:6px; background:#0052cc; color:#fff; font-weight:600; cursor:pointer; } #status { margin-left:8px; color:#15803d; } .hint { color:#64748b; font-size:12px; line-height:1.45; }
+</style></head><body>
+<h2>Kết nối CopyImage với Tacahu Ops</h2><p class="hint">Mỗi cấu hình chỉ dành cho một Acc Mẹ/Platform Printerval. Đổi platform trên web thì tạo token mới và thay cả Platform ID lẫn token tại đây.</p>
+<label>Địa chỉ backend<input id="apiBaseUrl" placeholder="https://desktop-p259ei0.tailea8fce.ts.net" /></label>
+<label>Platform ID<input id="platformId" placeholder="UUID của Acc Mẹ đang chọn" /></label>
+<label>Token CopyImage<input id="galleryBridgeToken" type="password" placeholder="Token tạo trong Quản lý Acc Mẹ" /></label>
+<button id="save">Lưu cấu hình</button><span id="status"></span><script src="options.js"></script>
+</body></html>

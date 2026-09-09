@@ -157,10 +157,11 @@ export function StatusDropdown({
   })
 
   // Fallback for OPEN or other states
-  const displayLabel = currentOpt ? currentOpt.label : normalizedState === 'OPEN' ? 'Chờ phân công' : localState
+  const isOpenForAllocation = ['OPEN', 'DISCOVERED', 'OPEN_FOR_ALLOCATION'].includes(normalizedState)
+  const displayLabel = currentOpt ? currentOpt.label : isOpenForAllocation ? 'Chờ phân công' : localState
   const displayBadgeClass = currentOpt
     ? currentOpt.badgeClass
-    : normalizedState === 'OPEN'
+    : isOpenForAllocation
     ? 'bg-amber-100 text-amber-800 border-amber-300'
     : 'bg-slate-100 text-slate-700 border-slate-300'
 
@@ -279,7 +280,7 @@ export function StatusDropdown({
 
             {!isAdmin && (
               <div className="px-2.5 py-1.5 border-t border-slate-100 bg-slate-50/80 rounded-b-lg text-[10px] text-slate-500">
-                💡 Des chỉ được chuyển <strong className="text-blue-600">Doing</strong> hoặc <strong className="text-purple-600">Review</strong>.
+                Des chỉ được chuyển <strong className="text-blue-600">Doing</strong> hoặc <strong className="text-purple-600">Review</strong>.
               </div>
             )}
           </div>,

@@ -67,6 +67,15 @@ def _parse_variants(sku_data: dict[str, Any] | None) -> list[ProductVariant]:
     if not sku_data:
         return []
     raw = sku_data.get("variants")
+    if isinstance(raw, list):
+        variants: list[ProductVariant] = []
+        for item in raw:
+            if isinstance(item, dict):
+                name = str(item.get("name") or item.get("key") or "").strip()
+                value = str(item.get("value") or "").strip()
+                if name and value:
+                    variants.append(ProductVariant(name=name, value=value))
+        return variants
     if not isinstance(raw, str) or not raw.strip():
         return []
     variants: list[ProductVariant] = []
@@ -138,7 +147,13 @@ def parse_product_summary_fields(row: dict[str, Any]) -> tuple[str, str | None, 
         or row.get("name")
         or "Đơn 2D Custom"
     )
-    sku = str(product_info.get("sku") or row.get("sku") or "") or None
+    # `product_skus[*].product_sku` is the value printed beside the preview in
+    # Printerval's task detail.  Prefer it over the generic product SKU so Size/Type
+    # variants and the displayed SKU always describe the same task.
+    sku_data = _first_sku_data(meta)
+    sku = str(
+        (sku_data or {}).get("product_sku") or product_info.get("sku") or row.get("sku") or ""
+    ) or None
     category = str(product_info.get("category_name") or row.get("product_category") or "") or None
     return product_name, sku, category
 

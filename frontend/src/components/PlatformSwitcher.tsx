@@ -17,7 +17,6 @@ export const PlatformSwitcher: React.FC = () => {
   return (
     <div className="flex items-center gap-2">
       <div className="flex items-center gap-1.5 bg-blue-50 text-[#0052CC] border border-blue-200 px-3 py-1.5 rounded-xl font-semibold text-xs shadow-2xs">
-        <span className="text-sm">🔑</span>
         <select
           value={activePlatform?.id || ''}
           onChange={(e) => {

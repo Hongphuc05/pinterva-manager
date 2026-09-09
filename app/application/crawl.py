@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import logging
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -15,6 +16,8 @@ from app.adapters.printerval.models import OrderSummary
 from app.application.operations import OperationInProgressError, run_idempotent
 from app.application.order_transitions import apply_transition
 from app.domain.models import OrderState
+
+logger = logging.getLogger(__name__)
 
 
 class DiscoverFailedError(Exception):
@@ -30,6 +33,29 @@ class DiscoverFailedError(Exception):
     def __init__(self, error_class: str):
         super().__init__(f"discover_waiting_orders failed: {error_class}")
         self.error_class = error_class
+
+
+def apply_crawled_product_gallery(order: Order, incoming: list[str] | None) -> None:
+    """Apply a server-crawled gallery without discarding a richer browser capture.
+
+    Server requests can legitimately be reduced to one thumbnail by Cloudflare.
+    Once CopyImage has stored a multi-image gallery, that fallback must never erase
+    it on later status/detail crawls.
+    """
+    candidates = [
+        url.strip() for url in (incoming or []) if isinstance(url, str) and url.strip()
+    ]
+    if not candidates:
+        return
+    current = [
+        url.strip()
+        for url in (order.product_image_urls or [])
+        if isinstance(url, str) and url.strip()
+    ]
+    if len(current) > 1 and len(candidates) <= 1:
+        return
+    chosen = candidates if len(candidates) > 1 else [*current, *candidates]
+    order.product_image_urls = list(dict.fromkeys(chosen))
 
 
 def discover_waiting_orders_with_summaries(
@@ -105,8 +131,7 @@ def discover_waiting_orders_with_summaries(
                 existing_order.source_files = summary.source_files
             if summary.source_download_all_url:
                 existing_order.source_download_all_url = summary.source_download_all_url
-            if summary.product_image_urls:
-                existing_order.product_image_urls = summary.product_image_urls
+            apply_crawled_product_gallery(existing_order, summary.product_image_urls)
             if summary.template_jobs:
                 existing_order.template_jobs = summary.template_jobs
                 existing_order.has_template = True
@@ -206,8 +231,7 @@ def scan_orders_fast(
                     order.printerval_designer = None
                 order.printerval_status = summary.status.lower()
                 order.thumbnail_url = summary.thumbnail_url or order.thumbnail_url
-                if summary.product_image_urls:
-                    order.product_image_urls = summary.product_image_urls
+                apply_crawled_product_gallery(order, summary.product_image_urls)
                 updated += 1
 
             # The fast list endpoint already contains the complete order payload.
@@ -223,7 +247,8 @@ def scan_orders_fast(
                     order.sku = detail.sku
                 if detail.product_category:
                     order.product_category = detail.product_category
-                order.product_variants = [variant.model_dump() for variant in detail.product_variants]
+                if detail.product_variants:
+                    order.product_variants = [variant.model_dump() for variant in detail.product_variants]
                 order.has_template = detail.has_template
                 if detail.template_jobs:
                     order.template_jobs = detail.template_jobs
@@ -242,8 +267,7 @@ def scan_orders_fast(
                     order.external_order_url = detail.external_order_url
                 if detail.source_files:
                     order.source_files = detail.source_files
-                if detail.product_image_urls:
-                    order.product_image_urls = detail.product_image_urls
+                apply_crawled_product_gallery(order, detail.product_image_urls)
         if not result.cursor:
             break
         cursor = result.cursor
@@ -456,7 +480,8 @@ def _apply_order_detail_result(order: Order, detail_result) -> None:
         order.sku = detail_result.sku
     if detail_result.product_category:
         order.product_category = detail_result.product_category
-    order.product_variants = [v.model_dump() for v in detail_result.product_variants]
+    if detail_result.product_variants:
+        order.product_variants = [v.model_dump() for v in detail_result.product_variants]
     order.has_template = detail_result.has_template
     if detail_result.template_jobs:
         order.template_jobs = detail_result.template_jobs
@@ -480,8 +505,7 @@ def _apply_order_detail_result(order: Order, detail_result) -> None:
         order.source_files = detail_result.source_files
     if detail_result.source_download_all_url:
         order.source_download_all_url = detail_result.source_download_all_url
-    if detail_result.product_image_urls:
-        order.product_image_urls = detail_result.product_image_urls
+    apply_crawled_product_gallery(order, detail_result.product_image_urls)
 
 
 def refresh_order_detail(session: Session, adapter: PrintervalAdapter, order: Order) -> dict:

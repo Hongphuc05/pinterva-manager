@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { X, KeyRound, Check, AlertCircle, Loader2, ArrowRightLeft, Plus, CheckCircle2, HelpCircle } from 'lucide-react'
+import { X, KeyRound, Check, AlertCircle, Loader2, ArrowRightLeft, Plus, CheckCircle2, HelpCircle, Copy } from 'lucide-react'
 import { apiFetch } from '../api/client'
 import { usePlatform } from '../auth/PlatformContext'
 
@@ -21,6 +21,8 @@ export function PrintervalSettingsModal({ isOpen, onClose }: PrintervalSettingsM
   const [successMsg, setSuccessMsg] = useState('')
   const [showTeamOutsourceHelp, setShowTeamOutsourceHelp] = useState(false)
   const [showCookieHelp, setShowCookieHelp] = useState(false)
+  const [galleryBridgeToken, setGalleryBridgeToken] = useState('')
+  const [creatingGalleryBridgeToken, setCreatingGalleryBridgeToken] = useState(false)
 
   if (!isOpen) return null
 
@@ -70,6 +72,24 @@ export function PrintervalSettingsModal({ isOpen, onClose }: PrintervalSettingsM
       setError(err?.message || 'Có lỗi xảy ra khi đăng nhập / cập nhật tài khoản Printerval.')
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function createGalleryBridgeToken() {
+    if (!activePlatform) return
+    setCreatingGalleryBridgeToken(true)
+    setError('')
+    try {
+      const result = await apiFetch<{ token: string; message: string }>(
+        `/platforms/${activePlatform.id}/gallery-bridge-token`,
+        { method: 'POST' },
+      )
+      setGalleryBridgeToken(result.token)
+      setSuccessMsg(result.message)
+    } catch (err: any) {
+      setError(err?.message || 'Không tạo được token CopyImage.')
+    } finally {
+      setCreatingGalleryBridgeToken(false)
     }
   }
 
@@ -209,6 +229,32 @@ export function PrintervalSettingsModal({ isOpen, onClose }: PrintervalSettingsM
                 })}
               </div>
 
+              {activePlatform && (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+                  <p className="text-xs font-bold text-slate-700">Kết nối extension CopyImage</p>
+                  <p className="text-[11px] text-slate-500">
+                    Tạo token riêng cho platform đang chọn rồi dán vào Cài đặt CopyImage. Token chỉ đồng bộ gallery cho platform này.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={createGalleryBridgeToken}
+                    disabled={creatingGalleryBridgeToken}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-[#0052CC] hover:bg-[#0041A3] rounded-lg disabled:opacity-60"
+                  >
+                    {creatingGalleryBridgeToken && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    {galleryBridgeToken ? 'Tạo token mới' : 'Tạo token CopyImage'}
+                  </button>
+                  {galleryBridgeToken && (
+                    <div className="flex gap-2">
+                      <code className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[10px] break-all">{galleryBridgeToken}</code>
+                      <button type="button" onClick={() => navigator.clipboard.writeText(galleryBridgeToken)} className="p-2 rounded-lg border border-slate-200 bg-white text-slate-600 hover:text-[#0052CC]" title="Sao chép token">
+                        <Copy className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="pt-2 text-center">
                 <button
                   onClick={() => {
@@ -231,7 +277,7 @@ export function PrintervalSettingsModal({ isOpen, onClose }: PrintervalSettingsM
           {activeTab === 'new' && (
             <form onSubmit={handleLoginNewAccount} className="space-y-4">
               <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 space-y-1">
-                <p className="font-bold">🔑 Cập Nhật / Đăng Nhập Acc Mẹ Printerval</p>
+                <p className="font-bold">Cập Nhật / Đăng Nhập Acc Mẹ Printerval</p>
                 <p className="text-[11px] text-amber-800">
                   Nhập Session Cookie Printerval (laravel_session) thu thập từ F12 DevTools để hệ thống crawl đơn nhanh chóng & bỏ qua Cloudflare WAF.
                 </p>

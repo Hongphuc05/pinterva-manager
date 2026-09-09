@@ -328,7 +328,7 @@ export function OrderDetailPage() {
             </div>
 
             <div className="text-[11px] text-slate-500 bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-              💡 Sau khi nộp, ô nhập bài sẽ được khóa. Nếu cần sửa lại, bạn có thể bấm nút <strong>"Doing"</strong> để mở lại.
+              Sau khi nộp, ô nhập bài sẽ được khóa. Nếu cần sửa lại, bạn có thể bấm nút <strong>"Doing"</strong> để mở lại.
             </div>
 
             <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
@@ -763,7 +763,7 @@ export function OrderDetailPage() {
 
                 {isReview && (
                   <p className="text-[11px] text-slate-500 italic flex items-center gap-1 pt-1">
-                    <span>💡 Đơn đang chờ Admin review. Nếu cần nộp lại, bạn chỉ cần bấm nút</span>
+                    <span>Đơn đang chờ Admin review. Nếu cần nộp lại, bạn chỉ cần bấm nút</span>
                     <strong className="text-blue-600 font-bold not-italic">"Doing (Đang làm)"</strong>
                     <span>ở trên để mở khóa ô nhập bài.</span>
                   </p>

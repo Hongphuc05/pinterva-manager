@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiFetch, ApiError, resolveAssetUrl } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { usePlatform } from '../auth/PlatformContext'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { ImageModal } from '../components/ImageModal'
 import { TemplateModal, type TemplateJob } from '../components/TemplateModal'
@@ -57,10 +58,38 @@ type UserOption = {
   role: string
 }
 
+const ORDERS_CACHE_PREFIX = 'tacahu-orders-cache'
+
+function getOrdersCacheKey(platformId: string | undefined, query: string) {
+  return `${ORDERS_CACHE_PREFIX}:${platformId || localStorage.getItem('activePlatformId') || 'default'}:${query || 'all'}`
+}
+
+function readOrdersCache(key: string): OrderSummary[] | null {
+  try {
+    const raw = sessionStorage.getItem(key)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as { orders?: OrderSummary[]; savedAt?: number }
+    if (!Array.isArray(parsed.orders) || !parsed.savedAt || Date.now() - parsed.savedAt > 15 * 60_000) return null
+    return parsed.orders
+  } catch {
+    return null
+  }
+}
+
+function writeOrdersCache(key: string, orders: OrderSummary[]) {
+  try {
+    sessionStorage.setItem(key, JSON.stringify({ orders, savedAt: Date.now() }))
+  } catch {
+    // Private browsing can disable storage; the API remains the source of truth.
+  }
+}
+
 export function OrdersListPage() {
   const { user } = useAuth()
+  const { activePlatform } = usePlatform()
   const isAdmin = user?.role === 'admin'
-  const [orders, setOrders] = useState<OrderSummary[]>([])
+  const [orders, setOrders] = useState<OrderSummary[]>(() => readOrdersCache(getOrdersCacheKey(undefined, '')) ?? [])
+  const [ordersLoading, setOrdersLoading] = useState(() => readOrdersCache(getOrdersCacheKey(undefined, '')) === null)
   const [statusOptions, setStatusOptions] = useState<string[]>([])
   const [statusFilter, setStatusFilter] = useState('')
   const [designerFilter, setDesignerFilter] = useState('')
@@ -246,23 +275,27 @@ export function OrdersListPage() {
     if (designerFilter && designerFilter !== 'unassigned') params.set('designer_id', designerFilter)
     if (designerFilter === 'unassigned') params.set('designer_id', 'unassigned')
     const qs = params.toString()
-    const data = await apiFetch<{ orders: OrderSummary[] }>(`/orders${qs ? `?${qs}` : ''}`)
-    
-    // Detect newly arrived orders
-    setOrders((prevOrders) => {
-      if (prevOrders.length > 0) {
-        const existingIds = new Set(prevOrders.map((o) => o.id))
-        const newIds = data.orders.filter((o) => !existingIds.has(o.id)).map((o) => o.id)
-        if (newIds.length > 0) {
-          setNewlyCrawledOrderIds((prev) => Array.from(new Set([...prev, ...newIds])))
-          // Auto-remove highlights after 3 minutes (180,000ms)
-          setTimeout(() => {
-            setNewlyCrawledOrderIds((prev) => prev.filter((id) => !newIds.includes(id)))
-          }, 180000)
+    setOrdersLoading(true)
+    try {
+      const data = await apiFetch<{ orders: OrderSummary[] }>(`/orders${qs ? `?${qs}` : ''}`)
+      // Detect newly arrived orders without blanking the table while revalidating.
+      setOrders((prevOrders) => {
+        if (prevOrders.length > 0) {
+          const existingIds = new Set(prevOrders.map((o) => o.id))
+          const newIds = data.orders.filter((o) => !existingIds.has(o.id)).map((o) => o.id)
+          if (newIds.length > 0) {
+            setNewlyCrawledOrderIds((prev) => Array.from(new Set([...prev, ...newIds])))
+            setTimeout(() => {
+              setNewlyCrawledOrderIds((prev) => prev.filter((id) => !newIds.includes(id)))
+            }, 180000)
+          }
         }
-      }
-      return data.orders
-    })
+        return data.orders
+      })
+      writeOrdersCache(getOrdersCacheKey(activePlatform?.id, qs), data.orders)
+    } finally {
+      setOrdersLoading(false)
+    }
   }
 
   useEffect(() => {
@@ -272,6 +305,18 @@ export function OrdersListPage() {
   }, [])
 
   useEffect(() => {
+    const params = new URLSearchParams()
+    if (statusFilter) params.set('status', statusFilter)
+    if (batchFilter) params.set('batch_id', batchFilter)
+    if (designerFilter) params.set('designer_id', designerFilter)
+    const cachedOrders = readOrdersCache(getOrdersCacheKey(activePlatform?.id, params.toString()))
+    if (cachedOrders !== null) {
+      setOrders(cachedOrders)
+      setOrdersLoading(false)
+    } else {
+      setOrders([])
+      setOrdersLoading(true)
+    }
     loadOrders().catch((e) => {
       setError(e instanceof ApiError ? e.message : 'Không tải được danh sách đơn.')
     })
@@ -281,7 +326,7 @@ export function OrdersListPage() {
     }
     window.addEventListener('orders-updated', handleOrdersUpdated)
     return () => window.removeEventListener('orders-updated', handleOrdersUpdated)
-  }, [statusFilter, batchFilter, designerFilter])
+  }, [activePlatform?.id, statusFilter, batchFilter, designerFilter])
 
   async function handleSyncPrintervalStatus(orderIds?: string[]) {
     setSyncingPrinterval(true)
@@ -427,7 +472,7 @@ export function OrdersListPage() {
                   : 'bg-amber-50/60 text-amber-900 border-amber-200 hover:bg-amber-100/70'
               }`}
             >
-              <span>📌 Việc Cần Làm (Todo)</span>
+              <span>Việc Cần Làm (Todo)</span>
               <span
                 className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
                   activeDesignerTab === 'todo' ? 'bg-white/20 text-white' : 'bg-amber-200/80 text-amber-900'
@@ -446,7 +491,7 @@ export function OrdersListPage() {
                   : 'bg-blue-50/60 text-blue-900 border-blue-200 hover:bg-blue-100/70'
               }`}
             >
-              <span>⚡ Đang Làm (Doing)</span>
+              <span>Đang Làm (Doing)</span>
               <span
                 className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
                   activeDesignerTab === 'doing' ? 'bg-white/20 text-white' : 'bg-blue-200/80 text-blue-900'
@@ -465,7 +510,7 @@ export function OrdersListPage() {
                   : 'bg-purple-50/60 text-purple-900 border-purple-200 hover:bg-purple-100/70'
               }`}
             >
-              <span>🕒 Chờ Duyệt (Review)</span>
+              <span>Chờ Duyệt (Review)</span>
               <span
                 className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
                   activeDesignerTab === 'review' ? 'bg-white/20 text-white' : 'bg-purple-200/80 text-purple-900'
@@ -750,9 +795,18 @@ export function OrdersListPage() {
               {filteredOrders.length === 0 ? (
                 <tr>
                   <td colSpan={isAdmin ? 9 : 8} className="py-12 text-center text-slate-400">
-                    <Package className="h-10 w-10 mx-auto mb-2 opacity-30" />
-                    <p className="font-medium text-sm text-slate-500">Không tìm thấy đơn hàng nào</p>
-                    <p className="text-xs text-slate-400 mt-1">Thử thay đổi bộ lọc hoặc quét đơn mới từ Printerval</p>
+                    {ordersLoading ? (
+                      <>
+                        <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin opacity-50" />
+                        <p className="font-medium text-sm text-slate-500">Đang cập nhật danh sách đơn…</p>
+                      </>
+                    ) : (
+                      <>
+                        <Package className="h-10 w-10 mx-auto mb-2 opacity-30" />
+                        <p className="font-medium text-sm text-slate-500">Không tìm thấy đơn hàng nào</p>
+                        <p className="text-xs text-slate-400 mt-1">Thử thay đổi bộ lọc hoặc quét đơn mới từ Printerval</p>
+                      </>
+                    )}
                   </td>
                 </tr>
               ) : (
@@ -816,18 +870,6 @@ export function OrdersListPage() {
                               </span>
                             )}
                           </Link>
-                          {isNewlyCrawled && (
-                            <span
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                dismissHighlight(o.id)
-                              }}
-                              className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 font-black bg-emerald-600 text-white rounded-full animate-pulse shadow-2xs cursor-pointer"
-                              title="Đơn mới crawl về! Click để tắt highlight"
-                            >
-                              ⚡ MỚI CRAWL
-                            </span>
-                          )}
                         </div>
                         {isAdmin && o.product_name && (
                           <p className="text-[11px] text-slate-500 font-normal line-clamp-1 mt-0.5" title={o.product_name}>

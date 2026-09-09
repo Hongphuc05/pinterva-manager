@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import math
 import uuid
 from datetime import UTC, datetime
+from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -83,6 +86,86 @@ class OrderSummaryOut(BaseModel):
 
 class OrdersListResponse(BaseModel):
     orders: list[OrderSummaryOut]
+
+
+class GalleryBridgeImportRequest(BaseModel):
+    platform_id: uuid.UUID
+    external_order_id: str
+    image_urls: list[str]
+    product_url: str | None = None
+
+
+class GalleryBridgeImportResponse(BaseModel):
+    order_id: uuid.UUID
+    image_count: int
+
+
+def _is_allowed_gallery_url(url: str) -> bool:
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    return (
+        parsed.scheme == "https"
+        and bool(host)
+        and (
+            host == "printerval.com"
+            or host.endswith(".printerval.com")
+            or host.endswith(".customily.com")
+        )
+    )
+
+
+@router.post("/integrations/printerval-gallery", response_model=GalleryBridgeImportResponse)
+def import_printerval_gallery_from_extension(
+    payload: GalleryBridgeImportRequest,
+    x_gallery_bridge_token: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    """Receive a gallery captured by CopyImage in an authenticated Chrome session.
+
+    This endpoint deliberately does not accept the normal web session.  Its token is
+    scoped to one platform and cannot read or modify orders outside gallery URLs.
+    """
+    platform = db.get(Platform, payload.platform_id)
+    supplied_hash = hashlib.sha256((x_gallery_bridge_token or "").encode()).hexdigest()
+    if (
+        platform is None
+        or not platform.is_active
+        or not platform.gallery_bridge_token_hash
+        or not hmac.compare_digest(platform.gallery_bridge_token_hash, supplied_hash)
+    ):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "CopyImage token không hợp lệ")
+
+    external_order_id = payload.external_order_id.strip()
+    if not external_order_id:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Thiếu mã đơn Printerval")
+    if len(payload.image_urls) > 50:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Tối đa 50 ảnh cho một đơn")
+
+    image_urls: list[str] = []
+    for raw_url in payload.image_urls:
+        url = raw_url.strip()
+        if not _is_allowed_gallery_url(url):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY, "URL ảnh không thuộc Printerval"
+            )
+        if url not in image_urls:
+            image_urls.append(url)
+    if not image_urls:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Không có ảnh hợp lệ để đồng bộ")
+
+    order = (
+        db.query(Order)
+        .filter(Order.platform_id == platform.id, Order.external_order_id == external_order_id)
+        .one_or_none()
+    )
+    if order is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn thuộc platform này")
+
+    # The browser page is the authoritative product gallery.  Replace stale fallback
+    # thumbnails atomically; normal crawls use a merge helper and cannot erase it.
+    order.product_image_urls = image_urls
+    db.commit()
+    return GalleryBridgeImportResponse(order_id=order.id, image_count=len(image_urls))
 
 
 class ResultVersionOut(BaseModel):

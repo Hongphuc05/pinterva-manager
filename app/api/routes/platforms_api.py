@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import secrets
 import uuid
 from datetime import datetime
 
@@ -27,6 +29,12 @@ class PlatformOut(BaseModel):
 class CreatePlatformRequest(BaseModel):
     name: str
     account_username: str
+
+
+class GalleryBridgeTokenOut(BaseModel):
+    platform_id: uuid.UUID
+    token: str
+    message: str
 
 
 @router.get("", response_model=list[PlatformOut])
@@ -66,6 +74,30 @@ def create_platform(
     db.commit()
     db.refresh(platform)
     return platform
+
+
+@router.post("/{platform_id}/gallery-bridge-token", response_model=GalleryBridgeTokenOut)
+def create_gallery_bridge_token(
+    platform_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_role("admin")),
+):
+    """Rotate the narrowly-scoped token used by the local CopyImage extension.
+
+    The plaintext token is intentionally returned once only.  The database stores
+    its SHA-256 digest, so a database export cannot be used to submit galleries.
+    """
+    platform = db.get(Platform, platform_id)
+    if not platform or not platform.is_active:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Platform not found")
+    token = secrets.token_urlsafe(32)
+    platform.gallery_bridge_token_hash = hashlib.sha256(token.encode()).hexdigest()
+    db.commit()
+    return GalleryBridgeTokenOut(
+        platform_id=platform.id,
+        token=token,
+        message="Đã tạo token CopyImage. Sao chép token này vào phần Cài đặt của extension.",
+    )
 
 
 @router.delete("/{platform_id}", status_code=status.HTTP_204_NO_CONTENT)
