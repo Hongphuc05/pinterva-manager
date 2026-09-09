@@ -1,4 +1,5 @@
 import { X } from 'lucide-react'
+import { resolveAssetUrl } from '../api/client'
 
 type ImageModalProps = {
   isOpen: boolean
@@ -28,7 +29,7 @@ export function ImageModal({ isOpen, onClose, imageUrl, altText = 'Xem ·∫£nh ph√
         </button>
 
         <img
-          src={imageUrl}
+          src={resolveAssetUrl(imageUrl)}
           alt={altText}
           className="max-h-[80vh] max-w-full rounded-xl object-contain shadow-xs"
         />

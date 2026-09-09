@@ -45,3 +45,12 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   if (resp.status === 204) return undefined as T
   return resp.json() as Promise<T>
 }
+
+export function resolveAssetUrl(url: string | null | undefined): string {
+  if (!url) return ''
+  if (url.startsWith('/crawled_assets/') || url.startsWith('/order_assets/')) {
+    const baseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
+    return baseUrl ? `${baseUrl}${url}` : url
+  }
+  return url
+}

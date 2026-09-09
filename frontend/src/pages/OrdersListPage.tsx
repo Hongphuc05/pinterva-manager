@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { apiFetch, ApiError } from '../api/client'
+import { apiFetch, ApiError, resolveAssetUrl } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { ImageModal } from '../components/ImageModal'
@@ -619,10 +619,10 @@ export function OrdersListPage() {
                       <td className="py-2.5 px-4 text-center">
                         {o.thumbnail_url ? (
                           <img
-                            src={o.thumbnail_url}
+                            src={resolveAssetUrl(o.thumbnail_url)}
                             alt={o.external_order_id}
                             title="Click để xem ảnh to"
-                            onClick={() => setSelectedImage(o.thumbnail_url)}
+                            onClick={() => setSelectedImage(resolveAssetUrl(o.thumbnail_url) ?? null)}
                             className="h-10 w-10 rounded-lg object-cover border border-slate-200 mx-auto shadow-2xs cursor-pointer hover:scale-105 transition-transform hover:ring-2 hover:ring-[#0052CC]"
                           />
                         ) : (

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { apiFetch, ApiError } from '../api/client'
+import { apiFetch, ApiError, resolveAssetUrl } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { useSyncStatus } from '../hooks/useSyncStatus'
@@ -379,7 +379,7 @@ export function OrderStatusPage() {
                       <td className="py-2.5 px-4 text-center">
                         {o.thumbnail_url ? (
                           <img
-                            src={o.thumbnail_url}
+                            src={resolveAssetUrl(o.thumbnail_url)}
                             alt={o.external_order_id}
                             className="h-10 w-10 rounded-lg object-cover border border-slate-200 mx-auto"
                           />

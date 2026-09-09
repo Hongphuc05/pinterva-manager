@@ -1,7 +1,10 @@
 name: tacahu-ops
 
 x-backend: &backend
-  image: ${BACKEND_IMAGE:-ghcr.io/hongphuc05/pinterva-manager-backend}:${BACKEND_VERSION:-latest}
+  build:
+    context: ${APP_SOURCE_DIR:-.}
+    dockerfile: Dockerfile
+  image: ${BACKEND_IMAGE:-tacahu-backend}:${APP_VERSION:-latest}
   env_file: ${ENV_FILE:-.env}
   restart: unless-stopped
   environment:
@@ -10,11 +13,11 @@ x-backend: &backend
     PLAYWRIGHT_PROFILE_ROOT: /app/chrome-profiles
     PLAYWRIGHT_EVIDENCE_DIR: /app/playwright-evidence
   volumes:
-    - crawled_assets:/app/crawled_assets
-    - order_assets:/app/order_assets
-    - platform_data:/app/platform_data
-    - playwright_evidence:/app/playwright-evidence
-    - chrome_profiles:/app/chrome-profiles
+    - ${DATA_DIR:-./data}/crawled_assets:/app/crawled_assets
+    - ${DATA_DIR:-./data}/order_assets:/app/order_assets
+    - ${DATA_DIR:-./data}/platform_data:/app/platform_data
+    - ${DATA_DIR:-./data}/playwright_evidence:/app/playwright-evidence
+    - ${DATA_DIR:-./data}/chrome_profiles:/app/chrome-profiles
   logging:
     driver: local
     options:
@@ -68,7 +71,7 @@ services:
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
-      - redis_data:/data
+      - ${DATA_DIR:-./data}/redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -93,11 +96,3 @@ services:
       options:
         max-size: 20m
         max-file: "5"
-
-volumes:
-  crawled_assets:
-  order_assets:
-  platform_data:
-  playwright_evidence:
-  chrome_profiles:
-  redis_data:

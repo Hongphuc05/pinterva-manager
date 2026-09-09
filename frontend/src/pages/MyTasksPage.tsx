@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ApiError, apiFetch } from '../api/client'
+import { ApiError, apiFetch, resolveAssetUrl } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { ImageModal } from '../components/ImageModal'
@@ -162,10 +162,10 @@ export function MyTasksPage() {
                   {/* Product Thumbnail */}
                   {task.order.thumbnail_url ? (
                     <img
-                      src={task.order.thumbnail_url}
+                      src={resolveAssetUrl(task.order.thumbnail_url)}
                       alt={task.order.external_order_id}
                       title="Click để phóng to ảnh"
-                      onClick={() => setSelectedImage(task.order.thumbnail_url)}
+                      onClick={() => setSelectedImage(resolveAssetUrl(task.order.thumbnail_url))}
                       className="h-16 w-16 rounded-xl object-cover border border-slate-200 shrink-0 cursor-pointer hover:scale-105 transition-transform"
                     />
                   ) : (
