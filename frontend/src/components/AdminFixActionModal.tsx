@@ -24,14 +24,13 @@ export function AdminFixActionModal({
   onSuccess,
 }: AdminFixActionModalProps) {
   const isApprove = mode === 'approve'
-  const initialNote = isApprove ? currentNote : (previousNote || currentNote)
-  const [noteText, setNoteText] = useState(initialNote || '')
+  const [noteText, setNoteText] = useState(currentNote || previousNote || '')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (isOpen) {
-      setNoteText((isApprove ? currentNote : (previousNote || currentNote)) || '')
+      setNoteText(currentNote || previousNote || '')
       setError(null)
     }
   }, [isOpen, mode, currentNote, previousNote])
@@ -89,13 +88,13 @@ export function AdminFixActionModal({
             <div>
               <h3 className="text-sm font-bold text-slate-900">
                 {isApprove
-                  ? `Duyệt Note Sửa Cho Designer (#${externalOrderId})`
+                  ? `Check & Duyệt Đơn Fix (#${externalOrderId})`
                   : `Hủy Fix & Trả Về Review (#${externalOrderId})`}
               </h3>
               <p className="text-[11px] text-slate-500">
                 {isApprove
-                  ? 'Gửi chỉ dẫn sửa bài xuống tab Todo cho Designer'
-                  : 'Cập nhật lại Note outsource và đổi trạng thái về Review trên Printerval'}
+                  ? 'Kiểm tra & chỉnh sửa Note outsource gửi cho Designer làm (Lưu ý: Không đẩy lên Printerval)'
+                  : 'Chỉnh sửa Note outsource và cập nhật ngược lại lên Printerval cùng trạng thái Review'}
               </p>
             </div>
           </div>
@@ -116,13 +115,24 @@ export function AdminFixActionModal({
             </div>
           )}
 
-          {!isApprove && previousNote && (
-            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
-              <div className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider">
-                Note Outsource trước khi bị Fix:
+          {isApprove ? (
+            <div className="p-3 bg-emerald-50/80 border border-emerald-200 text-emerald-950 rounded-xl space-y-1">
+              <div className="font-bold flex items-center gap-1.5 text-xs text-emerald-900">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>Quy trình duyệt gửi Designer:</span>
               </div>
-              <p className="text-slate-700 font-mono text-[11px] whitespace-pre-wrap break-all">
-                {previousNote}
+              <p className="text-[11px] text-emerald-800 leading-relaxed">
+                Bạn có thể để nguyên Note từ Printerval hoặc chỉnh sửa thêm chỉ dẫn. Khi bấm <strong>Check & Duyệt</strong>, Note này sẽ hiển thị cho Designer xem tại Todo, <strong>tuyệt đối không đẩy ngược lại lên Printerval</strong>.
+              </p>
+            </div>
+          ) : (
+            <div className="p-3 bg-orange-50/80 border border-orange-200 text-orange-950 rounded-xl space-y-1">
+              <div className="font-bold flex items-center gap-1.5 text-xs text-orange-900">
+                <RotateCcw className="w-4 h-4 text-orange-600 shrink-0" />
+                <span>Đồng bộ ngược lại Printerval:</span>
+              </div>
+              <p className="text-[11px] text-orange-800 leading-relaxed">
+                Hệ thống sẽ <strong>ghi đè Note outsource này lên Printerval</strong> và tự động cập nhật trạng thái đơn hàng trên Printerval về <strong>Review (Chờ duyệt)</strong>.
               </p>
             </div>
           )}
@@ -138,11 +148,6 @@ export function AdminFixActionModal({
               placeholder="Nhập nội dung note outsource, link drive, link ảnh mockup..."
               className="w-full p-3 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0052CC] font-mono leading-relaxed bg-white"
             />
-            <p className="text-[11px] text-slate-400">
-              {isApprove
-                ? 'Designer sẽ thấy nội dung này trong tab Todo để làm theo.'
-                : 'Nội dung này sẽ được ghi đè vào Note outsource trên Printerval.'}
-            </p>
           </div>
         </div>
 
@@ -169,8 +174,8 @@ export function AdminFixActionModal({
             {loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
             <span>
               {isApprove
-                ? 'Xác nhận duyệt & Gửi Des'
-                : 'Xác nhận trả về Review'}
+                ? 'Check & Duyệt'
+                : 'Gửi & Cập nhật Printerval'}
             </span>
           </button>
         </div>

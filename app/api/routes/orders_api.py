@@ -1195,7 +1195,6 @@ def api_approve_fix(
     order_id: str,
     payload: ApproveFixRequest,
     user: User = Depends(require_role("admin")),
-    platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
     order = None
@@ -1207,10 +1206,10 @@ def api_approve_fix(
     if order is None:
         order = db.query(Order).filter(Order.external_order_id == order_id).first()
 
-    if order is None or order.platform_id != platform_id:
+    if order is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
 
-    if payload.note_outsource and payload.note_outsource.strip():
+    if payload.note_outsource is not None:
         order.note_outsource = payload.note_outsource.strip()
 
     order.state = OrderState.REVISION.value
@@ -1226,7 +1225,7 @@ def api_approve_fix(
             "action": "APPROVE_FIX_FOR_DESIGNER",
             "actor_name": admin_name,
             "actor_role": user.role,
-            "description": f"Admin {admin_name} duyệt note sửa và gửi xuống Todo cho Designer",
+            "description": f"Admin {admin_name} check & duyệt note sửa cho Designer: {order.note_outsource or 'Không có note'}",
             "note_outsource": order.note_outsource,
         },
     )
@@ -1240,12 +1239,12 @@ def api_approve_fix(
         "external_order_id": order.external_order_id,
         "fix_approved_by_admin": True,
         "note_outsource": order.note_outsource,
-        "message": "Đã duyệt và gửi yêu cầu sửa bài xuống cho Designer.",
+        "message": "Đã check & duyệt và gửi yêu cầu sửa bài xuống cho Designer.",
     }
 
 
 class RejectFixRequest(BaseModel):
-    note_outsource: str
+    note_outsource: str | None = None
 
 
 @router.post("/orders/{order_id}/reject-fix-to-review")
@@ -1253,7 +1252,6 @@ def api_reject_fix_to_review(
     order_id: str,
     payload: RejectFixRequest,
     user: User = Depends(require_role("admin")),
-    platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
     order = None
@@ -1265,11 +1263,11 @@ def api_reject_fix_to_review(
     if order is None:
         order = db.query(Order).filter(Order.external_order_id == order_id).first()
 
-    if order is None or order.platform_id != platform_id:
+    if order is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
 
     order.previous_note_outsource = order.note_outsource
-    if payload.note_outsource and payload.note_outsource.strip():
+    if payload.note_outsource is not None:
         order.note_outsource = payload.note_outsource.strip()
 
     old_state = order.state

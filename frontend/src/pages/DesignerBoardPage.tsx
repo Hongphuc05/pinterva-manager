@@ -727,7 +727,7 @@ export function DesignerBoardPage() {
                                           title="Duyệt yêu cầu fix và gửi vào Todo của Designer"
                                         >
                                           <Check className="h-3 w-3" />
-                                          <span>Duyệt gửi Des</span>
+                                          <span>Check & Duyệt</span>
                                         </button>
 
                                         <button

@@ -524,7 +524,7 @@ export function OrderDetailPage() {
                       </span>
                     ) : (
                       <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800">
-                        Chờ Admin duyệt gửi Des
+                        Chờ Admin check & duyệt
                       </span>
                     )}
                   </div>
@@ -538,7 +538,7 @@ export function OrderDetailPage() {
                             className="px-3 py-1 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-2xs cursor-pointer flex items-center gap-1"
                           >
                             <Check className="h-3 w-3" />
-                            <span>Duyệt gửi Des</span>
+                            <span>Check & Duyệt</span>
                           </button>
                           <button
                             type="button"
