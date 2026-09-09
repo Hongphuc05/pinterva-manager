@@ -15,8 +15,14 @@ jobs:
         run: |
           echo "🚀 Deploying latest code to /srv/tacahu..."
           cp compose.yaml /srv/tacahu/compose.yaml
+          cp Dockerfile /srv/tacahu/Dockerfile
+          cp pyproject.toml /srv/tacahu/pyproject.toml
+          cp alembic.ini /srv/tacahu/alembic.ini
+          rsync -av --delete migrations/ /srv/tacahu/migrations/
           rsync -av --delete app/ /srv/tacahu/app/
           cd /srv/tacahu
-          docker compose up -d --build
+          docker compose build api celery-general celery-assignment celery-beat
+          docker compose run --rm migrate
+          docker compose up -d
           echo "✅ Deployment successful! Current containers:"
           docker compose ps
