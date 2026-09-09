@@ -4,7 +4,7 @@ import math
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -19,6 +19,7 @@ from app.adapters.printerval.api_client import (
 )
 from app.adapters.printerval.interface import ALL_JOB_TYPES
 from app.api.deps import (
+    DEFAULT_PLATFORM_ID,
     get_current_platform_id,
     get_current_user,
     get_db,
@@ -1599,6 +1600,7 @@ def api_designers_workload(
 
 @router.get("/orders-history", response_model=OrderHistoryListResponse)
 def api_get_orders_history(
+    request: Request,
     page: int = Query(1, ge=1),
     page_size: int = Query(30, ge=1, le=100),
     search: str | None = None,
@@ -1606,14 +1608,21 @@ def api_get_orders_history(
     designer_id: str | None = None,
     action: str | None = None,
     user: User = Depends(get_current_user),
-    platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
     query = (
         db.query(WorkflowEvent, Order)
         .join(Order, Order.id == WorkflowEvent.order_id)
-        .filter(Order.platform_id == platform_id)
     )
+
+    header_platform_id = request.headers.get("X-Platform-Id")
+    if header_platform_id and header_platform_id != "ALL":
+        try:
+            p_uuid = uuid.UUID(header_platform_id)
+            if p_uuid != DEFAULT_PLATFORM_ID:
+                query = query.filter(Order.platform_id == p_uuid)
+        except ValueError:
+            pass
 
     if user.role == "designer":
         asgn_order_ids = (
@@ -1728,7 +1737,6 @@ def api_get_orders_history(
 def api_get_single_order_history(
     order_id: str,
     user: User = Depends(get_current_user),
-    platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
     order = None
@@ -1740,8 +1748,26 @@ def api_get_single_order_history(
     if order is None:
         order = db.query(Order).filter(Order.external_order_id == order_id).first()
 
-    if order is None or order.platform_id != platform_id:
+    if order is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
+
+    # If designer, ensure they have access to this order
+    if user.role == "designer":
+        asgn = (
+            db.query(Assignment)
+            .filter(
+                Assignment.order_id == order.id,
+                Assignment.designer_id == user.id,
+                Assignment.status != "cancelled",
+            )
+            .first()
+        )
+        is_assigned_name = (
+            (user.printerval_designer_option and order.printerval_designer == user.printerval_designer_option)
+            or (user.full_name and order.printerval_designer == user.full_name)
+        )
+        if not asgn and not is_assigned_name:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Bạn không có quyền xem lịch sử đơn hàng này")
 
     history = get_order_history(db, str(order.id))
     actor_ids = {e.actor_id for e in history if e.actor_id}

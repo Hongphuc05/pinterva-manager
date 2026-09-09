@@ -125,6 +125,16 @@ export function OrderHistoryPage() {
     fetchHistory()
   }, [fetchHistory])
 
+  useEffect(() => {
+    const handleSync = () => {
+      fetchHistory()
+    }
+    window.addEventListener('request-sync-current-tab', handleSync)
+    return () => {
+      window.removeEventListener('request-sync-current-tab', handleSync)
+    }
+  }, [fetchHistory])
+
   function handleSearchSubmit(e: React.FormEvent) {
     e.preventDefault()
     setPage(1)
