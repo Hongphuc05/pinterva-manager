@@ -16,7 +16,6 @@ from app.adapters.db.models import (
     Assignment,
     Order,
     Platform,
-    PlatformSyncState,
     PrintervalAssignmentRequest,
     ResultVersion,
     User,
