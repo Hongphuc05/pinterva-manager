@@ -608,6 +608,7 @@ export function OrdersListPage() {
         isOpen={!!selectedImage}
         onClose={() => setSelectedImage(null)}
         imageUrl={selectedImage}
+        hideExternalLink={!isAdmin}
       />
 
       {/* Flash / Error Banner */}
@@ -1133,7 +1134,7 @@ export function OrdersListPage() {
                 <th className="py-3 px-4">{isAdmin ? 'Mã Đơn Hàng' : 'Tên Đơn Hàng'}</th>
                 <th className="py-3 px-4">Trạng Thái</th>
                 <th className="py-3 px-4">DES Đảm Nhận</th>
-                <th className="py-3 px-4">Deadline Printerval</th>
+                <th className="py-3 px-4">Deadline</th>
                 <th className="py-3 px-4">Ngày Tạo</th>
                 <th className="py-3 px-4 text-right">Thao Tác</th>
               </tr>
@@ -1151,7 +1152,7 @@ export function OrdersListPage() {
                       <>
                         <Package className="h-10 w-10 mx-auto mb-2 opacity-30" />
                         <p className="font-medium text-sm text-slate-500">Không tìm thấy đơn hàng nào</p>
-                        <p className="text-xs text-slate-400 mt-1">Thử thay đổi bộ lọc hoặc quét đơn mới từ Printerval</p>
+                        <p className="text-xs text-slate-400 mt-1">Thử thay đổi bộ lọc hoặc quét đơn mới</p>
                       </>
                     )}
                   </td>
@@ -1319,7 +1320,7 @@ export function OrdersListPage() {
                             {isAdmin ? '+ Phân công DES' : 'Chưa phân bổ'}
                           </span>
                         )}
-                        {(o.printerval_designer || o.printerval_status || o.printerval_assignment_lifecycle === 'pending') && (
+                        {isAdmin && (o.printerval_designer || o.printerval_status || o.printerval_assignment_lifecycle === 'pending') && (
                           <p className="mt-1 text-[10px] font-medium text-slate-500">
                             Printerval: {o.printerval_designer || '—'}
                             {o.printerval_status ? ` · ${o.printerval_status}` : ''}

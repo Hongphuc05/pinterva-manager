@@ -9,7 +9,6 @@ import { getStatusInfo } from '../utils/statusTranslation'
 import { 
   CheckSquare, 
   Clock, 
-  ExternalLink, 
   AlertCircle, 
   Package,
   ChevronRight,
@@ -100,6 +99,7 @@ export function MyTasksPage() {
         isOpen={!!selectedImage}
         onClose={() => setSelectedImage(null)}
         imageUrl={selectedImage}
+        hideExternalLink={true}
       />
 
       {/* Header Info */}
@@ -180,29 +180,14 @@ export function MyTasksPage() {
                       </Link>
 
                       {task.order.sku_image_url && (
-                        <a
-                          href={task.order.sku_image_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-xs font-bold text-[#0052CC] hover:underline flex items-center gap-0.5 px-2 py-0.5 rounded bg-blue-50 border border-blue-100"
-                          title="Xem ảnh SKU Printerval"
+                        <button
+                          type="button"
+                          onClick={() => setSelectedImage(task.order.sku_image_url)}
+                          className="text-xs font-bold text-[#0052CC] hover:underline flex items-center gap-0.5 px-2 py-0.5 rounded bg-blue-50 border border-blue-100 cursor-pointer"
+                          title="Xem ảnh mẫu"
                         >
-                          <span>Image</span>
-                          <ExternalLink className="h-3 w-3" />
-                        </a>
-                      )}
-
-                      {task.order.external_order_url && (
-                        <a
-                          href={task.order.external_order_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-xs font-bold text-[#0052CC] hover:underline flex items-center gap-0.5 px-2 py-0.5 rounded bg-blue-50 border border-blue-100"
-                          title="Mở đơn trên Printerval"
-                        >
-                          <span>Order</span>
-                          <ExternalLink className="h-3 w-3" />
-                        </a>
+                          <span>Xem ảnh</span>
+                        </button>
                       )}
 
                       <span
