@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { apiFetch, ApiError, resolveAssetUrl } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { usePlatform } from '../auth/PlatformContext'
@@ -84,6 +84,7 @@ function writeOrdersCache(key: string, orders: OrderSummary[]) {
 }
 
 export function OrdersListPage() {
+  const navigate = useNavigate()
   const { user } = useAuth()
   const { activePlatform } = usePlatform()
   const isAdmin = user?.role === 'admin'
@@ -97,6 +98,8 @@ export function OrdersListPage() {
   const [flash, setFlash] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [activeDesignerTab, setActiveDesignerTab] = useState<'todo' | 'doing' | 'review' | 'all'>('todo')
+  const [adminTab, setAdminTab] = useState<'unprocessed' | 'processed' | 'all'>('unprocessed')
+  const [kpiFilter, setKpiFilter] = useState<'all' | 'open' | 'in_progress' | 'done' | null>(null)
   const [syncingPrinterval, setSyncingPrinterval] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
 
@@ -359,46 +362,88 @@ export function OrdersListPage() {
     ['QC_PENDING', 'RESULT_SUBMITTED', 'SUBMITTING_TO_SITE'].includes(o.state.toUpperCase())
   )
 
-  const baseOrders = !isAdmin
-    ? activeDesignerTab === 'todo'
-      ? todoOrders
-      : activeDesignerTab === 'doing'
-      ? doingOrders
-      : activeDesignerTab === 'review'
-      ? reviewOrders
-      : orders
-    : orders
+  // Calculate Admin Workflow groups
+  const unprocessedOrders = orders.filter(
+    (o) => !['DONE', 'CLAIMED_IMPORTED', 'COMPLETED', 'CANCELLED'].includes(o.state.toUpperCase())
+  )
+  const processedOrders = orders.filter((o) =>
+    ['DONE', 'CLAIMED_IMPORTED', 'COMPLETED'].includes(o.state.toUpperCase())
+  )
 
-  // Filter client-side order list.
-  const filteredOrders = baseOrders.filter((o) => {
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase()
-      const matches =
-        o.external_order_id.toLowerCase().includes(q) ||
-        (o.product_name && o.product_name.toLowerCase().includes(q)) ||
-        (o.assigned_designer_name && o.assigned_designer_name.toLowerCase().includes(q))
-      if (!matches) return false
+  // Calculate Metrics
+  const totalCount = orders.length
+  const openCount = orders.filter(
+    (o) => ['OPEN_FOR_ALLOCATION', 'DISCOVERED', 'PENDING', 'WAITING'].includes(o.state.toUpperCase())
+  ).length
+  const inProgressCount = orders.filter(
+    (o) => ['IN_PROGRESS', 'ASSIGNED'].includes(o.state.toUpperCase())
+  ).length
+  const doneCount = orders.filter(
+    (o) => ['DONE', 'CLAIMED_IMPORTED', 'COMPLETED'].includes(o.state.toUpperCase())
+  ).length
+
+  let baseOrders = orders
+  if (!isAdmin) {
+    baseOrders =
+      activeDesignerTab === 'todo'
+        ? todoOrders
+        : activeDesignerTab === 'doing'
+        ? doingOrders
+        : activeDesignerTab === 'review'
+        ? reviewOrders
+        : orders
+  } else {
+    if (kpiFilter === 'open') {
+      baseOrders = orders.filter((o) =>
+        ['OPEN_FOR_ALLOCATION', 'DISCOVERED', 'PENDING', 'WAITING'].includes(o.state.toUpperCase())
+      )
+    } else if (kpiFilter === 'in_progress') {
+      baseOrders = orders.filter((o) => ['IN_PROGRESS', 'ASSIGNED'].includes(o.state.toUpperCase()))
+    } else if (kpiFilter === 'done') {
+      baseOrders = orders.filter((o) =>
+        ['DONE', 'CLAIMED_IMPORTED', 'COMPLETED'].includes(o.state.toUpperCase())
+      )
+    } else if (adminTab === 'unprocessed') {
+      baseOrders = unprocessedOrders
+    } else if (adminTab === 'processed') {
+      baseOrders = processedOrders
+    } else {
+      baseOrders = orders
     }
+  }
 
-    if (designerFilter) {
-      if (designerFilter === 'unassigned') {
-        if (o.assigned_designer_name) return false
-      } else {
-        const desUser = usersList.find((u) => u.id === designerFilter)
-        if (desUser) {
-          const name = desUser.full_name || desUser.username
-          if (o.assigned_designer_name !== name) return false
+  // Filter client-side order list & sort newest first
+  const filteredOrders = baseOrders
+    .filter((o) => {
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase()
+        const matches =
+          o.external_order_id.toLowerCase().includes(q) ||
+          (o.product_name && o.product_name.toLowerCase().includes(q)) ||
+          (o.assigned_designer_name && o.assigned_designer_name.toLowerCase().includes(q))
+        if (!matches) return false
+      }
+
+      if (designerFilter) {
+        if (designerFilter === 'unassigned') {
+          if (o.assigned_designer_name) return false
+        } else {
+          const desUser = usersList.find((u) => u.id === designerFilter)
+          if (desUser) {
+            const name = desUser.full_name || desUser.username
+            if (o.assigned_designer_name !== name) return false
+          }
         }
       }
-    }
 
-    return true
-  })
+      return true
+    })
+    .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
 
   // Reset page when filters change
   useEffect(() => {
     setCurrentPage(1)
-  }, [statusFilter, designerFilter, batchFilter, searchQuery, activeDesignerTab])
+  }, [statusFilter, designerFilter, batchFilter, searchQuery, activeDesignerTab, adminTab, kpiFilter])
 
   const paginatedOrders = paginate(filteredOrders, currentPage)
 
@@ -422,12 +467,6 @@ export function OrdersListPage() {
     return () => window.removeEventListener('request-sync-current-tab', handleRequestSync)
   }, [isAdmin, activeDesignerTab, todoOrders, doingOrders, reviewOrders, orders, filteredOrders])
 
-  // Calculate Metrics
-  const totalCount = orders.length
-  const openCount = orders.filter(o => o.state === 'OPEN_FOR_ALLOCATION' || o.state === 'DISCOVERED').length
-  const inProgressCount = orders.filter(o => o.state === 'IN_PROGRESS' || o.state === 'ASSIGNED').length
-  const doneCount = orders.filter(o => o.state === 'DONE' || o.state === 'CLAIMED_IMPORTED').length
-
   return (
     <DashboardLayout>
       {/* Image Zoom Modal */}
@@ -448,6 +487,175 @@ export function OrdersListPage() {
         <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-800 text-sm font-medium flex items-center justify-between shadow-xs">
           <span>{error}</span>
           <button onClick={() => setError(null)} className="text-red-600 hover:text-red-900 text-xs font-bold cursor-pointer">X</button>
+        </div>
+      )}
+
+      {/* KPI Summary Cards Grid (For Admin) - Interactive Filters */}
+      {isAdmin && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+          <div
+            onClick={() => {
+              setKpiFilter(kpiFilter === 'all' ? null : 'all')
+              setAdminTab('all')
+              setStatusFilter('')
+            }}
+            className={`rounded-xl border bg-white p-5 shadow-xs flex items-center justify-between cursor-pointer transition-all hover:shadow-md hover:border-blue-300 select-none ${
+              adminTab === 'all' && (kpiFilter === 'all' || kpiFilter === null)
+                ? 'border-[#0052CC] ring-2 ring-[#0052CC]/20 bg-blue-50/20'
+                : 'border-[hsl(var(--border))]'
+            }`}
+            title="Click để hiển thị tất cả đơn hàng"
+          >
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Tổng Đơn Hàng</p>
+              <h3 className="text-2xl font-bold font-mono text-slate-800 mt-1">{totalCount}</h3>
+            </div>
+            <div className="p-3 bg-blue-50 text-[#0052CC] rounded-xl">
+              <Package className="h-6 w-6" />
+            </div>
+          </div>
+
+          <div
+            onClick={() => {
+              setKpiFilter(kpiFilter === 'open' ? null : 'open')
+              setAdminTab('unprocessed')
+              setStatusFilter('')
+            }}
+            className={`rounded-xl border bg-white p-5 shadow-xs flex items-center justify-between cursor-pointer transition-all hover:shadow-md hover:border-amber-300 select-none ${
+              kpiFilter === 'open'
+                ? 'border-amber-500 ring-2 ring-amber-500/20 bg-amber-50/30'
+                : 'border-[hsl(var(--border))]'
+            }`}
+            title="Click để lọc đơn Mới / Chờ Phân Bổ"
+          >
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Mới / Chờ Phân Bổ</p>
+              <h3 className="text-2xl font-bold font-mono text-amber-600 mt-1">{openCount}</h3>
+            </div>
+            <div className="p-3 bg-amber-50 text-amber-600 rounded-xl">
+              <Clock className="h-6 w-6" />
+            </div>
+          </div>
+
+          <div
+            onClick={() => {
+              setKpiFilter(kpiFilter === 'in_progress' ? null : 'in_progress')
+              setAdminTab('unprocessed')
+              setStatusFilter('')
+            }}
+            className={`rounded-xl border bg-white p-5 shadow-xs flex items-center justify-between cursor-pointer transition-all hover:shadow-md hover:border-blue-300 select-none ${
+              kpiFilter === 'in_progress'
+                ? 'border-blue-600 ring-2 ring-blue-600/20 bg-blue-50/30'
+                : 'border-[hsl(var(--border))]'
+            }`}
+            title="Click để lọc đơn Đang Thực Hiện"
+          >
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Đang Thực Hiện</p>
+              <h3 className="text-2xl font-bold font-mono text-blue-600 mt-1">{inProgressCount}</h3>
+            </div>
+            <div className="p-3 bg-blue-50 text-blue-600 rounded-xl">
+              <Layers className="h-6 w-6" />
+            </div>
+          </div>
+
+          <div
+            onClick={() => {
+              setKpiFilter(kpiFilter === 'done' ? null : 'done')
+              setAdminTab('processed')
+              setStatusFilter('')
+            }}
+            className={`rounded-xl border bg-white p-5 shadow-xs flex items-center justify-between cursor-pointer transition-all hover:shadow-md hover:border-emerald-300 select-none ${
+              adminTab === 'processed' || kpiFilter === 'done'
+                ? 'border-emerald-500 ring-2 ring-emerald-500/20 bg-emerald-50/30'
+                : 'border-[hsl(var(--border))]'
+            }`}
+            title="Click để lọc đơn Đã Hoàn Thành"
+          >
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Đã Hoàn Thành / Claim</p>
+              <h3 className="text-2xl font-bold font-mono text-emerald-600 mt-1">{doneCount}</h3>
+            </div>
+            <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl">
+              <CheckCircle2 className="h-6 w-6" />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Admin Logic Sub-Tabs (Đơn Chưa Xử Lý vs Đơn Đã Xử Lý) */}
+      {isAdmin && (
+        <div className="bg-white p-2 rounded-2xl border border-slate-200 shadow-2xs flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="flex items-center gap-2 overflow-x-auto w-full sm:w-auto">
+            <button
+              type="button"
+              onClick={() => {
+                setAdminTab('unprocessed')
+                setKpiFilter(null)
+              }}
+              className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
+                adminTab === 'unprocessed' && !kpiFilter
+                  ? 'bg-[#0052CC] text-white border-[#0052CC] shadow-2xs'
+                  : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+              }`}
+            >
+              <Clock className="h-3.5 w-3.5" />
+              <span>Đơn Chưa Xử Lý (Cần Làm / Đang Làm / Chờ Duyệt)</span>
+              <span
+                className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                  adminTab === 'unprocessed' && !kpiFilter ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-800'
+                }`}
+              >
+                {unprocessedOrders.length}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setAdminTab('processed')
+                setKpiFilter(null)
+              }}
+              className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
+                adminTab === 'processed' && !kpiFilter
+                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
+                  : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+              }`}
+            >
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              <span>Đơn Đã Xử Lý (Hoàn Thành / Claimed)</span>
+              <span
+                className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                  adminTab === 'processed' && !kpiFilter ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-800'
+                }`}
+              >
+                {processedOrders.length}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setAdminTab('all')
+                setKpiFilter(null)
+              }}
+              className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
+                adminTab === 'all' && !kpiFilter
+                  ? 'bg-slate-800 text-white border-slate-800 shadow-2xs'
+                  : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+              }`}
+            >
+              <Package className="h-3.5 w-3.5" />
+              <span>Tất Cả Đơn Hàng</span>
+              <span
+                className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                  adminTab === 'all' && !kpiFilter ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+                }`}
+              >
+                {orders.length}
+              </span>
+            </button>
+          </div>
         </div>
       )}
 
@@ -542,51 +750,6 @@ export function OrdersListPage() {
             <RefreshCw className={`h-3.5 w-3.5 text-purple-600 ${syncingPrinterval ? 'animate-spin' : ''}`} />
             <span>{syncingPrinterval ? 'Đang đồng bộ...' : 'Làm Mới Từ Printerval'}</span>
           </button>
-        </div>
-      )}
-
-      {/* KPI Summary Cards Grid (For Admin) */}
-      {isAdmin && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="rounded-xl border border-[hsl(var(--border))] bg-white p-5 shadow-xs flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Tổng Đơn Hàng</p>
-              <h3 className="text-2xl font-bold font-mono text-slate-800 mt-1">{totalCount}</h3>
-            </div>
-            <div className="p-3 bg-blue-50 text-blue-600 rounded-xl">
-              <Package className="h-6 w-6" />
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-[hsl(var(--border))] bg-white p-5 shadow-xs flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Mới / Chờ Phân Bổ</p>
-              <h3 className="text-2xl font-bold font-mono text-amber-600 mt-1">{openCount}</h3>
-            </div>
-            <div className="p-3 bg-amber-50 text-amber-600 rounded-xl">
-              <Clock className="h-6 w-6" />
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-[hsl(var(--border))] bg-white p-5 shadow-xs flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Đang Thực Hiện</p>
-              <h3 className="text-2xl font-bold font-mono text-blue-600 mt-1">{inProgressCount}</h3>
-            </div>
-            <div className="p-3 bg-blue-50 text-blue-600 rounded-xl">
-              <Layers className="h-6 w-6" />
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-[hsl(var(--border))] bg-white p-5 shadow-xs flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Đã Hoàn Thành / Claim</p>
-              <h3 className="text-2xl font-bold font-mono text-emerald-600 mt-1">{doneCount}</h3>
-            </div>
-            <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl">
-              <CheckCircle2 className="h-6 w-6" />
-            </div>
-          </div>
         </div>
       )}
 
@@ -796,17 +959,21 @@ export function OrdersListPage() {
                   return (
                     <tr
                       key={o.id}
-                      onClick={() => isNewlyCrawled && dismissHighlight(o.id)}
-                      className={`transition-all duration-300 ${
+                      onClick={() => {
+                        if (isNewlyCrawled) dismissHighlight(o.id)
+                        navigate(`/orders/${o.id}`)
+                      }}
+                      className={`transition-all duration-150 cursor-pointer ${
                         isNewlyCrawled
                           ? 'bg-emerald-50/80 border-l-4 border-l-emerald-500 shadow-xs'
                           : isSelected
                           ? 'bg-blue-50/80 font-medium'
-                          : 'hover:bg-blue-50/40'
+                          : 'hover:bg-blue-50/60'
                       }`}
+                      title="Click vào dòng để xem chi tiết đơn hàng"
                     >
                       {isAdmin && (
-                        <td className="py-2.5 px-3 text-center">
+                        <td className="py-2.5 px-3 text-center" onClick={(e) => e.stopPropagation()}>
                           <input
                             type="checkbox"
                             checked={isSelected}
@@ -816,7 +983,7 @@ export function OrdersListPage() {
                         </td>
                       )}
                       {/* Image Thumbnail with Click-to-Zoom */}
-                      <td className="py-2.5 px-4 text-center">
+                      <td className="py-2.5 px-4 text-center" onClick={(e) => e.stopPropagation()}>
                         {o.thumbnail_url ? (
                           <img
                             src={resolveAssetUrl(o.thumbnail_url)}
@@ -837,7 +1004,10 @@ export function OrdersListPage() {
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <Link
                             to={`/orders/${o.id}`}
-                            onClick={() => isNewlyCrawled && dismissHighlight(o.id)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              if (isNewlyCrawled) dismissHighlight(o.id)
+                            }}
                             className="hover:underline flex items-center gap-1"
                             title={o.product_name || o.external_order_id}
                           >
@@ -855,7 +1025,7 @@ export function OrdersListPage() {
                             {o.product_name}
                           </p>
                         )}
-                        <div className="flex items-center gap-2 mt-1 flex-wrap">
+                        <div className="flex items-center gap-2 mt-1 flex-wrap" onClick={(e) => e.stopPropagation()}>
                           {o.sku_image_url && (
                             <a
                               href={o.sku_image_url}
@@ -907,7 +1077,7 @@ export function OrdersListPage() {
                       </td>
 
                       {/* Interactive Status Dropdown */}
-                      <td className="py-2.5 px-4">
+                      <td className="py-2.5 px-4" onClick={(e) => e.stopPropagation()}>
                         <StatusDropdown
                           orderId={o.id}
                           externalOrderId={o.external_order_id}
@@ -921,7 +1091,7 @@ export function OrdersListPage() {
                       </td>
 
                       {/* DES Đảm Nhận */}
-                      <td className="py-2.5 px-4 font-medium text-slate-700">
+                      <td className="py-2.5 px-4 font-medium text-slate-700" onClick={(e) => e.stopPropagation()}>
                         {o.assigned_designer_name ? (
                           <span
                             onClick={() => isAdmin && setAssigningOrder(o)}
@@ -973,7 +1143,7 @@ export function OrdersListPage() {
                       </td>
 
                       {/* Actions */}
-                      <td className="py-2.5 px-4 text-right">
+                      <td className="py-2.5 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                         <Link
                           to={`/orders/${o.id}`}
                           className="inline-flex items-center gap-1 text-xs font-semibold text-[#0052CC] hover:text-[#003D99] hover:bg-blue-50 px-2.5 py-1 rounded-md transition-colors"
