@@ -1150,6 +1150,10 @@ def api_update_printerval_credentials(
             session_cookie=payload.session_cookie,
         )
     except PlatformCredentialsError as exc:
+        # `ensure_platform_for_account` may have flushed a newly-created platform
+        # before live credential verification. Do not leave that unusable row behind
+        # when verification fails.
+        db.rollback()
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
     return {
