@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { X, ChevronLeft, ChevronRight, Copy, Check, ExternalLink } from 'lucide-react'
+import { X, ChevronLeft, ChevronRight, Copy, Check, ExternalLink, Download } from 'lucide-react'
 import { resolveAssetUrl } from '../api/client'
 
 type ImageModalProps = {
@@ -9,6 +9,7 @@ type ImageModalProps = {
   images?: string[] | null
   initialIndex?: number
   altText?: string
+  hideExternalLink?: boolean
 }
 
 export function ImageModal({
@@ -18,6 +19,7 @@ export function ImageModal({
   images,
   initialIndex = 0,
   altText = 'Xem ảnh phóng to',
+  hideExternalLink = false,
 }: ImageModalProps) {
   // Aggregate images list
   const imageList: string[] = []
@@ -93,34 +95,62 @@ export function ImageModal({
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              onClick={handleCopyLink}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors cursor-pointer text-xs"
-              title="Sao chép link ảnh"
-            >
-              {copied ? (
-                <>
-                  <Check className="h-3.5 w-3.5 text-emerald-400" />
-                  <span className="text-emerald-400 font-medium">Đã chép</span>
-                </>
-              ) : (
-                <>
-                  <Copy className="h-3.5 w-3.5" />
-                  <span>Copy link</span>
-                </>
-              )}
-            </button>
+            {!hideExternalLink && (
+              <>
+                <button
+                  onClick={handleCopyLink}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors cursor-pointer text-xs"
+                  title="Sao chép link ảnh"
+                >
+                  {copied ? (
+                    <>
+                      <Check className="h-3.5 w-3.5 text-emerald-400" />
+                      <span className="text-emerald-400 font-medium">Đã chép</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-3.5 w-3.5" />
+                      <span>Copy link</span>
+                    </>
+                  )}
+                </button>
 
-            <a
-              href={resolvedUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors cursor-pointer text-xs"
-              title="Mở ảnh gốc trong tab mới"
+                <a
+                  href={resolvedUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors cursor-pointer text-xs"
+                  title="Mở ảnh gốc trong tab mới"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  <span>Mở tab mới</span>
+                </a>
+              </>
+            )}
+
+            <button
+              onClick={async () => {
+                try {
+                  const response = await fetch(resolvedUrl)
+                  const blob = await response.blob()
+                  const blobUrl = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = blobUrl
+                  a.download = `image-${currentIndex + 1}.png`
+                  document.body.appendChild(a)
+                  a.click()
+                  a.remove()
+                  URL.revokeObjectURL(blobUrl)
+                } catch {
+                  window.open(resolvedUrl, '_blank', 'noopener,noreferrer')
+                }
+              }}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-blue-600 hover:bg-blue-700 text-white transition-colors cursor-pointer text-xs font-semibold"
+              title="Tải ảnh về máy"
             >
-              <ExternalLink className="h-3.5 w-3.5" />
-              <span>Mở tab mới</span>
-            </a>
+              <Download className="h-3.5 w-3.5" />
+              <span>Tải ảnh</span>
+            </button>
 
             <button
               onClick={onClose}

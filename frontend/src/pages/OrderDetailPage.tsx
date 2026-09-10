@@ -28,7 +28,8 @@ import {
   CheckCircle2,
   ArrowRight,
   Flame,
-  RotateCcw
+  RotateCcw,
+  Image as ImageIcon
 } from 'lucide-react'
 import { AdminFixActionModal } from '../components/AdminFixActionModal'
 
@@ -261,10 +262,11 @@ export function OrderDetailPage() {
         images={
           order.product_image_urls && order.product_image_urls.length > 0
             ? order.product_image_urls
-            : (order.thumbnail_url ? [order.thumbnail_url] : [])
+            : (order.thumbnail_url ? [order.thumbnail_url] : (order.sku_image_url ? [order.sku_image_url] : []))
         }
         initialIndex={selectedImageIndex}
         altText={isAdmin ? order.external_order_id : (order.product_name || 'Ảnh sản phẩm')}
+        hideExternalLink={!isAdmin}
       />
 
       {/* Submit & Review Confirmation Modal */}
@@ -472,7 +474,7 @@ export function OrderDetailPage() {
                     <span>DES: {order.assigned_designer_name}</span>
                   </span>
                 )}
-                {order.printerval_designer && (
+                {isAdmin && order.printerval_designer && (
                   <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-violet-50 text-violet-700 text-xs font-semibold border border-violet-100">
                     <User className="h-3.5 w-3.5" />
                     <span>
@@ -486,21 +488,27 @@ export function OrderDetailPage() {
                 <p className="text-sm font-semibold text-slate-800 mt-1">{order.product_name ?? 'Đơn hàng 2D Custom'}</p>
               )}
               <div className="flex flex-wrap items-center gap-4 mt-2 text-xs text-slate-500 font-mono">
-                <span>SKU: <strong className="text-slate-700">{order.sku ?? '-'}</strong></span>
-                <span>•</span>
+                {isAdmin && (
+                  <>
+                    <span>SKU: <strong className="text-slate-700">{order.sku ?? '-'}</strong></span>
+                    <span>•</span>
+                  </>
+                )}
                 <span>Category: <strong className="text-slate-700">{order.product_category ?? '-'}</strong></span>
                 {order.sku_image_url && (
                   <>
                     <span>•</span>
-                    <a
-                      href={order.sku_image_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="font-bold text-[#0052CC] hover:underline flex items-center gap-1"
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedImageIndex(0)
+                        setShowImageModal(true)
+                      }}
+                      className="font-bold text-[#0052CC] hover:underline flex items-center gap-1 cursor-pointer"
                     >
-                      <span>Image</span>
-                      <ExternalLink className="h-3 w-3" />
-                    </a>
+                      <ImageIcon className="h-3 w-3" />
+                      <span>Xem ảnh mẫu</span>
+                    </button>
                   </>
                 )}
                 {isAdmin && order.external_order_url && (
@@ -523,18 +531,20 @@ export function OrderDetailPage() {
 
           <div className="flex flex-wrap items-center gap-3 shrink-0">
             {order.sku_image_url && (
-              <a
-                href={order.sku_image_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-[#0052CC] bg-blue-50 hover:bg-blue-100 rounded-xl transition-colors border border-blue-200"
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedImageIndex(0)
+                  setShowImageModal(true)
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-[#0052CC] bg-blue-50 hover:bg-blue-100 rounded-xl transition-colors border border-blue-200 cursor-pointer"
               >
-                <span>Image Link</span>
-                <ExternalLink className="h-3.5 w-3.5" />
-              </a>
+                <ImageIcon className="h-3.5 w-3.5" />
+                <span>Xem ảnh mẫu</span>
+              </button>
             )}
 
-            {order.external_order_url && (
+            {isAdmin && order.external_order_url && (
               <a
                 href={order.external_order_url}
                 target="_blank"
@@ -546,7 +556,7 @@ export function OrderDetailPage() {
               </a>
             )}
 
-            {order.design_tool_url && (
+            {isAdmin && order.design_tool_url && (
               <a
                 href={order.design_tool_url}
                 target="_blank"
@@ -574,7 +584,7 @@ export function OrderDetailPage() {
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div className="font-bold flex items-center gap-1.5 text-orange-900">
                     <Flame className="h-4 w-4 text-orange-600" />
-                    <span>Yêu Cầu Sửa Bài (QC Printerval):</span>
+                    <span>Yêu Cầu Sửa Bài (QC):</span>
                     {order.fix_approved_by_admin ? (
                       <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800">
                         Admin đã duyệt gửi Designer sửa
@@ -642,7 +652,7 @@ export function OrderDetailPage() {
                   onClick={() => handleUpdateState('IN_PROGRESS')}
                 >
                   <span className={`h-2 w-2 rounded-full ${isDoing ? 'bg-white' : 'bg-blue-500'}`} />
-                  <span>Doing (Đang làm)</span>
+                  <span>Đang làm</span>
                 </button>
 
                 {/* 2. REVIEW Button */}
@@ -657,7 +667,7 @@ export function OrderDetailPage() {
                   onClick={() => handleUpdateState('QC_PENDING')}
                 >
                   <span className={`h-2 w-2 rounded-full ${isReview ? 'bg-white' : 'bg-purple-500'}`} />
-                  <span>Review (Chờ duyệt)</span>
+                  <span>Chờ duyệt</span>
                 </button>
 
                 {/* If Admin, show Fix and Done buttons as well */}
@@ -786,7 +796,7 @@ export function OrderDetailPage() {
         {/* Specifications Grid */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
           <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-            <span className="text-slate-400 font-semibold block uppercase text-[10px]">Deadline Printerval</span>
+            <span className="text-slate-400 font-semibold block uppercase text-[10px]">Thời Hạn (Deadline)</span>
             <p className="font-mono font-semibold text-slate-700 flex items-center gap-1">
               <Clock className="h-3.5 w-3.5 text-amber-600" />
               <span>{order.deadline_at_ext ? new Date(order.deadline_at_ext).toLocaleString('vi-VN') : '-'}</span>
@@ -838,6 +848,7 @@ export function OrderDetailPage() {
           fallbackSku={order.sku}
           fallbackCategory={order.product_category}
           fallbackVariants={order.product_variants}
+          isAdmin={isAdmin}
         />
 
         {order.product_image_urls && order.product_image_urls.length > 0 && (
@@ -855,6 +866,7 @@ export function OrderDetailPage() {
         <SourceFilesCard
           sourceFiles={order.source_files}
           downloadAllUrl={order.source_download_all_url}
+          isAdmin={isAdmin}
         />
 
         {/* Workflow History Audit Table */}
