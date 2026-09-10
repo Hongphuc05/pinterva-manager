@@ -56,6 +56,7 @@ describe('OrderDetailPage', () => {
       </AuthProvider>
     )
     await waitFor(() => expect(screen.getByText(/Test Mug/)).toBeInTheDocument())
-    expect(screen.getAllByText(/SKU1/).length).toBeGreaterThan(0)
+    expect(screen.getByText(/Mẫu Hàng Thiết Kế/)).toBeInTheDocument()
+    expect(screen.getAllByText(/1 mẫu hàng/).length).toBeGreaterThan(0)
   })
 })
