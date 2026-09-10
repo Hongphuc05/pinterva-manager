@@ -29,7 +29,8 @@ import {
   ArrowRight,
   Flame,
   RotateCcw,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Flag
 } from 'lucide-react'
 import { AdminFixActionModal } from '../components/AdminFixActionModal'
 
@@ -114,6 +115,7 @@ export function OrderDetailPage() {
   const [actionSuccess, setActionSuccess] = useState<string | null>(null)
   const [designerNoteInput, setDesignerNoteInput] = useState('')
   const [savingDesignerNote, setSavingDesignerNote] = useState(false)
+  const [flaggingMissingTemplate, setFlaggingMissingTemplate] = useState(false)
   const [fixActionModal, setFixActionModal] = useState<{
     isOpen: boolean
     mode: 'approve' | 'reject'
@@ -155,6 +157,25 @@ export function OrderDetailPage() {
       setActionError(caught instanceof ApiError ? caught.message : 'Không thể cập nhật ghi chú.')
     } finally {
       setSavingDesignerNote(false)
+    }
+  }
+
+  async function flagMissingTemplate() {
+    if (!order?.assignment_id) return
+    setFlaggingMissingTemplate(true)
+    setActionError(null)
+    try {
+      await apiFetch(`/assignments/${order.assignment_id}/flag-missing-template`, {
+        method: 'POST',
+        body: JSON.stringify({ request_id: crypto.randomUUID() }),
+      })
+      setActionSuccess('Đã báo thiếu temp. Đơn được chuyển sang mục Chờ cập nhật.')
+      await loadOrderDetail()
+      window.dispatchEvent(new CustomEvent('orders-updated'))
+    } catch (caught) {
+      setActionError(caught instanceof ApiError ? caught.message : 'Không thể báo thiếu temp.')
+    } finally {
+      setFlaggingMissingTemplate(false)
     }
   }
 
@@ -727,6 +748,24 @@ export function OrderDetailPage() {
                   </>
                 )}
               </div>
+              {!isAdmin && order.assignment_id && (
+                order.template_missing ? (
+                  <span className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-700">
+                    <Flag className="h-3.5 w-3.5" /> Đang chờ cập nhật temp
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={flagMissingTemplate}
+                    disabled={busyAssignment || flaggingMissingTemplate || isDone}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    title="Báo Admin rằng đơn này thiếu temp"
+                  >
+                    {flaggingMissingTemplate ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Flag className="h-3.5 w-3.5" />}
+                    {flaggingMissingTemplate ? 'Đang báo…' : 'Báo thiếu temp'}
+                  </button>
+                )
+              )}
             </div>
 
             {/* Submit Drive Link Form */}
