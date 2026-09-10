@@ -584,8 +584,12 @@ export function OrdersListPage() {
       return true
     })
     .sort((a, b) => {
-      const aTime = a[dateSort.field] ? new Date(a[dateSort.field]!).getTime() : 0
-      const bTime = b[dateSort.field] ? new Date(b[dateSort.field]!).getTime() : 0
+      const aValue = a[dateSort.field]
+      const bValue = b[dateSort.field]
+      if (!aValue) return bValue ? 1 : 0
+      if (!bValue) return -1
+      const aTime = new Date(aValue).getTime()
+      const bTime = new Date(bValue).getTime()
       return dateSort.direction === 'desc' ? bTime - aTime : aTime - bTime
     })
 

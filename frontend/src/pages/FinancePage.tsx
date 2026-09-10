@@ -285,7 +285,7 @@ export function FinancePage() {
                       className={`transition-colors hover:bg-blue-50/40 ${isFiltered ? 'bg-blue-50/80 font-medium' : ''}`}
                     >
                       <td className="py-3 px-4 font-semibold text-slate-800">
-                        <div className="flex items-center gap-2">
+                        <button type="button" onClick={() => { setSelectedDesigner(des.designer_id || des.designer_name); setCurrentPage(1) }} className="flex items-center gap-2 text-left hover:text-[#0052CC]">
                           <div className="w-7 h-7 rounded-full bg-blue-100 text-[#0052CC] font-bold flex items-center justify-center text-xs">
                             {des.designer_name.charAt(0).toUpperCase()}
                           </div>
@@ -293,7 +293,7 @@ export function FinancePage() {
                             <p className="font-semibold text-slate-800">{des.designer_name}</p>
                             {des.username && <p className="text-[10px] text-slate-400 font-normal">@{des.username}</p>}
                           </div>
-                        </div>
+                        </button>
                       </td>
                       <td className="py-3 px-4 text-center">
                         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-blue-50 text-[#0052CC] border border-blue-200">
