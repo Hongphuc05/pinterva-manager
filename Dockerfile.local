@@ -1,0 +1,24 @@
+# Fast local wrapper around the existing backend image. The base already contains
+# Python dependencies and Playwright Chromium; rebuilding local UI/source therefore
+# does not re-download the browser every time.
+ARG BACKEND_BASE_IMAGE=pinterval-ops-backend:dev
+
+FROM node:22-alpine AS frontend-build
+
+WORKDIR /frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend ./
+RUN npm run build
+
+FROM ${BACKEND_BASE_IMAGE}
+
+USER root
+COPY --chown=app:app pyproject.toml /app/pyproject.toml
+COPY --chown=app:app alembic.ini /app/alembic.ini
+COPY --chown=app:app migrations /app/migrations
+COPY --chown=app:app app /app/app
+COPY --chown=app:app --from=frontend-build /frontend/dist /app/frontend/dist
+RUN pip install --no-deps -e /app
+
+USER app

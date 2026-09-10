@@ -5,6 +5,14 @@ Web dashboard nội bộ điều phối order 2D outsource — xem `claude.md` v
 
 ## Chạy local
 
+### Một lệnh Docker đầy đủ
+
+Để chạy web, API, PostgreSQL, Redis, migration và toàn bộ worker bằng Docker,
+xem [docs/LOCAL_DOCKER.md](docs/LOCAL_DOCKER.md). Sau khi khởi động, mở
+`http://localhost:8000`.
+
+### Native development
+
 1. `cp .env.example .env` rồi chỉnh nếu cần.
 2. `docker compose up -d db` — chạy Postgres 16 local.
 3. `pip install -e ".[dev]"`

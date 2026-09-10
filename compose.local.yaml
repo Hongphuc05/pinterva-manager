@@ -1,0 +1,130 @@
+# Complete local runtime. It is intentionally independent from compose.yaml, whose
+# job is production deployment with a remote PostgreSQL database and Vercel SPA.
+#
+# Start everything:
+#   docker compose -f compose.local.yaml up --build -d
+#
+# Open http://localhost:8000 after `api` reports healthy.
+name: tacahu-local
+
+x-backend: &backend
+  build:
+    context: .
+    dockerfile: Dockerfile.local
+    args:
+      BACKEND_BASE_IMAGE: ${LOCAL_BACKEND_BASE_IMAGE:-pinterval-ops-backend:dev}
+  image: pinterval-ops-backend:local
+  restart: unless-stopped
+  environment:
+    DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/pinterval
+    REDIS_URL: redis://redis:6379/0
+    SECRET_KEY: ${TACAHU_LOCAL_SECRET_KEY:-local-development-only-change-this}
+    COOKIE_SECURE: "false"
+    CORS_ORIGINS: http://localhost:8000
+    PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+    PLAYWRIGHT_BROWSER_CHANNEL: ""
+    PLAYWRIGHT_PROFILE_ROOT: /app/chrome-profiles
+    PLAYWRIGHT_EVIDENCE_DIR: /app/playwright-evidence
+  volumes:
+    - tacahu_local_crawled_assets:/app/crawled_assets
+    - tacahu_local_order_assets:/app/order_assets
+    - tacahu_local_platform_data:/app/platform_data
+    - tacahu_local_playwright_evidence:/app/playwright-evidence
+    - tacahu_local_chrome_profiles:/app/chrome-profiles
+  logging:
+    driver: local
+    options:
+      max-size: 20m
+      max-file: "5"
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: pinterval
+    ports:
+      - "127.0.0.1:${LOCAL_POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - tacahu_local_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pinterval"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:${LOCAL_REDIS_PORT:-6379}:6379"
+    volumes:
+      - tacahu_local_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  migrate:
+    <<: *backend
+    restart: "no"
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    <<: *backend
+    ports:
+      - "127.0.0.1:${LOCAL_WEB_PORT:-8000}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+      start_period: 20s
+
+  celery-general:
+    <<: *backend
+    command: ["celery", "-A", "app.workers.celery_app", "worker", "--loglevel=info", "-Q", "celery", "-n", "general@%h"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  celery-assignment:
+    <<: *backend
+    command: ["celery", "-A", "app.workers.celery_app", "worker", "--pool=solo", "--loglevel=info", "-Q", "assignment", "-n", "assignment@%h"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  celery-beat:
+    <<: *backend
+    command: ["celery", "-A", "app.workers.celery_app", "beat", "--loglevel=info"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+volumes:
+  tacahu_local_postgres:
+  tacahu_local_redis:
+  tacahu_local_crawled_assets:
+  tacahu_local_order_assets:
+  tacahu_local_platform_data:
+  tacahu_local_playwright_evidence:
+  tacahu_local_chrome_profiles:
