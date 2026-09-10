@@ -6,7 +6,6 @@ import {
   UserCheck,
   ShieldAlert,
   Users,
-  Radio,
   History,
   Coins
 } from 'lucide-react'
@@ -19,22 +18,39 @@ export function Sidebar() {
 
   const isAdmin = user.role === 'admin'
 
-  const adminNav = [
-    { label: 'Danh Sách Đơn Hàng', path: '/orders', icon: ListOrdered },
-    { label: 'Tiến Độ Designer', path: '/designer-board', icon: UserCheck },
-    { label: 'Tài Chính & Công Lao', path: '/finance', icon: Coins },
-    { label: 'Lịch Sử Tiến Độ', path: '/order-history', icon: History },
-    { label: 'Trạng Thái Đơn', path: '/order-status', icon: Radio },
-    { label: 'Quản Lý Tài Khoản', path: '/users', icon: Users },
+  const adminSections = [
+    {
+      label: 'Vận hành',
+      items: [
+        { label: 'Đơn Hàng', path: '/orders', icon: ListOrdered },
+        { label: 'Tiến Độ Team', path: '/designer-board', icon: UserCheck },
+      ],
+    },
+    {
+      label: 'Báo cáo',
+      items: [
+        { label: 'Tài Chính & Công Lao', path: '/finance', icon: Coins },
+        { label: 'Lịch Sử Tiến Độ', path: '/order-history', icon: History },
+      ],
+    },
+    {
+      label: 'Cài đặt',
+      items: [{ label: 'Quản Lý Tài Khoản', path: '/users', icon: Users }],
+    },
   ]
 
-  const designerNav = [
-    { label: 'My Tasks', path: '/orders', icon: ListOrdered },
-    { label: 'Tài Chính Của Tôi', path: '/finance', icon: Coins },
-    { label: 'Lịch Sử Của Tôi', path: '/order-history', icon: History },
+  const designerSections = [
+    {
+      label: 'Công việc',
+      items: [
+        { label: 'Nhiệm Vụ Của Tôi', path: '/orders', icon: ListOrdered },
+        { label: 'Lịch Sử Của Tôi', path: '/order-history', icon: History },
+        { label: 'Tài Chính Của Tôi', path: '/finance', icon: Coins },
+      ],
+    },
   ]
 
-  const navItems = isAdmin ? adminNav : designerNav
+  const navSections = isAdmin ? adminSections : designerSections
 
   return (
     <aside className="w-64 bg-[#0052CC] text-white flex flex-col fixed lg:sticky top-0 h-screen z-50 shadow-lg select-none">
@@ -51,27 +67,33 @@ export function Sidebar() {
 
       {/* Navigation Items */}
       <div className="flex-1 py-6 px-3 space-y-1 overflow-y-auto">
-        <div className="px-3 pb-2 text-[11px] font-semibold text-blue-200/60 uppercase tracking-wider">
-          Điều Hành Hệ Thống
-        </div>
-        {navItems.map((item) => {
-          const Icon = item.icon
-          const isActive = location.pathname === item.path || (item.path !== '/orders' && location.pathname.startsWith(item.path))
-          return (
-            <Link
-              key={item.path}
-              to={item.path}
-              className={`flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm transition-all duration-150 ${
-                isActive
-                  ? 'bg-white/20 text-white font-semibold shadow-sm backdrop-blur-sm'
-                  : 'text-blue-100/80 hover:bg-white/10 hover:text-white'
-              }`}
-            >
-              <Icon className={`h-4 w-4 ${isActive ? 'text-white' : 'text-blue-200/80'}`} />
-              <span>{item.label}</span>
-            </Link>
-          )
-        })}
+        {navSections.map((section) => (
+          <section key={section.label} className="mb-5 last:mb-0">
+            <div className="px-3 pb-2 text-[11px] font-semibold text-blue-200/60 uppercase tracking-wider">
+              {section.label}
+            </div>
+            <div className="space-y-1">
+              {section.items.map((item) => {
+                const Icon = item.icon
+                const isActive = location.pathname === item.path || (item.path !== '/orders' && location.pathname.startsWith(item.path))
+                return (
+                  <Link
+                    key={item.path}
+                    to={item.path}
+                    className={`flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm transition-all duration-150 ${
+                      isActive
+                        ? 'bg-white/20 text-white font-semibold shadow-sm backdrop-blur-sm'
+                        : 'text-blue-100/80 hover:bg-white/10 hover:text-white'
+                    }`}
+                  >
+                    <Icon className={`h-4 w-4 ${isActive ? 'text-white' : 'text-blue-200/80'}`} />
+                    <span>{item.label}</span>
+                  </Link>
+                )
+              })}
+            </div>
+          </section>
+        ))}
       </div>
 
       {/* User Info Footer */}
