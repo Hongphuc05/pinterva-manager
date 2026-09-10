@@ -6,7 +6,6 @@ import { LoginPage } from './pages/LoginPage'
 import { OrdersListPage } from './pages/OrdersListPage'
 import { OrderStatusPage } from './pages/OrderStatusPage'
 import { OrderDetailPage } from './pages/OrderDetailPage'
-import { PrintervalLoginPage } from './pages/PrintervalLoginPage'
 import { UsersPage } from './pages/UsersPage'
 import { DesignerBoardPage } from './pages/DesignerBoardPage'
 import { OrderHistoryPage } from './pages/OrderHistoryPage'
@@ -77,11 +76,7 @@ function App() {
           />
           <Route
             path="/printerval-login"
-            element={
-              <ProtectedRoute>
-                <PrintervalLoginPage />
-              </ProtectedRoute>
-            }
+            element={<Navigate to="/orders" replace />}
           />
           <Route
             path="/my-tasks"

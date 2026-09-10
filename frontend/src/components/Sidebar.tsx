@@ -2,7 +2,6 @@ import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import {
   ListOrdered,
-  Globe,
   PackageCheck,
   UserCheck,
   ShieldAlert,
@@ -27,7 +26,6 @@ export function Sidebar() {
     { label: 'Lịch Sử Tiến Độ', path: '/order-history', icon: History },
     { label: 'Trạng Thái Đơn', path: '/order-status', icon: Radio },
     { label: 'Quản Lý Tài Khoản', path: '/users', icon: Users },
-    { label: 'Đăng Nhập Printerval', path: '/printerval-login', icon: Globe },
   ]
 
   const designerNav = [
