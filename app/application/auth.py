@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import bcrypt
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from sqlalchemy.orm import Session
 
 from app.config import get_settings
 
@@ -33,8 +34,9 @@ def read_session_token(token: str) -> dict | None:
 
 def ensure_seed_users(db: Session) -> None:
     """Ensure seed users exist in DB."""
-    from app.adapters.db.models import User
     from sqlalchemy.exc import IntegrityError
+
+    from app.adapters.db.models import User
 
     admin_user = db.query(User).filter_by(username="admin").first()
     if admin_user is None:

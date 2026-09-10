@@ -1,8 +1,7 @@
 import json
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import httpx
-import pytest
 
 from app.adapters.printerval.gallery_scraper import (
     extract_gallery_images_from_html,
@@ -11,7 +10,6 @@ from app.adapters.printerval.gallery_scraper import (
 from app.adapters.printerval.row_mapper import (
     extract_product_sales_url,
     fetch_product_gallery_images,
-    parse_order_detail_from_row,
 )
 
 

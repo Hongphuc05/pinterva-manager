@@ -5,8 +5,8 @@ Revises: 7a8b9c0d1e2f
 Create Date: 2026-09-08 19:05:00.000000
 
 """
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = '9c0d1e2f3a4b'

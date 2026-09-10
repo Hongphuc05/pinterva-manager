@@ -47,9 +47,4 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
-
-[tool.ruff.lint.per-file-ignores]
-# Alembic autogenerates one `sa.Column(...)` per line and cannot wrap them; a
-# timestamptz column declaration alone exceeds 100 chars. Hand-wrapping generated
-# output would just regress on the next `alembic revision --autogenerate`.
-"migrations/versions/*" = ["E501"]
+ignore = ["E501"]

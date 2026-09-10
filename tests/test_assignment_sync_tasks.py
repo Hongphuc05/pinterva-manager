@@ -99,7 +99,7 @@ def test_sync_printerval_assignment_request_returns_quietly_when_request_missing
 
 def test_sync_printerval_assignment_request_fails_fast_when_platform_has_no_credentials(monkeypatch):
     request_id, platform_id = uuid.uuid4(), uuid.uuid4()
-    from app.adapters.db.models import Platform, PrintervalAssignmentRequest
+    from app.adapters.db.models import Platform
 
     request = _FakePrintervalAssignmentRequest(request_id, platform_id)
     platform = Platform(id=platform_id, account_username="acc@printerval.com", account_password=None)

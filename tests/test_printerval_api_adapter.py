@@ -1,7 +1,5 @@
 import httpx
-import pytest
 
-from app.adapters.errors import ErrorClass
 from app.adapters.printerval.api_adapter import PrintervalApiAdapter
 from app.adapters.printerval.api_client import (
     DESIGNER_OPTIONS_URL,

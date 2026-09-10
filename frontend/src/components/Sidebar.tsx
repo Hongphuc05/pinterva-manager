@@ -2,15 +2,14 @@ import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import {
   ListOrdered,
-  Kanban,
-  Columns3,
   Globe,
   PackageCheck,
   UserCheck,
   ShieldAlert,
   Users,
   Radio,
-  History
+  History,
+  Coins
 } from 'lucide-react'
 
 export function Sidebar() {
@@ -24,9 +23,8 @@ export function Sidebar() {
   const adminNav = [
     { label: 'Danh Sách Đơn Hàng', path: '/orders', icon: ListOrdered },
     { label: 'Tiến Độ Designer', path: '/designer-board', icon: UserCheck },
+    { label: 'Tài Chính & Công Lao', path: '/finance', icon: Coins },
     { label: 'Lịch Sử Tiến Độ', path: '/order-history', icon: History },
-    { label: 'Phân Bổ Kéo-Thả', path: '/allocation', icon: Kanban },
-    { label: 'Bảng Tiến Độ Kanban', path: '/kanban', icon: Columns3 },
     { label: 'Trạng Thái Đơn', path: '/order-status', icon: Radio },
     { label: 'Quản Lý Tài Khoản', path: '/users', icon: Users },
     { label: 'Đăng Nhập Printerval', path: '/printerval-login', icon: Globe },
@@ -34,6 +32,7 @@ export function Sidebar() {
 
   const designerNav = [
     { label: 'My Tasks', path: '/orders', icon: ListOrdered },
+    { label: 'Tài Chính Của Tôi', path: '/finance', icon: Coins },
     { label: 'Lịch Sử Của Tôi', path: '/order-history', icon: History },
   ]
 

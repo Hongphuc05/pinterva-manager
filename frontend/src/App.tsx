@@ -7,12 +7,10 @@ import { OrdersListPage } from './pages/OrdersListPage'
 import { OrderStatusPage } from './pages/OrderStatusPage'
 import { OrderDetailPage } from './pages/OrderDetailPage'
 import { PrintervalLoginPage } from './pages/PrintervalLoginPage'
-import { AllocationBoardPage } from './pages/AllocationBoardPage'
-import { KanbanPage } from './pages/KanbanPage'
 import { UsersPage } from './pages/UsersPage'
-
 import { DesignerBoardPage } from './pages/DesignerBoardPage'
 import { OrderHistoryPage } from './pages/OrderHistoryPage'
+import { FinancePage } from './pages/FinancePage'
 
 function App() {
   return (
@@ -38,26 +36,10 @@ function App() {
             }
           />
           <Route
-            path="/users"
+            path="/finance"
             element={
               <ProtectedRoute>
-                <UsersPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/printerval-login"
-            element={
-              <ProtectedRoute>
-                <PrintervalLoginPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/allocation"
-            element={
-              <ProtectedRoute>
-                <AllocationBoardPage />
+                <FinancePage />
               </ProtectedRoute>
             }
           />
@@ -78,11 +60,41 @@ function App() {
             }
           />
           <Route
+            path="/order-status"
+            element={
+              <ProtectedRoute>
+                <OrderStatusPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/users"
+            element={
+              <ProtectedRoute>
+                <UsersPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/printerval-login"
+            element={
+              <ProtectedRoute>
+                <PrintervalLoginPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/my-tasks"
             element={<Navigate to="/orders" replace />}
           />
-          <Route path="/kanban" element={<ProtectedRoute><KanbanPage /></ProtectedRoute>} />
-          <Route path="/order-status" element={<ProtectedRoute><OrderStatusPage /></ProtectedRoute>} />
+          <Route
+            path="/allocation"
+            element={<Navigate to="/orders" replace />}
+          />
+          <Route
+            path="/kanban"
+            element={<Navigate to="/orders" replace />}
+          />
           <Route path="/" element={<Navigate to="/orders" replace />} />
         </Routes>
         </PlatformProvider>

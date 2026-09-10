@@ -17,6 +17,7 @@ const RUNNING_POLL_MS = 3000
  * moment it stops. Shared by Topbar (icon) and OrderStatusPage (table + button). */
 export function useSyncStatus() {
   const [status, setStatus] = useState<SyncStatus | null>(null)
+  const [isTriggering, setIsTriggering] = useState(false)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const mountedRef = useRef(true)
 
@@ -44,11 +45,28 @@ export function useSyncStatus() {
   }, [poll])
 
   const triggerRun = useCallback(async () => {
-    const res = await apiFetch<SyncStatus>('/orders/sync-status/run', { method: 'POST' })
-    setStatus(res)
-    if (timerRef.current) clearTimeout(timerRef.current)
-    timerRef.current = setTimeout(poll, RUNNING_POLL_MS)
+    setIsTriggering(true)
+    try {
+      const res = await apiFetch<SyncStatus>('/orders/sync-status/run', { method: 'POST' })
+      setStatus(res)
+      if (timerRef.current) clearTimeout(timerRef.current)
+      timerRef.current = setTimeout(poll, RUNNING_POLL_MS)
+    } catch (err) {
+      console.error('Failed to trigger sync:', err)
+      throw err
+    } finally {
+      setIsTriggering(false)
+    }
   }, [poll])
 
-  return { status, triggerRun }
+  const forceReset = useCallback(async () => {
+    try {
+      const res = await apiFetch<SyncStatus>('/orders/sync-status/reset', { method: 'POST' })
+      setStatus(res)
+    } catch (err) {
+      console.error('Failed to reset sync lock:', err)
+    }
+  }, [])
+
+  return { status, triggerRun, isTriggering, forceReset }
 }

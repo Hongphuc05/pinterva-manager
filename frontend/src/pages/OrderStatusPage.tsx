@@ -40,7 +40,7 @@ export function OrderStatusPage() {
   const isAdmin = user?.role === 'admin'
   const [orders, setOrders] = useState<OrderRow[]>([])
   const [error, setError] = useState<string | null>(null)
-  const { status, triggerRun } = useSyncStatus()
+  const { status, triggerRun, isTriggering, forceReset } = useSyncStatus()
 
   const [usersList, setUsersList] = useState<UserOption[]>([])
   const [printervalDesigners, setPrintervalDesigners] = useState<string[]>([])
@@ -294,14 +294,33 @@ export function OrderStatusPage() {
             )}
           </p>
         </div>
-        <button
-          onClick={triggerRun}
-          disabled={!!status?.is_running}
-          className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-white bg-[#0052CC] hover:bg-[#0041A3] rounded-xl disabled:opacity-60 cursor-pointer shadow-2xs"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${status?.is_running ? 'animate-spin' : ''}`} />
-          {status?.is_running ? 'Đang đồng bộ...' : 'Đồng bộ ngay'}
-        </button>
+        <div className="flex items-center gap-2">
+          {status?.is_running && (
+            <button
+              type="button"
+              onClick={forceReset}
+              className="text-[11px] text-slate-500 hover:text-red-600 underline font-medium cursor-pointer"
+              title="Nhấn vào đây nếu tác vụ đồng bộ bị kẹt"
+            >
+              Hủy kẹt đồng bộ
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                await triggerRun()
+              } catch (err: any) {
+                setError(err?.message || 'Lỗi khi kích hoạt đồng bộ.')
+              }
+            }}
+            disabled={isTriggering || !!status?.is_running}
+            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-white bg-[#0052CC] hover:bg-[#0041A3] rounded-xl disabled:opacity-60 cursor-pointer shadow-2xs transition-all"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${status?.is_running || isTriggering ? 'animate-spin' : ''}`} />
+            {status?.is_running || isTriggering ? 'Đang đồng bộ...' : 'Đồng bộ ngay'}
+          </button>
+        </div>
       </div>
 
       {error && (

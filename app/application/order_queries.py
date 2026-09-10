@@ -59,7 +59,7 @@ def list_orders_for_user(
             query = query.filter(
                 or_(
                     Order.state.in_(["WAITING", "ASSIGNED"]),
-                    (Order.state.in_(["REVISION", "FIX"]) & (Order.fix_approved_by_admin == True)),
+                    (Order.state.in_(["REVISION", "FIX"]) & (Order.fix_approved_by_admin.is_(True))),
                 )
             )
         else:

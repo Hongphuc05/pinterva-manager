@@ -1,9 +1,6 @@
-from pathlib import Path
 import httpx
-import pytest
 
 from app.adapters.printerval.image_helper import (
-    download_and_save_image,
     extract_image_url_from_dict_or_html,
     normalize_image_url,
 )
@@ -46,9 +43,6 @@ def test_download_and_save_image(tmp_path):
 
     httpx_client = httpx.Client(transport=httpx.MockTransport(handler))
 
-    # Monkeypatch httpx.Client to use our mock transport
-    original_init = httpx.Client.__init__
-    
     local_dir = tmp_path / "crawled_assets"
     
     # Direct test using httpx MockTransport

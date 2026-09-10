@@ -1,8 +1,8 @@
+
 import pytest
-import uuid
 from fastapi.testclient import TestClient
 
-from app.adapters.db.models import User, Order
+from app.adapters.db.models import User
 from app.api.deps import get_db
 from app.api.main import create_app
 from app.application.auth import hash_password

@@ -1,7 +1,6 @@
 import os
 
 import pytest
-import uuid
 from fastapi.testclient import TestClient
 
 from app.adapters.db.models import Order, Platform, PlatformSyncState, User
@@ -178,8 +177,8 @@ def test_printerval_credentials_rejects_a_login_that_fails_against_the_real_site
     """Regression test: a wrong password used to save silently — nothing verified it
     could actually log in — and only surfaced as a mysterious "crawl thất bại" during
     an unrelated crawl attempt much later."""
-    from app.adapters.printerval.api_client import PrintervalApiClient, PrintervalApiError
     from app.adapters.errors import ErrorClass
+    from app.adapters.printerval.api_client import PrintervalApiClient, PrintervalApiError
 
     def _fail_login(self):
         raise PrintervalApiError(ErrorClass.AUTH, "Printerval did not accept the supplied login")
@@ -201,8 +200,8 @@ def test_printerval_credentials_rejects_a_login_that_fails_against_the_real_site
 def test_printerval_credentials_rejects_a_team_outsource_the_find_endpoint_errors_on(
     client, db_session, monkeypatch
 ):
-    from app.adapters.printerval.api_client import PrintervalApiClient, PrintervalApiError
     from app.adapters.errors import ErrorClass
+    from app.adapters.printerval.api_client import PrintervalApiClient, PrintervalApiError
 
     monkeypatch.setattr(PrintervalApiClient, "login", lambda self: None)
     monkeypatch.setattr(PrintervalApiClient, "close", lambda self: None)

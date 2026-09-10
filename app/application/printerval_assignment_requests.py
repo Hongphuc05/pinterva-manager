@@ -7,7 +7,13 @@ from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
-from app.adapters.db.models import ExternalObservation, Order, Platform, PrintervalAssignmentRequest, User
+from app.adapters.db.models import (
+    ExternalObservation,
+    Order,
+    Platform,
+    PrintervalAssignmentRequest,
+    User,
+)
 from app.adapters.playwright_support import with_retry
 from app.adapters.printerval.interface import PrintervalAdapter
 from app.application.operations import run_idempotent

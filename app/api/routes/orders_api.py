@@ -401,6 +401,19 @@ def api_orders_sync_status(
     state = db.get(PlatformSyncState, platform_id)
     if state is None:
         return SyncStatusResponse(is_running=False)
+
+    # Automatically recover if is_running was stuck for > 3 minutes (180s)
+    if state.is_running and state.last_started_at:
+        now = datetime.now(UTC)
+        started_at = state.last_started_at
+        if started_at.tzinfo is None:
+            started_at = started_at.replace(tzinfo=UTC)
+        if (now - started_at).total_seconds() > 180:
+            state.is_running = False
+            state.last_finished_at = now
+            state.last_error = "Đã tự động khôi phục do tác vụ đồng bộ quá thời gian (timeout)."
+            db.commit()
+
     return SyncStatusResponse.model_validate(state)
 
 
@@ -410,17 +423,59 @@ def api_orders_sync_status_run(
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
-    """Manual "refresh now" — syncs the current platform's order statuses and details
-    immediately, then dispatches background job."""
-    from app.application.status_sync import sync_platform_order_statuses
-    platform = db.get(Platform, platform_id)
-    if platform:
-        sync_platform_order_statuses(db, platform)
+    """Manual "refresh now" — marks platform as running and dispatches background sync non-blockingly."""
+    from app.adapters.db.models import PlatformSyncState
 
-    from app.workers.status_sync_tasks import sync_order_statuses
+    state = db.get(PlatformSyncState, platform_id)
+    if state is None:
+        state = PlatformSyncState(platform_id=platform_id)
+        db.add(state)
+    state.is_running = True
+    state.last_started_at = datetime.now(UTC)
+    state.last_error = None
+    db.commit()
 
-    sync_order_statuses.delay()
-    return api_orders_sync_status(user=user, platform_id=platform_id, db=db)
+    try:
+        from app.workers.status_sync_tasks import sync_order_statuses
+
+        sync_order_statuses.delay()
+    except Exception:
+        # Fallback if Celery broker is not running: execute in daemon background thread
+        import threading
+
+        from app.adapters.db.session import SessionLocal
+        from app.application.status_sync import sync_all_platforms
+
+        def bg_run():
+            s = SessionLocal()
+            try:
+                sync_all_platforms(s)
+            except Exception:
+                pass
+            finally:
+                s.close()
+
+        threading.Thread(target=bg_run, daemon=True).start()
+
+    return SyncStatusResponse.model_validate(state)
+
+
+@router.post("/orders/sync-status/reset", response_model=SyncStatusResponse)
+def api_orders_sync_status_reset(
+    user: User = Depends(require_role("admin")),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    """Force reset the is_running lock if stuck."""
+    from app.adapters.db.models import PlatformSyncState
+
+    state = db.get(PlatformSyncState, platform_id)
+    if state:
+        state.is_running = False
+        state.last_finished_at = datetime.now(UTC)
+        db.commit()
+        return SyncStatusResponse.model_validate(state)
+    return SyncStatusResponse(is_running=False)
 
 
 class RefreshOrderDetailResponse(BaseModel):
@@ -1513,7 +1568,7 @@ def api_sync_printerval_status(
             query = query.filter(
                 or_(
                     Order.state.in_([OrderState.WAITING.value, "ASSIGNED"]),
-                    (Order.state.in_([OrderState.REVISION.value, "FIX"]) & (Order.fix_approved_by_admin == True)),
+                    (Order.state.in_([OrderState.REVISION.value, "FIX"]) & (Order.fix_approved_by_admin.is_(True))),
                 )
             )
 
@@ -1573,7 +1628,7 @@ def api_designers_workload(
         db.query(User)
         .filter(
             User.role == "designer",
-            User.active == True,
+            User.active.is_(True),
             (User.platform_id == platform_id) | (User.platform_id.is_(None)),
         )
         .order_by(User.full_name)

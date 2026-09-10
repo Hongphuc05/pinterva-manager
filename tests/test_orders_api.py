@@ -117,7 +117,7 @@ def test_api_printerval_login_status_defaults_closed(client, db_session):
 
 
 def test_api_bulk_assign_orders(client, db_session):
-    admin = _login(client, db_session, "admin", "bulk_admin")
+    _login(client, db_session, "admin", "bulk_admin")
     designer = User(
         username="des1", full_name="Linh Designer", role="designer", password_hash="hash"
     )
@@ -313,7 +313,7 @@ def test_api_sync_status_serializes_a_real_sync_state_row(client, db_session, mo
 
 
 def test_api_update_order_state_flow(client, db_session):
-    from app.adapters.db.models import Order, Platform, Assignment
+    from app.adapters.db.models import Assignment, Order, Platform
     from app.api.deps import get_current_platform_id
 
     platform = Platform(name="P1", account_username="acc1@printerval.com")
@@ -328,7 +328,7 @@ def test_api_update_order_state_flow(client, db_session):
     app.dependency_overrides[get_current_platform_id] = lambda: platform.id
 
     # 1. Admin converts OPEN -> DOING
-    admin = _login(client, db_session, "admin", username="admin_flow")
+    _login(client, db_session, "admin", username="admin_flow")
     resp = client.patch(f"/api/orders/{order.id}/state", json={"state": "Doing"})
     assert resp.status_code == 200
     assert resp.json()["state"] == "IN_PROGRESS"
@@ -391,7 +391,8 @@ def test_api_update_order_state_flow(client, db_session):
 
 def test_api_approve_and_reject_fix_flow(client, db_session):
     import uuid
-    from app.adapters.db.models import Assignment, Order, Platform, User
+
+    from app.adapters.db.models import Assignment, Order, Platform
     from app.api.deps import get_current_platform_id
     from app.domain.models import OrderState
 
@@ -408,7 +409,7 @@ def test_api_approve_and_reject_fix_flow(client, db_session):
     app = client.app
     app.dependency_overrides[get_current_platform_id] = lambda: platform.id
 
-    admin = _login(client, db_session, "admin", username="admin_fix_test")
+    _login(client, db_session, "admin", username="admin_fix_test")
     des = _login(client, db_session, "designer", username="des_fix_test")
 
     order = Order(

@@ -1,3 +1,4 @@
+
 from app.adapters.db.models import Assignment, Order, User, WorkflowEvent
 from app.application.auth import hash_password
 from app.application.order_queries import (
@@ -6,9 +7,6 @@ from app.application.order_queries import (
     list_orders_for_user,
 )
 from app.domain.models import OrderState
-
-
-import uuid
 
 
 def _make_user(db_session, role, username):
