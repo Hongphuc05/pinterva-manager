@@ -23,7 +23,8 @@ import {
   Loader2,
   ExternalLink,
   RefreshCw,
-  AlertTriangle
+  AlertTriangle,
+  ArrowDownUp
 } from 'lucide-react'
 
 type OrderSummary = {
@@ -50,6 +51,7 @@ type OrderSummary = {
   note_outsource?: string | null
   previous_note_outsource?: string | null
   fix_approved_by_admin?: boolean
+  template_missing?: boolean
 }
 
 type UserOption = {
@@ -110,7 +112,8 @@ export function OrdersListPage() {
   const [error, setError] = useState<string | null>(null)
   const [activeDesignerTab, setActiveDesignerTab] = useState<'todo' | 'doing' | 'review' | 'all'>('todo')
   const [adminTab, setAdminTab] = useState<'unprocessed' | 'processed' | 'all'>('unprocessed')
-  const [kpiFilter, setKpiFilter] = useState<'all' | 'open' | 'in_progress' | 'done' | null>(null)
+  const [kpiFilter, setKpiFilter] = useState<'all' | 'open' | 'in_progress' | 'done' | 'missing_template' | null>(null)
+  const [dateSort, setDateSort] = useState<{ field: 'order_created_at_ext' | 'created_at'; direction: 'asc' | 'desc' }>({ field: 'created_at', direction: 'desc' })
   const { status: syncStatus, triggerRun, isTriggering } = useSyncStatus()
   const [currentPage, setCurrentPage] = useState(() => {
     const parsed = Number(searchParams.get('page') || '1')
@@ -457,6 +460,7 @@ export function OrdersListPage() {
   const doneCount = orders.filter(
     (o) => ['DONE', 'CLAIMED_IMPORTED', 'COMPLETED'].includes(o.state.toUpperCase())
   ).length
+  const missingTemplateCount = orders.filter((o) => o.template_missing).length
 
   // Printerval status breakdown
   const printervalCounts = useMemo(() => {
@@ -493,6 +497,8 @@ export function OrdersListPage() {
       baseOrders = orders.filter((o) =>
         ['DONE', 'CLAIMED_IMPORTED', 'COMPLETED'].includes(o.state.toUpperCase())
       )
+    } else if (kpiFilter === 'missing_template') {
+      baseOrders = orders.filter((o) => o.template_missing)
     } else if (adminTab === 'unprocessed') {
       baseOrders = unprocessedOrders
     } else if (adminTab === 'processed') {
@@ -577,7 +583,11 @@ export function OrdersListPage() {
 
       return true
     })
-    .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
+    .sort((a, b) => {
+      const aTime = a[dateSort.field] ? new Date(a[dateSort.field]!).getTime() : 0
+      const bTime = b[dateSort.field] ? new Date(b[dateSort.field]!).getTime() : 0
+      return dateSort.direction === 'desc' ? bTime - aTime : aTime - bTime
+    })
 
   // Reset page when filters change
   useEffect(() => {
@@ -585,7 +595,14 @@ export function OrdersListPage() {
     const next = new URLSearchParams(searchParams)
     next.delete('page')
     setSearchParams(next, { replace: true })
-  }, [statusFilter, designerFilter, batchFilter, searchQuery, activeDesignerTab, adminTab, kpiFilter])
+  }, [statusFilter, designerFilter, batchFilter, searchQuery, activeDesignerTab, adminTab, kpiFilter, dateSort])
+
+  function toggleDateSort(field: 'order_created_at_ext' | 'created_at') {
+    setDateSort((current) => ({
+      field,
+      direction: current.field === field && current.direction === 'desc' ? 'asc' : 'desc',
+    }))
+  }
 
   function setOrdersView(view: 'list' | 'sync') {
     const next = new URLSearchParams(searchParams)
@@ -692,7 +709,7 @@ export function OrdersListPage() {
 
       {/* KPI Summary Cards Grid (For Admin) - Interactive Filters */}
       {isAdmin && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4">
           <div
             onClick={() => {
               setKpiFilter(kpiFilter === 'all' ? null : 'all')
@@ -730,6 +747,24 @@ export function OrdersListPage() {
             <div className="p-3 bg-blue-50 text-[#0052CC] rounded-xl shrink-0">
               <Package className="h-6 w-6" />
             </div>
+          </div>
+          <div
+            onClick={() => {
+              setKpiFilter(kpiFilter === 'missing_template' ? null : 'missing_template')
+              setAdminTab('all')
+              setStatusFilter('')
+            }}
+            className={`rounded-xl border bg-white p-4 sm:p-5 shadow-xs flex items-start justify-between cursor-pointer transition-all hover:shadow-md hover:border-rose-300 select-none ${
+              kpiFilter === 'missing_template' ? 'border-rose-500 ring-2 ring-rose-500/20 bg-rose-50/30' : 'border-[hsl(var(--border))]'
+            }`}
+            title="Click để xem các đơn Designer báo thiếu temp"
+          >
+            <div className="flex-1 min-w-0 pr-2">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Thiếu Temp</p>
+              <h3 className="text-2xl font-bold font-mono text-rose-600 mt-1">{missingTemplateCount}</h3>
+              <p className="text-[11px] text-slate-400 mt-0.5">DES đang chờ cập nhật</p>
+            </div>
+            <div className="p-3 bg-rose-50 text-rose-600 rounded-xl shrink-0"><AlertTriangle className="h-6 w-6" /></div>
           </div>
 
           <div
@@ -1167,8 +1202,16 @@ export function OrdersListPage() {
                 <th className="py-3 px-4">{isAdmin ? 'Mã Đơn Hàng' : 'Tên Đơn Hàng'}</th>
                 <th className="py-3 px-4">Trạng Thái</th>
                 <th className="py-3 px-4">DES Đảm Nhận</th>
-                <th className="py-3 px-4">Order At</th>
-                <th className="py-3 px-4">Ngày Tạo</th>
+                <th className="py-3 px-4">
+                  <button type="button" onClick={() => toggleDateSort('order_created_at_ext')} className="inline-flex items-center gap-1 hover:text-[#0052CC]" title="Sắp xếp theo Order at">
+                    Order At <ArrowDownUp className={`h-3.5 w-3.5 ${dateSort.field === 'order_created_at_ext' ? 'text-[#0052CC]' : ''}`} />
+                  </button>
+                </th>
+                <th className="py-3 px-4">
+                  <button type="button" onClick={() => toggleDateSort('created_at')} className="inline-flex items-center gap-1 hover:text-[#0052CC]" title="Sắp xếp theo ngày tạo trong hệ thống">
+                    Ngày Tạo <ArrowDownUp className={`h-3.5 w-3.5 ${dateSort.field === 'created_at' ? 'text-[#0052CC]' : ''}`} />
+                  </button>
+                </th>
                 <th className="py-3 px-4 text-right">Thao Tác</th>
               </tr>
             </thead>
@@ -1268,6 +1311,9 @@ export function OrdersListPage() {
                           <span className="mt-1 inline-flex rounded border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-[10px] font-bold text-violet-700">
                             Đơn trùng lặp
                           </span>
+                        )}
+                        {o.template_missing && (
+                          <span className="mt-1 inline-flex rounded border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700">Thiếu temp</span>
                         )}
                         <div className="flex items-center gap-2 mt-1 flex-wrap" onClick={(e) => e.stopPropagation()}>
                           {o.sku_image_url && (

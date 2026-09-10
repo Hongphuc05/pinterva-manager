@@ -42,6 +42,7 @@ from app.application.order_queries import (
     get_order_history,
     list_orders_for_user,
 )
+from app.application.order_transitions import apply_transition
 from app.application.printerval_assignment_requests import (
     PRINTERVAL_STATUSES,
     PrintervalAssignmentValidationError,
@@ -75,6 +76,8 @@ class OrderSummaryOut(BaseModel):
     note_outsource: str = ""
     previous_note_outsource: str | None = None
     fix_approved_by_admin: bool = False
+    designer_note: str = ""
+    template_missing: bool = False
     sku_image_url: str | None = None
     external_order_url: str | None = None
     source_files: list[dict] | None = None
@@ -196,6 +199,8 @@ class OrderDetailOut(BaseModel):
     note_outsource: str
     previous_note_outsource: str | None = None
     fix_approved_by_admin: bool = False
+    designer_note: str = ""
+    template_missing: bool = False
     order_note: str
     custom_config: dict | None
     product_skus: list[dict] | None = None
@@ -1171,6 +1176,83 @@ class UpdateOrderStateRequest(BaseModel):
     state: str
     drive_url: str | None = None
     note_outsource: str | None = None
+
+
+class DesignerNoteRequest(BaseModel):
+    designer_note: str = ""
+
+
+def _get_order_by_identifier(db: Session, order_id: str) -> Order | None:
+    try:
+        order = db.get(Order, uuid.UUID(order_id))
+    except ValueError:
+        order = None
+    return order or db.query(Order).filter(Order.external_order_id == order_id).first()
+
+
+@router.put("/orders/{order_id}/designer-note")
+def api_update_designer_note(
+    order_id: str,
+    payload: DesignerNoteRequest,
+    user: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    order = _get_order_by_identifier(db, order_id)
+    if order is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
+    order.designer_note = payload.designer_note.strip()
+    db.add(WorkflowEvent(
+        order_id=order.id, from_state=order.state, to_state=order.state, actor_id=user.id,
+        evidence={"action": "UPDATE_DESIGNER_NOTE", "actor_role": "admin", "actor_name": user.full_name or user.username,
+                  "description": "Admin cập nhật ghi chú gửi Designer."},
+    ))
+    db.commit()
+    return {"ok": True, "designer_note": order.designer_note}
+
+
+@router.post("/orders/{order_id}/resolve-missing-template")
+def api_resolve_missing_template(
+    order_id: str,
+    payload: DesignerNoteRequest,
+    user: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    order = _get_order_by_identifier(db, order_id)
+    if order is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
+    if not order.template_missing:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Đơn này không nằm trong danh sách thiếu temp")
+
+    assignment = (
+        db.query(Assignment)
+        .filter(Assignment.order_id == order.id, Assignment.status == "approved")
+        .order_by(Assignment.created_at.desc())
+        .first()
+    )
+    if assignment is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Đơn thiếu assignment đang hoạt động")
+
+    old_state = order.state
+    order.designer_note = payload.designer_note.strip()
+    order.template_missing = False
+    order.template_missing_reported_at = None
+    order.template_missing_reported_by_id = None
+    assignment.sub_status = "todo"
+    if order.state != OrderState.WAITING.value:
+        apply_transition(
+            db, order, OrderState.WAITING, actor_id=user.id,
+            evidence={"action": "RESOLVE_MISSING_TEMPLATE", "actor_role": "admin", "actor_name": user.full_name or user.username,
+                      "description": "Admin đã bổ sung temp/ghi chú và trả đơn về To-do cho Designer."},
+            commit=False,
+        )
+    else:
+        db.add(WorkflowEvent(
+            order_id=order.id, from_state=old_state, to_state=OrderState.WAITING.value, actor_id=user.id,
+            evidence={"action": "RESOLVE_MISSING_TEMPLATE", "actor_role": "admin", "actor_name": user.full_name or user.username,
+                      "description": "Admin đã bổ sung temp/ghi chú và trả đơn về To-do cho Designer."},
+        ))
+    db.commit()
+    return {"ok": True, "state": order.state, "designer_note": order.designer_note}
 
 
 @router.patch("/orders/{order_id}/state")

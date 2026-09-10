@@ -154,6 +154,22 @@ class Order(Base):
     fix_approved_by_admin: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=text("false"), nullable=False
     )
+    # Internal instruction from Admin to the assigned Designer.  This is kept
+    # separate from `note_outsource`, which mirrors Printerval QC feedback.
+    designer_note: Mapped[str] = mapped_column(
+        Text, nullable=False, default="", server_default=text("''")
+    )
+    # A Designer-reported missing template is an internal exception queue.  It
+    # deliberately does not re-introduce template crawling.
+    template_missing: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    template_missing_reported_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    template_missing_reported_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
     order_note: Mapped[str] = mapped_column(
         Text, nullable=False, default="", server_default=text("''")
     )

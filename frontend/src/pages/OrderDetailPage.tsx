@@ -56,6 +56,8 @@ type OrderDetail = {
   note_outsource: string
   previous_note_outsource?: string | null
   fix_approved_by_admin?: boolean
+  designer_note: string
+  template_missing: boolean
   order_note: string
   custom_config: {
     original: { key: string; value: string }[]
@@ -110,6 +112,8 @@ export function OrderDetailPage() {
   const [busyAssignment, setBusyAssignment] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [actionSuccess, setActionSuccess] = useState<string | null>(null)
+  const [designerNoteInput, setDesignerNoteInput] = useState('')
+  const [savingDesignerNote, setSavingDesignerNote] = useState(false)
   const [fixActionModal, setFixActionModal] = useState<{
     isOpen: boolean
     mode: 'approve' | 'reject'
@@ -120,6 +124,7 @@ export function OrderDetailPage() {
     apiFetch<{ order: OrderDetail; history: WorkflowEvent[] }>(`/orders/${id}`)
       .then((data) => {
         setOrder(data.order)
+        setDesignerNoteInput(data.order.designer_note || '')
         setHistory(data.history)
         if (data.order.result_versions && data.order.result_versions.length > 0) {
           const latest = data.order.result_versions[data.order.result_versions.length - 1]
@@ -132,6 +137,25 @@ export function OrderDetailPage() {
       .catch((e) => {
         setStatus(e instanceof ApiError && e.status === 404 ? 'not-found' : 'error')
       })
+  }
+
+  async function saveDesignerNote(resolveMissingTemplate = false) {
+    if (!order) return
+    setSavingDesignerNote(true)
+    setActionError(null)
+    try {
+      await apiFetch(`/orders/${order.id}/${resolveMissingTemplate ? 'resolve-missing-template' : 'designer-note'}`, {
+        method: resolveMissingTemplate ? 'POST' : 'PUT',
+        body: JSON.stringify({ designer_note: designerNoteInput }),
+      })
+      setActionSuccess(resolveMissingTemplate ? 'Đã cập nhật temp và trả đơn về To-do.' : 'Đã gửi ghi chú xuống Designer.')
+      await loadOrderDetail()
+      window.dispatchEvent(new CustomEvent('orders-updated'))
+    } catch (caught) {
+      setActionError(caught instanceof ApiError ? caught.message : 'Không thể cập nhật ghi chú.')
+    } finally {
+      setSavingDesignerNote(false)
+    }
   }
 
   useEffect(() => {
@@ -817,7 +841,7 @@ export function OrderDetailPage() {
         </div>
 
         {/* Notes */}
-        {(order.order_note || order.note_outsource) && (
+        {(order.order_note || order.note_outsource || order.designer_note || isAdmin) && (
           <div className="p-4 rounded-xl bg-blue-50/50 border border-blue-100 text-xs space-y-2">
             <h3 className="font-bold text-slate-800 flex items-center gap-1.5">
               <FileText className="h-4 w-4 text-[#0052CC]" />
@@ -828,6 +852,25 @@ export function OrderDetailPage() {
             )}
             {order.note_outsource && (
               <p className="text-slate-700 font-mono text-[11px] whitespace-pre-wrap"><strong className="text-slate-900">Note Outsource:</strong> {order.note_outsource}</p>
+            )}
+            {order.designer_note && !isAdmin && (
+              <p className="rounded bg-white/70 p-2 text-slate-700 whitespace-pre-wrap"><strong>Ghi chú Admin:</strong> {order.designer_note}</p>
+            )}
+            {isAdmin && (
+              <div className="mt-3 space-y-2 border-t border-blue-100 pt-3">
+                <label className="block font-bold text-slate-700">Ghi chú gửi Designer</label>
+                <textarea value={designerNoteInput} onChange={(e) => setDesignerNoteInput(e.target.value)} rows={3}
+                  placeholder="Nhập hướng dẫn, link temp hoặc yêu cầu cho Designer..."
+                  className="w-full rounded-lg border border-slate-200 bg-white p-2 text-xs focus:border-[#0052CC] focus:outline-none" />
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={() => saveDesignerNote(false)} disabled={savingDesignerNote}
+                    className="rounded-lg bg-[#0052CC] px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50">Lưu ghi chú</button>
+                  {order.template_missing && (
+                    <button type="button" onClick={() => saveDesignerNote(true)} disabled={savingDesignerNote}
+                      className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50">Cập nhật temp & trả To-do</button>
+                  )}
+                </div>
+              </div>
             )}
           </div>
         )}
