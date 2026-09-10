@@ -1,188 +1,158 @@
-# RUNME — Hướng Dẫn Khởi Chạy Tacahu Ops Dashboard (Nhánh `main`)
+# RUNME — chạy Tacahu Ops local bằng Docker
 
-Tài liệu hướng dẫn khởi chạy toàn bộ hệ thống **Tacahu Ops Dashboard** trên nhánh `main`, bao gồm Backend (FastAPI + SQLAlchemy + Postgres), Frontend (React + Vite + TailwindCSS), và Hệ thống Crawl Đơn hàng API-First từ Printerval.
+Hướng dẫn này là cách chạy local chuẩn. Toàn bộ runtime nằm trong Docker; không
+cần chạy `npm run dev`, Uvicorn hay Celery thủ công.
 
----
+> Chỉ dùng các lệnh dưới đây từ thư mục chính
+> `/Users/hongphuc/Documents/01_congViec/pinterval`.
 
-## 1. Cài Đặt Ban Đầu (Setup)
+## 1. Điều kiện ban đầu
 
-### Bước 1: Clone & Chuyển sang nhánh `main`
+- Docker Desktop đang mở và trạng thái là **Running**.
+- Đã có image nền `pinterval-ops-backend:dev` trên Mac. Image này chứa Python,
+  Playwright và Chromium; `compose.local.yaml` chỉ ghép source hiện tại cùng React
+  bundle lên trên image đó để build nhanh.
+
+Kiểm tra Docker:
+
 ```bash
-cd /Users/hongphuc/Documents/01_congViec/pinterval
-git checkout main
+docker info >/dev/null && echo 'Docker đang sẵn sàng'
 ```
 
-### Bước 2: Tạo môi trường Virtualenv & Cài đặt thư viện Python
-```bash
-# Tạo .env từ file mẫu nếu chưa có
-cp -n .env.example .env
+## 2. Khởi động toàn bộ hệ thống
 
-# Tạo Virtual Environment & Activate
-python3.12 -m venv .venv
+Lần đầu, hoặc sau khi sửa source code:
+
+```bash
+cd /Users/hongphuc/Documents/01_congViec/pinterval
+docker compose -f compose.local.yaml up --build -d
+```
+
+Lần sau chỉ cần bật lại các container đã có:
+
+```bash
+cd /Users/hongphuc/Documents/01_congViec/pinterval
+docker compose -f compose.local.yaml up -d
+```
+
+Kiểm tra tất cả service:
+
+```bash
+docker compose -f compose.local.yaml ps
+```
+
+`api` và `db` phải hiện `healthy`. Service `migrate` hiện `Exited (0)` là đúng,
+vì nó chỉ chạy Alembic migration một lần trước khi API và worker được khởi động.
+
+## 3. Các địa chỉ local
+
+| Thành phần | Địa chỉ |
+| --- | --- |
+| Web dashboard | http://localhost:8000 |
+| Swagger API | http://localhost:8000/docs |
+| Health check | http://localhost:8000/api/health |
+| PostgreSQL | `localhost:5432` |
+| Redis | `localhost:6379` |
+
+Mở web tại `http://localhost:8000`. React SPA được build sẵn trong image và FastAPI
+serve cùng một origin, nên không có Vite dev server hay proxy riêng.
+
+Lần login đầu tiên trên database local sẽ seed tài khoản:
+
+```text
+username: admin
+password: admin123
+```
+
+## 4. Docker đang chạy những gì
+
+`compose.local.yaml` tự chạy:
+
+- React SPA đã build trong image local
+- FastAPI API
+- PostgreSQL
+- Redis
+- Alembic migration
+- Celery general worker: crawl, Sync Job và công việc nền chung
+- Celery assignment worker: thao tác phân công/đổi trạng thái Printerval
+- Celery Beat: lập lịch các tác vụ định kỳ
+
+Không chạy thêm Celery/Uvicorn native trên Mac. Chạy song song native worker với
+Docker worker có thể làm một job bị xử lý hai lần.
+
+## 5. Thao tác thường dùng
+
+Xem log API:
+
+```bash
+docker compose -f compose.local.yaml logs -f --tail=100 api
+```
+
+Xem log worker đồng bộ/crawl:
+
+```bash
+docker compose -f compose.local.yaml logs -f --tail=100 celery-general
+```
+
+Xem log worker phân công:
+
+```bash
+docker compose -f compose.local.yaml logs -f --tail=100 celery-assignment
+```
+
+Dừng web mà vẫn giữ database, Redis, browser profile và cache:
+
+```bash
+docker compose -f compose.local.yaml stop
+```
+
+Bật lại sau khi đã dừng:
+
+```bash
+docker compose -f compose.local.yaml start
+```
+
+Sau khi pull code hoặc sửa code, build và recreate các container:
+
+```bash
+docker compose -f compose.local.yaml up --build -d
+```
+
+Không dùng lệnh sau trừ khi chủ động muốn xóa sạch database và toàn bộ runtime data
+local:
+
+```bash
+docker compose -f compose.local.yaml down -v
+```
+
+`docker compose ... down` không kèm `-v` chỉ xóa container/network, vẫn giữ named
+volume chứa PostgreSQL, Redis, source/gallery cache và browser profile.
+
+## 6. Database local và production
+
+PostgreSQL Docker local là database mới, độc lập với database production và PC server
+cũ. Không có dữ liệu đơn hàng production trong đó. Đây là chủ ý để test/crawl local
+không ảnh hưởng vận hành thật.
+
+## 7. Chạy test
+
+Test dùng database riêng `pinterval_test`, không dùng database web local `pinterval`:
+
+```bash
+cd /Users/hongphuc/Documents/01_congViec/pinterval
+docker compose -f compose.local.yaml exec -T db createdb -U postgres pinterval_test || true
 source .venv/bin/activate
-
-# Cài đặt toàn bộ dependencies
-pip install -e ".[dev]"
+PYTHONPATH=. pytest -q
 ```
 
-### Bước 3: Khởi chạy Database (Postgres 16 + Redis) & Migration
-```bash
-# Khởi chạy Docker Postgres & Redis
-docker compose up -d db redis
+Kết quả kiểm chứng gần nhất: **249 passed, 2 deselected**. Frontend production build,
+Python compile, Ruff và Docker Compose validation đều pass.
 
-# Chạy Alembic Migration để cập nhật bảng mới nhất (Bao gồm Multi-Platform & Templates)
-alembic upgrade head
-```
+## 8. Production và local là hai cấu hình khác nhau
 
-### Bước 4: Tạo Tài Khoản Quản Trị Viên (Admin)
-Chạy script tạo sẵn tài khoản Admin và Designer thử nghiệm:
-```bash
-./.venv/bin/python -c "
-from app.adapters.db.session import SessionLocal
-from app.adapters.db.models import User
-from app.application.auth import hash_password
+- `compose.local.yaml`: dùng trên Mac để chạy trọn hệ thống bằng một lệnh.
+- `compose.yaml`: backend production/self-hosted; frontend production có thể vẫn chạy
+  trên Vercel.
 
-db = SessionLocal()
-if not db.query(User).filter_by(username='admin').first():
-    db.add(User(username='admin', full_name='Admin Test', role='admin', password_hash=hash_password('admin123')))
-if not db.query(User).filter_by(username='designer1').first():
-    db.add(User(username='designer1', full_name='Designer Test', role='designer', password_hash=hash_password('designer123')))
-db.commit()
-print('Đã tạo tài khoản: admin/admin123 (Admin), designer1/designer123 (Designer)')
-"
-```
-
----
-
-## 2. Khởi Chạy Web Dashboard
-
-## Deploy: Vercel frontend + backend production
-
-Vercel hiện chỉ host SPA React. Backend FastAPI, PostgreSQL và Redis/Celery phải
-chạy trên một dịch vụ có tiến trình nền riêng (ví dụ Railway, Render hoặc VPS); không
-thể dùng deployment Vercel tĩnh làm API/database.
-
-1. Tạo PostgreSQL production và deploy backend từ thư mục gốc repo. Start command:
-
-   ```bash
-   alembic upgrade head && uvicorn app.api.main:app --host 0.0.0.0 --port $PORT
-   ```
-
-2. Thiết lập biến môi trường ở backend:
-
-   ```text
-   DATABASE_URL=postgresql+psycopg://...
-   SECRET_KEY=<chuỗi-ngẫu-nhiên-dài>
-   COOKIE_SECURE=true
-   CORS_ORIGINS=https://frontend-sigma-one-j64a3yvyi1.vercel.app
-   ```
-
-3. Trong Vercel → Project Settings → Environment Variables, thêm:
-
-   ```text
-   VITE_API_BASE_URL=https://<domain-backend-cua-ban>
-   ```
-
-   Sau đó redeploy frontend. Không thêm dấu `/` cuối URL.
-
-4. Mở `https://<domain-backend-cua-ban>/docs` để kiểm tra backend, rồi đăng nhập
-   trên Vercel. Lần đăng nhập đầu tiên sẽ tạo admin mặc định `admin` / `admin123`
-   trong **PostgreSQL production**.
-
-Nếu cần tạo trước tài khoản đó từ terminal của dịch vụ backend, chạy:
-
-```bash
-python -c "from app.adapters.db.session import SessionLocal; from app.application.auth import ensure_seed_users; db=SessionLocal(); ensure_seed_users(db); db.close()"
-```
-
----
-
-Hệ thống hoạt động ở **4 tiến trình độc lập**: Backend API, Frontend Dev Server, và
-**Celery Worker + Beat** (bắt buộc cho job nền tự động — quét đơn định kỳ và đồng bộ
-trạng thái Printerval; nút "Đồng bộ ngay" cũng cần Worker đang chạy để xử lý, nếu
-không sẽ chỉ nằm im trong hàng đợi Redis không ai xử lý).
-
-### Tiến trình 1: Khởi chạy Backend (FastAPI Server)
-```bash
-cd /Users/hongphuc/Documents/01_congViec/pinterval
-source .venv/bin/activate
-uvicorn app.api.main:app --reload --port 8000
-```
-*(Backend JSON API lắng nghe tại `http://localhost:8000`, API Docs Swagger tại `http://localhost:8000/docs`)*
-
-### Tiến trình 2: Khởi chạy Frontend (Vite Dev Server)
-Mở một cửa sổ Terminal mới:
-```bash
-cd /Users/hongphuc/Documents/01_congViec/pinterval/frontend
-npm install
-npm run dev
-```
-*(Frontend Dev Server chạy tại `http://localhost:5173` — tự động proxy mọi API `/api` sang cổng 8000)*
-
-### Tiến trình 3 + 4: Khởi chạy Celery Worker & Beat (job nền)
-Mở 2 cửa sổ Terminal mới (mỗi tiến trình 1 cửa sổ riêng, hoặc `&` chạy nền):
-```bash
-cd /Users/hongphuc/Documents/01_congViec/pinterval
-source .venv/bin/activate
-celery -A app.workers.celery_app worker --loglevel=info -Q celery -n general@%h
-```
-Mở thêm một worker ưu tiên cho thao tác phân công/đổi trạng thái Printerval:
-```bash
-cd /Users/hongphuc/Documents/01_congViec/pinterval
-source .venv/bin/activate
-celery -A app.workers.celery_app worker --pool=solo --loglevel=info -Q assignment -n assignment@%h
-```
-```bash
-cd /Users/hongphuc/Documents/01_congViec/pinterval
-source .venv/bin/activate
-celery -A app.workers.celery_app beat --loglevel=info
-```
-*(Worker xử lý task thật; job phân công/đổi trạng thái Printerval có queue riêng nên không
-phải chờ tác vụ định kỳ. Beat chỉ đồng bộ trạng thái Printerval theo
-`STATUS_SYNC_INTERVAL_SECONDS` trong `.env`; quét đơn dùng nút **Quét Đơn Printerval**.
-Cần Redis đang chạy —
-`docker compose up -d redis` ở Bước 3.)*
-
----
-
-## 3. Hướng Dẫn Sử Dụng & Thao Tác Web Dashboard
-
-1. Mở trình duyệt truy cập: **`http://localhost:5173`**
-2. Đăng nhập với tài khoản:
-   - **Tài khoản:** `admin`
-   - **Mật khẩu:** `admin123`
-
-### Chức Năng Chính:
-- **Quản Lý Workspace Acc Mẹ Printerval:** 
-  - Nhấp vào nút **`Acc Mẹ Printerval: ...`** trên góc phải Topbar để xem danh sách hoặc đăng nhập tài khoản mẹ Printerval mới.
-  - Khi chuyển đổi Workspace Acc Mẹ, toàn bộ dữ liệu đơn hàng, phân công và tiến độ được cô lập và tải riêng theo từng tài khoản mẹ.
-- **Quét Đơn Printerval (API HTTP Crawl):**
-  - Nhấp nút **`Quét Đơn Printerval`** ở góc trên bên phải.
-  - Hệ thống sử dụng HTTP API tự động quét và nhập hàng chục đơn hàng từ Printerval về CSDL chỉ trong vài giây mà không cần mở trình duyệt Chromium ngầm.
-- **Phân Bổ Kéo-Thả (Allocation Board):**
-  - Giao diện trực quan hỗ trợ phân công đơn hàng cho Designer.
-- **Bảng Tiến Độ Kanban:**
-  - Theo dõi trạng thái quy trình xử lý đơn hàng từ DISCOVERED, ASSIGNED, CLAIMED_IMPORTED đến SUBMITTED, PASSED_QC.
-- **Trạng Thái Đơn (chỉ xem):**
-  - Mirror một chiều trạng thái thật trên Printerval (Waiting/Doing/Review/Fix/Confirm/Done), tự đồng bộ theo lịch + nút "Đồng bộ ngay". Không có nút đổi trạng thái ngược lại Printerval từ tab này (xem claude.md §10).
-- **Quản Lý Tài Khoản (User Management):**
-  - Thêm, sửa, cấp quyền Admin / Designer cho nhân sự trong team.
-
----
-
-## 4. Chạy Kiểm Thử Tự Động (Pytest)
-
-Để đảm bảo toàn bộ hệ thống hoạt động chính xác (190 test cases):
-
-```bash
-cd /Users/hongphuc/Documents/01_congViec/pinterval
-createdb -h localhost -U postgres pinterval_test 2>/dev/null || true
-DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/pinterval_test ./.venv/bin/pytest
-```
-
----
-
-## 5. Cấu Trúc Nhánh & Ghi Chú Phát Triển
-
-- **Nhánh hiện tại:** `main` (Đã được merge đầy đủ toàn bộ tính năng Phase 1-4, Multi-Tenant Workspace & HTTP API Crawl).
-- **Quy tắc Commit:** Mọi thay đổi mới nên được kiểm thử qua `pytest` trước khi commit trực tiếp lên `main`.
+Không dùng `compose.local.yaml` để deploy production. Xem
+[docs/SELF_HOSTED_PRODUCTION.md](docs/SELF_HOSTED_PRODUCTION.md) khi triển khai server.
