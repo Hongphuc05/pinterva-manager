@@ -33,6 +33,7 @@ describe('OrdersListPage', () => {
                   batch_id: null,
                   sku: 'SKU1',
                   thumbnail_url: null,
+                  order_created_at_ext: '2026-09-10T14:28:00',
                   deadline_at_ext: null,
                   created_at: '2026-01-01T00:00:00',
                 },
@@ -57,7 +58,8 @@ describe('OrdersListPage', () => {
     )
     await waitFor(() => expect(screen.getByText('DJ1')).toBeInTheDocument())
     expect(screen.getByText('Chờ phân công')).toBeInTheDocument()
+    expect(screen.getByText('Order At')).toBeInTheDocument()
+    expect(screen.getByText('14:28:00 10/9/2026')).toBeInTheDocument()
   })
 })
-
 

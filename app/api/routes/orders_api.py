@@ -65,6 +65,7 @@ class OrderSummaryOut(BaseModel):
     thumbnail_url: str | None = None
     assigned_designer_name: str | None = None
     product_skus: list[dict] | None = None
+    order_created_at_ext: datetime | None = None
     deadline_at_ext: datetime | None = None
     created_at: datetime
     # Read-only mirror of Printerval's own site status — never written back to the

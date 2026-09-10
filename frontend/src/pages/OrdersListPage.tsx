@@ -37,6 +37,7 @@ type OrderSummary = {
   thumbnail_url: string | null
   assigned_designer_name: string | null
   product_skus: { sku?: string | null }[] | null
+  order_created_at_ext: string | null
   deadline_at_ext: string | null
   sku_image_url: string | null
   external_order_url: string | null
@@ -1166,7 +1167,7 @@ export function OrdersListPage() {
                 <th className="py-3 px-4">{isAdmin ? 'Mã Đơn Hàng' : 'Tên Đơn Hàng'}</th>
                 <th className="py-3 px-4">Trạng Thái</th>
                 <th className="py-3 px-4">DES Đảm Nhận</th>
-                <th className="py-3 px-4">Deadline</th>
+                <th className="py-3 px-4">Order At</th>
                 <th className="py-3 px-4">Ngày Tạo</th>
                 <th className="py-3 px-4 text-right">Thao Tác</th>
               </tr>
@@ -1371,10 +1372,10 @@ export function OrdersListPage() {
                         )}
                       </td>
 
-                      {/* Deadline */}
+                      {/* Printerval order creation time */}
                       <td className="py-2.5 px-4 font-mono text-slate-600">
-                        {o.deadline_at_ext ? (
-                          <span>{new Date(o.deadline_at_ext).toLocaleString('vi-VN')}</span>
+                        {o.order_created_at_ext ? (
+                          <span>{new Date(o.order_created_at_ext).toLocaleString('vi-VN')}</span>
                         ) : (
                           <span className="text-slate-300">-</span>
                         )}
