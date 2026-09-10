@@ -102,6 +102,25 @@ def test_discover_orders_prefixes_a_bare_numeric_row_id_with_dj():
     assert [o.external_order_id for o in res.orders] == ["DJ3971347"]
 
 
+def test_discover_orders_all_status_sends_an_empty_status_filter():
+    seen_params = []
+
+    def handler(request):
+        if request.method == "GET" and request.url.path == LOGIN_PATH:
+            return httpx.Response(200, text='<input type="hidden" name="_token" value="csrf-123">')
+        if request.method == "POST" and request.url.path == LOGIN_PATH:
+            return httpx.Response(302, headers={"location": "/admin"})
+        if request.method == "GET" and request.url.path == FIND_PATH:
+            seen_params.append(dict(request.url.params))
+            return httpx.Response(200, json={"status": "successful", "result": []})
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    result = _api_adapter(handler).discover_orders(status="")
+
+    assert result.success is True
+    assert seen_params[0]["status"] == ""
+
+
 def test_discover_orders_forwards_date_filters_to_the_client():
     seen_params = []
 

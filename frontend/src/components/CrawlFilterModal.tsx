@@ -1,15 +1,9 @@
 import { useState } from 'react'
 import { X, Search, RotateCcw } from 'lucide-react'
 
-// Mirrors Printerval's own filter bar (docs/phase0-field-map.md §4). Only "Tất cả 2D &
-// 3D" is confirmed safe on the fast HTTP crawl path — picking any other value routes
-// the crawl through the slower, DOM-verified Playwright fallback instead (see
-// PrintervalApiAdapter.discover_orders). Status/Designer stay fixed: crawling is
-// specifically for claiming *new* orders, which only ever matters for "Waiting" (an
-// order with a designer already set isn't a candidate to claim) — so those two
-// controls wouldn't do anything real here, shown disabled for visual parity with the
-// site rather than silently ignored. Date range (created_at) IS wired — live-confirmed
-// 2026-09-08 against the real find endpoint.
+// Status and designer use the same values as the Printerval filter. Selecting
+// "All status" sends an empty status filter, which the confirmed HTTP API treats as
+// no status restriction. A specific job type still uses the slower DOM-verified path.
 const JOB_TYPES = ['Tất cả 2D & 3D', '2D', '3D', 'ART', 'WOOD', 'CALENDAR', 'EMBROIDERY', 'AI']
 
 type CrawlFilterModalProps = {
@@ -20,7 +14,15 @@ type CrawlFilterModalProps = {
   designers: string[]
 }
 
-const STATUSES = ['Waiting', 'Doing', 'Review', 'Fix', 'Confirm', 'Done']
+const STATUSES = [
+  { value: '', label: 'All status' },
+  { value: 'Waiting', label: 'Waiting' },
+  { value: 'Doing', label: 'Doing' },
+  { value: 'Review', label: 'Review' },
+  { value: 'Fix', label: 'Fix' },
+  { value: 'Confirm', label: 'Confirm' },
+  { value: 'Done', label: 'Done' },
+]
 
 export function CrawlFilterModal({ isOpen, onClose, onSearch, loading, designers }: CrawlFilterModalProps) {
   const [jobType, setJobType] = useState(JOB_TYPES[0])
@@ -56,7 +58,7 @@ export function CrawlFilterModal({ isOpen, onClose, onSearch, loading, designers
             <div className="space-y-1">
               <label className="text-xs font-bold text-slate-700 block">Status</label>
               <select value={status} onChange={(e) => setStatus(e.target.value)} className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300">
-                {STATUSES.map((item) => <option key={item} value={item}>{item}</option>)}
+                {STATUSES.map((item) => <option key={item.value || 'all'} value={item.value}>{item.label}</option>)}
               </select>
             </div>
             <div className="space-y-1">
