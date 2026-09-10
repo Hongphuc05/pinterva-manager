@@ -158,7 +158,7 @@ export function MyTasksPage() {
                   {task.order.thumbnail_url ? (
                     <img
                       src={resolveAssetUrl(task.order.thumbnail_url)}
-                      alt={task.order.external_order_id}
+                      alt={task.order.product_name || 'Ảnh sản phẩm'}
                       title="Click để phóng to ảnh"
                       onClick={() => setSelectedImage(resolveAssetUrl(task.order.thumbnail_url))}
                       className="h-16 w-16 rounded-xl object-cover border border-slate-200 shrink-0 cursor-pointer hover:scale-105 transition-transform"
@@ -174,9 +174,10 @@ export function MyTasksPage() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <Link
                         to={`/orders/${task.order.id}`}
-                        className="font-mono text-base font-bold text-[#0052CC] hover:underline"
+                        className="text-base font-bold text-[#0052CC] hover:underline"
+                        title={task.order.product_name ?? 'Đơn thiết kế 2D'}
                       >
-                        {task.order.external_order_id}
+                        {task.order.product_name ?? 'Đơn thiết kế 2D'}
                       </Link>
 
                       {task.order.sku_image_url && (
@@ -203,10 +204,6 @@ export function MyTasksPage() {
                         </span>
                       )}
                     </div>
-
-                    <p className="text-xs font-medium text-slate-700 truncate">
-                      {task.order.product_name ?? task.order.sku ?? 'Đơn thiết kế 2D'}
-                    </p>
 
                     <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 font-mono pt-0.5">
                       {task.order.deadline_at_ext && (

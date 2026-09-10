@@ -977,7 +977,7 @@ export function OrdersListPage() {
             <Search className="h-4 w-4 absolute left-3.5 top-3 text-slate-400" />
             <input
               type="text"
-              placeholder="Tìm theo Mã Đơn, Tên SP, DES..."
+              placeholder={isAdmin ? "Tìm theo Mã Đơn, Tên SP, DES..." : "Tìm theo Tên Sản Phẩm..."}
               className="w-full pl-10 pr-4 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0052CC] bg-slate-50"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -1247,7 +1247,7 @@ export function OrdersListPage() {
                               if (isNewlyCrawled) dismissHighlight(o.id)
                             }}
                             className="hover:underline flex items-center gap-1"
-                            title={o.product_name || o.external_order_id}
+                            title={isAdmin ? (o.product_name || o.external_order_id) : (o.product_name || 'Đơn thiết kế')}
                           >
                             {isAdmin ? (
                               <span className="font-mono">{o.external_order_id}</span>

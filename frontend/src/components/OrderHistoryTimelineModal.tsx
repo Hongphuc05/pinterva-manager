@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiFetch } from '../api/client'
+import { useAuth } from '../auth/AuthContext'
 import { getStatusInfo } from '../utils/statusTranslation'
 import {
   X,
@@ -46,6 +47,8 @@ export function OrderHistoryTimelineModal({
   externalOrderId,
   productName,
 }: OrderHistoryTimelineModalProps) {
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
   const [events, setEvents] = useState<OrderTimelineEvent[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -118,7 +121,7 @@ export function OrderHistoryTimelineModal({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-xl max-h-[85vh] rounded-2xl bg-white shadow-2xl border border-slate-200 flex flex-col overflow-hidden animate-in zoom-in-95 duration-150"
+        className="w-full max-w-2xl max-h-[85vh] rounded-2xl bg-white shadow-2xl border border-slate-200 flex flex-col overflow-hidden animate-in zoom-in-95 duration-150"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -129,7 +132,9 @@ export function OrderHistoryTimelineModal({
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <h3 className="font-bold text-sm text-slate-900 font-mono">{externalOrderId}</h3>
+                <h3 className="font-bold text-sm text-slate-900 font-mono">
+                  {isAdmin ? externalOrderId : (productName || 'Chi tiết đơn hàng')}
+                </h3>
                 <Link
                   to={`/orders/${orderId}`}
                   onClick={onClose}
@@ -139,7 +144,7 @@ export function OrderHistoryTimelineModal({
                   <ExternalLink className="h-2.5 w-2.5" />
                 </Link>
               </div>
-              {productName && (
+              {isAdmin && productName && (
                 <p className="text-xs text-slate-500 truncate mt-0.5">{productName}</p>
               )}
             </div>

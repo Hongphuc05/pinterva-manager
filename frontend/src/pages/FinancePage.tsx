@@ -333,7 +333,7 @@ export function FinancePage() {
               <Search className="h-4 w-4 absolute left-3.5 top-3 text-slate-400" />
               <input
                 type="text"
-                placeholder="Tìm mã đơn, tên sản phẩm..."
+                placeholder={isAdmin ? "Tìm mã đơn, tên sản phẩm..." : "Tìm tên sản phẩm..."}
                 className="w-full pl-10 pr-4 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0052CC] bg-slate-50"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -411,7 +411,7 @@ export function FinancePage() {
               <thead>
                 <tr className="bg-slate-50/50 border-b border-slate-200 text-[11px] font-semibold uppercase text-slate-500">
                   <th className="py-3 px-4 w-14 text-center">Ảnh</th>
-                  <th className="py-3 px-4">Mã Đơn / Tên Sản Phẩm</th>
+                  <th className="py-3 px-4">{isAdmin ? 'Mã Đơn / Tên Sản Phẩm' : 'Tên Sản Phẩm'}</th>
                   {isAdmin && <th className="py-3 px-4">Designer</th>}
                   <th className="py-3 px-4">Trạng Thái Hiện Tại</th>
                   <th className="py-3 px-4">Lần Đầu Nộp Bài</th>
@@ -452,7 +452,7 @@ export function FinancePage() {
                           {task.thumbnail_url ? (
                             <img
                               src={resolveAssetUrl(task.thumbnail_url)}
-                              alt={task.external_order_id}
+                              alt={isAdmin ? task.external_order_id : (task.product_name || 'Ảnh sản phẩm')}
                               title="Click để phóng to"
                               onClick={() => setSelectedImage(resolveAssetUrl(task.thumbnail_url) ?? null)}
                               className="h-10 w-10 rounded-lg object-cover border border-slate-200 mx-auto shadow-2xs cursor-pointer hover:scale-105 transition-transform"
@@ -464,19 +464,32 @@ export function FinancePage() {
                           )}
                         </td>
 
-                        {/* Order Code & Product Name */}
+                        {/* Order Code & Product Name (Admin) vs Product Name (Designer) */}
                         <td className="py-2.5 px-4">
-                          <Link
-                            to={`/orders/${task.order_id}`}
-                            onClick={(e) => e.stopPropagation()}
-                            className="font-mono font-bold text-[#0052CC] hover:underline"
-                          >
-                            {task.external_order_id}
-                          </Link>
-                          {task.product_name && (
-                            <p className="text-[11px] text-slate-600 line-clamp-1 mt-0.5" title={task.product_name}>
-                              {task.product_name}
-                            </p>
+                          {isAdmin ? (
+                            <>
+                              <Link
+                                to={`/orders/${task.order_id}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="font-mono font-bold text-[#0052CC] hover:underline"
+                              >
+                                {task.external_order_id}
+                              </Link>
+                              {task.product_name && (
+                                <p className="text-[11px] text-slate-600 line-clamp-1 mt-0.5" title={task.product_name}>
+                                  {task.product_name}
+                                </p>
+                              )}
+                            </>
+                          ) : (
+                            <Link
+                              to={`/orders/${task.order_id}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-xs font-bold text-[#0052CC] hover:underline line-clamp-2 block"
+                              title={task.product_name || 'Đơn thiết kế 2D'}
+                            >
+                              {task.product_name || 'Đơn thiết kế 2D'}
+                            </Link>
                           )}
                         </td>
 
