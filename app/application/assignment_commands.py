@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -93,15 +92,30 @@ def queue_assignment_command(
             _upsert_internal_assignment(session, order, designer)
         if mapped_state:
             order.state = mapped_state.value
-        order.printerval_status = printerval_status.lower()
-        order.printerval_status_synced_at = datetime.now(UTC)
     session.commit()
 
-    from app.workers.assignment_sync_tasks import sync_order_review_to_printerval_task
-
+    # Status-only commands use the same durable request as Designer+Status commands.
+    # This makes queued/running/failure visible in Order.printerval_assignment_lifecycle.
     for order in orders:
-        sync_order_review_to_printerval_task.delay(str(order.id), None, printerval_status)
-    return [], len(orders)
+        try:
+            requests.append(
+                create_request(
+                    session,
+                    order=order,
+                    internal_designer=designer or actor,
+                    platform_id=platform_id,
+                    designer_option=None,
+                    target_status=printerval_status,
+                )
+            )
+        except PrintervalAssignmentValidationError as exc:
+            raise AssignmentCommandError(str(exc)) from exc
+
+    from app.workers.assignment_sync_tasks import sync_printerval_assignment_request
+
+    for request in requests:
+        sync_printerval_assignment_request.delay(str(request.id))
+    return requests, len(orders)
 
 
 def _upsert_internal_assignment(session: Session, order: Order, designer: User) -> None:

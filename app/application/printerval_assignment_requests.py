@@ -31,15 +31,16 @@ def create_request(
     order: Order,
     internal_designer: User,
     platform_id,
-    designer_option: str,
+    designer_option: str | None,
     target_status: str,
 ) -> PrintervalAssignmentRequest:
     """Persist an intent after the internal assignment transaction has succeeded."""
     if order.platform_id != platform_id:
         raise PrintervalAssignmentValidationError("Order does not belong to the active platform")
-    designer_option = designer_option.strip()
-    if not designer_option:
-        raise PrintervalAssignmentValidationError("Printerval Designer is required")
+    # A request can update both the external Designer and status, or only the
+    # status. Keep the latter in the same durable request lifecycle so the UI can
+    # show a verified outcome instead of treating a queued Celery task as success.
+    designer_option = (designer_option or "").strip()
     if target_status not in PRINTERVAL_STATUSES:
         raise PrintervalAssignmentValidationError("Invalid Printerval status")
     request = PrintervalAssignmentRequest(
@@ -72,43 +73,44 @@ def execute_request(
 
     def _do() -> dict:
         platform = session.get(Platform, request.platform_id)
-        available_designers = platform.printerval_designer_options if platform else None
-        if not available_designers:
-            return _fail(
-                request,
-                "VALIDATION",
-                "Printerval Designer cache has not been loaded for this platform",
-                {},
+        if request.designer_option:
+            available_designers = platform.printerval_designer_options if platform else None
+            if not available_designers:
+                return _fail(
+                    request,
+                    "VALIDATION",
+                    "Printerval Designer cache has not been loaded for this platform",
+                    {},
+                )
+            if request.designer_option not in available_designers:
+                return _fail(
+                    request,
+                    "EXTERNAL_CHANGED",
+                    "Selected Printerval Designer is no longer available for this platform",
+                    {"available_designers": available_designers},
+                )
+            designer_result = with_retry(
+                lambda: adapter.set_designer(order.external_order_id, request.designer_option)
             )
-        if request.designer_option not in available_designers:
-            return _fail(
-                request,
-                "EXTERNAL_CHANGED",
-                "Selected Printerval Designer is no longer available for this platform",
-                {"available_designers": available_designers},
+            if not designer_result.success:
+                return _fail(
+                    request,
+                    designer_result.error_class or "BUG",
+                    "Printerval rejected the Designer update",
+                    designer_result.evidence,
+                )
+            request.observed_designer = (
+                str(designer_result.observed_state.get("designer") or "") or None
             )
-        designer_result = with_retry(
-            lambda: adapter.set_designer(order.external_order_id, request.designer_option)
-        )
-        if not designer_result.success:
-            return _fail(
-                request,
-                designer_result.error_class or "BUG",
-                "Printerval rejected the Designer update",
-                designer_result.evidence,
+            session.add(
+                ExternalObservation(
+                    order_id=order.id,
+                    source="printerval.assignment_request",
+                    external_id=order.external_order_id,
+                    observed_state=request.observed_designer,
+                    evidence={"request": {"designer": request.designer_option, "status": request.target_status}},
+                )
             )
-        request.observed_designer = (
-            str(designer_result.observed_state.get("designer") or "") or None
-        )
-        session.add(
-            ExternalObservation(
-                order_id=order.id,
-                source="printerval.assignment_request",
-                external_id=order.external_order_id,
-                observed_state=request.observed_designer,
-                evidence={"request": {"designer": request.designer_option, "status": request.target_status}},
-            )
-        )
 
         status_result = with_retry(
             lambda: adapter.set_status(order.external_order_id, request.target_status)
@@ -125,8 +127,9 @@ def execute_request(
         request.error_class = None
         request.error_message = None
         request.evidence = {"request": {"designer": request.designer_option, "status": request.target_status}}
-        order.printerval_designer = request.observed_designer
-        order.printerval_designer_synced_at = datetime.now(UTC)
+        if request.observed_designer:
+            order.printerval_designer = request.observed_designer
+            order.printerval_designer_synced_at = datetime.now(UTC)
         order.printerval_status = (
             request.observed_status.lower() if request.observed_status else None
         )

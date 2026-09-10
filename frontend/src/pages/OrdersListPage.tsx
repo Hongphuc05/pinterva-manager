@@ -58,6 +58,14 @@ type UserOption = {
   role: string
 }
 
+type PrintervalStatusTarget = {
+  orderIds: string[]
+  title: string
+  currentStatus?: string | null
+}
+
+const PRINTERVAL_STATUS_OPTIONS = ['Waiting', 'Doing', 'Review', 'Fix', 'Confirm', 'Done'] as const
+
 const ORDERS_CACHE_PREFIX = 'tacahu-orders-cache'
 
 function getOrdersCacheKey(platformId: string | undefined, query: string) {
@@ -125,6 +133,11 @@ export function OrdersListPage() {
   const [selectedPrintervalStatus, setSelectedPrintervalStatus] = useState('Doing')
   const [loadingPrintervalOptions, setLoadingPrintervalOptions] = useState(false)
   const [assigning, setAssigning] = useState(false)
+
+  // Status-only Printerval update. This deliberately does not require a Designer.
+  const [printervalStatusTarget, setPrintervalStatusTarget] = useState<PrintervalStatusTarget | null>(null)
+  const [printervalStatusValue, setPrintervalStatusValue] = useState<string>('Doing')
+  const [updatingPrintervalStatus, setUpdatingPrintervalStatus] = useState(false)
 
   // Bulk Selection State
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([])
@@ -274,6 +287,44 @@ export function OrdersListPage() {
       }
     } finally {
       setAssigning(false)
+    }
+  }
+
+  function openPrintervalStatusModal(
+    orderIds: string[],
+    title: string,
+    currentStatus?: string | null,
+  ) {
+    const matchingStatus = PRINTERVAL_STATUS_OPTIONS.find(
+      (status) => status.toLowerCase() === currentStatus?.toLowerCase(),
+    )
+    setPrintervalStatusValue(matchingStatus || 'Doing')
+    setPrintervalStatusTarget({ orderIds, title, currentStatus })
+  }
+
+  async function handleUpdatePrintervalStatus(e: React.FormEvent) {
+    e.preventDefault()
+    if (!printervalStatusTarget || printervalStatusTarget.orderIds.length === 0) return
+    setUpdatingPrintervalStatus(true)
+    try {
+      const result = await apiFetch<{ queued_count: number }>('/assignments', {
+        method: 'POST',
+        body: JSON.stringify({
+          order_ids: printervalStatusTarget.orderIds,
+          printerval_status: printervalStatusValue,
+        }),
+      })
+      setFlash(
+        `Đã xếp cập nhật trạng thái ${printervalStatusValue} trên Printerval cho ${result.queued_count} đơn.`,
+      )
+      printervalStatusTarget.orderIds.forEach(dismissHighlight)
+      setSelectedOrderIds([])
+      setPrintervalStatusTarget(null)
+      loadOrders()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Không thể xếp cập nhật trạng thái trên Printerval.')
+    } finally {
+      setUpdatingPrintervalStatus(false)
     }
   }
 
@@ -529,7 +580,7 @@ export function OrdersListPage() {
             onClick={() => setOrdersView('sync')}
             className={`px-3 py-2 text-xs font-bold border-b-2 ${activeView === 'sync' ? 'border-[#0052CC] text-[#0052CC]' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
           >
-            Đồng bộ Printerval
+            Lấy trạng thái từ Printerval
           </button>
         </div>
       )}
@@ -537,7 +588,7 @@ export function OrdersListPage() {
       {isAdmin && activeView === 'sync' && (
         <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-4 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-bold text-slate-800">Đồng bộ trạng thái tab hiện tại</p>
+            <p className="text-sm font-bold text-slate-800">Lấy trạng thái từ Printerval</p>
             <p className="mt-1 text-xs text-slate-600">
               {syncStatus?.is_running
                 ? `Đang kiểm tra ${syncStatus.last_result?.processed || 0}/${syncStatus.last_result?.total || filteredOrders.length} đơn.`
@@ -552,7 +603,7 @@ export function OrdersListPage() {
             className="inline-flex items-center gap-2 rounded-lg bg-[#0052CC] px-3.5 py-2 text-xs font-bold text-white disabled:opacity-50"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${isTriggering || syncStatus?.is_running ? 'animate-spin' : ''}`} />
-            {filteredOrders.length > 500 ? 'Thu hẹp bộ lọc (tối đa 500)' : `Đồng bộ ${filteredOrders.length} đơn`}
+            {filteredOrders.length > 500 ? 'Thu hẹp bộ lọc (tối đa 500)' : `Lấy trạng thái ${filteredOrders.length} đơn`}
           </button>
         </div>
       )}
@@ -909,6 +960,17 @@ export function OrdersListPage() {
           <div className="flex items-center gap-3">
             <button
               type="button"
+              onClick={() => openPrintervalStatusModal(
+                selectedOrderIds,
+                `Cập nhật ${selectedOrderIds.length} đơn đã chọn`,
+              )}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-[#0052CC] bg-white hover:bg-slate-100 rounded-lg shadow-sm transition-all"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              <span>Đổi trạng thái Printerval</span>
+            </button>
+            <button
+              type="button"
               onClick={refreshPrintervalDesignerOptions}
               disabled={loadingPrintervalOptions}
               className="px-3 py-1.5 text-xs font-bold text-white border border-white/40 rounded-lg hover:bg-white/10 disabled:opacity-60"
@@ -1181,7 +1243,7 @@ export function OrdersListPage() {
                             {isAdmin ? '+ Phân công DES' : 'Chưa phân bổ'}
                           </span>
                         )}
-                        {(o.printerval_designer || o.printerval_status) && (
+                        {(o.printerval_designer || o.printerval_status || o.printerval_assignment_lifecycle === 'pending') && (
                           <p className="mt-1 text-[10px] font-medium text-slate-500">
                             Printerval: {o.printerval_designer || '—'}
                             {o.printerval_status ? ` · ${o.printerval_status}` : ''}
@@ -1211,6 +1273,21 @@ export function OrdersListPage() {
 
                       {/* Actions */}
                       <td className="py-2.5 px-4 text-right" onClick={(e) => e.stopPropagation()}>
+                        {isAdmin && (
+                          <button
+                            type="button"
+                            onClick={() => openPrintervalStatusModal(
+                              [o.id],
+                              `Đơn ${o.external_order_id}`,
+                              o.printerval_status,
+                            )}
+                            className="mr-1 inline-flex items-center gap-1 text-xs font-semibold text-slate-600 hover:text-[#0052CC] hover:bg-blue-50 px-2.5 py-1 rounded-md transition-colors"
+                            title="Đổi trạng thái đơn trên Printerval"
+                          >
+                            <RefreshCw className="h-3.5 w-3.5" />
+                            <span>Printerval</span>
+                          </button>
+                        )}
                         <Link
                           to={`/orders/${o.id}`}
                           className="inline-flex items-center gap-1 text-xs font-semibold text-[#0052CC] hover:text-[#003D99] hover:bg-blue-50 px-2.5 py-1 rounded-md transition-colors"
@@ -1234,6 +1311,75 @@ export function OrdersListPage() {
           onPageChange={handlePageChange}
         />
       </div>
+
+      {/* Status-only Printerval update modal */}
+      {printervalStatusTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-200"
+          onClick={() => !updatingPrintervalStatus && setPrintervalStatusTarget(null)}
+        >
+          <div
+            className="relative w-full max-w-sm overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-6 py-4">
+              <div className="flex items-center gap-2">
+                <RefreshCw className="h-5 w-5 text-[#0052CC]" />
+                <h2 className="text-base font-bold text-slate-800">Cập nhật trạng thái Printerval</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPrintervalStatusTarget(null)}
+                disabled={updatingPrintervalStatus}
+                className="rounded-lg p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700 disabled:opacity-50"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <form onSubmit={handleUpdatePrintervalStatus} className="space-y-4 p-6">
+              <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-xs text-slate-700">
+                <p className="font-bold text-slate-800">{printervalStatusTarget.title}</p>
+                {printervalStatusTarget.currentStatus && (
+                  <p className="mt-1">Trạng thái Printerval đã lưu: <strong>{printervalStatusTarget.currentStatus}</strong></p>
+                )}
+              </div>
+              <div className="space-y-1">
+                <label className="block text-xs font-bold text-slate-700">Trạng thái mới trên Printerval</label>
+                <select
+                  value={printervalStatusValue}
+                  onChange={(e) => setPrintervalStatusValue(e.target.value)}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs focus:border-[#0052CC] focus:outline-none focus:ring-2 focus:ring-[#0052CC]/20"
+                >
+                  {PRINTERVAL_STATUS_OPTIONS.map((status) => (
+                    <option key={status} value={status}>{status}</option>
+                  ))}
+                </select>
+              </div>
+              <p className="text-[11px] leading-relaxed text-slate-500">
+                Thao tác này đẩy trạng thái lên Printerval. Hệ thống xếp việc vào worker nền và chỉ cập nhật kết quả sau khi Printerval xác nhận.
+              </p>
+              <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setPrintervalStatusTarget(null)}
+                  disabled={updatingPrintervalStatus}
+                  className="rounded-xl bg-slate-100 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200 disabled:opacity-50"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  disabled={updatingPrintervalStatus}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-[#0052CC] px-4 py-2 text-xs font-bold text-white hover:bg-[#0041A3] disabled:opacity-50"
+                >
+                  {updatingPrintervalStatus && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  {updatingPrintervalStatus ? 'Đang xếp hàng…' : `Cập nhật ${printervalStatusTarget.orderIds.length} đơn`}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Assign Order Modal */}
       {assigningOrder && (

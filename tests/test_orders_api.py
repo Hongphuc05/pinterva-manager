@@ -285,6 +285,47 @@ def test_api_assignments_replaces_the_bulk_printerval_assignment_contract(client
     assert len(calls) == 2
 
 
+def test_api_assignments_queues_status_only_requests(client, db_session, monkeypatch):
+    from app.workers import assignment_sync_tasks
+
+    calls = []
+    monkeypatch.setattr(
+        assignment_sync_tasks.sync_printerval_assignment_request,
+        "delay",
+        lambda *args: calls.append(args),
+    )
+    platform = Platform(name="P1 status only", account_username="status-only@example.com")
+    db_session.add(platform)
+    db_session.flush()
+    order1 = Order(external_order_id="STATUS1", platform_id=platform.id)
+    order2 = Order(external_order_id="STATUS2", platform_id=platform.id)
+    db_session.add_all([order1, order2])
+    db_session.commit()
+    client.app.dependency_overrides[get_current_platform_id] = lambda: platform.id
+    _login(client, db_session, "admin", "status_only_admin")
+
+    try:
+        response = client.post(
+            "/api/assignments",
+            json={
+                "order_ids": [str(order1.id), str(order2.id)],
+                "printerval_status": "Review",
+            },
+        )
+    finally:
+        del client.app.dependency_overrides[get_current_platform_id]
+
+    assert response.status_code == 202
+    assert response.json()["queued_count"] == 2
+    requests = db_session.query(PrintervalAssignmentRequest).order_by(
+        PrintervalAssignmentRequest.order_id
+    ).all()
+    assert len(requests) == 2
+    assert {request.designer_option for request in requests} == {""}
+    assert {request.target_status for request in requests} == {"Review"}
+    assert {call[0] for call in calls} == {str(request.id) for request in requests}
+
+
 def test_api_sync_status_defaults_to_not_running_when_never_synced(client, db_session):
     _login(client, db_session, "admin")
     resp = client.get("/api/orders/sync-status")

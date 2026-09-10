@@ -63,6 +63,44 @@ def test_request_updates_designer_and_status_and_mirrors_verified_values(db_sess
     assert db_session.get(PrintervalAssignmentRequest, request.id).lifecycle == "succeeded"
 
 
+def test_status_only_request_preserves_designer_and_updates_verified_status(db_session):
+    platform = _platform()
+    platform.printerval_designer_options = None
+    designer = _designer()
+    db_session.add_all([platform, designer])
+    db_session.flush()
+    order = Order(
+        external_order_id="DJ000000-status-only",
+        platform_id=platform.id,
+        printerval_designer="Existing Designer",
+    )
+    db_session.add(order)
+    db_session.commit()
+    request = create_request(
+        db_session,
+        order=order,
+        internal_designer=designer,
+        platform_id=platform.id,
+        designer_option=None,
+        target_status="Review",
+    )
+    adapter = FakePrintervalAdapter()
+    adapter.add_order(
+        external_order_id=order.external_order_id,
+        product_name="Mug",
+        designer="Existing Designer",
+        status="Waiting",
+    )
+
+    result = execute_request(db_session, adapter, request)
+
+    assert result == {"lifecycle": "succeeded", "designer": None, "status": "Review"}
+    assert adapter._orders[order.external_order_id].designer == "Existing Designer"
+    assert adapter._orders[order.external_order_id].status == "Review"
+    assert order.printerval_designer == "Existing Designer"
+    assert order.printerval_status == "review"
+
+
 def test_request_fails_before_writing_when_designer_is_no_longer_an_option(db_session):
     platform = _platform()
     designer = _designer()
