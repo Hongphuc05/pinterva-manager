@@ -6,7 +6,12 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import Assignment, Order, User, WorkflowEvent
-from app.domain.access import ROLE_DESIGNER, ROLE_DESIGNER_TRELLO, WORK_DOMAIN_DUPLICATE
+from app.domain.access import (
+    ROLE_DESIGNER,
+    ROLE_DESIGNER_TRELLO,
+    WORK_DOMAIN_DUPLICATE,
+    WORK_DOMAIN_STANDARD,
+)
 
 
 def list_orders_for_user(
@@ -32,6 +37,10 @@ def list_orders_for_user(
         # Trello designers work in a shared, deliberately separate queue. Their
         # board command applies the finer ownership policy.
         query = query.filter(Order.work_domain == WORK_DOMAIN_DUPLICATE)
+    elif user.role == ROLE_DESIGNER:
+        # A legacy Printerval designer label may remain on an order after it is
+        # moved to the shared board. Domain is authoritative for visibility.
+        query = query.filter(Order.work_domain == WORK_DOMAIN_STANDARD)
 
     if designer_id:
         if designer_id == "unassigned":
@@ -143,6 +152,8 @@ def get_order_detail_for_user(session: Session, user: User, order_id: str) -> Or
         return None
 
     if user.role == ROLE_DESIGNER:
+        if order.work_domain != WORK_DOMAIN_STANDARD:
+            return None
         assignment = (
             session.query(Assignment)
             .filter(

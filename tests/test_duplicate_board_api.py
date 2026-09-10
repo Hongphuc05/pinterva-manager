@@ -145,3 +145,26 @@ def test_regular_designer_cannot_read_duplicate_board(client, db_session):
     finally:
         del client.app.dependency_overrides[get_current_platform_id]
     assert response.status_code == 403
+
+
+def test_regular_designer_cannot_see_duplicate_order_via_legacy_printerval_match(client, db_session):
+    platform = _platform(db_session)
+    designer, headers = _login(client, db_session, "designer", "regular-duplicate-hidden")
+    designer.platform_id = platform.id
+    designer.full_name = "Regular External Name"
+    order = Order(
+        external_order_id="DUP-HIDDEN",
+        platform_id=platform.id,
+        work_domain="duplicate",
+        printerval_designer="Regular External Name",
+    )
+    db_session.add(order)
+    db_session.commit()
+    client.app.dependency_overrides[get_current_platform_id] = lambda: platform.id
+    try:
+        response = client.get("/api/orders", headers=headers)
+    finally:
+        del client.app.dependency_overrides[get_current_platform_id]
+
+    assert response.status_code == 200
+    assert response.json()["orders"] == []
