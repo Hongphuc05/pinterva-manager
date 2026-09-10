@@ -127,8 +127,11 @@ def get_current_sync_job(
 ):
     job = (
         db.query(SyncJob)
-        .filter(SyncJob.platform_id == platform_id, SyncJob.status.in_(ACTIVE_STATUSES))
-        .order_by(SyncJob.created_at.desc())
+        .filter(SyncJob.platform_id == platform_id)
+        .order_by(
+            SyncJob.status.in_(ACTIVE_STATUSES).desc(),
+            SyncJob.created_at.desc(),
+        )
         .first()
     )
     return _out(job) if job else None

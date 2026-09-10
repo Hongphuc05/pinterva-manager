@@ -40,7 +40,7 @@ export function OrderStatusPage() {
   const isAdmin = user?.role === 'admin'
   const [orders, setOrders] = useState<OrderRow[]>([])
   const [error, setError] = useState<string | null>(null)
-  const { status, triggerRun, isTriggering, forceReset } = useSyncStatus()
+  const { status, triggerRun, isTriggering } = useSyncStatus()
 
   const [usersList, setUsersList] = useState<UserOption[]>([])
   const [printervalDesigners, setPrintervalDesigners] = useState<string[]>([])
@@ -295,16 +295,6 @@ export function OrderStatusPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {status?.is_running && (
-            <button
-              type="button"
-              onClick={forceReset}
-              className="text-[11px] text-slate-500 hover:text-red-600 underline font-medium cursor-pointer"
-              title="Nhấn vào đây nếu tác vụ đồng bộ bị kẹt"
-            >
-              Hủy kẹt đồng bộ
-            </button>
-          )}
           <button
             type="button"
             onClick={async () => {

@@ -9,6 +9,30 @@ export type SyncStatus = {
   last_error: string | null
 }
 
+type SyncJob = {
+  id: string
+  type: string
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+  total: number
+  processed: number
+  updated: number
+  failed: number
+  message: string | null
+  error_summary: string | null
+  started_at: string | null
+  finished_at: string | null
+}
+
+function toSyncStatus(job: SyncJob | null): SyncStatus {
+  return {
+    is_running: job?.status === 'queued' || job?.status === 'running',
+    last_started_at: job?.started_at ?? null,
+    last_finished_at: job?.finished_at ?? null,
+    last_result: job ? { processed: job.processed, total: job.total, updated: job.updated, failed: job.failed } : null,
+    last_error: job?.error_summary ?? null,
+  }
+}
+
 const IDLE_POLL_MS = 15000
 const RUNNING_POLL_MS = 3000
 
@@ -23,11 +47,12 @@ export function useSyncStatus() {
 
   const poll = useCallback(async () => {
     try {
-      const res = await apiFetch<SyncStatus>('/orders/sync-status')
+      const res = await apiFetch<SyncJob | null>('/sync-jobs/current')
       if (!mountedRef.current) return
-      setStatus(res)
+      const next = toSyncStatus(res)
+      setStatus(next)
       if (timerRef.current) clearTimeout(timerRef.current)
-      timerRef.current = setTimeout(poll, res.is_running ? RUNNING_POLL_MS : IDLE_POLL_MS)
+      timerRef.current = setTimeout(poll, next.is_running ? RUNNING_POLL_MS : IDLE_POLL_MS)
     } catch {
       if (!mountedRef.current) return
       if (timerRef.current) clearTimeout(timerRef.current)
@@ -47,8 +72,11 @@ export function useSyncStatus() {
   const triggerRun = useCallback(async () => {
     setIsTriggering(true)
     try {
-      const res = await apiFetch<SyncStatus>('/orders/sync-status/run', { method: 'POST' })
-      setStatus(res)
+      const res = await apiFetch<SyncJob>('/sync-jobs', {
+        method: 'POST',
+        body: JSON.stringify({ type: 'status_sync' }),
+      })
+      setStatus(toSyncStatus(res))
       if (timerRef.current) clearTimeout(timerRef.current)
       timerRef.current = setTimeout(poll, RUNNING_POLL_MS)
     } catch (err) {
@@ -59,14 +87,5 @@ export function useSyncStatus() {
     }
   }, [poll])
 
-  const forceReset = useCallback(async () => {
-    try {
-      const res = await apiFetch<SyncStatus>('/orders/sync-status/reset', { method: 'POST' })
-      setStatus(res)
-    } catch (err) {
-      console.error('Failed to reset sync lock:', err)
-    }
-  }, [])
-
-  return { status, triggerRun, isTriggering, forceReset }
+  return { status, triggerRun, isTriggering }
 }
