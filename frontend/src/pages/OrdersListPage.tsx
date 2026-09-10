@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { apiFetch, ApiError, resolveAssetUrl } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
@@ -440,6 +440,20 @@ export function OrdersListPage() {
     (o) => ['DONE', 'CLAIMED_IMPORTED', 'COMPLETED'].includes(o.state.toUpperCase())
   ).length
 
+  // Printerval status breakdown
+  const printervalCounts = useMemo(() => {
+    const counts = { waiting: 0, doing: 0, review: 0, fix: 0, done: 0 }
+    for (const o of orders) {
+      const s = (o.printerval_status || '').toLowerCase().trim()
+      if (s === 'waiting') counts.waiting++
+      else if (s === 'doing') counts.doing++
+      else if (s === 'review') counts.review++
+      else if (s === 'fix') counts.fix++
+      else if (s === 'done') counts.done++
+    }
+    return counts
+  }, [orders])
+
   let baseOrders = orders
   if (!isAdmin) {
     baseOrders =
@@ -617,18 +631,35 @@ export function OrdersListPage() {
               setAdminTab('all')
               setStatusFilter('')
             }}
-            className={`rounded-xl border bg-white p-5 shadow-xs flex items-center justify-between cursor-pointer transition-all hover:shadow-md hover:border-blue-300 select-none ${
+            className={`rounded-xl border bg-white p-4 sm:p-5 shadow-xs flex items-start justify-between cursor-pointer transition-all hover:shadow-md hover:border-blue-300 select-none ${
               adminTab === 'all' && (kpiFilter === 'all' || kpiFilter === null)
                 ? 'border-[#0052CC] ring-2 ring-[#0052CC]/20 bg-blue-50/20'
                 : 'border-[hsl(var(--border))]'
             }`}
             title="Click để hiển thị tất cả đơn hàng"
           >
-            <div>
+            <div className="flex-1 min-w-0 pr-2">
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Tổng Đơn Hàng</p>
               <h3 className="text-2xl font-bold font-mono text-slate-800 mt-1">{totalCount}</h3>
+              <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-[10px]">
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded font-mono font-medium bg-amber-50 text-amber-700 border border-amber-200/80" title="Printerval: waiting">
+                  waiting: <strong className="ml-1 font-bold">{printervalCounts.waiting}</strong>
+                </span>
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded font-mono font-medium bg-blue-50 text-blue-700 border border-blue-200/80" title="Printerval: doing">
+                  doing: <strong className="ml-1 font-bold">{printervalCounts.doing}</strong>
+                </span>
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded font-mono font-medium bg-purple-50 text-purple-700 border border-purple-200/80" title="Printerval: review">
+                  review: <strong className="ml-1 font-bold">{printervalCounts.review}</strong>
+                </span>
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded font-mono font-medium bg-rose-50 text-rose-700 border border-rose-200/80" title="Printerval: fix">
+                  fix: <strong className="ml-1 font-bold">{printervalCounts.fix}</strong>
+                </span>
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded font-mono font-medium bg-emerald-50 text-emerald-700 border border-emerald-200/80" title="Printerval: done">
+                  done: <strong className="ml-1 font-bold">{printervalCounts.done}</strong>
+                </span>
+              </div>
             </div>
-            <div className="p-3 bg-blue-50 text-[#0052CC] rounded-xl">
+            <div className="p-3 bg-blue-50 text-[#0052CC] rounded-xl shrink-0">
               <Package className="h-6 w-6" />
             </div>
           </div>
@@ -639,18 +670,18 @@ export function OrdersListPage() {
               setAdminTab('unprocessed')
               setStatusFilter('')
             }}
-            className={`rounded-xl border bg-white p-5 shadow-xs flex items-center justify-between cursor-pointer transition-all hover:shadow-md hover:border-amber-300 select-none ${
+            className={`rounded-xl border bg-white p-4 sm:p-5 shadow-xs flex items-start justify-between cursor-pointer transition-all hover:shadow-md hover:border-amber-300 select-none ${
               kpiFilter === 'open'
                 ? 'border-amber-500 ring-2 ring-amber-500/20 bg-amber-50/30'
                 : 'border-[hsl(var(--border))]'
             }`}
             title="Click để lọc đơn Mới / Chờ Phân Bổ"
           >
-            <div>
+            <div className="flex-1 min-w-0 pr-2">
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Mới / Chờ Phân Bổ</p>
               <h3 className="text-2xl font-bold font-mono text-amber-600 mt-1">{openCount}</h3>
             </div>
-            <div className="p-3 bg-amber-50 text-amber-600 rounded-xl">
+            <div className="p-3 bg-amber-50 text-amber-600 rounded-xl shrink-0">
               <Clock className="h-6 w-6" />
             </div>
           </div>
@@ -661,18 +692,18 @@ export function OrdersListPage() {
               setAdminTab('unprocessed')
               setStatusFilter('')
             }}
-            className={`rounded-xl border bg-white p-5 shadow-xs flex items-center justify-between cursor-pointer transition-all hover:shadow-md hover:border-blue-300 select-none ${
+            className={`rounded-xl border bg-white p-4 sm:p-5 shadow-xs flex items-start justify-between cursor-pointer transition-all hover:shadow-md hover:border-blue-300 select-none ${
               kpiFilter === 'in_progress'
                 ? 'border-blue-600 ring-2 ring-blue-600/20 bg-blue-50/30'
                 : 'border-[hsl(var(--border))]'
             }`}
             title="Click để lọc đơn Đang Thực Hiện"
           >
-            <div>
+            <div className="flex-1 min-w-0 pr-2">
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Đang Thực Hiện</p>
               <h3 className="text-2xl font-bold font-mono text-blue-600 mt-1">{inProgressCount}</h3>
             </div>
-            <div className="p-3 bg-blue-50 text-blue-600 rounded-xl">
+            <div className="p-3 bg-blue-50 text-blue-600 rounded-xl shrink-0">
               <Layers className="h-6 w-6" />
             </div>
           </div>
@@ -683,18 +714,18 @@ export function OrdersListPage() {
               setAdminTab('processed')
               setStatusFilter('')
             }}
-            className={`rounded-xl border bg-white p-5 shadow-xs flex items-center justify-between cursor-pointer transition-all hover:shadow-md hover:border-emerald-300 select-none ${
+            className={`rounded-xl border bg-white p-4 sm:p-5 shadow-xs flex items-start justify-between cursor-pointer transition-all hover:shadow-md hover:border-emerald-300 select-none ${
               adminTab === 'processed' || kpiFilter === 'done'
                 ? 'border-emerald-500 ring-2 ring-emerald-500/20 bg-emerald-50/30'
                 : 'border-[hsl(var(--border))]'
             }`}
             title="Click để lọc đơn Đã Hoàn Thành"
           >
-            <div>
+            <div className="flex-1 min-w-0 pr-2">
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Đã Hoàn Thành / Claim</p>
               <h3 className="text-2xl font-bold font-mono text-emerald-600 mt-1">{doneCount}</h3>
             </div>
-            <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl">
+            <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl shrink-0">
               <CheckCircle2 className="h-6 w-6" />
             </div>
           </div>
