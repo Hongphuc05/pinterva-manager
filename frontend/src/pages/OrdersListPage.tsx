@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { apiFetch, ApiError, resolveAssetUrl } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { usePlatform } from '../auth/PlatformContext'
@@ -86,6 +86,7 @@ function writeOrdersCache(key: string, orders: OrderSummary[]) {
 
 export function OrdersListPage() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { user } = useAuth()
   const { activePlatform } = usePlatform()
   const isAdmin = user?.role === 'admin'
@@ -102,7 +103,11 @@ export function OrdersListPage() {
   const [adminTab, setAdminTab] = useState<'unprocessed' | 'processed' | 'all'>('unprocessed')
   const [kpiFilter, setKpiFilter] = useState<'all' | 'open' | 'in_progress' | 'done' | null>(null)
   const { status: syncStatus, triggerRun, isTriggering } = useSyncStatus()
-  const [currentPage, setCurrentPage] = useState(1)
+  const [currentPage, setCurrentPage] = useState(() => {
+    const parsed = Number(searchParams.get('page') || '1')
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : 1
+  })
+  const activeView = searchParams.get('view') === 'sync' ? 'sync' : 'list'
 
   // Highlight state for newly crawled jobs
   const [newlyCrawledOrderIds, setNewlyCrawledOrderIds] = useState<string[]>([])
@@ -333,6 +338,10 @@ export function OrdersListPage() {
   }, [activePlatform?.id, statusFilter, batchFilter, designerFilter])
 
   async function handleSyncPrintervalStatus(orderIds?: string[]) {
+    if (orderIds && orderIds.length > 500) {
+      setError('Tab hiện tại có quá 500 đơn. Hãy thu hẹp bộ lọc trước khi đồng bộ.')
+      return
+    }
     window.dispatchEvent(new CustomEvent('sync-printerval-start'))
     try {
       await triggerRun(orderIds)
@@ -441,7 +450,25 @@ export function OrdersListPage() {
   // Reset page when filters change
   useEffect(() => {
     setCurrentPage(1)
+    const next = new URLSearchParams(searchParams)
+    next.delete('page')
+    setSearchParams(next, { replace: true })
   }, [statusFilter, designerFilter, batchFilter, searchQuery, activeDesignerTab, adminTab, kpiFilter])
+
+  function setOrdersView(view: 'list' | 'sync') {
+    const next = new URLSearchParams(searchParams)
+    if (view === 'sync') next.set('view', 'sync')
+    else next.delete('view')
+    setSearchParams(next)
+  }
+
+  function handlePageChange(page: number) {
+    setCurrentPage(page)
+    const next = new URLSearchParams(searchParams)
+    if (page > 1) next.set('page', String(page))
+    else next.delete('page')
+    setSearchParams(next, { replace: true })
+  }
 
   const paginatedOrders = paginate(filteredOrders, currentPage)
 
@@ -485,6 +512,48 @@ export function OrdersListPage() {
         <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-800 text-sm font-medium flex items-center justify-between shadow-xs">
           <span>{error}</span>
           <button onClick={() => setError(null)} className="text-red-600 hover:text-red-900 text-xs font-bold cursor-pointer">X</button>
+        </div>
+      )}
+
+      {isAdmin && (
+        <div className="flex items-center gap-2 border-b border-slate-200">
+          <button
+            type="button"
+            onClick={() => setOrdersView('list')}
+            className={`px-3 py-2 text-xs font-bold border-b-2 ${activeView === 'list' ? 'border-[#0052CC] text-[#0052CC]' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
+          >
+            Danh sách
+          </button>
+          <button
+            type="button"
+            onClick={() => setOrdersView('sync')}
+            className={`px-3 py-2 text-xs font-bold border-b-2 ${activeView === 'sync' ? 'border-[#0052CC] text-[#0052CC]' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
+          >
+            Đồng bộ Printerval
+          </button>
+        </div>
+      )}
+
+      {isAdmin && activeView === 'sync' && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-bold text-slate-800">Đồng bộ trạng thái tab hiện tại</p>
+            <p className="mt-1 text-xs text-slate-600">
+              {syncStatus?.is_running
+                ? `Đang kiểm tra ${syncStatus.last_result?.processed || 0}/${syncStatus.last_result?.total || filteredOrders.length} đơn.`
+                : `Sẽ kiểm tra ${filteredOrders.length} đơn đang được lọc. Kết quả được lưu lại nếu mày tải lại trang.`}
+            </p>
+            {syncStatus?.last_error && <p className="mt-1 text-xs text-red-700">Lỗi gần nhất: {syncStatus.last_error}</p>}
+          </div>
+          <button
+            type="button"
+            onClick={() => handleSyncPrintervalStatus(filteredOrders.map((order) => order.id))}
+            disabled={isTriggering || !!syncStatus?.is_running || filteredOrders.length === 0 || filteredOrders.length > 500}
+            className="inline-flex items-center gap-2 rounded-lg bg-[#0052CC] px-3.5 py-2 text-xs font-bold text-white disabled:opacity-50"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isTriggering || syncStatus?.is_running ? 'animate-spin' : ''}`} />
+            {filteredOrders.length > 500 ? 'Thu hẹp bộ lọc (tối đa 500)' : `Đồng bộ ${filteredOrders.length} đơn`}
+          </button>
         </div>
       )}
 
@@ -1162,7 +1231,7 @@ export function OrdersListPage() {
         <Pagination
           totalItems={filteredOrders.length}
           currentPage={currentPage}
-          onPageChange={setCurrentPage}
+          onPageChange={handlePageChange}
         />
       </div>
 

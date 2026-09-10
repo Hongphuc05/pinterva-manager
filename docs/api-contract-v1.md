@@ -29,7 +29,7 @@ extension và telemetry vận hành.
 | Order read | `GET /order-states`, `GET /orders/{id}/printerval-options`, `POST /platforms/printerval-options/refresh` | auth/admin | orders UI | options cache theo platform |
 | Order command | `POST /orders/refresh`, `POST /orders/{id}/refresh-detail` | admin | crawl/detail UI | crawl mới và refresh một order |
 | Sync | `POST /sync-jobs`, `GET /sync-jobs/current`, `GET /sync-jobs/{id}` | admin/auth | topbar/orders | durable background status sync |
-| Assignment | `POST /orders/{id}/printerval-assignment`, `POST /orders/bulk-printerval-assignment` | admin | orders UI | sẽ chuyển về `/assignments` ở Task 1.6 |
+| Assignment | `POST /assignments` | admin | orders UI | một command nhận snapshot `order_ids`, single và bulk cùng contract |
 | Workflow | `PATCH /orders/{id}/state`, `POST /orders/{id}/approve-fix`, `POST /orders/{id}/reject-fix-to-review` | auth/admin | detail/status UI | sẽ chuyển về action transition rõ nghĩa |
 | Designer task | `GET /my-tasks`, `POST /assignments/{id}/start`, `PATCH /assignments/{id}/sub-status`, `POST /assignments/{id}/results` | designer | task UI | giữ model Assignment |
 | User | `GET, POST /users`, `GET, PATCH /users/{id}/password`, `DELETE /users/{id}` | admin | users UI | password policy tách riêng |
@@ -45,6 +45,7 @@ extension và telemetry vận hành.
 | `POST /orders/sync-status/reset` | không còn frontend chính | không có reset public | deprecate |
 | `POST /orders/sync-printerval-status` | Orders, Topbar, DesignerBoard/History cũ | `POST /sync-jobs` | Orders/Topbar đã chuyển; chuyển view còn lại ở Task 1.4 |
 | `POST /orders/printerval-credentials` | test/consumer legacy | `PATCH /platforms/{id}/credentials` | compatibility adapter, không thêm consumer mới |
+| `POST /orders/{id}/printerval-assignment`, `POST /orders/bulk-printerval-assignment` | `OrderStatusPage` legacy | `POST /assignments` | Orders list đã chuyển; giữ route cũ tới khi Task 1.4 gỡ page legacy |
 | `/printerval-login/status`, `/start`, `/done` | browser-login legacy | cookie credential flow | route UI đã redirect; giữ rollback window |
 | `POST /orders/{id}/assign`, `POST /orders/bulk-assign` | không thấy frontend | `/assignments` | không port Go |
 | `GET /admin/ping`, `GET /designer/ping` | test RBAC | middleware test | không port Go |

@@ -36,12 +36,16 @@ DEPRECATED_PATHS = {
     "/api/orders/sync-status/reset",
     "/api/orders/sync-printerval-status",
     "/api/orders/printerval-credentials",
+    "/api/orders/bulk-printerval-assignment",
     "/api/printerval-login/status",
     "/api/printerval-login/start",
     "/api/printerval-login/done",
     "/api/orders/bulk-assign",
 }
-DEPRECATED_PATH_PATTERNS = (re.compile(r"^/api/orders/[^/]+/assign$"),)
+DEPRECATED_PATH_PATTERNS = (
+    re.compile(r"^/api/orders/[^/]+/assign$"),
+    re.compile(r"^/api/orders/[^/]+/printerval-assignment$"),
+)
 
 
 def _request_actor_role(request: Request) -> str | None:

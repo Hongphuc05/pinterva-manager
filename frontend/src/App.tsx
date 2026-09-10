@@ -4,7 +4,6 @@ import { PlatformProvider } from './auth/PlatformContext'
 import { ProtectedRoute } from './auth/ProtectedRoute'
 import { LoginPage } from './pages/LoginPage'
 import { OrdersListPage } from './pages/OrdersListPage'
-import { OrderStatusPage } from './pages/OrderStatusPage'
 import { OrderDetailPage } from './pages/OrderDetailPage'
 import { UsersPage } from './pages/UsersPage'
 import { DesignerBoardPage } from './pages/DesignerBoardPage'
@@ -60,11 +59,7 @@ function App() {
           />
           <Route
             path="/order-status"
-            element={
-              <ProtectedRoute>
-                <OrderStatusPage />
-              </ProtectedRoute>
-            }
+            element={<Navigate to="/orders?view=sync" replace />}
           />
           <Route
             path="/users"
