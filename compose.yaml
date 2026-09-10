@@ -4,6 +4,10 @@ x-backend: &backend
   build:
     context: ${APP_SOURCE_DIR:-.}
     dockerfile: Dockerfile
+    # The production host runs Docker inside WSL2.  Its bridge DNS may not be
+    # able to resolve PyPI after a Windows network change, while the host DNS
+    # can.  Use the host network only while building the image.
+    network: host
   image: ${BACKEND_IMAGE:-tacahu-backend}:${APP_VERSION:-latest}
   env_file: ${ENV_FILE:-.env}
   restart: unless-stopped
