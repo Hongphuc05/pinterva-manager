@@ -6,6 +6,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import Assignment, Order, User, WorkflowEvent
+from app.domain.access import ROLE_DESIGNER, ROLE_DESIGNER_TRELLO, WORK_DOMAIN_DUPLICATE
 
 
 def list_orders_for_user(
@@ -19,13 +20,18 @@ def list_orders_for_user(
     """Admin sees all platform orders (optionally filtered).
     Designer sees ONLY orders assigned to themselves.
     """
-    if user.role == "designer":
+    if user.role == ROLE_DESIGNER:
         designer_id = str(user.id)
 
     query = session.query(Order)
 
     if platform_id:
         query = query.filter(Order.platform_id == platform_id)
+
+    if user.role == ROLE_DESIGNER_TRELLO:
+        # Trello designers work in a shared, deliberately separate queue. Their
+        # board command applies the finer ownership policy.
+        query = query.filter(Order.work_domain == WORK_DOMAIN_DUPLICATE)
 
     if designer_id:
         if designer_id == "unassigned":
@@ -136,7 +142,7 @@ def get_order_detail_for_user(session: Session, user: User, order_id: str) -> Or
     if order is None:
         return None
 
-    if user.role == "designer":
+    if user.role == ROLE_DESIGNER:
         assignment = (
             session.query(Assignment)
             .filter(
@@ -152,6 +158,9 @@ def get_order_detail_for_user(session: Session, user: User, order_id: str) -> Or
         )
         if assignment is None and not is_printerval_match:
             return None
+
+    if user.role == ROLE_DESIGNER_TRELLO and order.work_domain != WORK_DOMAIN_DUPLICATE:
+        return None
 
     return order
 
@@ -174,4 +183,3 @@ def get_order_history(session: Session, order_id: str) -> list[WorkflowEvent]:
         .order_by(WorkflowEvent.created_at)
         .all()
     )
-

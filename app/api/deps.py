@@ -47,6 +47,19 @@ def require_role(role: str):
     return _check
 
 
+def require_any_role(*roles: str):
+    """Authorize a small fixed set of roles at the HTTP boundary."""
+
+    allowed_roles = set(roles)
+
+    def _check(user: User = Depends(get_current_user)) -> User:
+        if user.role not in allowed_roles:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Insufficient role")
+        return user
+
+    return _check
+
+
 DEFAULT_PLATFORM_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
 
 
@@ -90,4 +103,3 @@ def get_current_platform_id(
     except Exception:
         db.rollback()
     return DEFAULT_PLATFORM_ID
-

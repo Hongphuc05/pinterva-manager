@@ -58,6 +58,7 @@ class OrderSummaryOut(BaseModel):
     id: uuid.UUID
     external_order_id: str
     state: str
+    work_domain: str = "standard"
     batch_id: uuid.UUID | None
     product_name: str | None = None
     sku: str | None = None

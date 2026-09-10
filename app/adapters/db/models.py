@@ -52,7 +52,9 @@ class Platform(Base):
 
 class User(Base):
     __tablename__ = "users"
-    __table_args__ = (CheckConstraint("role IN ('admin', 'designer')", name="ck_users_role"),)
+    __table_args__ = (
+        CheckConstraint("role IN ('admin', 'designer', 'designer-trello')", name="ck_users_role"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
@@ -99,6 +101,11 @@ class Order(Base):
     external_order_id: Mapped[str] = mapped_column(String(64), nullable=False)
     batch_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("batches.id"), nullable=True)
     platform_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("platforms.id"), nullable=True)
+    # `duplicate` is the shared Trello workspace. It is separate from the internal
+    # workflow state so moving a card between people never mutates production state.
+    work_domain: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="standard", server_default=text("'standard'")
+    )
     state: Mapped[str] = mapped_column(String(32), nullable=False, default="OPEN")
     version: Mapped[int] = mapped_column(nullable=False, default=1)
     external_observation: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

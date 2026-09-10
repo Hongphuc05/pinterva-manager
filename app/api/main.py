@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from app.api.routes import assignments_api as assignments_api_routes
 from app.api.routes import auth as auth_routes
 from app.api.routes import designer_tasks_api as designer_tasks_api_routes
+from app.api.routes import duplicate_board_api as duplicate_board_api_routes
 from app.api.routes import finance_api as finance_api_routes
 from app.api.routes import health as health_routes
 from app.api.routes import orders_api as orders_api_routes
@@ -120,6 +121,7 @@ def create_app() -> FastAPI:
     app.include_router(orders_api_routes.router, prefix="/api")
     app.include_router(finance_api_routes.router, prefix="/api")
     app.include_router(designer_tasks_api_routes.router, prefix="/api")
+    app.include_router(duplicate_board_api_routes.router, prefix="/api")
     app.include_router(protected_example.router, prefix="/api")
 
     CRAWLED_ASSETS_DIR.mkdir(parents=True, exist_ok=True)

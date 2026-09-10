@@ -11,6 +11,7 @@ from app.adapters.db.models import User
 from app.api.deps import get_current_platform_id, get_db, require_role
 from app.application.auth import hash_password
 from app.application.password_vault import decrypt_password, encrypt_password
+from app.domain.access import ROLE_ADMIN, ROLE_DESIGNER, ROLE_DESIGNER_TRELLO
 
 router = APIRouter()
 
@@ -29,7 +30,7 @@ class CreateUserRequest(BaseModel):
     username: str
     password: str
     full_name: str
-    role: str = "designer"  # "admin" | "designer" | "user"
+    role: str = ROLE_DESIGNER
 
 
 class UserPasswordOut(BaseModel):
@@ -99,10 +100,11 @@ def create_user(
 
     role = payload.role.strip().lower()
     if role == "user":
-        role = "designer"
-    if role not in ("admin", "designer"):
+        role = ROLE_DESIGNER
+    if role not in (ROLE_ADMIN, ROLE_DESIGNER, ROLE_DESIGNER_TRELLO):
         raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, "Vai trò không hợp lệ (admin hoặc designer)."
+            status.HTTP_400_BAD_REQUEST,
+            "Vai trò không hợp lệ (admin, designer hoặc designer-trello).",
         )
 
     existing = db.query(User).filter_by(username=clean_username).one_or_none()
@@ -117,7 +119,7 @@ def create_user(
         role=role,
         password_hash=hash_password(clean_password),
         password_ciphertext=encrypt_password(clean_password),
-        platform_id=platform_id if role == "designer" else None,
+        platform_id=platform_id if role in (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO) else None,
         active=True,
     )
     db.add(new_user)
