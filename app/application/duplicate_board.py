@@ -7,13 +7,14 @@ import uuid
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from app.adapters.db.models import Assignment, Order, User, WorkflowEvent
+from app.adapters.db.models import Assignment, Order, Platform, User, WorkflowEvent
 from app.domain.access import (
     ROLE_ADMIN,
     ROLE_DESIGNER_TRELLO,
     WORK_DOMAIN_DUPLICATE,
     WORK_DOMAINS,
 )
+from app.domain.models import OrderState
 
 
 class DuplicateBoardError(ValueError):
@@ -34,12 +35,21 @@ def _same_platform_or_unscoped(user: User, platform_id: uuid.UUID) -> bool:
     return user.platform_id is None or user.platform_id == platform_id
 
 
-def _event(session: Session, order: Order, actor_id: uuid.UUID, action: str, **evidence) -> None:
+def _event(
+    session: Session,
+    order: Order,
+    actor_id: uuid.UUID,
+    action: str,
+    *,
+    from_state: str | None = None,
+    to_state: str | None = None,
+    **evidence,
+) -> None:
     session.add(
         WorkflowEvent(
             order_id=order.id,
-            from_state=order.state,
-            to_state=order.state,
+            from_state=from_state if from_state is not None else order.state,
+            to_state=to_state if to_state is not None else order.state,
             actor_id=actor_id,
             evidence={"source": "duplicate_board", "action": action, **evidence},
         )
@@ -92,13 +102,21 @@ def set_orders_work_domain(
             reason=f"moved_to_{work_domain}_domain",
         )
         previous_domain = order.work_domain
+        previous_state = order.state
         order.work_domain = work_domain
+        # A duplicate card immediately becomes work for the Trello team. This is
+        # an internal workflow change only; dragging it never writes Printerval.
+        if work_domain == WORK_DOMAIN_DUPLICATE:
+            order.state = OrderState.IN_PROGRESS.value
+            order.fix_approved_by_admin = False
         session.add(order)
         _event(
             session,
             order,
             actor.id,
             "work_domain_changed",
+            from_state=previous_state,
+            to_state=order.state,
             from_domain=previous_domain,
             to_domain=work_domain,
             cancelled_assignment_ids=[str(item.id) for item in active_assignments],
@@ -145,6 +163,10 @@ def move_duplicate_order(
     if order.work_domain != WORK_DOMAIN_DUPLICATE:
         raise DuplicateBoardError("Đơn chưa thuộc domain Đơn trùng lặp")
 
+    platform = session.get(Platform, platform_id)
+    if platform is None:
+        raise DuplicateBoardError("Không tìm thấy platform đang chọn")
+
     active_assignments = _active_assignments(session, order.id, lock=True)
     current_assignment = next(
         (
@@ -159,10 +181,11 @@ def move_duplicate_order(
         raise DuplicateBoardError("Bạn không có quyền thay đổi board này")
 
     if actor.role == ROLE_DESIGNER_TRELLO:
-        if target_designer_id not in (None, actor.id):
-            raise DuplicateBoardError("Designer Trello chỉ có thể nhận đơn cho chính mình")
-        if target_designer_id is None and current_assignment and current_assignment.designer_id != actor.id:
-            raise DuplicateBoardError("Bạn chỉ có thể trả đơn do chính mình nhận")
+        if not platform.duplicate_board_cross_designer_drag_enabled:
+            if target_designer_id not in (None, actor.id):
+                raise DuplicateBoardError("Admin đang tắt quyền kéo thẻ sang cột Designer khác")
+            if target_designer_id is None and current_assignment and current_assignment.designer_id != actor.id:
+                raise DuplicateBoardError("Bạn chỉ có thể trả đơn do chính mình nhận")
 
     target = _get_target_designer(session, target_designer_id, platform_id) if target_designer_id else None
     if current_assignment and target and current_assignment.designer_id == target.id:
@@ -195,12 +218,28 @@ def _card(order: Order, assignee: User | None) -> dict:
         "thumbnail_url": order.thumbnail_url,
         "deadline_at_ext": order.deadline_at_ext.isoformat() if order.deadline_at_ext else None,
         "state": order.state,
+        "note_outsource": order.note_outsource,
+        "previous_note_outsource": order.previous_note_outsource,
+        "fix_approved_by_admin": order.fix_approved_by_admin,
         "assignee_id": str(assignee.id) if assignee else None,
         "assignee_name": (assignee.full_name or assignee.username) if assignee else None,
     }
 
 
-def list_duplicate_board(session: Session, *, platform_id: uuid.UUID) -> list[dict]:
+def _column_metrics(cards: list[dict]) -> dict[str, int]:
+    return {
+        "total": len(cards),
+        "doing": sum(card["state"] == OrderState.IN_PROGRESS.value for card in cards),
+        "review": sum(card["state"] == OrderState.QC_PENDING.value for card in cards),
+        "fix": sum(card["state"] == OrderState.REVISION.value for card in cards),
+        "done": sum(card["state"] == OrderState.DONE.value for card in cards),
+    }
+
+
+def list_duplicate_board(session: Session, *, platform_id: uuid.UUID) -> dict:
+    platform = session.get(Platform, platform_id)
+    if platform is None:
+        raise DuplicateBoardError("Không tìm thấy platform đang chọn")
     designers = (
         session.query(User)
         .filter(
@@ -241,4 +280,26 @@ def list_duplicate_board(session: Session, *, platform_id: uuid.UUID) -> list[di
         assignee = assignment_by_order.get(order.id)
         target_column = column_by_designer.get(str(assignee.id)) if assignee else None
         (target_column or columns[0])["cards"].append(_card(order, assignee))
-    return columns
+    for column in columns:
+        column["metrics"] = _column_metrics(column["cards"])
+    return {
+        "columns": columns,
+        "cross_designer_drag_enabled": platform.duplicate_board_cross_designer_drag_enabled,
+    }
+
+
+def set_cross_designer_drag_enabled(
+    session: Session,
+    *,
+    actor: User,
+    platform_id: uuid.UUID,
+    enabled: bool,
+) -> bool:
+    if actor.role != ROLE_ADMIN:
+        raise DuplicateBoardError("Chỉ admin được thay đổi quyền kéo thẻ")
+    platform = session.get(Platform, platform_id)
+    if platform is None:
+        raise DuplicateBoardError("Không tìm thấy platform đang chọn")
+    platform.duplicate_board_cross_designer_drag_enabled = enabled
+    session.commit()
+    return platform.duplicate_board_cross_designer_drag_enabled

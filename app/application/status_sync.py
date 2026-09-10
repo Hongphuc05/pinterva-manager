@@ -72,7 +72,7 @@ def sync_selected_order_statuses(
     This deliberately does *not* re-crawl source/SKU/detail. Each chosen order
     is looked up by its own DJ code, first using its last observed Printerval state.
     Reads run with a small, configurable concurrency cap; ORM writes remain on this
-    caller thread and are committed once, avoiding a SQLAlchemy session race.
+    caller thread and commit per order with optimistic-lock retry.
     """
     if not orders:
         return {"checked": 0, "updated": 0, "not_found": 0, "failed": 0}
@@ -94,103 +94,140 @@ def sync_selected_order_statuses(
         designer_map = client.get_designer_map()
         worker_count = min(max(1, get_settings().printerval_manual_sync_concurrency), len(orders))
 
-        def find(order: Order) -> tuple[object, dict[str, Any] | None]:
-            return order.id, client.find_order(
-                order.external_order_id,
-                statuses=_status_guess_order(order.printerval_status),
+        # Never let worker threads touch ORM state.  Their only job is HTTP
+        # lookup; all database reads/writes stay on this caller thread.
+        lookups = [
+            (order.id, order.external_order_id, order.printerval_status)
+            for order in orders
+        ]
+
+        def find(
+            order_id: object, external_order_id: str, printerval_status: str | None
+        ) -> tuple[object, dict[str, Any] | None]:
+            return order_id, client.find_order(
+                external_order_id,
+                statuses=_status_guess_order(printerval_status),
             )
 
         with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="printerval-status") as pool:
-            futures = {pool.submit(find, order): order for order in orders}
+            futures = {
+                pool.submit(find, order_id, external_order_id, printerval_status): (
+                    order_id,
+                    external_order_id,
+                )
+                for order_id, external_order_id, printerval_status in lookups
+            }
             for future in as_completed(futures):
-                order = futures[future]
+                order_id, external_order_id = futures[future]
                 try:
-                    order_id, row = future.result()
-                    rows_by_order_id[order_id] = row
+                    result_order_id, row = future.result()
+                    rows_by_order_id[result_order_id] = row
                 except Exception as exc:
                     failed += 1
-                    failed_order_ids.add(order.id)
-                    logger.warning("Manual status sync failed for %s: %s", order.external_order_id, exc)
+                    failed_order_ids.add(order_id)
+                    logger.warning("Manual status sync failed for %s: %s", external_order_id, exc)
 
         updated = 0
         not_found = 0
-        now_utc = datetime.now(UTC)
-        for order in orders:
-            row = rows_by_order_id.get(order.id)
-            if row is None:
-                if order.id not in failed_order_ids:
-                    not_found += 1
-                    if order.printerval_status != "cancelled":
-                        order.printerval_status = "cancelled"
+        for original_order in orders:
+            order_id = original_order.id
+            row = rows_by_order_id.get(order_id)
+            if row is None and order_id not in failed_order_ids:
+                not_found += 1
+
+            # Commit each card independently. A concurrent drag, Fix decision or
+            # scheduled sync can then only retry this one row, never abort a whole
+            # board/tab sync due to SQLAlchemy's Order.version optimistic lock.
+            for attempt in range(3):
+                try:
+                    session.expire_all()
+                    order = session.get(Order, order_id)
+                    if order is None:
+                        break
+                    changed = False
+                    now_utc = datetime.now(UTC)
+
+                    if row is None:
+                        if order_id not in failed_order_ids and order.printerval_status != "cancelled":
+                            order.printerval_status = "cancelled"
+                            order.printerval_status_synced_at = now_utc
+                            changed = True
+                    else:
+                        found_status = str(row.get("status") or "").strip()
+                        norm_status = found_status.upper()
+                        attributes = row.get("attributes") or {}
+                        note = str(attributes.get("outsource_note") or row.get("note") or "").strip()
+                        old_state = order.state
+
+                        if norm_status == "DONE" and order.state != "DONE":
+                            order.state = "DONE"
+                            session.add(
+                                WorkflowEvent(
+                                    order_id=order.id,
+                                    from_state=old_state,
+                                    to_state="DONE",
+                                    actor_id=actor_id,
+                                    evidence={
+                                        "action": "APPROVE_DONE",
+                                        "actor_name": "Printerval",
+                                        "description": "Printerval đã duyệt hoàn thành đơn hàng (Done)",
+                                    },
+                                )
+                            )
+                            changed = True
+                        elif norm_status == "FIX" and order.state != "REVISION":
+                            order.state = "REVISION"
+                            order.previous_note_outsource = order.note_outsource
+                            if note:
+                                order.note_outsource = note
+                            order.fix_approved_by_admin = False
+                            session.add(
+                                WorkflowEvent(
+                                    order_id=order.id,
+                                    from_state=old_state,
+                                    to_state="REVISION",
+                                    actor_id=actor_id,
+                                    evidence={
+                                        "action": "REQUEST_FIX",
+                                        "actor_name": "Printerval",
+                                        "description": f"Printerval trả về Fix với note: {note or 'Không có note'}",
+                                        "note_outsource": note,
+                                    },
+                                )
+                            )
+                            changed = True
+                        elif note and norm_status == "FIX" and note != order.note_outsource:
+                            order.previous_note_outsource = order.note_outsource
+                            order.note_outsource = note
+                            changed = True
+
+                        if found_status and found_status.lower() != (order.printerval_status or "").lower():
+                            order.printerval_status = found_status.lower()
+                            changed = True
+
+                        designer = _row_designer(row, designer_map=designer_map)
+                        if designer and designer != order.printerval_designer:
+                            order.printerval_designer = designer
+                            order.printerval_designer_synced_at = now_utc
+                            changed = True
+
                         order.printerval_status_synced_at = now_utc
-                        changed = True
+
+                    session.commit()
+                    if changed:
                         updated += 1
-                continue
+                    break
+                except StaleDataError:
+                    session.rollback()
+                    if attempt == 2:
+                        failed += 1
+                        logger.warning("Manual status sync exhausted concurrent-update retries for %s", order_id)
+                except Exception as exc:
+                    session.rollback()
+                    failed += 1
+                    logger.warning("Manual status sync failed while saving %s: %s", order_id, exc)
+                    break
 
-            found_status = str(row.get("status") or "").strip()
-            norm_status = found_status.upper()
-            attributes = row.get("attributes") or {}
-            note = str(attributes.get("outsource_note") or row.get("note") or "").strip()
-            old_state = order.state
-            changed = False
-
-            if norm_status == "DONE" and order.state != "DONE":
-                order.state = "DONE"
-                session.add(
-                    WorkflowEvent(
-                        order_id=order.id,
-                        from_state=old_state,
-                        to_state="DONE",
-                        actor_id=actor_id,
-                        evidence={
-                            "action": "APPROVE_DONE",
-                            "actor_name": "Printerval",
-                            "description": "Printerval đã duyệt hoàn thành đơn hàng (Done)",
-                        },
-                    )
-                )
-                changed = True
-            elif norm_status == "FIX" and order.state != "REVISION":
-                order.state = "REVISION"
-                order.previous_note_outsource = order.note_outsource
-                if note:
-                    order.note_outsource = note
-                order.fix_approved_by_admin = False
-                session.add(
-                    WorkflowEvent(
-                        order_id=order.id,
-                        from_state=old_state,
-                        to_state="REVISION",
-                        actor_id=actor_id,
-                        evidence={
-                            "action": "REQUEST_FIX",
-                            "actor_name": "Printerval",
-                            "description": f"Printerval trả về Fix với note: {note or 'Không có note'}",
-                            "note_outsource": note,
-                        },
-                    )
-                )
-                changed = True
-            elif note and norm_status == "FIX" and note != order.note_outsource:
-                order.previous_note_outsource = order.note_outsource
-                order.note_outsource = note
-                changed = True
-
-            if found_status and found_status.lower() != (order.printerval_status or "").lower():
-                order.printerval_status = found_status.lower()
-                changed = True
-
-            designer = _row_designer(row, designer_map=designer_map)
-            if designer and designer != order.printerval_designer:
-                order.printerval_designer = designer
-                order.printerval_designer_synced_at = now_utc
-                changed = True
-
-            order.printerval_status_synced_at = now_utc
-            if changed:
-                updated += 1
-
-        session.commit()
         return {"checked": len(orders), "updated": updated, "not_found": not_found, "failed": failed}
     except Exception:
         session.rollback()

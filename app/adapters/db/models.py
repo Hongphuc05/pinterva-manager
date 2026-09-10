@@ -44,6 +44,11 @@ class Platform(Base):
     printerval_options_synced_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # When enabled, every designer-trello may rebalance duplicate cards between
+    # every Trello column. Admins may always do so.
+    duplicate_board_cross_designer_drag_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, server_default=text("true"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

@@ -1,9 +1,22 @@
-import { useCallback, useEffect, useState, type DragEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState, type DragEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { AlertCircle, GripVertical, Layers3, Package, RefreshCw, UserRound } from 'lucide-react'
+import {
+  AlertCircle,
+  ArrowDownUp,
+  Check,
+  GripVertical,
+  Layers3,
+  Package,
+  RefreshCw,
+  RotateCcw,
+  Settings2,
+  UserRound,
+} from 'lucide-react'
 import { ApiError, apiFetch, resolveAssetUrl } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { DashboardLayout } from '../components/DashboardLayout'
+import { AdminFixActionModal } from '../components/AdminFixActionModal'
+import { useSyncStatus } from '../hooks/useSyncStatus'
 
 type DuplicateCard = {
   id: string
@@ -12,14 +25,28 @@ type DuplicateCard = {
   thumbnail_url: string | null
   deadline_at_ext: string | null
   state: string
+  note_outsource: string
+  previous_note_outsource: string | null
+  fix_approved_by_admin: boolean
   assignee_id: string | null
   assignee_name: string | null
 }
 
+type ColumnMetrics = { total: number; doing: number; review: number; fix: number; done: number }
+
 type DuplicateColumn = {
   id: string
   title: string
+  metrics: ColumnMetrics
   cards: DuplicateCard[]
+}
+
+type FixAction = {
+  orderId: string
+  externalOrderId: string
+  mode: 'approve' | 'reject'
+  currentNote: string
+  previousNote: string | null
 }
 
 function stateLabel(state: string) {
@@ -43,22 +70,48 @@ function stateClass(state: string) {
   return 'bg-slate-100 text-slate-600 border-slate-200'
 }
 
+const stateSortRank: Record<string, number> = {
+  OPEN: 0,
+  WAITING: 0,
+  IN_PROGRESS: 1,
+  QC_PENDING: 2,
+  REVISION: 3,
+  DONE: 4,
+  CANCELLED: 5,
+}
+
+function sortedCards(cards: DuplicateCard[], statusSortEnabled: boolean) {
+  if (!statusSortEnabled) return cards
+  return [...cards].sort((left, right) => {
+    const stateDifference = (stateSortRank[left.state] ?? 99) - (stateSortRank[right.state] ?? 99)
+    if (stateDifference !== 0) return stateDifference
+    return (left.deadline_at_ext || '').localeCompare(right.deadline_at_ext || '')
+  })
+}
+
 export function DuplicateBoardPage() {
   const { user } = useAuth()
+  const { status: syncStatus, triggerRun, isTriggering } = useSyncStatus()
   const [columns, setColumns] = useState<DuplicateColumn[]>([])
+  const [crossDesignerDragEnabled, setCrossDesignerDragEnabled] = useState(true)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [draggedCard, setDraggedCard] = useState<DuplicateCard | null>(null)
   const [dropTarget, setDropTarget] = useState<string | null>(null)
   const [movingCardId, setMovingCardId] = useState<string | null>(null)
+  const [statusSortColumns, setStatusSortColumns] = useState<Set<string>>(() => new Set())
+  const [savingSettings, setSavingSettings] = useState(false)
+  const [syncRequested, setSyncRequested] = useState(false)
+  const [fixAction, setFixAction] = useState<FixAction | null>(null)
 
   const isAdmin = user?.role === 'admin'
 
   const loadBoard = useCallback(async () => {
     setLoading(true)
     try {
-      const result = await apiFetch<{ columns: DuplicateColumn[] }>('/duplicate-board')
+      const result = await apiFetch<{ columns: DuplicateColumn[]; cross_designer_drag_enabled: boolean }>('/duplicate-board')
       setColumns(result.columns)
+      setCrossDesignerDragEnabled(result.cross_designer_drag_enabled)
       setError(null)
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : 'Không thể tải board Đơn trùng lặp.')
@@ -68,12 +121,54 @@ export function DuplicateBoardPage() {
   }, [])
 
   useEffect(() => {
-    loadBoard()
+    void loadBoard()
   }, [loadBoard])
+
+  useEffect(() => {
+    const handleOrdersUpdated = () => { void loadBoard() }
+    window.addEventListener('orders-updated', handleOrdersUpdated)
+    return () => window.removeEventListener('orders-updated', handleOrdersUpdated)
+  }, [loadBoard])
+
+  const boardOrderIds = useMemo(() => columns.flatMap((column) => column.cards.map((card) => card.id)), [columns])
+
+  const syncBoardStatus = useCallback(async () => {
+    if (!isAdmin) return
+    if (boardOrderIds.length === 0) {
+      setError('Board chưa có đơn để đồng bộ trạng thái.')
+      return
+    }
+    setError(null)
+    setSyncRequested(true)
+    try {
+      await triggerRun(boardOrderIds)
+    } catch (caught) {
+      setSyncRequested(false)
+      setError(caught instanceof ApiError ? caught.message : 'Không thể gửi tác vụ đồng bộ.')
+      window.dispatchEvent(new CustomEvent('sync-printerval-end'))
+    }
+  }, [boardOrderIds, isAdmin, triggerRun])
+
+  useEffect(() => {
+    const handleSyncCurrentTab = () => {
+      if (!isAdmin) return
+      window.dispatchEvent(new CustomEvent('sync-tab-handled'))
+      void syncBoardStatus()
+    }
+    window.addEventListener('request-sync-current-tab', handleSyncCurrentTab)
+    return () => window.removeEventListener('request-sync-current-tab', handleSyncCurrentTab)
+  }, [isAdmin, syncBoardStatus])
+
+  useEffect(() => {
+    if (!syncRequested || isTriggering || syncStatus?.is_running) return
+    setSyncRequested(false)
+    void loadBoard()
+    window.dispatchEvent(new CustomEvent('sync-printerval-end'))
+  }, [isTriggering, loadBoard, syncRequested, syncStatus?.is_running])
 
   function canDropTo(column: DuplicateColumn) {
     if (!draggedCard || movingCardId) return false
-    if (isAdmin) return true
+    if (isAdmin || crossDesignerDragEnabled) return true
     if (column.id === user?.id) return true
     return column.id === 'unassigned' && draggedCard.assignee_id === user?.id
   }
@@ -115,6 +210,30 @@ export function DuplicateBoardPage() {
     }
   }
 
+  async function updateCrossDesignerDrag(enabled: boolean) {
+    setSavingSettings(true)
+    try {
+      const result = await apiFetch<{ cross_designer_drag_enabled: boolean }>('/duplicate-board/settings', {
+        method: 'PUT',
+        body: JSON.stringify({ cross_designer_drag_enabled: enabled }),
+      })
+      setCrossDesignerDragEnabled(result.cross_designer_drag_enabled)
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'Không thể lưu quyền kéo thẻ.')
+    } finally {
+      setSavingSettings(false)
+    }
+  }
+
+  function toggleStatusSort(columnId: string) {
+    setStatusSortColumns((current) => {
+      const next = new Set(current)
+      if (next.has(columnId)) next.delete(columnId)
+      else next.add(columnId)
+      return next
+    })
+  }
+
   return (
     <DashboardLayout>
       <section className="-m-6 min-h-[calc(100vh-4rem)] bg-[#f1f2f4] p-6 lg:-m-8 lg:p-8">
@@ -125,19 +244,50 @@ export function DuplicateBoardPage() {
               Board Đơn trùng lặp
             </h1>
             <p className="mt-1 text-xs text-slate-500">
-              Kéo thẻ từ <strong>Thiếu form</strong> vào cột của mày để nhận xử lý.
-              {isAdmin ? ' Admin có thể phân lại giữa mọi cột.' : ' Mày chỉ có thể nhận hoặc trả đơn của chính mình.'}
+              {crossDesignerDragEnabled
+                ? 'Designer Trello có thể kéo thẻ tự do giữa mọi cột.'
+                : 'Designer Trello chỉ có thể nhận đơn cho mình hoặc trả đơn mình đang giữ.'}
+              {isAdmin && ' Admin luôn có thể phân lại thẻ giữa mọi cột.'}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={loadBoard}
-            disabled={loading || movingCardId !== null}
-            className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 shadow-xs hover:bg-slate-50 disabled:opacity-50"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
-            Làm mới board
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {isAdmin && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    window.dispatchEvent(new CustomEvent('sync-printerval-start'))
+                    void syncBoardStatus()
+                  }}
+                  disabled={syncRequested || isTriggering || syncStatus?.is_running || boardOrderIds.length === 0}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#0052CC] px-3 py-2 text-xs font-bold text-white shadow-xs hover:bg-[#0041A3] disabled:opacity-50"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${(syncRequested || isTriggering || syncStatus?.is_running) ? 'animate-spin' : ''}`} />
+                  Đồng bộ trạng thái
+                </button>
+                <label className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700">
+                  <Settings2 className="h-3.5 w-3.5 text-slate-500" />
+                  <input
+                    type="checkbox"
+                    checked={crossDesignerDragEnabled}
+                    disabled={savingSettings}
+                    onChange={(event) => { void updateCrossDesignerDrag(event.target.checked) }}
+                    className="h-3.5 w-3.5 accent-[#0052CC]"
+                  />
+                  Des kéo chéo
+                </label>
+              </>
+            )}
+            <button
+              type="button"
+              onClick={() => { void loadBoard() }}
+              disabled={loading || movingCardId !== null}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 shadow-xs hover:bg-slate-50 disabled:opacity-50"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+              Làm mới board
+            </button>
+          </div>
         </header>
 
         {error && (
@@ -155,6 +305,7 @@ export function DuplicateBoardPage() {
           <div className="flex min-h-[calc(100vh-15rem)] gap-4 overflow-x-auto pb-5">
             {columns.map((column) => {
               const canDrop = canDropTo(column)
+              const cards = sortedCards(column.cards, statusSortColumns.has(column.id))
               return (
                 <section
                   key={column.id}
@@ -166,21 +317,39 @@ export function DuplicateBoardPage() {
                     }
                   }}
                   onDragLeave={() => setDropTarget((current) => current === column.id ? null : current)}
-                  onDrop={(event) => onDrop(event, column)}
+                  onDrop={(event) => { void onDrop(event, column) }}
                   className={`flex w-80 shrink-0 flex-col rounded-xl border p-3 transition-colors ${
                     dropTarget === column.id && canDrop
                       ? 'border-violet-400 bg-violet-100 ring-2 ring-violet-300/60'
                       : 'border-slate-200 bg-slate-200/80'
                   }`}
                 >
-                  <div className="mb-3 flex items-center justify-between gap-2 px-1">
-                    <h2 className="truncate text-sm font-bold text-slate-700">{column.title}</h2>
-                    <span className="rounded-full bg-white px-2 py-0.5 font-mono text-[11px] font-bold text-slate-500 shadow-xs">
-                      {column.cards.length}
-                    </span>
+                  <div className="mb-3 space-y-2 px-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <h2 className="truncate text-sm font-bold text-slate-700">{column.title}</h2>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => toggleStatusSort(column.id)}
+                          title="Sắp xếp Waiting, Doing, Review, Fix, Done"
+                          className={`rounded p-1 transition-colors ${statusSortColumns.has(column.id) ? 'bg-violet-100 text-violet-700' : 'text-slate-500 hover:bg-white hover:text-slate-700'}`}
+                        >
+                          <ArrowDownUp className="h-3.5 w-3.5" />
+                        </button>
+                        <span className="rounded-full bg-white px-2 py-0.5 font-mono text-[11px] font-bold text-slate-500 shadow-xs">
+                          {column.metrics.total}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-1 text-[10px] font-semibold">
+                      <span className="rounded bg-blue-50 px-1.5 py-0.5 text-blue-700">Doing {column.metrics.doing}</span>
+                      <span className="rounded bg-violet-50 px-1.5 py-0.5 text-violet-700">Review {column.metrics.review}</span>
+                      <span className="rounded bg-orange-50 px-1.5 py-0.5 text-orange-700">Fix {column.metrics.fix}</span>
+                      <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-700">Done {column.metrics.done}</span>
+                    </div>
                   </div>
                   <div className="min-h-28 space-y-2">
-                    {column.cards.map((card) => (
+                    {cards.map((card) => (
                       <div
                         key={card.id}
                         draggable={!movingCardId}
@@ -214,6 +383,38 @@ export function DuplicateBoardPage() {
                           </span>
                           {card.deadline_at_ext && <span className="text-[10px] font-medium text-slate-400">{new Date(card.deadline_at_ext).toLocaleDateString('vi-VN')}</span>}
                         </div>
+                        {isAdmin && card.state === 'REVISION' && !card.fix_approved_by_admin && (
+                          <div className="mt-2 flex gap-1.5 border-t border-orange-100 pt-2">
+                            <button
+                              type="button"
+                              draggable={false}
+                              onClick={() => setFixAction({
+                                orderId: card.id,
+                                externalOrderId: card.external_order_id,
+                                mode: 'approve',
+                                currentNote: card.note_outsource,
+                                previousNote: card.previous_note_outsource,
+                              })}
+                              className="flex-1 inline-flex items-center justify-center gap-1 rounded-md bg-emerald-600 px-1.5 py-1 text-[10px] font-bold text-white hover:bg-emerald-700"
+                            >
+                              <Check className="h-3 w-3" /> Check & Duyệt
+                            </button>
+                            <button
+                              type="button"
+                              draggable={false}
+                              onClick={() => setFixAction({
+                                orderId: card.id,
+                                externalOrderId: card.external_order_id,
+                                mode: 'reject',
+                                currentNote: card.note_outsource,
+                                previousNote: card.previous_note_outsource,
+                              })}
+                              className="inline-flex items-center justify-center gap-1 rounded-md border border-slate-300 bg-white px-1.5 py-1 text-[10px] font-bold text-slate-700 hover:bg-slate-50"
+                            >
+                              <RotateCcw className="h-3 w-3" /> Trả Review
+                            </button>
+                          </div>
+                        )}
                       </div>
                     ))}
                     {column.cards.length === 0 && (
@@ -229,6 +430,19 @@ export function DuplicateBoardPage() {
           </div>
         )}
       </section>
+
+      {fixAction && (
+        <AdminFixActionModal
+          isOpen
+          mode={fixAction.mode}
+          orderId={fixAction.orderId}
+          externalOrderId={fixAction.externalOrderId}
+          currentNote={fixAction.currentNote}
+          previousNote={fixAction.previousNote}
+          onClose={() => setFixAction(null)}
+          onSuccess={() => { void loadBoard() }}
+        />
+      )}
     </DashboardLayout>
   )
 }
