@@ -4,6 +4,7 @@ import { apiFetch, ApiError, resolveAssetUrl } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { useSyncStatus } from '../hooks/useSyncStatus'
+import { Pagination, paginate } from '../components/Pagination'
 import { getStatusInfo, getPrintervalStatusInfo } from '../utils/statusTranslation'
 import { Package, RefreshCw, Radio, Loader2, UserPlus, X, User, AlertTriangle, Search, Filter } from 'lucide-react'
 
@@ -55,6 +56,7 @@ export function OrderStatusPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [designerFilter, setDesignerFilter] = useState('')
+  const [currentPage, setCurrentPage] = useState(1)
 
   const [editingOrder, setEditingOrder] = useState<OrderRow | null>(null)
   const [editDesignerId, setEditDesignerId] = useState('')
@@ -186,8 +188,15 @@ export function OrderStatusPage() {
     return true
   })
 
+  // Reset page when filters change
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchQuery, statusFilter, designerFilter])
+
+  const paginatedOrders = paginate(filteredOrders, currentPage)
+
   function handleSelectAll(checked: boolean) {
-    setSelectedOrderIds(checked ? filteredOrders.map((o) => o.id) : [])
+    setSelectedOrderIds(checked ? paginatedOrders.map((o) => o.id) : [])
   }
 
   useEffect(() => {
@@ -439,7 +448,7 @@ export function OrderStatusPage() {
                   <th className="py-3 px-3 w-10 text-center">
                     <input
                       type="checkbox"
-                      checked={filteredOrders.length > 0 && filteredOrders.every((o) => selectedOrderIds.includes(o.id))}
+                      checked={paginatedOrders.length > 0 && paginatedOrders.every((o) => selectedOrderIds.includes(o.id))}
                       onChange={(e) => handleSelectAll(e.target.checked)}
                       className="rounded border-slate-300 text-[#0052CC] focus:ring-[#0052CC] h-3.5 w-3.5 cursor-pointer"
                     />
@@ -455,7 +464,7 @@ export function OrderStatusPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
-              {filteredOrders.length === 0 ? (
+              {paginatedOrders.length === 0 ? (
                 <tr>
                   <td colSpan={isAdmin ? 8 : 6} className="py-12 text-center text-slate-400">
                     <Package className="h-10 w-10 mx-auto mb-2 opacity-30" />
@@ -463,7 +472,7 @@ export function OrderStatusPage() {
                   </td>
                 </tr>
               ) : (
-                filteredOrders.map((o) => {
+                paginatedOrders.map((o) => {
                   const internal = getStatusInfo(o.state)
                   const site = getPrintervalStatusInfo(o.printerval_status)
                   const isPending = o.printerval_assignment_lifecycle === 'pending'
@@ -600,6 +609,13 @@ export function OrderStatusPage() {
             </tbody>
           </table>
         </div>
+
+        {/* Pagination */}
+        <Pagination
+          totalItems={filteredOrders.length}
+          currentPage={currentPage}
+          onPageChange={setCurrentPage}
+        />
       </div>
 
       {/* Single-order edit modal */}

@@ -7,6 +7,7 @@ import { DashboardLayout } from '../components/DashboardLayout'
 import { ImageModal } from '../components/ImageModal'
 import { TemplateModal, type TemplateJob } from '../components/TemplateModal'
 import { StatusDropdown } from '../components/StatusDropdown'
+import { Pagination, paginate } from '../components/Pagination'
 import { STATE_MAP } from '../utils/statusTranslation'
 import { 
   Package, 
@@ -100,6 +101,7 @@ export function OrdersListPage() {
   const [error, setError] = useState<string | null>(null)
   const [activeDesignerTab, setActiveDesignerTab] = useState<'todo' | 'doing' | 'review' | 'all'>('todo')
   const [syncingPrinterval, setSyncingPrinterval] = useState(false)
+  const [currentPage, setCurrentPage] = useState(1)
 
   // Highlight state for newly crawled jobs
   const [newlyCrawledOrderIds, setNewlyCrawledOrderIds] = useState<string[]>([])
@@ -197,8 +199,9 @@ export function OrdersListPage() {
   }
 
   function handleSelectAll(checked: boolean) {
+    const pageOrders = paginate(filteredOrders, currentPage)
     if (checked) {
-      setSelectedOrderIds(filteredOrders.map((o) => o.id))
+      setSelectedOrderIds(pageOrders.map((o) => o.id))
     } else {
       setSelectedOrderIds([])
     }
@@ -401,6 +404,13 @@ export function OrdersListPage() {
 
     return true
   })
+
+  // Reset page when filters change
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [statusFilter, designerFilter, hasTemplateFilter, batchFilter, searchQuery, activeDesignerTab])
+
+  const paginatedOrders = paginate(filteredOrders, currentPage)
 
   // Listen for Topbar sync button click
   useEffect(() => {
@@ -773,8 +783,8 @@ export function OrdersListPage() {
                     <input
                       type="checkbox"
                       checked={
-                        filteredOrders.length > 0 &&
-                        filteredOrders.every((o) => selectedOrderIds.includes(o.id))
+                        paginatedOrders.length > 0 &&
+                        paginatedOrders.every((o) => selectedOrderIds.includes(o.id))
                       }
                       onChange={(e) => handleSelectAll(e.target.checked)}
                       className="rounded border-slate-300 text-[#0052CC] focus:ring-[#0052CC] h-3.5 w-3.5 cursor-pointer"
@@ -792,7 +802,7 @@ export function OrdersListPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
-              {filteredOrders.length === 0 ? (
+              {paginatedOrders.length === 0 ? (
                 <tr>
                   <td colSpan={isAdmin ? 9 : 8} className="py-12 text-center text-slate-400">
                     {ordersLoading ? (
@@ -810,7 +820,7 @@ export function OrdersListPage() {
                   </td>
                 </tr>
               ) : (
-                filteredOrders.map((o) => {
+                paginatedOrders.map((o) => {
                   const isSelected = selectedOrderIds.includes(o.id)
                   const isNewlyCrawled = newlyCrawledOrderIds.includes(o.id)
 
@@ -1020,6 +1030,13 @@ export function OrdersListPage() {
             </tbody>
           </table>
         </div>
+
+        {/* Pagination */}
+        <Pagination
+          totalItems={filteredOrders.length}
+          currentPage={currentPage}
+          onPageChange={setCurrentPage}
+        />
       </div>
 
       {/* Assign Order Modal */}

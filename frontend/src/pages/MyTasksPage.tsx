@@ -5,6 +5,7 @@ import { useAuth } from '../auth/AuthContext'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { ImageModal } from '../components/ImageModal'
 import { TemplateModal, type TemplateJob } from '../components/TemplateModal'
+import { Pagination, paginate } from '../components/Pagination'
 import { getStatusInfo } from '../utils/statusTranslation'
 import { 
   CheckSquare, 
@@ -61,6 +62,7 @@ export function MyTasksPage() {
   const [loading, setLoading] = useState(true)
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
   const [activeTemplateJobs, setActiveTemplateJobs] = useState<{ jobs: TemplateJob[]; orderId: string } | null>(null)
+  const [currentPage, setCurrentPage] = useState(1)
 
   async function loadTasks() {
     setLoading(true)
@@ -78,6 +80,10 @@ export function MyTasksPage() {
   useEffect(() => {
     loadTasks()
   }, [])
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [tasks.length])
 
   if (user?.role !== 'designer') {
     return (
@@ -148,8 +154,9 @@ export function MyTasksPage() {
           <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">Vào trang "Tất Cả Đơn Hàng" để xem danh sách chung hoặc chờ Admin gán công việc cho bạn.</p>
         </div>
       ) : (
-        <div className="space-y-4">
-          {tasks.map((task) => {
+        <>
+          <div className="space-y-4">
+            {paginate(tasks, currentPage).map((task) => {
             const statusInfo = getStatusInfo(task.order.state)
             const sourceCount = task.order.source_files?.length ?? 0
 
@@ -269,8 +276,15 @@ export function MyTasksPage() {
                 </div>
               </article>
             )
-          })}
-        </div>
+            })}
+          </div>
+
+          <Pagination
+            totalItems={tasks.length}
+            currentPage={currentPage}
+            onPageChange={setCurrentPage}
+          />
+        </>
       )}
     </DashboardLayout>
   )

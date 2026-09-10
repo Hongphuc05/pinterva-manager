@@ -12,6 +12,7 @@ import {
   Clock, 
   AlertCircle, 
   Check, 
+  ChevronDown,
   ChevronRight,
   CheckCheck,
   History,
@@ -54,6 +55,7 @@ export function DesignerBoardPage() {
   const [filterMode, setFilterMode] = useState<'all' | 'needs_review' | 'has_fix' | 'active'>('all')
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
   const [showDoneColumn, setShowDoneColumn] = useState(true)
+  const [expandedDesignerIds, setExpandedDesignerIds] = useState<Set<string>>(() => new Set())
   const [syncingPrinterval, setSyncingPrinterval] = useState(false)
   const [fixActionModal, setFixActionModal] = useState<{
     isOpen: boolean
@@ -151,6 +153,19 @@ export function DesignerBoardPage() {
       .filter((o) => ['QC_PENDING', 'REVISION', 'IN_PROGRESS', 'RESULT_SUBMITTED'].includes(o.state.toUpperCase()))
       .map((o) => o.id),
   )
+
+  function toggleDesigner(designerId: string) {
+    setExpandedDesignerIds((previous) => {
+      const next = new Set(previous)
+      if (next.has(designerId)) next.delete(designerId)
+      else next.add(designerId)
+      return next
+    })
+  }
+
+  function expandAllDesigners() {
+    setExpandedDesignerIds(new Set(filteredDesigners.map((designer) => designer.id)))
+  }
 
   // Listen for Topbar sync button click
   useEffect(() => {
@@ -341,6 +356,24 @@ export function DesignerBoardPage() {
             >
               <span>{showDoneColumn ? 'Ẩn Cột Done (3 Cột)' : 'Hiện Cột Done (4 Cột)'}</span>
             </button>
+
+            <div className="h-4 w-px bg-slate-200 mx-1 hidden sm:block" />
+            <button
+              type="button"
+              onClick={expandAllDesigners}
+              disabled={filteredDesigners.length === 0}
+              className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-50 transition-all cursor-pointer shrink-0"
+            >
+              Mở tất cả
+            </button>
+            <button
+              type="button"
+              onClick={() => setExpandedDesignerIds(new Set())}
+              disabled={expandedDesignerIds.size === 0}
+              className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-50 transition-all cursor-pointer shrink-0"
+            >
+              Đóng tất cả
+            </button>
           </div>
         </div>
 
@@ -374,6 +407,7 @@ export function DesignerBoardPage() {
               const doneOrders = des.orders.filter((o) =>
                 ['DONE', 'SKIPPED'].includes(o.state.toUpperCase())
               )
+              const isExpanded = expandedDesignerIds.has(des.id)
 
               return (
                 <div
@@ -381,8 +415,25 @@ export function DesignerBoardPage() {
                   className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden transition-all hover:border-slate-300"
                 >
                   {/* Designer Header Card */}
-                  <div className="p-5 border-b border-slate-100 bg-slate-50/60 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => toggleDesigner(des.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        toggleDesigner(des.id)
+                      }
+                    }}
+                    className={`p-5 bg-slate-50/60 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 cursor-pointer hover:bg-slate-100/70 ${isExpanded ? 'border-b border-slate-100' : ''}`}
+                    title={isExpanded ? 'Đóng chi tiết designer' : 'Mở chi tiết designer'}
+                  >
                     <div className="flex items-center gap-3.5">
+                      {isExpanded ? (
+                        <ChevronDown className="h-5 w-5 text-slate-500 shrink-0" aria-hidden="true" />
+                      ) : (
+                        <ChevronRight className="h-5 w-5 text-slate-500 shrink-0" aria-hidden="true" />
+                      )}
                       <div className="h-11 w-11 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 text-white font-bold flex items-center justify-center text-base shadow-sm shrink-0">
                         {des.full_name.charAt(0).toUpperCase()}
                       </div>
@@ -425,8 +476,8 @@ export function DesignerBoardPage() {
                     </div>
                   </div>
 
-                  {/* Orders Group Grid */}
-                  <div className="p-5">
+                  {isExpanded && (
+                    <div className="p-5">
                     {des.orders.length === 0 ? (
                       <div className="py-6 text-center text-slate-400 text-xs font-medium">
                         Hiện chưa có đơn hàng nào được phân công cho Designer này.
@@ -879,7 +930,8 @@ export function DesignerBoardPage() {
                         )}
                       </div>
                     )}
-                  </div>
+                    </div>
+                  )}
                 </div>
               )
             })}
