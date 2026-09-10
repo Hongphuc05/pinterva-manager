@@ -65,6 +65,12 @@ def test_create_user_as_admin(client, db_session):
     assert created["username"] == "newdesigner1"
     assert created["role"] == "designer"
 
+    password_response = client.get(
+        f"/api/users/{created['id']}/password", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert password_response.status_code == 200
+    assert password_response.json() == {"password": "designpassword", "recoverable": True}
+
 
 def test_delete_user_as_admin(client, db_session):
     admin_user, token = _login(client, db_session, "admin", "admin_deleter")
@@ -93,8 +99,8 @@ def test_admin_cannot_self_delete(client, db_session):
     assert resp.status_code == 400
 
 
-def test_update_printerval_designer_option_as_admin(client, db_session):
-    admin_user, token = _login(client, db_session, "admin", "admin_pdo")
+def test_admin_can_reset_another_users_password(client, db_session):
+    admin_user, token = _login(client, db_session, "admin", "admin_password_reset")
     target = User(
         username="linh_designer",
         full_name="Linh Designer",
@@ -106,44 +112,21 @@ def test_update_printerval_designer_option_as_admin(client, db_session):
     db_session.commit()
 
     resp = client.patch(
-        f"/api/users/{target.id}/printerval-designer-option",
-        json={"printerval_designer_option": "Linh Designer - 2D Prin"},
+        f"/api/users/{target.id}/password",
+        json={"password": "new-pass-123"},
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 200
-    assert resp.json()["printerval_designer_option"] == "Linh Designer - 2D Prin"
 
     db_session.refresh(target)
-    assert target.printerval_designer_option == "Linh Designer - 2D Prin"
-
-
-def test_update_printerval_designer_option_clears_with_blank_string(client, db_session):
-    admin_user, token = _login(client, db_session, "admin", "admin_pdo2")
-    target = User(
-        username="hoa_designer",
-        full_name="Hoa Designer",
-        role="designer",
-        password_hash=hash_password("pass"),
-        active=True,
-        printerval_designer_option="Hoa Designer - 2D Prin",
+    login_response = client.post(
+        "/api/login", json={"username": target.username, "password": "new-pass-123"}
     )
-    db_session.add(target)
-    db_session.commit()
+    assert login_response.status_code == 200
 
-    resp = client.patch(
-        f"/api/users/{target.id}/printerval-designer-option",
-        json={"printerval_designer_option": "  "},
-        headers={"Authorization": f"Bearer {token}"},
-    )
-    assert resp.status_code == 200
-    assert resp.json()["printerval_designer_option"] is None
-
-
-def test_update_printerval_designer_option_requires_admin(client, db_session):
-    designer_user, token = _login(client, db_session, "designer", "designer_pdo")
-    resp = client.patch(
-        f"/api/users/{designer_user.id}/printerval-designer-option",
-        json={"printerval_designer_option": "x"},
-        headers={"Authorization": f"Bearer {token}"},
+def test_password_endpoints_require_admin(client, db_session):
+    designer_user, token = _login(client, db_session, "designer", "designer_password")
+    resp = client.get(
+        f"/api/users/{designer_user.id}/password", headers={"Authorization": f"Bearer {token}"}
     )
     assert resp.status_code == 403

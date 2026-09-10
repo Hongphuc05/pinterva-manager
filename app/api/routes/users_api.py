@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.adapters.db.models import User
 from app.api.deps import get_current_platform_id, get_db, require_role
 from app.application.auth import hash_password
+from app.application.password_vault import decrypt_password, encrypt_password
 
 router = APIRouter()
 
@@ -21,7 +22,6 @@ class UserOut(BaseModel):
     role: str
     active: bool
     platform_id: str | None = None
-    printerval_designer_option: str | None = None
     created_at: datetime
 
 
@@ -30,6 +30,38 @@ class CreateUserRequest(BaseModel):
     password: str
     full_name: str
     role: str = "designer"  # "admin" | "designer" | "user"
+
+
+class UserPasswordOut(BaseModel):
+    password: str | None = None
+    recoverable: bool
+
+
+class UpdateUserPasswordRequest(BaseModel):
+    password: str
+
+
+def _user_out(user: User) -> UserOut:
+    return UserOut(
+        id=str(user.id),
+        username=user.username,
+        full_name=user.full_name,
+        role=user.role,
+        active=user.active,
+        platform_id=str(user.platform_id) if user.platform_id else None,
+        created_at=user.created_at,
+    )
+
+
+def _target_user(db: Session, user_id: str) -> User:
+    try:
+        target_uuid = uuid.UUID(user_id)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mã người dùng không hợp lệ.") from exc
+    target_user = db.get(User, target_uuid)
+    if target_user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy người dùng.")
+    return target_user
 
 
 @router.get("/users", response_model=list[UserOut])
@@ -43,19 +75,7 @@ def list_users(
         (User.role == "admin") | (User.platform_id == platform_id) | (User.platform_id.is_(None))
     )
     users = query.order_by(User.created_at.desc()).all()
-    return [
-        UserOut(
-            id=str(u.id),
-            username=u.username,
-            full_name=u.full_name,
-            role=u.role,
-            active=u.active,
-            platform_id=str(u.platform_id) if u.platform_id else None,
-            printerval_designer_option=u.printerval_designer_option,
-            created_at=u.created_at,
-        )
-        for u in users
-    ]
+    return [_user_out(u) for u in users]
 
 
 @router.post("/users", response_model=UserOut, status_code=status.HTTP_201_CREATED)
@@ -96,6 +116,7 @@ def create_user(
         full_name=payload.full_name.strip() or clean_username,
         role=role,
         password_hash=hash_password(clean_password),
+        password_ciphertext=encrypt_password(clean_password),
         platform_id=platform_id if role == "designer" else None,
         active=True,
     )
@@ -103,57 +124,36 @@ def create_user(
     db.commit()
     db.refresh(new_user)
 
-    return UserOut(
-        id=str(new_user.id),
-        username=new_user.username,
-        full_name=new_user.full_name,
-        role=new_user.role,
-        active=new_user.active,
-        platform_id=str(new_user.platform_id) if new_user.platform_id else None,
-        created_at=new_user.created_at,
-    )
+    return _user_out(new_user)
 
 
-class UpdatePrintervalDesignerOptionRequest(BaseModel):
-    printerval_designer_option: str | None = None
-
-
-@router.patch("/users/{user_id}/printerval-designer-option", response_model=UserOut)
-def update_printerval_designer_option(
+@router.get("/users/{user_id}/password", response_model=UserPasswordOut)
+def get_user_password(
     user_id: str,
-    payload: UpdatePrintervalDesignerOptionRequest,
     current_admin: User = Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ):
-    """The exact visible label this designer is registered under in Printerval's own
-    per-team Designer <select> — required before any order assigned to them can sync
-    to the site (app/application/assignment_sync.py). Free text, not validated against
-    a live list: a wrong value fails loudly on the next sync attempt (dead-lettered,
-    EXTERNAL_CHANGED) rather than being guessed or silently rejected here."""
-    try:
-        target_uuid = uuid.UUID(user_id)
-    except ValueError:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mã người dùng không hợp lệ.")
+    target_user = _target_user(db, user_id)
+    password = decrypt_password(target_user.password_ciphertext)
+    return UserPasswordOut(password=password, recoverable=password is not None)
 
-    target_user = db.get(User, target_uuid)
-    if target_user is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy người dùng.")
 
-    value = payload.printerval_designer_option.strip() if payload.printerval_designer_option else None
-    target_user.printerval_designer_option = value or None
+@router.patch("/users/{user_id}/password", response_model=UserOut)
+def update_user_password(
+    user_id: str,
+    payload: UpdateUserPasswordRequest,
+    current_admin: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    clean_password = payload.password.strip()
+    if len(clean_password) < 4:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mật khẩu phải có ít nhất 4 ký tự.")
+    target_user = _target_user(db, user_id)
+    target_user.password_hash = hash_password(clean_password)
+    target_user.password_ciphertext = encrypt_password(clean_password)
     db.commit()
     db.refresh(target_user)
-
-    return UserOut(
-        id=str(target_user.id),
-        username=target_user.username,
-        full_name=target_user.full_name,
-        role=target_user.role,
-        active=target_user.active,
-        platform_id=str(target_user.platform_id) if target_user.platform_id else None,
-        printerval_designer_option=target_user.printerval_designer_option,
-        created_at=target_user.created_at,
-    )
+    return _user_out(target_user)
 
 
 @router.delete("/users/{user_id}")
@@ -164,17 +164,15 @@ def delete_user(
 ):
     try:
         target_uuid = uuid.UUID(user_id)
-    except ValueError:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mã người dùng không hợp lệ.")
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mã người dùng không hợp lệ.") from exc
 
     if target_uuid == current_admin.id:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, "Không thể tự xóa tài khoản của chính mình."
         )
 
-    target_user = db.get(User, target_uuid)
-    if target_user is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy người dùng.")
+    target_user = _target_user(db, user_id)
 
     db.delete(target_user)
     db.commit()
