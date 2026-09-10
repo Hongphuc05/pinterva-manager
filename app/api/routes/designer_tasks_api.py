@@ -14,6 +14,7 @@ from app.application.designer_tasks import (
     DriveUnavailableError,
     DriveValidationError,
     TaskNotFoundError,
+    flag_missing_template,
     list_my_tasks,
     start_task,
     submit_result,
@@ -54,6 +55,8 @@ class TaskOrderOut(BaseModel):
     product_skus: list[dict] | None = None
     deadline_at_ext: str | None
     note_outsource: str | None = None
+    designer_note: str = ""
+    template_missing: bool = False
     order_note: str
     custom_config: dict | None
     sku_image_url: str | None = None
@@ -152,6 +155,24 @@ def api_update_sub_status(
             request_fingerprint=f"{assignment_id}:{payload.sub_status}",
         )
     except Exception as exc:  # routed through stable HTTP errors above
+        _raise_task_error(exc)
+    return TaskMutationResponse(**result)
+
+
+@router.post("/assignments/{assignment_id}/flag-missing-template", response_model=TaskMutationResponse)
+def api_flag_missing_template(
+    assignment_id: uuid.UUID,
+    payload: RequestIdPayload,
+    user: User = Depends(require_role("designer")),
+    db: Session = Depends(get_db),
+):
+    try:
+        result = flag_missing_template(
+            db, assignment_id, user.id,
+            f"flag-missing-template:{user.id}:{payload.request_id}",
+            request_fingerprint=str(assignment_id),
+        )
+    except Exception as exc:
         _raise_task_error(exc)
     return TaskMutationResponse(**result)
 

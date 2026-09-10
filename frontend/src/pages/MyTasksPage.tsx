@@ -12,7 +12,8 @@ import {
   AlertCircle, 
   Package,
   ChevronRight,
-  FolderArchive
+  FolderArchive,
+  Flag
 } from 'lucide-react'
 
 type ResultVersion = {
@@ -38,6 +39,8 @@ type Task = {
     product_skus: { sku?: string | null }[] | null
     deadline_at_ext: string | null
     note_outsource: string | null
+    designer_note: string
+    template_missing: boolean
     order_note: string
     custom_config: Record<string, unknown> | null
     sku_image_url: string | null
@@ -58,6 +61,10 @@ export function MyTasksPage() {
   const [loading, setLoading] = useState(true)
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
+  const [flaggingAssignmentId, setFlaggingAssignmentId] = useState<string | null>(null)
+
+  const pendingTemplateTasks = tasks.filter((task) => task.order.template_missing)
+  const activeTasks = tasks.filter((task) => !task.order.template_missing)
 
   async function loadTasks() {
     setLoading(true)
@@ -79,6 +86,21 @@ export function MyTasksPage() {
   useEffect(() => {
     setCurrentPage(1)
   }, [tasks.length])
+
+  async function flagMissingTemplate(assignmentId: string) {
+    setFlaggingAssignmentId(assignmentId)
+    try {
+      await apiFetch(`/assignments/${assignmentId}/flag-missing-template`, {
+        method: 'POST',
+        body: JSON.stringify({ request_id: crypto.randomUUID() }),
+      })
+      await loadTasks()
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'Không thể gắn cờ thiếu temp.')
+    } finally {
+      setFlaggingAssignmentId(null)
+    }
+  }
 
   if (user?.role !== 'designer') {
     return (
@@ -143,8 +165,26 @@ export function MyTasksPage() {
         </div>
       ) : (
         <>
+          {pendingTemplateTasks.length > 0 && (
+            <section className="rounded-xl border border-rose-200 bg-rose-50/50 p-4 space-y-3">
+              <div className="flex items-center gap-2 text-rose-800">
+                <Flag className="h-4 w-4" />
+                <h3 className="text-sm font-bold">Chờ cập nhật ({pendingTemplateTasks.length})</h3>
+              </div>
+              <p className="text-xs text-rose-700">Các đơn này đã được báo thiếu temp. Chờ Admin bổ sung link hoặc ghi chú rồi sẽ tự quay lại To-do.</p>
+              {pendingTemplateTasks.map((task) => (
+                <div key={task.assignment_id} className="rounded-lg border border-rose-200 bg-white p-3 text-xs">
+                  <Link to={`/orders/${task.order.id}`} className="font-mono font-bold text-[#0052CC] hover:underline">{task.order.external_order_id}</Link>
+                  <p className="mt-1 text-slate-600">{task.order.product_name || task.order.sku || 'Đơn thiết kế'}</p>
+                  {task.order.designer_note && <p className="mt-2 rounded bg-blue-50 p-2 text-slate-700 whitespace-pre-wrap"><strong>Ghi chú Admin:</strong> {task.order.designer_note}</p>}
+                </div>
+              ))}
+            </section>
+          )}
+
+          {activeTasks.length > 0 && <h3 className="text-sm font-bold text-slate-700">To-do ({activeTasks.length})</h3>}
           <div className="space-y-4">
-            {paginate(tasks, currentPage).map((task) => {
+            {paginate(activeTasks, currentPage).map((task) => {
             const statusInfo = getStatusInfo(task.order.state)
             const sourceCount = task.order.source_files?.length ?? 0
 
@@ -205,6 +245,9 @@ export function MyTasksPage() {
                       )}
                     </div>
 
+                    {task.order.designer_note && (
+                      <p className="rounded bg-blue-50 px-2 py-1 text-xs text-slate-700 whitespace-pre-wrap"><strong>Ghi chú Admin:</strong> {task.order.designer_note}</p>
+                    )}
                     <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 font-mono pt-0.5">
                       {task.order.deadline_at_ext && (
                         <span className="flex items-center gap-1">
@@ -232,6 +275,14 @@ export function MyTasksPage() {
 
                 {/* Right Action Button */}
                 <div className="shrink-0 w-full sm:w-auto text-right border-t sm:border-t-0 pt-3 sm:pt-0 border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => flagMissingTemplate(task.assignment_id)}
+                    disabled={flaggingAssignmentId === task.assignment_id}
+                    className="mb-2 inline-flex w-full items-center justify-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+                  >
+                    <Flag className="h-3.5 w-3.5" /> {flaggingAssignmentId === task.assignment_id ? 'Đang báo…' : 'Báo thiếu temp'}
+                  </button>
                   <Link
                     to={`/orders/${task.order.id}`}
                     className="inline-flex items-center justify-center gap-1 px-4 py-2 text-xs font-bold text-white bg-[#0052CC] hover:bg-[#0041A3] rounded-xl transition-all shadow-2xs hover:shadow-xs w-full sm:w-auto"
@@ -246,7 +297,7 @@ export function MyTasksPage() {
           </div>
 
           <Pagination
-            totalItems={tasks.length}
+            totalItems={activeTasks.length}
             currentPage={currentPage}
             onPageChange={setCurrentPage}
           />

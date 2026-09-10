@@ -12,6 +12,7 @@ from app.adapters.db.models import (
     Assignment,
     Order,
     ResultVersion,
+    WorkflowEvent,
 )
 from app.adapters.google.drive_interface import DriveAdapter
 from app.application.operations import run_idempotent
@@ -23,7 +24,7 @@ ACTIVE_TASK_STATES = {
     OrderState.IN_PROGRESS.value,
     OrderState.REVISION.value,
 }
-SUB_STATUSES = {"doing", "fixing", "done"}
+SUB_STATUSES = {"todo", "doing", "fixing", "done", "waiting_template"}
 
 
 class TaskNotFoundError(Exception):
@@ -126,6 +127,8 @@ def list_my_tasks(session: Session, designer_id: uuid.UUID) -> list[dict]:
                         order.deadline_at_ext.isoformat() if order.deadline_at_ext else None
                     ),
                     "note_outsource": order.note_outsource,
+                    "designer_note": order.designer_note,
+                    "template_missing": order.template_missing,
                     "order_note": order.order_note,
                     "custom_config": order.custom_config,
                     "sku_image_url": order.sku_image_url,
@@ -186,6 +189,40 @@ def update_sub_status(
 
     return run_idempotent(
         session, idempotency_key, "update_sub_status", _do, request_fingerprint=request_fingerprint
+    )
+
+
+def flag_missing_template(
+    session: Session,
+    assignment_id: uuid.UUID,
+    designer_id: uuid.UUID,
+    idempotency_key: str,
+    request_fingerprint: str,
+) -> dict:
+    """Move an owned task to the internal waiting-for-template queue."""
+    def _do() -> dict:
+        assignment, order = _owned_task(session, assignment_id, designer_id, lock=True)
+        order.template_missing = True
+        order.template_missing_reported_at = datetime.now(UTC)
+        order.template_missing_reported_by_id = designer_id
+        assignment.sub_status = "waiting_template"
+        session.add_all([order, assignment])
+        session.add(WorkflowEvent(
+            order_id=order.id,
+            from_state=order.state,
+            to_state=order.state,
+            actor_id=designer_id,
+            evidence={
+                "action": "FLAG_MISSING_TEMPLATE",
+                "actor_role": "designer",
+                "description": "Designer báo đơn thiếu temp và chờ Admin cập nhật.",
+            },
+        ))
+        return {"assignment_id": str(assignment.id), "state": order.state, "sub_status": assignment.sub_status}
+
+    return run_idempotent(
+        session, idempotency_key, "flag_missing_template", _do,
+        request_fingerprint=request_fingerprint,
     )
 
 

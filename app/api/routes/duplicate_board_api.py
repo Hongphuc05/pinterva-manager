@@ -13,6 +13,7 @@ from app.application.duplicate_board import (
     DuplicateBoardError,
     list_duplicate_board,
     move_duplicate_order,
+    set_cross_designer_drag_enabled,
     set_orders_work_domain,
 )
 from app.domain.access import ROLE_ADMIN, ROLE_DESIGNER_TRELLO
@@ -27,6 +28,9 @@ class DuplicateCardOut(BaseModel):
     thumbnail_url: str | None
     deadline_at_ext: datetime | None
     state: str
+    note_outsource: str
+    previous_note_outsource: str | None
+    fix_approved_by_admin: bool
     assignee_id: str | None
     assignee_name: str | None
 
@@ -34,11 +38,13 @@ class DuplicateCardOut(BaseModel):
 class DuplicateColumnOut(BaseModel):
     id: str
     title: str
+    metrics: dict[str, int]
     cards: list[DuplicateCardOut]
 
 
 class DuplicateBoardResponse(BaseModel):
     columns: list[DuplicateColumnOut]
+    cross_designer_drag_enabled: bool
 
 
 class MoveDuplicateCardRequest(BaseModel):
@@ -51,13 +57,20 @@ class SetWorkDomainRequest(BaseModel):
     work_domain: str
 
 
+class DuplicateBoardSettingsRequest(BaseModel):
+    cross_designer_drag_enabled: bool
+
+
 @router.get("/duplicate-board", response_model=DuplicateBoardResponse)
 def api_duplicate_board(
     user: User = Depends(require_any_role(ROLE_ADMIN, ROLE_DESIGNER_TRELLO)),
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
-    return DuplicateBoardResponse(columns=list_duplicate_board(db, platform_id=platform_id))
+    try:
+        return DuplicateBoardResponse(**list_duplicate_board(db, platform_id=platform_id))
+    except DuplicateBoardError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
 
 
 @router.post("/duplicate-board/move", response_model=DuplicateCardOut)
@@ -101,3 +114,23 @@ def api_set_orders_duplicate_domain(
         db.rollback()
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     return {"changed_count": changed_count, "work_domain": payload.work_domain}
+
+
+@router.put("/duplicate-board/settings")
+def api_set_duplicate_board_settings(
+    payload: DuplicateBoardSettingsRequest,
+    user: User = Depends(require_role(ROLE_ADMIN)),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    try:
+        enabled = set_cross_designer_drag_enabled(
+            db,
+            actor=user,
+            platform_id=platform_id,
+            enabled=payload.cross_designer_drag_enabled,
+        )
+    except DuplicateBoardError as exc:
+        db.rollback()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    return {"cross_designer_drag_enabled": enabled}

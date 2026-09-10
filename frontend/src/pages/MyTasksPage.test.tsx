@@ -45,10 +45,9 @@ describe('MyTasksPage', () => {
       </BrowserRouter>
     )
 
-    await waitFor(() => expect(screen.getByText('TASK-1')).toBeInTheDocument())
-    expect(screen.getByText('Blue tee')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('Blue tee')).toBeInTheDocument())
+    expect(screen.queryByText('TASK-1')).not.toBeInTheDocument()
     const detailLink = screen.getByRole('link', { name: /Xem Chi Tiết & Nộp Bài/i })
     expect(detailLink).toHaveAttribute('href', '/orders/o1')
   })
 })
-

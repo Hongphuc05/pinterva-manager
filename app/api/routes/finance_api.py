@@ -412,14 +412,16 @@ def get_finance_stats(
     if start_date:
         try:
             st_dt = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
-            filtered_tasks = [t for t in filtered_tasks if t["first_submitted_at"] >= st_dt]
+            filtered_tasks = [t for t in filtered_tasks if t["order_created_at"] >= st_dt]
         except Exception:
             pass
 
     if end_date:
         try:
             end_dt = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
-            filtered_tasks = [t for t in filtered_tasks if t["first_submitted_at"] <= end_dt]
+            if len(end_date) == 10:
+                end_dt = end_dt.replace(hour=23, minute=59, second=59, microsecond=999999)
+            filtered_tasks = [t for t in filtered_tasks if t["order_created_at"] <= end_dt]
         except Exception:
             pass
 

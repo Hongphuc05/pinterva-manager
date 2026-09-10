@@ -86,11 +86,20 @@ def test_admin_can_put_orders_in_duplicate_domain_and_board_shows_missing_form(
     db_session.refresh(order)
     db_session.refresh(active_assignment)
     assert order.work_domain == "duplicate"
+    assert order.state == "IN_PROGRESS"
     assert active_assignment.status == "cancelled"
     assert db_session.query(WorkflowEvent).filter_by(order_id=order.id).count() == 1
     assert board.status_code == 200
     assert [column["title"] for column in board.json()["columns"]] == ["Thiếu form", "Trello A"]
     assert board.json()["columns"][0]["cards"][0]["id"] == str(order.id)
+    assert board.json()["columns"][0]["metrics"] == {
+        "total": 1,
+        "doing": 1,
+        "review": 0,
+        "fix": 0,
+        "done": 0,
+    }
+    assert board.json()["cross_designer_drag_enabled"] is True
 
 
 def test_trello_designer_can_claim_self_but_cannot_assign_another_user(client, db_session):
@@ -106,6 +115,7 @@ def test_trello_designer_can_claim_self_but_cannot_assign_another_user(client, d
     )
     order = Order(external_order_id="DUP-2", platform_id=platform.id, work_domain="duplicate")
     db_session.add_all([other, order])
+    platform.duplicate_board_cross_designer_drag_enabled = False
     db_session.commit()
     client.app.dependency_overrides[get_current_platform_id] = lambda: platform.id
 
@@ -134,6 +144,55 @@ def test_trello_designer_can_claim_self_but_cannot_assign_another_user(client, d
     assert release.status_code == 200
     assert release.json()["assignee_id"] is None
     assert db_session.query(Assignment).filter_by(order_id=order.id, status="approved").count() == 0
+
+
+def test_trello_designer_can_move_between_any_columns_when_admin_enables_cross_drag(client, db_session):
+    platform = _platform(db_session)
+    actor, headers = _login(client, db_session, "designer-trello", "trello-cross-actor")
+    actor.platform_id = platform.id
+    other = User(
+        username="trello-cross-other",
+        full_name="Trello Cross Other",
+        role="designer-trello",
+        password_hash="hash",
+        platform_id=platform.id,
+    )
+    order = Order(external_order_id="DUP-3", platform_id=platform.id, work_domain="duplicate")
+    db_session.add_all([other, order])
+    db_session.commit()
+    client.app.dependency_overrides[get_current_platform_id] = lambda: platform.id
+
+    try:
+        moved = client.post(
+            "/api/duplicate-board/move",
+            json={"order_id": str(order.id), "target_designer_id": str(other.id)},
+            headers=headers,
+        )
+    finally:
+        del client.app.dependency_overrides[get_current_platform_id]
+
+    assert moved.status_code == 200
+    assert moved.json()["assignee_id"] == str(other.id)
+
+
+def test_admin_can_toggle_cross_designer_drag(client, db_session):
+    platform = _platform(db_session)
+    _, headers = _login(client, db_session, "admin", "duplicate-domain-settings-admin")
+    client.app.dependency_overrides[get_current_platform_id] = lambda: platform.id
+
+    try:
+        response = client.put(
+            "/api/duplicate-board/settings",
+            json={"cross_designer_drag_enabled": False},
+            headers=headers,
+        )
+    finally:
+        del client.app.dependency_overrides[get_current_platform_id]
+
+    assert response.status_code == 200
+    assert response.json() == {"cross_designer_drag_enabled": False}
+    db_session.refresh(platform)
+    assert platform.duplicate_board_cross_designer_drag_enabled is False
 
 
 def test_regular_designer_cannot_read_duplicate_board(client, db_session):

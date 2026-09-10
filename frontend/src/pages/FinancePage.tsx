@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { apiFetch, ApiError, resolveAssetUrl } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { DashboardLayout } from '../components/DashboardLayout'
@@ -21,6 +21,8 @@ import {
   Loader2,
   FileText
 } from 'lucide-react'
+
+type WorkflowEvent = { id?: string; created_at: string; from_state: string | null; to_state: string; description?: string | null }
 
 type DesignerSummary = {
   designer_id: string | null
@@ -67,7 +69,6 @@ type FinanceStatsResponse = {
 export function FinancePage() {
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
-  const navigate = useNavigate()
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -77,7 +78,11 @@ export function FinancePage() {
   const [selectedDesigner, setSelectedDesigner] = useState<string>('')
   const [searchQuery, setSearchQuery] = useState('')
   const [stateFilter, setStateFilter] = useState('')
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null)
+  const [historyByOrder, setHistoryByOrder] = useState<Record<string, WorkflowEvent[]>>({})
 
   // Image modal
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
@@ -91,6 +96,8 @@ export function FinancePage() {
       if (selectedDesigner) params.set('designer_id', selectedDesigner)
       if (searchQuery.trim()) params.set('search', searchQuery.trim())
       if (stateFilter) params.set('state', stateFilter)
+      if (startDate) params.set('start_date', startDate)
+      if (endDate) params.set('end_date', endDate)
 
       const res = await apiFetch<FinanceStatsResponse>(`/finance/stats?${params.toString()}`)
       setData(res)
@@ -105,7 +112,22 @@ export function FinancePage() {
   useEffect(() => {
     loadData()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, selectedDesigner, stateFilter])
+  }, [currentPage, selectedDesigner, stateFilter, startDate, endDate])
+
+  async function toggleOrderHistory(orderId: string) {
+    if (expandedOrderId === orderId) {
+      setExpandedOrderId(null)
+      return
+    }
+    setExpandedOrderId(orderId)
+    if (historyByOrder[orderId]) return
+    try {
+      const history = await apiFetch<WorkflowEvent[]>(`/orders/${orderId}/history`)
+      setHistoryByOrder((current) => ({ ...current, [orderId]: history }))
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'Không tải được lịch sử đơn.')
+    }
+  }
 
   // Search debounce
   useEffect(() => {
@@ -263,7 +285,7 @@ export function FinancePage() {
                       className={`transition-colors hover:bg-blue-50/40 ${isFiltered ? 'bg-blue-50/80 font-medium' : ''}`}
                     >
                       <td className="py-3 px-4 font-semibold text-slate-800">
-                        <div className="flex items-center gap-2">
+                        <button type="button" onClick={() => { setSelectedDesigner(des.designer_id || des.designer_name); setCurrentPage(1) }} className="flex items-center gap-2 text-left hover:text-[#0052CC]">
                           <div className="w-7 h-7 rounded-full bg-blue-100 text-[#0052CC] font-bold flex items-center justify-center text-xs">
                             {des.designer_name.charAt(0).toUpperCase()}
                           </div>
@@ -271,7 +293,7 @@ export function FinancePage() {
                             <p className="font-semibold text-slate-800">{des.designer_name}</p>
                             {des.username && <p className="text-[10px] text-slate-400 font-normal">@{des.username}</p>}
                           </div>
-                        </div>
+                        </button>
                       </td>
                       <td className="py-3 px-4 text-center">
                         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-blue-50 text-[#0052CC] border border-blue-200">
@@ -379,12 +401,21 @@ export function FinancePage() {
                 </select>
               </div>
 
-              {(selectedDesigner || stateFilter || searchQuery) && (
+              <label className="text-xs text-slate-500">Ngày tạo đơn từ
+                <input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setCurrentPage(1) }} className="ml-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs" />
+              </label>
+              <label className="text-xs text-slate-500">đến
+                <input type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setCurrentPage(1) }} className="ml-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs" />
+              </label>
+
+              {(selectedDesigner || stateFilter || searchQuery || startDate || endDate) && (
                 <button
                   onClick={() => {
                     setSelectedDesigner('')
                     setStateFilter('')
                     setSearchQuery('')
+                    setStartDate('')
+                    setEndDate('')
                     setCurrentPage(1)
                   }}
                   className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-800 font-semibold px-2.5 py-1.5 rounded-lg hover:bg-slate-100 cursor-pointer"
@@ -441,11 +472,12 @@ export function FinancePage() {
                     const statusInfo = getStatusInfo(task.current_state)
 
                     return (
+                      <>
                       <tr
                         key={task.order_id}
-                        onClick={() => navigate(`/orders/${task.order_id}`)}
+                        onClick={() => toggleOrderHistory(task.order_id)}
                         className="transition-colors hover:bg-blue-50/60 cursor-pointer"
-                        title="Click để mở chi tiết đơn hàng"
+                        title="Click để xem lịch sử trạng thái đơn hàng"
                       >
                         {/* Thumbnail */}
                         <td className="py-2.5 px-4 text-center" onClick={(e) => e.stopPropagation()}>
@@ -554,6 +586,17 @@ export function FinancePage() {
                           </Link>
                         </td>
                       </tr>
+                      {expandedOrderId === task.order_id && (
+                        <tr key={`${task.order_id}-history`} className="bg-slate-50/70">
+                          <td colSpan={isAdmin ? 8 : 7} className="px-5 py-3">
+                            <p className="mb-2 text-xs font-bold text-slate-700">Lịch sử thay đổi trạng thái</p>
+                            {!historyByOrder[task.order_id] ? <p className="text-xs text-slate-400">Đang tải lịch sử…</p> : historyByOrder[task.order_id].length === 0 ? <p className="text-xs text-slate-400">Chưa có lịch sử.</p> : (
+                              <div className="space-y-1 text-xs text-slate-600">{historyByOrder[task.order_id].map((event) => <p key={event.id || event.created_at}><span className="font-mono text-slate-400">{new Date(event.created_at).toLocaleString('vi-VN')}</span> · {event.description || `${event.from_state || 'Mới'} → ${event.to_state}`}</p>)}</div>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                      </>
                     )
                   })
                 )}

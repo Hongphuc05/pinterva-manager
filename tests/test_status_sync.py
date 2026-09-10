@@ -1,6 +1,6 @@
 import httpx
 
-from app.adapters.db.models import Order, Platform, PlatformSyncState
+from app.adapters.db.models import Order, Platform, PlatformSyncState, WorkflowEvent
 from app.adapters.printerval.api_client import FIND_PATH, LOGIN_PATH, PrintervalApiClient
 from app.application.status_sync import (
     sync_all_platforms,
@@ -60,11 +60,11 @@ def test_sync_platform_order_statuses_updates_matching_orders_only(db_session):
     assert order1.printerval_status_synced_at is not None
     assert order1.printerval_designer == "Nguyễn Thị Thuý Hường - 2D Prin"
     assert order1.printerval_designer_synced_at is not None
-    assert order2.printerval_status is None
+    assert order2.printerval_status == "cancelled"
     # DJ9999 was still looked up (and its sync attempt noted), just not found on site.
-    assert order2.printerval_status_synced_at is None
+    assert order2.printerval_status_synced_at is not None
     assert result["checked"] == 2
-    assert result["updated"] == 1
+    assert result["updated"] == 2
     assert result["not_found"] == 1
 
 
@@ -101,6 +101,41 @@ def test_sync_selected_order_statuses_only_updates_requested_orders(db_session):
     assert selected.printerval_status == "done"
     assert untouched.state == "IN_PROGRESS"
     assert untouched.printerval_status == "doing"
+
+
+def test_selected_sync_turns_printerval_fix_into_the_existing_admin_fix_flow(db_session):
+    platform = Platform(name="P1", account_username="acc1@printerval.com", team_outsource="team-a")
+    db_session.add(platform)
+    db_session.flush()
+    order = Order(
+        external_order_id="DJ1003",
+        platform_id=platform.id,
+        work_domain="duplicate",
+        state="IN_PROGRESS",
+        printerval_status="doing",
+        note_outsource="Ghi chú cũ",
+    )
+    db_session.add(order)
+    db_session.commit()
+
+    result = sync_selected_order_statuses(
+        db_session,
+        platform,
+        [order],
+        api_client=_mock_client({
+            "DJ1003": {"id": 1003, "status": "fix", "note": "Sửa lại phần tay áo"}
+        }),
+    )
+
+    db_session.refresh(order)
+    event = db_session.query(WorkflowEvent).filter_by(order_id=order.id).one()
+    assert result == {"checked": 1, "updated": 1, "not_found": 0, "failed": 0}
+    assert order.state == "REVISION"
+    assert order.printerval_status == "fix"
+    assert order.previous_note_outsource == "Ghi chú cũ"
+    assert order.note_outsource == "Sửa lại phần tay áo"
+    assert order.fix_approved_by_admin is False
+    assert event.evidence["action"] == "REQUEST_FIX"
 
 
 def test_sync_platform_order_statuses_tries_the_last_known_status_first(db_session):
