@@ -55,15 +55,58 @@ def list_orders_for_user(
             query = query.filter(or_(*conds))
 
     if status:
-        if status.upper() == "TODO":
+        st = status.strip()
+        st_upper = st.upper()
+        if st_upper == "TODO":
             query = query.filter(
                 or_(
-                    Order.state.in_(["WAITING", "ASSIGNED"]),
+                    Order.state.in_(["WAITING", "ASSIGNED", "OPEN_FOR_ALLOCATION", "DISCOVERED", "PENDING"]),
                     (Order.state.in_(["REVISION", "FIX"]) & (Order.fix_approved_by_admin.is_(True))),
                 )
             )
+        elif st_upper in ("WAITING", "OPEN_FOR_ALLOCATION", "DISCOVERED", "PENDING"):
+            query = query.filter(
+                or_(
+                    Order.state.in_(["WAITING", "OPEN_FOR_ALLOCATION", "DISCOVERED", "PENDING"]),
+                    Order.printerval_status.ilike("waiting"),
+                )
+            )
+        elif st_upper in ("DOING", "IN_PROGRESS", "ASSIGNED"):
+            query = query.filter(
+                or_(
+                    Order.state.in_(["IN_PROGRESS", "ASSIGNED"]),
+                    Order.printerval_status.ilike("doing"),
+                )
+            )
+        elif st_upper in ("DONE", "COMPLETED", "CLAIMED_IMPORTED"):
+            query = query.filter(
+                or_(
+                    Order.state.in_(["DONE", "COMPLETED", "CLAIMED_IMPORTED"]),
+                    Order.printerval_status.ilike("done"),
+                )
+            )
+        elif st_upper in ("REVIEW", "QC_PENDING", "RESULT_SUBMITTED"):
+            query = query.filter(
+                or_(
+                    Order.state.in_(["QC_PENDING", "RESULT_SUBMITTED", "SUBMITTING_TO_SITE", "REVIEW"]),
+                    Order.printerval_status.ilike("review"),
+                )
+            )
+        elif st_upper in ("FIX", "REVISION", "REVISION_REQUESTED"):
+            query = query.filter(
+                or_(
+                    Order.state.in_(["REVISION", "REVISION_REQUESTED", "FIX"]),
+                    Order.printerval_status.ilike("fix"),
+                )
+            )
         else:
-            query = query.filter(Order.state == status)
+            query = query.filter(
+                or_(
+                    Order.state == st,
+                    Order.state == st_upper,
+                    Order.printerval_status.ilike(st),
+                )
+            )
 
     if batch_id:
         try:

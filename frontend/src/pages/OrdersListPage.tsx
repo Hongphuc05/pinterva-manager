@@ -8,7 +8,6 @@ import { ImageModal } from '../components/ImageModal'
 import { StatusDropdown } from '../components/StatusDropdown'
 import { Pagination, paginate } from '../components/Pagination'
 import { useSyncStatus } from '../hooks/useSyncStatus'
-import { STATE_MAP } from '../utils/statusTranslation'
 import { 
   Package, 
   Search, 
@@ -56,6 +55,7 @@ type UserOption = {
   username: string
   full_name: string
   role: string
+  printerval_designer_option?: string | null
 }
 
 type PrintervalStatusTarget = {
@@ -100,7 +100,6 @@ export function OrdersListPage() {
   const isAdmin = user?.role === 'admin'
   const [orders, setOrders] = useState<OrderSummary[]>(() => readOrdersCache(getOrdersCacheKey(undefined, '')) ?? [])
   const [ordersLoading, setOrdersLoading] = useState(() => readOrdersCache(getOrdersCacheKey(undefined, '')) === null)
-  const [statusOptions, setStatusOptions] = useState<string[]>([])
   const [statusFilter, setStatusFilter] = useState('')
   const [designerFilter, setDesignerFilter] = useState('')
   const [batchFilter, setBatchFilter] = useState('')
@@ -358,11 +357,7 @@ export function OrdersListPage() {
     }
   }
 
-  useEffect(() => {
-    apiFetch<{ states: string[] }>('/order-states')
-      .then((r) => setStatusOptions(r.states))
-      .catch(() => setStatusOptions([]))
-  }, [])
+
 
   useEffect(() => {
     const params = new URLSearchParams()
@@ -488,23 +483,72 @@ export function OrdersListPage() {
   const filteredOrders = baseOrders
     .filter((o) => {
       if (searchQuery) {
-        const q = searchQuery.toLowerCase()
+        const q = searchQuery.toLowerCase().trim()
         const matches =
           o.external_order_id.toLowerCase().includes(q) ||
           (o.product_name && o.product_name.toLowerCase().includes(q)) ||
-          (o.assigned_designer_name && o.assigned_designer_name.toLowerCase().includes(q))
+          (o.assigned_designer_name && o.assigned_designer_name.toLowerCase().includes(q)) ||
+          (o.printerval_designer && o.printerval_designer.toLowerCase().includes(q))
         if (!matches) return false
+      }
+
+      if (statusFilter) {
+        const sf = statusFilter.toUpperCase()
+        const oState = (o.state || '').toUpperCase()
+        const pState = (o.printerval_status || '').toUpperCase()
+        if (sf === 'WAITING' || sf === 'OPEN_FOR_ALLOCATION' || sf === 'DISCOVERED' || sf === 'PENDING') {
+          if (!['WAITING', 'OPEN_FOR_ALLOCATION', 'DISCOVERED', 'PENDING'].includes(oState) && pState !== 'WAITING') {
+            return false
+          }
+        } else if (sf === 'DOING' || sf === 'IN_PROGRESS' || sf === 'ASSIGNED') {
+          if (!['IN_PROGRESS', 'ASSIGNED'].includes(oState) && pState !== 'DOING') {
+            return false
+          }
+        } else if (sf === 'REVIEW' || sf === 'QC_PENDING') {
+          if (!['QC_PENDING', 'RESULT_SUBMITTED', 'SUBMITTING_TO_SITE', 'REVIEW'].includes(oState) && pState !== 'REVIEW') {
+            return false
+          }
+        } else if (sf === 'FIX' || sf === 'REVISION') {
+          if (!['REVISION', 'REVISION_REQUESTED', 'FIX'].includes(oState) && pState !== 'FIX') {
+            return false
+          }
+        } else if (sf === 'DONE' || sf === 'CLAIMED_IMPORTED' || sf === 'COMPLETED') {
+          if (!['DONE', 'CLAIMED_IMPORTED', 'COMPLETED'].includes(oState) && pState !== 'DONE') {
+            return false
+          }
+        } else if (sf === 'CANCELLED') {
+          if (oState !== 'CANCELLED' && pState !== 'CANCELLED') {
+            return false
+          }
+        } else {
+          if (oState !== sf && pState !== sf) return false
+        }
       }
 
       if (designerFilter) {
         if (designerFilter === 'unassigned') {
-          if (o.assigned_designer_name) return false
+          if (o.assigned_designer_name || o.printerval_designer) return false
         } else {
           const desUser = usersList.find((u) => u.id === designerFilter)
           if (desUser) {
-            const name = desUser.full_name || desUser.username
-            if (o.assigned_designer_name !== name) return false
+            const name = (desUser.full_name || desUser.username || '').toLowerCase().trim()
+            const opt = (desUser.printerval_designer_option || '').toLowerCase().trim()
+            const assigned = (o.assigned_designer_name || '').toLowerCase().trim()
+            const pDes = (o.printerval_designer || '').toLowerCase().trim()
+            const matches =
+              (name && assigned === name) ||
+              (name && pDes === name) ||
+              (opt && pDes === opt) ||
+              (name && pDes.includes(name))
+            if (!matches) return false
           }
+        }
+      }
+
+      if (batchFilter) {
+        const bf = batchFilter.toLowerCase().trim()
+        if (bf && o.batch_id !== batchFilter && !o.external_order_id.toLowerCase().includes(bf)) {
+          return false
         }
       }
 
@@ -927,11 +971,12 @@ export function OrdersListPage() {
                 onChange={(e) => setStatusFilter(e.target.value)}
               >
                 <option value="">Tất cả Trạng Thái</option>
-                {statusOptions.map((s) => (
-                  <option key={s} value={s}>
-                    {STATE_MAP[s] ? STATE_MAP[s].label : s}
-                  </option>
-                ))}
+                <option value="WAITING">Waiting (Chờ nhận / Chưa làm)</option>
+                <option value="DOING">Doing (Đang thực hiện)</option>
+                <option value="REVIEW">Review (Chờ duyệt / Nộp bài)</option>
+                <option value="FIX">Fix (Yêu cầu sửa lại)</option>
+                <option value="DONE">Done (Đã hoàn thành / Claim)</option>
+                <option value="CANCELLED">Cancelled (Đã hủy)</option>
               </select>
             </div>
 
