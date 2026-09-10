@@ -11,6 +11,10 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.models import Platform, User
 from app.api.deps import get_db, require_role
+from app.application.platform_credentials import (
+    PlatformCredentialsError,
+    verify_and_save_platform_credentials,
+)
 
 router = APIRouter(prefix="/platforms", tags=["platforms"])
 
@@ -21,7 +25,6 @@ class PlatformOut(BaseModel):
     name: str
     account_username: str
     team_outsource: str | None = None
-    session_cookie: str | None = None
     is_active: bool
     created_at: datetime
 
@@ -34,6 +37,22 @@ class CreatePlatformRequest(BaseModel):
 class GalleryBridgeTokenOut(BaseModel):
     platform_id: uuid.UUID
     token: str
+    message: str
+
+
+class UpdatePlatformCredentialsRequest(BaseModel):
+    username: str
+    password: str | None = None
+    team_outsource: str | None = None
+    session_cookie: str | None = None
+
+
+class PlatformCredentialsOut(BaseModel):
+    ok: bool
+    platform_id: uuid.UUID
+    platform_name: str
+    account_username: str
+    team_outsource: str | None
     message: str
 
 
@@ -74,6 +93,37 @@ def create_platform(
     db.commit()
     db.refresh(platform)
     return platform
+
+
+@router.patch("/{platform_id}/credentials", response_model=PlatformCredentialsOut)
+def update_platform_credentials(
+    platform_id: uuid.UUID,
+    req: UpdatePlatformCredentialsRequest,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_role("admin")),
+):
+    platform = db.get(Platform, platform_id)
+    if platform is None or not platform.is_active:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Platform not found")
+    try:
+        platform = verify_and_save_platform_credentials(
+            db,
+            platform=platform,
+            username=req.username,
+            password=req.password,
+            team_outsource=req.team_outsource,
+            session_cookie=req.session_cookie,
+        )
+    except PlatformCredentialsError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    return PlatformCredentialsOut(
+        ok=True,
+        platform_id=platform.id,
+        platform_name=platform.name,
+        account_username=platform.account_username,
+        team_outsource=platform.team_outsource,
+        message=f"Đã xác thực tài khoản Printerval thành công: {platform.account_username}",
+    )
 
 
 @router.post("/{platform_id}/gallery-bridge-token", response_model=GalleryBridgeTokenOut)

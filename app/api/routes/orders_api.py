@@ -1131,77 +1131,27 @@ def api_update_printerval_credentials(
     user: User = Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ):
-    from app.adapters.db.models import Platform
-
-    username_clean = payload.username.strip()
-    password_clean = payload.password.strip() if payload.password else None
-    team_outsource_clean = payload.team_outsource.strip() if payload.team_outsource else None
-    session_cookie_clean = payload.session_cookie.strip() if payload.session_cookie else None
-
-    # Verify these credentials actually work against the real site BEFORE saving
-    settings = get_settings()
-    probe_client = PrintervalApiClient(
-        base_url=settings.printerval_api_base_url,
-        username=username_clean,
-        password=password_clean,
-        team_outsource=team_outsource_clean,
-        session_cookie=session_cookie_clean,
+    from app.application.platform_credentials import (
+        PlatformCredentialsError,
+        ensure_platform_for_account,
+        verify_and_save_platform_credentials,
     )
+
+    # Backward-compatible deprecated route. New clients use
+    # PATCH /platforms/{platform_id}/credentials so credentials always target a known
+    # platform rather than being hidden under the orders resource.
+    platform = ensure_platform_for_account(db, payload.username)
     try:
-        probe_client.login()
-    except PrintervalApiConfigurationError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
-    except PrintervalApiError as exc:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            f"Xác thực Printerval cho tài khoản '{username_clean}' không thành công: {exc}. "
-            "Kiểm tra lại Session Cookie hoặc username/mật khẩu.",
+        platform = verify_and_save_platform_credentials(
+            db,
+            platform=platform,
+            username=payload.username,
+            password=payload.password,
+            team_outsource=payload.team_outsource,
+            session_cookie=payload.session_cookie,
         )
-    try:
-        probe_client.discover_waiting_page(page_size=1)
-    except PrintervalApiError as exc:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            f"Xác thực thành công nhưng Team Outsource có vẻ không đúng: {exc}",
-        )
-    finally:
-        probe_client.close()
-
-    platform = (
-        db.query(Platform)
-        .filter(Platform.account_username == username_clean)
-        .first()
-    )
-    if not platform:
-        platform = Platform(
-            name=f"Acc Mẹ: {username_clean}",
-            account_username=username_clean,
-            account_password=password_clean,
-            team_outsource=team_outsource_clean,
-            session_cookie=session_cookie_clean,
-            is_active=True,
-        )
-        db.add(platform)
-        db.flush()  # Allocate the UUID before looking up its optional sync state.
-    else:
-        if password_clean:
-            platform.account_password = password_clean
-        if team_outsource_clean:
-            platform.team_outsource = team_outsource_clean
-        if session_cookie_clean:
-            platform.session_cookie = session_cookie_clean
-        platform.is_active = True
-
-    # The yellow banner represents the *last background sync failure*, not the
-    # current credential form.  A successful probe above proves the submitted
-    # credentials and team can read Printerval now, so leaving a stale failure here
-    # incorrectly tells the operator that this new cookie is still broken.
-    sync_state = db.get(PlatformSyncState, platform.id)
-    if sync_state is not None:
-        sync_state.last_error = None
-
-    db.commit()
-    db.refresh(platform)
+    except PlatformCredentialsError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
     return {
         "ok": True,

@@ -41,14 +41,17 @@ export function PrintervalSettingsModal({ isOpen, onClose }: PrintervalSettingsM
     setLoading(true)
 
     try {
+      if (!activePlatform) {
+        throw new Error('Chưa chọn Acc Mẹ Printerval')
+      }
       const res = await apiFetch<{
         ok: boolean
         platform_id: string
         platform_name: string
         account_username: string
         message: string
-      }>('/orders/printerval-credentials', {
-        method: 'POST',
+      }>(`/platforms/${activePlatform.id}/credentials`, {
+        method: 'PATCH',
         body: JSON.stringify({
           username: username.trim(),
           password: password.trim() || undefined,

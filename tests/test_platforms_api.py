@@ -63,6 +63,26 @@ def test_list_and_create_platforms(client, db_session):
     assert created["account_username"] == "seller_b@printerval.com"
 
 
+def test_platform_list_never_exposes_printerval_session_cookie(client, db_session):
+    _, token = _login(client, db_session, "admin", "admin_redacted_platform")
+    db_session.add(
+        Platform(
+            name="Sensitive platform",
+            account_username="sensitive@printerval.com",
+            account_password="do-not-return",
+            session_cookie="do-not-return-cookie",
+        )
+    )
+    db_session.commit()
+
+    response = client.get("/api/platforms", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert all("session_cookie" not in platform for platform in body)
+    assert all("account_password" not in platform for platform in body)
+
+
 def test_platform_scoped_orders(client, db_session):
     admin_user, token = _login(client, db_session, "admin", "admin_plat2")
 
