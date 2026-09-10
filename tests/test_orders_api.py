@@ -559,3 +559,29 @@ def test_api_approve_and_reject_fix_flow(client, db_session):
     db_session.refresh(order)
     assert order.state == OrderState.QC_PENDING.value
     assert order.fix_approved_by_admin is False
+
+
+def test_api_orders_list_returns_active_assignment_id_for_designer(client, db_session):
+    _seed_platform(db_session)
+    designer = _login(client, db_session, "designer", "designer_orders_assignment")
+    order = Order(
+        external_order_id="DJ-ASSIGNMENT-ID",
+        platform_id=DEFAULT_PLATFORM_ID,
+        state=OrderState.WAITING.value,
+    )
+    db_session.add(order)
+    db_session.flush()
+    assignment = Assignment(order_id=order.id, designer_id=designer.id, status="approved")
+    db_session.add(assignment)
+    db_session.commit()
+
+    response = client.get("/api/orders")
+
+    assert response.status_code == 200
+    assert response.json()["orders"] == [
+        {
+            **response.json()["orders"][0],
+            "id": str(order.id),
+            "assignment_id": str(assignment.id),
+        }
+    ]

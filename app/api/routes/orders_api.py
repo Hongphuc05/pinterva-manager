@@ -65,6 +65,7 @@ class OrderSummaryOut(BaseModel):
     sku: str | None = None
     thumbnail_url: str | None = None
     assigned_designer_name: str | None = None
+    assignment_id: uuid.UUID | None = None
     product_skus: list[dict] | None = None
     order_created_at_ext: datetime | None = None
     deadline_at_ext: datetime | None = None
@@ -364,6 +365,7 @@ def api_orders_list(
         else []
     )
     designer_map = {a.order_id: u.full_name or u.username for a, u in assignments}
+    assignment_id_map = {a.order_id: a.id for a, _ in assignments}
     requests = (
         db.query(PrintervalAssignmentRequest)
         .filter(PrintervalAssignmentRequest.order_id.in_(order_ids))
@@ -380,6 +382,7 @@ def api_orders_list(
     for o in orders:
         item = OrderSummaryOut.model_validate(o)
         item.assigned_designer_name = designer_map.get(o.id)
+        item.assignment_id = assignment_id_map.get(o.id)
         latest_request = request_map.get(o.id)
         item.printerval_assignment_lifecycle = latest_request.lifecycle if latest_request else None
         if latest_request and latest_request.lifecycle in ("failed", "unknown_outcome"):

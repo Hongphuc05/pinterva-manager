@@ -24,7 +24,8 @@ import {
   ExternalLink,
   RefreshCw,
   AlertTriangle,
-  ArrowDownUp
+  ArrowDownUp,
+  Flag
 } from 'lucide-react'
 
 type OrderSummary = {
@@ -37,6 +38,7 @@ type OrderSummary = {
   sku: string | null
   thumbnail_url: string | null
   assigned_designer_name: string | null
+  assignment_id: string | null
   product_skus: { sku?: string | null }[] | null
   order_created_at_ext: string | null
   deadline_at_ext: string | null
@@ -51,6 +53,7 @@ type OrderSummary = {
   note_outsource?: string | null
   previous_note_outsource?: string | null
   fix_approved_by_admin?: boolean
+  designer_note?: string
   template_missing?: boolean
 }
 
@@ -110,7 +113,7 @@ export function OrdersListPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [flash, setFlash] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [activeDesignerTab, setActiveDesignerTab] = useState<'todo' | 'doing' | 'review' | 'all'>('todo')
+  const [activeDesignerTab, setActiveDesignerTab] = useState<'todo' | 'doing' | 'review' | 'waiting_update' | 'all'>('todo')
   const [adminTab, setAdminTab] = useState<'unprocessed' | 'processed' | 'all'>('unprocessed')
   const [kpiFilter, setKpiFilter] = useState<'all' | 'open' | 'in_progress' | 'done' | 'missing_template' | null>(null)
   const [dateSort, setDateSort] = useState<{ field: 'order_created_at_ext' | 'created_at'; direction: 'asc' | 'desc' }>({ field: 'created_at', direction: 'desc' })
@@ -142,6 +145,7 @@ export function OrdersListPage() {
   const [printervalStatusTarget, setPrintervalStatusTarget] = useState<PrintervalStatusTarget | null>(null)
   const [printervalStatusValue, setPrintervalStatusValue] = useState<string>('Doing')
   const [updatingPrintervalStatus, setUpdatingPrintervalStatus] = useState(false)
+  const [flaggingMissingOrderId, setFlaggingMissingOrderId] = useState<string | null>(null)
 
   // Bulk Selection State
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([])
@@ -409,6 +413,27 @@ export function OrdersListPage() {
     return () => window.removeEventListener('orders-updated', handleOrdersUpdated)
   }, [activePlatform?.id, statusFilter, batchFilter, designerFilter])
 
+  async function flagMissingTemplate(order: OrderSummary) {
+    if (!order.assignment_id) {
+      setError('Đơn này chưa có assignment đang hoạt động nên chưa thể báo thiếu temp.')
+      return
+    }
+    setFlaggingMissingOrderId(order.id)
+    setError(null)
+    try {
+      await apiFetch(`/assignments/${order.assignment_id}/flag-missing-template`, {
+        method: 'POST',
+        body: JSON.stringify({ request_id: crypto.randomUUID() }),
+      })
+      setFlash(`Đã báo thiếu temp cho đơn ${order.external_order_id}. Đơn đã chuyển sang Chờ cập nhật.`)
+      await loadOrders()
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'Không thể báo thiếu temp.')
+    } finally {
+      setFlaggingMissingOrderId(null)
+    }
+  }
+
   async function handleSyncPrintervalStatus(orderIds?: string[]) {
     if (orderIds && orderIds.length > 500) {
       setError('Tab hiện tại có quá 500 đơn. Hãy thu hẹp bộ lọc trước khi đồng bộ.')
@@ -431,14 +456,16 @@ export function OrdersListPage() {
   }, [syncStatus?.is_running, syncStatus?.last_finished_at])
 
   // Calculate Designer Workflow groups
+  const waitingUpdateOrders = orders.filter((o) => Boolean(o.template_missing))
   const todoOrders = orders.filter(
     (o) =>
-      ['WAITING', 'ASSIGNED', 'OPEN_FOR_ALLOCATION', 'DISCOVERED', 'PENDING'].includes(o.state.toUpperCase()) ||
-      (['REVISION', 'REVISION_REQUESTED'].includes(o.state.toUpperCase()) && o.fix_approved_by_admin)
+      !o.template_missing &&
+      (['WAITING', 'ASSIGNED', 'OPEN_FOR_ALLOCATION', 'DISCOVERED', 'PENDING'].includes(o.state.toUpperCase()) ||
+        (['REVISION', 'REVISION_REQUESTED'].includes(o.state.toUpperCase()) && o.fix_approved_by_admin))
   )
-  const doingOrders = orders.filter((o) => ['IN_PROGRESS'].includes(o.state.toUpperCase()))
+  const doingOrders = orders.filter((o) => !o.template_missing && ['IN_PROGRESS'].includes(o.state.toUpperCase()))
   const reviewOrders = orders.filter((o) =>
-    ['QC_PENDING', 'RESULT_SUBMITTED', 'SUBMITTING_TO_SITE'].includes(o.state.toUpperCase())
+    !o.template_missing && ['QC_PENDING', 'RESULT_SUBMITTED', 'SUBMITTING_TO_SITE'].includes(o.state.toUpperCase())
   )
 
   // Calculate Admin Workflow groups
@@ -485,6 +512,8 @@ export function OrdersListPage() {
         ? doingOrders
         : activeDesignerTab === 'review'
         ? reviewOrders
+        : activeDesignerTab === 'waiting_update'
+        ? waitingUpdateOrders
         : orders
   } else {
     if (kpiFilter === 'open') {
@@ -636,6 +665,8 @@ export function OrdersListPage() {
           ? doingOrders
           : activeDesignerTab === 'review'
           ? reviewOrders
+          : activeDesignerTab === 'waiting_update'
+          ? waitingUpdateOrders
           : orders
         : filteredOrders
       const targetIds = targetOrders.map((o) => o.id)
@@ -643,7 +674,7 @@ export function OrdersListPage() {
     }
     window.addEventListener('request-sync-current-tab', handleRequestSync)
     return () => window.removeEventListener('request-sync-current-tab', handleRequestSync)
-  }, [isAdmin, activeDesignerTab, todoOrders, doingOrders, reviewOrders, orders, filteredOrders])
+  }, [isAdmin, activeDesignerTab, todoOrders, doingOrders, reviewOrders, waitingUpdateOrders, orders, filteredOrders])
 
   return (
     <DashboardLayout>
@@ -973,6 +1004,26 @@ export function OrdersListPage() {
                 }`}
               >
                 {reviewOrders.length}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveDesignerTab('waiting_update')}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
+                activeDesignerTab === 'waiting_update'
+                  ? 'bg-rose-600 text-white border-rose-600 shadow-2xs'
+                  : 'bg-rose-50/60 text-rose-800 border-rose-200 hover:bg-rose-100/70'
+              }`}
+            >
+              <Flag className="h-3.5 w-3.5" />
+              <span>Chờ Cập Nhật</span>
+              <span
+                className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
+                  activeDesignerTab === 'waiting_update' ? 'bg-white/20 text-white' : 'bg-rose-200/80 text-rose-800'
+                }`}
+              >
+                {waitingUpdateOrders.length}
               </span>
             </button>
 
@@ -1319,6 +1370,11 @@ export function OrdersListPage() {
                         {o.template_missing && (
                           <span className="mt-1 inline-flex rounded border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700">Thiếu temp</span>
                         )}
+                        {!isAdmin && o.designer_note && (
+                          <p className="mt-1 max-w-xl whitespace-pre-wrap break-words text-[11px] font-medium text-rose-700" title={o.designer_note}>
+                            Ghi chú Admin: {o.designer_note}
+                          </p>
+                        )}
                         <div className="flex items-center gap-2 mt-1 flex-wrap" onClick={(e) => e.stopPropagation()}>
                           {o.sku_image_url && (
                             <a
@@ -1376,6 +1432,7 @@ export function OrdersListPage() {
                           orderId={o.id}
                           externalOrderId={o.external_order_id}
                           currentState={o.state}
+                          disabled={!isAdmin && Boolean(o.template_missing)}
                           onStatusChanged={(newState) => {
                             setOrders((prev) =>
                               prev.map((item) => (item.id === o.id ? { ...item, state: newState } : item))
@@ -1451,6 +1508,23 @@ export function OrdersListPage() {
                           >
                             <RefreshCw className="h-3.5 w-3.5" />
                             <span>Printerval</span>
+                          </button>
+                        )}
+                        {!isAdmin && o.template_missing && (
+                          <span className="mr-1 inline-flex items-center gap-1 rounded-md bg-rose-50 px-2.5 py-1 text-xs font-bold text-rose-700">
+                            <Flag className="h-3.5 w-3.5" /> Chờ cập nhật
+                          </span>
+                        )}
+                        {!isAdmin && !o.template_missing && (
+                          <button
+                            type="button"
+                            onClick={() => flagMissingTemplate(o)}
+                            disabled={!o.assignment_id || flaggingMissingOrderId === o.id}
+                            className="mr-1 inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            title={!o.assignment_id ? 'Đơn chưa có assignment đang hoạt động' : 'Báo Admin rằng đơn này thiếu temp'}
+                          >
+                            {flaggingMissingOrderId === o.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Flag className="h-3.5 w-3.5" />}
+                            <span>{flaggingMissingOrderId === o.id ? 'Đang báo…' : 'Báo thiếu temp'}</span>
                           </button>
                         )}
                         <Link
