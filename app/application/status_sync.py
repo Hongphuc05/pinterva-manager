@@ -120,6 +120,11 @@ def sync_selected_order_statuses(
             if row is None:
                 if order.id not in failed_order_ids:
                     not_found += 1
+                    if order.printerval_status != "cancelled":
+                        order.printerval_status = "cancelled"
+                        order.printerval_status_synced_at = now_utc
+                        changed = True
+                        updated += 1
                 continue
 
             found_status = str(row.get("status") or "").strip()
@@ -231,6 +236,11 @@ def sync_platform_order_statuses(
                 )
                 if row is None:
                     not_found += 1
+                    if order.printerval_status != "cancelled":
+                        order.printerval_status = "cancelled"
+                        order.printerval_status_synced_at = datetime.now(UTC)
+                        session.commit()
+                        updated += 1
                     continue
                 found_status = row.get("status")
                 if found_status and found_status != order.printerval_status:
