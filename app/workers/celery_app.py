@@ -14,6 +14,7 @@ celery_app = Celery(
     include=[
         "app.workers.crawl_tasks",
         "app.workers.status_sync_tasks",
+        "app.workers.sync_job_tasks",
         "app.workers.assignment_sync_tasks",
     ],
 )
@@ -32,6 +33,7 @@ celery_app.conf.task_routes = {
     "app.workers.assignment_sync_tasks.sync_assignment_to_printerval_task": {
         "queue": "assignment"
     },
+    "app.workers.sync_job_tasks.run_status_sync_job": {"queue": "celery"},
 }
 
 celery_app.conf.beat_schedule = {

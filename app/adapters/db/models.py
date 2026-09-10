@@ -372,3 +372,29 @@ class PlatformSyncState(Base):
     last_finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     last_error: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+
+
+class SyncJob(Base):
+    """Durable progress for a user-requested or scheduled synchronization job."""
+
+    __tablename__ = "sync_jobs"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    platform_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("platforms.id"), nullable=False)
+    created_by_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    job_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    scope_fingerprint: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
+    order_ids: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    filters: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    total: Mapped[int] = mapped_column(nullable=False, default=0)
+    processed: Mapped[int] = mapped_column(nullable=False, default=0)
+    updated: Mapped[int] = mapped_column(nullable=False, default=0)
+    failed: Mapped[int] = mapped_column(nullable=False, default=0)
+    message: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    error_summary: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
