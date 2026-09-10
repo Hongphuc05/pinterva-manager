@@ -15,6 +15,9 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 
+from app.api.deps import get_db
+from app.api.main import create_app
+
 TEST_DATABASE_URL = os.environ["DATABASE_URL"]
 
 # `setdefault` above means a shell-exported DATABASE_URL wins — and `_truncate_tables`
@@ -42,6 +45,22 @@ def db_session(engine):
     session = session_factory()
     yield session
     session.close()
+
+
+@pytest.fixture()
+def client(db_session):
+    """Shared API client for route tests that only need the test database."""
+    from fastapi.testclient import TestClient
+
+    app = create_app()
+
+    def _override_get_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = _override_get_db
+    with TestClient(app) as test_client:
+        yield test_client
+    app.dependency_overrides.clear()
 
 
 @pytest.fixture(autouse=True)

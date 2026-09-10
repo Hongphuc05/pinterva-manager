@@ -1,9 +1,15 @@
-name: CI
+name: Pipeline
 
 on:
   push:
     branches: [main]
   pull_request:
+
+# Keep deployments serial: GitHub replaces an obsolete pending run with the latest
+# commit, but never interrupts a live Docker build or database migration.
+concurrency:
+  group: pipeline-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   test:
@@ -33,35 +39,30 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: pip install -e ".[dev]"
+      - name: Install Playwright Chromium
+        run: python -m playwright install --with-deps chromium
       - name: Lint
         run: ruff check .
       - name: Run tests
         run: pytest -v
 
-  publish-backend-image:
+  deploy:
     needs: test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/metadata-action@v5
-        id: meta
-        with:
-          images: ghcr.io/${{ github.repository_owner }}/pinterva-manager-backend
-          tags: |
-            type=sha,prefix=sha-
-            type=raw,value=latest,enable={{is_default_branch}}
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+      - name: Sync code to /srv/tacahu and restart containers
+        run: |
+          set -euo pipefail
+          cp compose.yaml /srv/tacahu/compose.yaml
+          cp Dockerfile /srv/tacahu/Dockerfile
+          cp pyproject.toml /srv/tacahu/pyproject.toml
+          cp alembic.ini /srv/tacahu/alembic.ini
+          rsync -a --delete migrations/ /srv/tacahu/migrations/
+          rsync -a --delete app/ /srv/tacahu/app/
+          cd /srv/tacahu
+          docker compose build api celery-general celery-assignment celery-beat
+          docker compose run --rm migrate
+          docker compose up -d --force-recreate api celery-general celery-assignment celery-beat
+          docker compose ps

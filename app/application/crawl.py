@@ -243,8 +243,10 @@ def scan_orders_fast(
                     order.sku = detail.sku
                 if detail.product_category:
                     order.product_category = detail.product_category
-                if detail.product_variants:
-                    order.product_variants = [variant.model_dump() for variant in detail.product_variants]
+                # [] is a meaningful persisted value: it records that this order's
+                # detail was fetched and genuinely had no variants.  Leaving NULL
+                # made import_claimed_orders select the order again forever.
+                order.product_variants = [variant.model_dump() for variant in detail.product_variants]
                 if detail.product_skus:
                     order.product_skus = [product_sku.model_dump() for product_sku in detail.product_skus]
                 order.multiple_design = detail.multiple_design
@@ -474,8 +476,10 @@ def _apply_order_detail_result(order: Order, detail_result) -> None:
         order.sku = detail_result.sku
     if detail_result.product_category:
         order.product_category = detail_result.product_category
-    if detail_result.product_variants:
-        order.product_variants = [v.model_dump() for v in detail_result.product_variants]
+    # Preserve an empty list as the "detail fetched" marker.  See the import query
+    # in import_claimed_orders, which uses NULL to identify orders still awaiting a
+    # first detail fetch.
+    order.product_variants = [v.model_dump() for v in detail_result.product_variants]
     if detail_result.product_skus:
         order.product_skus = [product_sku.model_dump() for product_sku in detail_result.product_skus]
     order.multiple_design = detail_result.multiple_design
