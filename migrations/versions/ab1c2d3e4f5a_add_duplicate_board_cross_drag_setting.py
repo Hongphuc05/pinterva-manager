@@ -15,6 +15,12 @@ depends_on = None
 
 
 def upgrade() -> None:
+    existing_columns = {
+        column["name"] for column in sa.inspect(op.get_bind()).get_columns("platforms")
+    }
+    if "duplicate_board_cross_designer_drag_enabled" in existing_columns:
+        return
+
     op.add_column(
         "platforms",
         sa.Column(
