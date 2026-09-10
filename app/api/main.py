@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.api.routes import assignments_api as assignments_api_routes
 from app.api.routes import auth as auth_routes
 from app.api.routes import designer_tasks_api as designer_tasks_api_routes
 from app.api.routes import finance_api as finance_api_routes
@@ -108,6 +109,7 @@ def create_app() -> FastAPI:
         return response
     app.include_router(health_routes.router, prefix="/api")
     app.include_router(auth_routes.router, prefix="/api")
+    app.include_router(assignments_api_routes.router, prefix="/api")
     app.include_router(users_api_routes.router, prefix="/api")
     app.include_router(platforms_api_routes.router, prefix="/api")
     app.include_router(sync_jobs_api_routes.router, prefix="/api")

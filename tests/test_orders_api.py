@@ -246,6 +246,45 @@ def test_api_bulk_printerval_assignment_records_one_request_per_order(client, db
     assert db_session.query(Assignment).filter_by(status="approved").count() == 2
 
 
+def test_api_assignments_replaces_the_bulk_printerval_assignment_contract(client, db_session, monkeypatch):
+    from app.workers import assignment_sync_tasks
+
+    calls = []
+    monkeypatch.setattr(
+        assignment_sync_tasks.sync_printerval_assignment_request,
+        "delay",
+        lambda *args: calls.append(args),
+    )
+    platform = Platform(name="P1 command", account_username="command@example.com")
+    designer = User(username="des-command", full_name="Mai", role="designer", password_hash="hash")
+    db_session.add_all([platform, designer])
+    db_session.flush()
+    order1 = Order(external_order_id="CMD1", platform_id=platform.id)
+    order2 = Order(external_order_id="CMD2", platform_id=platform.id)
+    db_session.add_all([order1, order2])
+    db_session.commit()
+    client.app.dependency_overrides[get_current_platform_id] = lambda: platform.id
+    _login(client, db_session, "admin", "assignments_command_admin")
+
+    try:
+        response = client.post(
+            "/api/assignments",
+            json={
+                "order_ids": [str(order1.id), str(order2.id)],
+                "designer_id": str(designer.id),
+                "printerval_designer": "Nguyễn Thị Thuý Hường - 2D Prin",
+                "printerval_status": "Doing",
+            },
+        )
+    finally:
+        del client.app.dependency_overrides[get_current_platform_id]
+
+    assert response.status_code == 202
+    assert response.json()["queued_count"] == 2
+    assert len(response.json()["request_ids"]) == 2
+    assert len(calls) == 2
+
+
 def test_api_sync_status_defaults_to_not_running_when_never_synced(client, db_session):
     _login(client, db_session, "admin")
     resp = client.get("/api/orders/sync-status")
@@ -479,4 +518,3 @@ def test_api_approve_and_reject_fix_flow(client, db_session):
     db_session.refresh(order)
     assert order.state == OrderState.QC_PENDING.value
     assert order.fix_approved_by_admin is False
-

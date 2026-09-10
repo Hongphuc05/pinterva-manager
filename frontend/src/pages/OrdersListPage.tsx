@@ -218,7 +218,7 @@ export function OrdersListPage() {
     if (!bulkDesignerId || !bulkPrintervalDesigner || selectedOrderIds.length === 0) return
     setBulkAssigning(true)
     try {
-      const res = await apiFetch<{ queued_count: number }>('/orders/bulk-printerval-assignment', {
+      const res = await apiFetch<{ queued_count: number }>('/assignments', {
         method: 'POST',
         body: JSON.stringify({
           order_ids: selectedOrderIds,
@@ -247,11 +247,12 @@ export function OrdersListPage() {
     if (!assigningOrder || !selectedUserId || !selectedPrintervalDesigner) return
     setAssigning(true)
     try {
-      await apiFetch<{ request_id: string; lifecycle: string }>(
-        `/orders/${assigningOrder.id}/printerval-assignment`,
+      await apiFetch<{ request_ids: string[]; queued_count: number }>(
+        '/assignments',
         {
           method: 'POST',
           body: JSON.stringify({
+            order_ids: [assigningOrder.id],
             designer_id: selectedUserId,
             printerval_designer: selectedPrintervalDesigner,
             printerval_status: selectedPrintervalStatus,
