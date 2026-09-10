@@ -72,6 +72,24 @@ def test_create_user_as_admin(client, db_session):
     assert password_response.json() == {"password": "designpassword", "recoverable": True}
 
 
+def test_admin_can_create_designer_trello_user(client, db_session):
+    _, token = _login(client, db_session, "admin", "admin_trello_creator")
+    response = client.post(
+        "/api/users",
+        json={
+            "username": "trello_designer_1",
+            "password": "designpassword",
+            "full_name": "Trello Designer",
+            "role": "designer-trello",
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["role"] == "designer-trello"
+    assert response.json()["platform_id"] is not None
+
+
 def test_delete_user_as_admin(client, db_session):
     admin_user, token = _login(client, db_session, "admin", "admin_deleter")
     # Create target user to delete

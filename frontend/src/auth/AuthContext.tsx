@@ -12,7 +12,7 @@ type AuthState = {
   user: User | null
   loading: boolean
   isAdmin: boolean
-  login: (username: string, password: string) => Promise<void>
+  login: (username: string, password: string) => Promise<User>
   logout: () => Promise<void>
 }
 
@@ -32,7 +32,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false))
   }, [])
 
-  async function login(username: string, password: string) {
+  async function login(username: string, password: string): Promise<User> {
     const res = await apiFetch<{
       access_token?: string
       user?: User
@@ -46,6 +46,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const me = await apiFetch<User>('/me')
     setUser(me)
+    return me
   }
 
   async function logout() {
@@ -75,4 +76,3 @@ export function useAuth(): AuthState {
 }
 
 export { ApiError }
-

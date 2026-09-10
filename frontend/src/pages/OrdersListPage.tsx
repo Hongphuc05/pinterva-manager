@@ -30,6 +30,7 @@ type OrderSummary = {
   id: string
   external_order_id: string
   state: string
+  work_domain: string
   batch_id: string | null
   product_name: string | null
   sku: string | null
@@ -144,6 +145,9 @@ export function OrdersListPage() {
   const [bulkPrintervalDesigner, setBulkPrintervalDesigner] = useState('')
   const [bulkPrintervalStatus, setBulkPrintervalStatus] = useState('Doing')
   const [bulkAssigning, setBulkAssigning] = useState<boolean>(false)
+  const [movingToDuplicateDomain, setMovingToDuplicateDomain] = useState(false)
+
+  const regularDesigners = usersList.filter((candidate) => candidate.role === 'designer')
 
   useEffect(() => {
     if (isAdmin) {
@@ -256,6 +260,24 @@ export function OrdersListPage() {
       }
     } finally {
       setBulkAssigning(false)
+    }
+  }
+
+  async function moveSelectedToDuplicateDomain() {
+    if (selectedOrderIds.length === 0) return
+    setMovingToDuplicateDomain(true)
+    try {
+      const result = await apiFetch<{ changed_count: number }>('/orders/duplicate-domain', {
+        method: 'POST',
+        body: JSON.stringify({ order_ids: selectedOrderIds, work_domain: 'duplicate' }),
+      })
+      setFlash(`Đã đưa ${result.changed_count} đơn vào domain Đơn trùng lặp.`)
+      setSelectedOrderIds([])
+      loadOrders()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Không thể chuyển đơn vào domain Đơn trùng lặp.')
+    } finally {
+      setMovingToDuplicateDomain(false)
     }
   }
 
@@ -989,7 +1011,7 @@ export function OrdersListPage() {
               >
                 <option value="">Tất cả DES</option>
                 <option value="unassigned">Chưa phân công</option>
-                {usersList.map((u) => (
+                {regularDesigners.map((u) => (
                   <option key={u.id} value={u.id}>
                     {u.full_name || u.username} ({u.role})
                   </option>
@@ -1036,6 +1058,16 @@ export function OrdersListPage() {
           <div className="flex items-center gap-3">
             <button
               type="button"
+              onClick={moveSelectedToDuplicateDomain}
+              disabled={movingToDuplicateDomain}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-[#0052CC] bg-white hover:bg-slate-100 rounded-lg shadow-sm transition-all disabled:opacity-50"
+              title="Đưa đơn vào board chung của Designer Trello"
+            >
+              {movingToDuplicateDomain ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Layers className="h-3.5 w-3.5" />}
+              <span>Đưa vào Đơn trùng lặp</span>
+            </button>
+            <button
+              type="button"
               onClick={() => openPrintervalStatusModal(
                 selectedOrderIds,
                 `Cập nhật ${selectedOrderIds.length} đơn đã chọn`,
@@ -1059,7 +1091,7 @@ export function OrdersListPage() {
               className="bg-white text-slate-800 text-xs font-semibold px-3 py-1.5 rounded-lg border border-white/30 focus:outline-none shadow-xs"
             >
               <option value="">-- Chọn Designer phân công --</option>
-              {usersList.map((u) => (
+              {regularDesigners.map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.full_name || u.username} ({u.role})
                 </option>
@@ -1229,6 +1261,11 @@ export function OrdersListPage() {
                           <p className="text-[11px] text-slate-500 font-normal line-clamp-1 mt-0.5" title={o.product_name}>
                             {o.product_name}
                           </p>
+                        )}
+                        {o.work_domain === 'duplicate' && (
+                          <span className="mt-1 inline-flex rounded border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-[10px] font-bold text-violet-700">
+                            Đơn trùng lặp
+                          </span>
                         )}
                         <div className="flex items-center gap-2 mt-1 flex-wrap" onClick={(e) => e.stopPropagation()}>
                           {o.sku_image_url && (
@@ -1501,7 +1538,7 @@ export function OrdersListPage() {
                   className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-[#0052CC]/20 focus:border-[#0052CC]"
                 >
                   <option value="">-- Chọn tài khoản --</option>
-                  {usersList.map((u) => (
+                  {regularDesigners.map((u) => (
                     <option key={u.id} value={u.id}>
                       {u.full_name || u.username} ({u.role})
                     </option>

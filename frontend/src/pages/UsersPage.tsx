@@ -34,7 +34,7 @@ export function UsersPage() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [fullName, setFullName] = useState('')
-  const [role, setRole] = useState<'admin' | 'designer'>('designer')
+  const [role, setRole] = useState<'admin' | 'designer' | 'designer-trello'>('designer')
   const [submitting, setSubmitting] = useState(false)
   const [modalError, setModalError] = useState('')
 
@@ -167,7 +167,7 @@ export function UsersPage() {
               <span>Quản Lý Tài Khoản</span>
             </h1>
             <p className="text-xs text-slate-500 mt-1">
-              Tạo mới, phân quyền (Admin / Designer) và quản lý tài khoản người dùng trong hệ thống
+              Tạo mới, phân quyền Admin, Designer và Designer Trello trong hệ thống
             </p>
           </div>
 
@@ -215,6 +215,7 @@ export function UsersPage() {
                 <tbody className="divide-y divide-slate-100 font-medium">
                   {users.map((u) => {
                     const isAdmin = u.role === 'admin'
+                    const isTrelloDesigner = u.role === 'designer-trello'
                     return (
                       <tr key={u.id} className="hover:bg-slate-50/70 transition-colors">
                         <td className="py-3.5 px-4 font-mono font-bold text-slate-800">
@@ -228,6 +229,11 @@ export function UsersPage() {
                             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-purple-50 text-purple-700 font-bold text-[11px] border border-purple-200">
                               <ShieldCheck className="h-3.5 w-3.5" />
                               <span>ADMIN</span>
+                            </span>
+                          ) : isTrelloDesigner ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-violet-50 text-violet-700 font-bold text-[11px] border border-violet-200">
+                              <UserIcon className="h-3.5 w-3.5" />
+                              <span>DESIGNER TRELLO</span>
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 font-bold text-[11px] border border-emerald-200">
@@ -360,10 +366,11 @@ export function UsersPage() {
                 <label className="text-xs font-bold text-slate-700 block">Vai Trò (Role)</label>
                 <select
                   value={role}
-                  onChange={(e) => setRole(e.target.value as 'admin' | 'designer')}
+                  onChange={(e) => setRole(e.target.value as 'admin' | 'designer' | 'designer-trello')}
                   className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-[#0052CC]/20 focus:border-[#0052CC]"
                 >
                   <option value="designer">Designer / Người dùng (Xử lý đơn hàng)</option>
+                  <option value="designer-trello">Designer Trello / Xử lý đơn trùng lặp</option>
                   <option value="admin">Admin (Quản trị viên hệ thống)</option>
                 </select>
               </div>

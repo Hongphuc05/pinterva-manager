@@ -34,7 +34,7 @@ export function Topbar() {
     if (path === '/designer-board') return 'Tiến Độ Designer'
     if (path === '/order-history') return user?.role === 'designer' ? 'Lịch Sử Của Tôi' : 'Lịch Sử Hoạt Động & Tiến Độ'
     if (path === '/allocation') return 'Phân Bổ Kéo-Thả'
-    if (path === '/kanban') return 'Bảng Tiến Độ Kanban'
+    if (path === '/kanban') return 'Board Đơn trùng lặp'
     if (path === '/my-tasks') return 'My Tasks'
     if (path === '/printerval-login') return 'Đăng Nhập Printerval'
     if (path === '/order-status') return 'Trạng Thái Đơn'

@@ -7,7 +7,8 @@ import {
   ShieldAlert,
   Users,
   History,
-  Coins
+  Coins,
+  Columns3
 } from 'lucide-react'
 
 export function Sidebar() {
@@ -17,6 +18,7 @@ export function Sidebar() {
   if (!user) return null
 
   const isAdmin = user.role === 'admin'
+  const isTrelloDesigner = user.role === 'designer-trello'
 
   const adminSections = [
     {
@@ -24,6 +26,7 @@ export function Sidebar() {
       items: [
         { label: 'Đơn Hàng', path: '/orders', icon: ListOrdered },
         { label: 'Tiến Độ Team', path: '/designer-board', icon: UserCheck },
+        { label: 'Board Đơn trùng lặp', path: '/kanban', icon: Columns3 },
       ],
     },
     {
@@ -50,7 +53,16 @@ export function Sidebar() {
     },
   ]
 
-  const navSections = isAdmin ? adminSections : designerSections
+  const trelloDesignerSections = [
+    {
+      label: 'Đơn trùng lặp',
+      items: [
+        { label: 'Board kéo thả', path: '/kanban', icon: Columns3 },
+      ],
+    },
+  ]
+
+  const navSections = isAdmin ? adminSections : isTrelloDesigner ? trelloDesignerSections : designerSections
 
   return (
     <aside className="w-64 bg-[#0052CC] text-white flex flex-col fixed lg:sticky top-0 h-screen z-50 shadow-lg select-none">

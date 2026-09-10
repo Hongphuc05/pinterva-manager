@@ -9,6 +9,7 @@ import { UsersPage } from './pages/UsersPage'
 import { DesignerBoardPage } from './pages/DesignerBoardPage'
 import { OrderHistoryPage } from './pages/OrderHistoryPage'
 import { FinancePage } from './pages/FinancePage'
+import { DuplicateBoardPage } from './pages/DuplicateBoardPage'
 
 function App() {
   return (
@@ -83,7 +84,11 @@ function App() {
           />
           <Route
             path="/kanban"
-            element={<Navigate to="/orders" replace />}
+            element={
+              <ProtectedRoute>
+                <DuplicateBoardPage />
+              </ProtectedRoute>
+            }
           />
           <Route path="/" element={<Navigate to="/orders" replace />} />
         </Routes>
