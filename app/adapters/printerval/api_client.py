@@ -240,7 +240,7 @@ class PrintervalApiClient:
         params = {
             "page_size": str(page_size),
             "page_id": str(page_id),
-            "status": status.lower(),
+            "status": status.lower() if status else "",
             "time_type": "created_at",
             "job_type": "all",
             "team_outsource": self.team_outsource or "",
@@ -249,20 +249,15 @@ class PrintervalApiClient:
             params["date_from"] = date_from
         if date_to:
             params["date_to"] = date_to
-        result = self._fetch_find_rows(params, error_context=f"{status} queue")
+        result = self._fetch_find_rows(params, error_context=f"{status or 'unassigned'} queue")
         return PrintervalApiPage(orders=result, raw={"status": "successful", "result": result})
 
     def discover_waiting_page(self, **kwargs) -> PrintervalApiPage:
         """Compatibility wrapper for existing Waiting-only callers."""
         return self.discover_page(status="waiting", **kwargs)
 
-    #: The site's 6 real order statuses (docs/phase0-field-map.md §1), confirmed live
-    #: 2026-09-08 as the exact literal values this endpoint's own `status` param
-    #: accepts (lowercase of the DOM label) — each one returned rows whose own
-    #: `status` field echoed back that same value. "doing" first: find_order is only
-    #: ever called right after this app's own claim, so that's overwhelmingly the
-    #: common case.
-    ORDER_STATUSES = ("doing", "waiting", "review", "fix", "confirm", "done")
+    #: The site's order statuses, including empty string ("") for unassigned/no-status orders
+    ORDER_STATUSES = ("doing", "waiting", "review", "fix", "confirm", "done", "")
 
     def find_order(
         self, external_order_id: str, statuses: tuple[str, ...] = ORDER_STATUSES
@@ -295,7 +290,7 @@ class PrintervalApiClient:
             params = {
                 "page_size": "1",
                 "page_id": "0",
-                "status": status,
+                "status": status.lower() if status else "",
                 "time_type": "created_at",
                 "job_type": "all",
                 "team_outsource": self.team_outsource or "",

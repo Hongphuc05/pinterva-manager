@@ -179,6 +179,9 @@ def sync_selected_order_statuses(
             if found_status and found_status.lower() != (order.printerval_status or "").lower():
                 order.printerval_status = found_status.lower()
                 changed = True
+            elif not found_status and order.printerval_status == "cancelled":
+                order.printerval_status = None
+                changed = True
 
             designer = _row_designer(row, designer_map=designer_map)
             if designer and designer != order.printerval_designer:
@@ -245,6 +248,9 @@ def sync_platform_order_statuses(
                 found_status = row.get("status")
                 if found_status and found_status != order.printerval_status:
                     order.printerval_status = found_status
+                    updated += 1
+                elif not found_status and order.printerval_status == "cancelled":
+                    order.printerval_status = None
                     updated += 1
 
                 norm_st = (found_status or "").upper()
