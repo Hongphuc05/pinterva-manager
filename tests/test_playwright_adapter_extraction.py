@@ -36,7 +36,6 @@ def test_extraction_on_plain_order_fixture(page):
     assert result.thumbnail_url == "https://assets.example.com/redacted-thumb-plain.webp"
     assert result.sku == "P_FIXTURE-UNI-XL-PLAIN"
     assert result.product_category == "Hawaiians"
-    assert result.has_template is True
     assert result.multiple_design is False
     assert result.double_sided is False
     assert result.priority_label is None

@@ -1,0 +1,112 @@
+import { ExternalLink, Package } from 'lucide-react'
+import { resolveAssetUrl } from '../api/client'
+
+export type ProductSku = {
+  sku?: string | null
+  image_url?: string | null
+  category?: string | null
+  variants?: { name: string; value: string }[] | null
+  custom_config?: {
+    original?: { key: string; value: string }[]
+    translated_vn?: { key: string; value: string }[]
+  } | null
+}
+
+type ProductSkusCardProps = {
+  productSkus?: ProductSku[] | null
+  fallbackSku?: string | null
+  fallbackCategory?: string | null
+  fallbackVariants?: { name: string; value: string }[] | null
+}
+
+export function productSkuCount(productSkus?: ProductSku[] | null) {
+  return productSkus?.length ?? 0
+}
+
+export function ProductSkusCard({
+  productSkus,
+  fallbackSku,
+  fallbackCategory,
+  fallbackVariants,
+}: ProductSkusCardProps) {
+  const items = productSkus && productSkus.length > 0
+    ? productSkus
+    : (fallbackSku || fallbackCategory || (fallbackVariants && fallbackVariants.length > 0)
+      ? [{ sku: fallbackSku, category: fallbackCategory, variants: fallbackVariants }]
+      : [])
+
+  if (items.length === 0) return null
+
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs space-y-4">
+      <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+        <div className="flex items-center gap-2">
+          <div className="p-1.5 rounded-lg bg-blue-50 text-[#0052CC]">
+            <Package className="h-4 w-4" />
+          </div>
+          <div>
+            <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Mẫu hàng / SKU</h3>
+            <p className="text-[11px] text-slate-400">Mỗi mẫu hàng trong đơn được lưu riêng.</p>
+          </div>
+        </div>
+        <span className="px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-800 text-[11px] font-bold">
+          {items.length} mẫu hàng
+        </span>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+        {items.map((item, index) => (
+          <article key={`${item.sku || 'sku'}-${index}`} className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+            <div className="flex gap-3">
+              {item.image_url ? (
+                <a href={item.image_url} target="_blank" rel="noopener noreferrer" className="shrink-0">
+                  <img src={resolveAssetUrl(item.image_url)} alt={item.sku || `SKU ${index + 1}`} className="h-16 w-16 rounded-lg object-cover border border-slate-200" />
+                </a>
+              ) : (
+                <div className="h-16 w-16 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-400 shrink-0">
+                  <Package className="h-6 w-6" />
+                </div>
+              )}
+              <div className="min-w-0">
+                <p className="font-mono text-xs font-bold text-slate-800 break-all">{item.sku || `Mẫu hàng ${index + 1}`}</p>
+                {item.category && <p className="text-xs text-slate-600 mt-1"><strong>Category:</strong> {item.category}</p>}
+                {item.image_url && (
+                  <a href={item.image_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[11px] font-bold text-[#0052CC] hover:underline mt-1">
+                    Ảnh SKU <ExternalLink className="h-3 w-3" />
+                  </a>
+                )}
+              </div>
+            </div>
+
+            {item.variants && item.variants.length > 0 && (
+              <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-xs">
+                {item.variants.map((variant, variantIndex) => (
+                  <div key={`${variant.name}-${variantIndex}`} className="contents">
+                    <dt className="font-bold text-slate-700">{variant.name}:</dt>
+                    <dd className="text-slate-600 break-words">{variant.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+
+            {item.custom_config?.original && item.custom_config.original.length > 0 && (
+              <details className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs">
+                <summary className="cursor-pointer font-semibold text-slate-700">
+                  Cấu hình custom ({item.custom_config.original.length})
+                </summary>
+                <dl className="mt-2 space-y-1.5">
+                  {item.custom_config.original.map((entry, configIndex) => (
+                    <div key={`${entry.key}-${configIndex}`}>
+                      <dt className="font-semibold text-slate-600">{entry.key}</dt>
+                      <dd className="mt-0.5 text-slate-500 break-all whitespace-pre-wrap">{entry.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </details>
+            )}
+          </article>
+        ))}
+      </div>
+    </section>
+  )
+}

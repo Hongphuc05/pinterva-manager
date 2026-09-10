@@ -13,10 +13,9 @@ class OrderSummary(BaseModel):
     thumbnail_url: str | None = None
     designer: str | None = None
     status: str
-    has_template: bool = False
-    template_jobs: list[dict] | None = None
     sku: str | None = None
     product_category: str | None = None
+    product_skus: list[dict] | None = None
     sku_image_url: str | None = None
     external_order_url: str | None = None
     source_files: list[dict] | None = None
@@ -48,6 +47,20 @@ class CustomConfig(BaseModel):
     translated_vn: list[CustomConfigEntry] = []
 
 
+class ProductSku(BaseModel):
+    """One sellable SKU inside a Printerval design job.
+
+    A design job can contain more than one SKU (for example XL and 2XL). Keeping
+    them as a list prevents the first item from overwriting the rest of the order.
+    """
+
+    sku: str | None = None
+    image_url: str | None = None
+    category: str | None = None
+    variants: list[ProductVariant] = []
+    custom_config: CustomConfig | None = None
+
+
 class OrderDetailResult(AdapterResult):
     external_order_id: str | None = None
     designer: str | None = None
@@ -63,12 +76,11 @@ class OrderDetailResult(AdapterResult):
     sku: str | None = None
     product_category: str | None = None
     product_variants: list[ProductVariant] = []
-    has_template: bool = False
+    product_skus: list[ProductSku] = []
     multiple_design: bool = False
     double_sided: bool = False
     priority_label: str | None = None
     custom_config: CustomConfig | None = None
-    template_jobs: list[dict] | None = None
     design_tool_url: str | None = None
     sku_image_url: str | None = None
     external_order_url: str | None = None

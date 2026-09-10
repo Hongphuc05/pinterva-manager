@@ -4,7 +4,6 @@ import { ApiError, apiFetch, resolveAssetUrl } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { ImageModal } from '../components/ImageModal'
-import { TemplateModal, type TemplateJob } from '../components/TemplateModal'
 import { Pagination, paginate } from '../components/Pagination'
 import { getStatusInfo } from '../utils/statusTranslation'
 import { 
@@ -12,7 +11,6 @@ import {
   Clock, 
   ExternalLink, 
   AlertCircle, 
-  FileText, 
   Package,
   ChevronRight,
   FolderArchive
@@ -38,8 +36,7 @@ type Task = {
     sku: string | null
     product_category: string | null
     product_variants: { name: string; value: string }[] | null
-    has_template: boolean
-    template_jobs: TemplateJob[] | null
+    product_skus: { sku?: string | null }[] | null
     deadline_at_ext: string | null
     note_outsource: string | null
     order_note: string
@@ -61,7 +58,6 @@ export function MyTasksPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
-  const [activeTemplateJobs, setActiveTemplateJobs] = useState<{ jobs: TemplateJob[]; orderId: string } | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
 
   async function loadTasks() {
@@ -104,14 +100,6 @@ export function MyTasksPage() {
         isOpen={!!selectedImage}
         onClose={() => setSelectedImage(null)}
         imageUrl={selectedImage}
-      />
-
-      {/* Template Modal */}
-      <TemplateModal
-        isOpen={!!activeTemplateJobs}
-        onClose={() => setActiveTemplateJobs(null)}
-        templateJobs={activeTemplateJobs?.jobs}
-        orderId={activeTemplateJobs?.orderId}
       />
 
       {/* Header Info */}
@@ -250,15 +238,11 @@ export function MyTasksPage() {
                         </span>
                       )}
 
-                      {task.order.template_jobs && task.order.template_jobs.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => setActiveTemplateJobs({ jobs: task.order.template_jobs!, orderId: task.order.external_order_id })}
-                          className="inline-flex items-center gap-1 px-2.5 py-0.5 text-xs font-bold text-white bg-[#0052CC] hover:bg-[#0041A3] rounded-md transition-colors cursor-pointer font-sans"
-                        >
-                          <FileText className="h-3 w-3" />
-                          <span>Xem template</span>
-                        </button>
+                      {task.order.product_skus && task.order.product_skus.length > 1 && (
+                        <span className="inline-flex items-center gap-1 text-slate-600 font-semibold bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                          <Package className="h-3 w-3 text-slate-500" />
+                          <span>{task.order.product_skus.length} mẫu hàng</span>
+                        </span>
                       )}
                     </div>
                   </div>

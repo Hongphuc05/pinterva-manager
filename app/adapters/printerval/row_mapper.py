@@ -25,10 +25,11 @@ from app.adapters.printerval.models import (
     CustomConfig,
     CustomConfigEntry,
     OrderDetailResult,
+    ProductSku,
     ProductVariant,
 )
 
-DESIGN_TOOL_URL_TEMPLATE = "https://design-tool.printerval.com/?tab=design-job&code=Printerval-{code}"
+DESIGN_TOOL_URL_FORMAT = "https://design-tool.printerval.com/?tab=design-job&code=Printerval-{code}"
 
 
 def _meta_data(row: dict[str, Any]) -> dict[str, Any]:
@@ -114,6 +115,54 @@ def _parse_custom_config(sku_data: dict[str, Any] | None) -> CustomConfig | None
     return CustomConfig(original=original, translated_vn=translated)
 
 
+def extract_product_skus(row: dict[str, Any]) -> list[ProductSku]:
+    """Normalize every Printerval ``meta_data.product_skus`` entry.
+
+    Printerval puts one dictionary item here for each sellable SKU in an order.
+    The old crawler selected only the first item, losing separate sizes and their
+    own configuration/photo fields.  Preserve the site's order and retain each
+    SKU's own image, category, variants and custom configuration.
+    """
+    meta = _meta_data(row)
+    raw_skus = meta.get("product_skus")
+    product = row.get("product") if isinstance(row.get("product"), dict) else {}
+    fallback_category = str(product.get("category_name") or row.get("product_category") or "").strip() or None
+    fallback_sku = str(product.get("sku") or row.get("sku") or "").strip() or None
+
+    if not isinstance(raw_skus, dict) or not raw_skus:
+        return [
+            ProductSku(
+                sku=fallback_sku,
+                image_url=extract_sku_image_url(row),
+                category=fallback_category,
+            )
+        ] if (fallback_sku or fallback_category or extract_sku_image_url(row)) else []
+
+    product_skus: list[ProductSku] = []
+    for key, raw_sku in raw_skus.items():
+        if not isinstance(raw_sku, dict):
+            continue
+        sku = str(raw_sku.get("product_sku") or raw_sku.get("sku") or "").strip() or None
+        # A few legacy rows do not contain product_sku.  The product's generic SKU
+        # is better than exposing the opaque numeric map key when there is one SKU.
+        if not sku and len(raw_skus) == 1:
+            sku = fallback_sku or str(key).strip() or None
+        elif not sku:
+            sku = str(key).strip() or None
+        image_url = str(raw_sku.get("image_url") or "").strip() or None
+        category = str(raw_sku.get("category_name") or raw_sku.get("category") or "").strip() or fallback_category
+        product_skus.append(
+            ProductSku(
+                sku=sku,
+                image_url=image_url,
+                category=category,
+                variants=_parse_variants(raw_sku),
+                custom_config=_parse_custom_config(raw_sku),
+            )
+        )
+    return product_skus
+
+
 def parse_external_order_id(row: dict[str, Any]) -> str:
     """The site's own external code. Live-confirmed 2026-09-08: a real row carries no
     "code"/"job_code" field already holding the "DJ#######" form — its own numeric
@@ -150,11 +199,12 @@ def parse_product_summary_fields(row: dict[str, Any]) -> tuple[str, str | None, 
     # `product_skus[*].product_sku` is the value printed beside the preview in
     # Printerval's task detail.  Prefer it over the generic product SKU so Size/Type
     # variants and the displayed SKU always describe the same task.
-    sku_data = _first_sku_data(meta)
+    product_skus = extract_product_skus(row)
+    first_sku = product_skus[0] if product_skus else None
     sku = str(
-        (sku_data or {}).get("product_sku") or product_info.get("sku") or row.get("sku") or ""
+        (first_sku.sku if first_sku else None) or product_info.get("sku") or row.get("sku") or ""
     ) or None
-    category = str(product_info.get("category_name") or row.get("product_category") or "") or None
+    category = (first_sku.category if first_sku else None) or str(product_info.get("category_name") or row.get("product_category") or "") or None
     return product_name, sku, category
 
 
@@ -267,11 +317,13 @@ def fetch_product_gallery_images(
 
 def extract_source_asset_url(row: dict[str, Any]) -> str | None:
     meta = _meta_data(row)
-    sku_data = _first_sku_data(meta)
-    if sku_data and sku_data.get("configurations"):
-        url = sku_data.get("image_url")
-        if isinstance(url, str) and url.strip():
-            return url.strip()
+    raw_skus = meta.get("product_skus")
+    if isinstance(raw_skus, dict):
+        for sku_data in raw_skus.values():
+            if isinstance(sku_data, dict) and sku_data.get("configurations"):
+                url = sku_data.get("image_url")
+                if isinstance(url, str) and url.strip():
+                    return url.strip()
     raw = row.get("source_asset_url") or row.get("source_url")
     return str(raw).strip() if isinstance(raw, str) and raw.strip() else None
 
@@ -287,15 +339,20 @@ def extract_source_files(row: dict[str, Any]) -> list[dict[str, str]] | None:
     # `designs` entry was an unrelated file (api_client.find_order bug, now fixed),
     # while `configurations` held the customer's actual uploaded photos.
     meta = _meta_data(row)
-    sku_data = _first_sku_data(meta)
-    raw_config = sku_data.get("configurations") if sku_data else None
-    if isinstance(raw_config, str):
-        try:
-            config = json.loads(raw_config)
-        except (TypeError, ValueError):
-            config = None
-    else:
-        config = raw_config
+    raw_skus = meta.get("product_skus")
+    sku_entries = list(raw_skus.values()) if isinstance(raw_skus, dict) else []
+    configs: list[dict[str, Any]] = []
+    for sku_data in sku_entries:
+        raw_config = sku_data.get("configurations") if isinstance(sku_data, dict) else None
+        if isinstance(raw_config, str):
+            try:
+                config = json.loads(raw_config)
+            except (TypeError, ValueError):
+                config = None
+        else:
+            config = raw_config
+        if isinstance(config, dict):
+            configs.append(config)
 
     def source_name(url: str) -> str:
         return url.split("?", 1)[0].rstrip("/").split("/")[-1] or "source"
@@ -309,25 +366,23 @@ def extract_source_files(row: dict[str, Any]) -> list[dict[str, str]] | None:
         recursively scanning every nested URL would incorrectly count metadata
         such as ``upload_image_url`` a second time.
         """
-        if not isinstance(config, dict):
-            return []
-        value = config.get(key)
-        if isinstance(value, str):
-            try:
-                value = json.loads(value)
-            except (TypeError, ValueError):
-                return []
-        if not isinstance(value, list):
-            return []
-
         result: list[dict[str, str]] = []
-        for item in value:
-            if not isinstance(item, dict):
+        for config in configs:
+            value = config.get(key)
+            if isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except (TypeError, ValueError):
+                    continue
+            if not isinstance(value, list):
                 continue
-            url = item.get("value")
-            if isinstance(url, str) and url.strip().lower().startswith(("http://", "https://")):
-                clean_url = url.strip()
-                result.append({"name": source_name(clean_url), "url": clean_url})
+            for item in value:
+                if not isinstance(item, dict):
+                    continue
+                url = item.get("value")
+                if isinstance(url, str) and url.strip().lower().startswith(("http://", "https://")):
+                    clean_url = url.strip()
+                    result.append({"name": source_name(clean_url), "url": clean_url})
         return result
 
     # On the live DJ3976109 payload, `layers` contains exactly the 22 entries
@@ -359,7 +414,7 @@ def extract_source_files(row: dict[str, Any]) -> list[dict[str, str]] | None:
             for nested in entry:
                 collect_configuration_images(nested)
 
-    if isinstance(config, dict):
+    for config in configs:
         for key, entry in config.items():
             collect_configuration_images(entry, str(key))
 
@@ -405,6 +460,7 @@ def parse_order_detail_from_row(
 ) -> OrderDetailResult:
     product_name, sku, category = parse_product_summary_fields(row)
     meta = _meta_data(row)
+    product_skus = extract_product_skus(row)
     sku_data = _first_sku_data(meta)
 
     raw_image_url = extract_image_url_from_dict_or_html(row)
@@ -430,10 +486,6 @@ def parse_order_detail_from_row(
         else ([local_path or raw_image_url] if (local_path or raw_image_url) else None)
     )
 
-    template_jobs = row.get("templateJobs")
-    if not isinstance(template_jobs, list) or not template_jobs:
-        template_jobs = None
-
     is_custom = bool(row.get("is_custom_design"))
     attributes = row.get("attributes") if isinstance(row.get("attributes"), dict) else {}
 
@@ -450,8 +502,7 @@ def parse_order_detail_from_row(
         sku=sku,
         product_category=category,
         product_variants=_parse_variants(sku_data),
-        has_template=bool(template_jobs),
-        template_jobs=template_jobs,
+        product_skus=product_skus,
         multiple_design=bool(row.get("multiple_design_id")),
         double_sided=bool(row.get("double_sided_id")),
         has_uploaded_design=bool(row.get("designs")),
@@ -462,7 +513,7 @@ def parse_order_detail_from_row(
         deadline_at=_parse_timestamp(row.get("deadline_at")),
         custom_config=_parse_custom_config(sku_data),
         design_tool_url=(
-            DESIGN_TOOL_URL_TEMPLATE.format(code=external_order_id) if is_custom else None
+            DESIGN_TOOL_URL_FORMAT.format(code=external_order_id) if is_custom else None
         ),
         sku_image_url=sku_img,
         external_order_url=ext_order_link,

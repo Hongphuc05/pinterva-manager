@@ -587,7 +587,7 @@ export function OrderStatusPage() {
                             <button
                               onClick={() => handleRefreshDetail(o.id)}
                               disabled={refreshingDetailIds.has(o.id)}
-                              title="Cập nhật toàn bộ thông tin đơn từ Printerval (template, ảnh nguồn, deadline...) — như Danh Sách Đơn Hàng"
+                              title="Cập nhật toàn bộ thông tin đơn từ Printerval (SKU, ảnh nguồn, deadline...) — như Danh Sách Đơn Hàng"
                               className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors shadow-2xs cursor-pointer disabled:opacity-50"
                             >
                               <RefreshCw className={`h-3 w-3 ${refreshingDetailIds.has(o.id) ? 'animate-spin' : ''}`} />

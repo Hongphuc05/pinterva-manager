@@ -32,13 +32,12 @@ class _FakeOrder:
     sku: str | None = None
     product_category: str | None = None
     product_variants: list[ProductVariant] = field(default_factory=list)
-    has_template: bool = False
+    product_skus: list[dict] = field(default_factory=list)
     multiple_design: bool = False
     double_sided: bool = False
     priority_label: str | None = None
     custom_config: CustomConfig | None = None
     design_tool_url: str | None = None
-    template_jobs: list[dict] | None = None
     checksum: str = "fakechecksum"
 
 
@@ -106,13 +105,12 @@ class FakePrintervalAdapter:
             sku=order.sku,
             product_category=order.product_category,
             product_variants=order.product_variants,
-            has_template=order.has_template,
+            product_skus=order.product_skus,
             multiple_design=order.multiple_design,
             double_sided=order.double_sided,
             priority_label=order.priority_label,
             custom_config=order.custom_config,
             design_tool_url=order.design_tool_url,
-            template_jobs=order.template_jobs,
         )
 
     def set_designer(self, external_order_id: str, designer_option: str) -> WriteResult:

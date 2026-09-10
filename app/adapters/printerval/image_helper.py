@@ -41,7 +41,7 @@ def extract_image_url_from_dict_or_html(data: dict[str, Any] | str | None) -> st
                 if not any(ignored in val.lower() for ignored in ["flag", "us-flag", "us.png", "icon"]):
                     return val.strip()
 
-        for sub_key in ("item", "product", "attributes", "meta_data", "templateJobs", "design", "mockup", "design_job"):
+        for sub_key in ("item", "product", "attributes", "meta_data", "design", "mockup", "design_job"):
             sub_val = data.get(sub_key)
             if isinstance(sub_val, dict):
                 res = extract_image_url_from_dict_or_html(sub_val)

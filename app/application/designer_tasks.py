@@ -121,8 +121,7 @@ def list_my_tasks(session: Session, designer_id: uuid.UUID) -> list[dict]:
                     "sku": order.sku,
                     "product_category": order.product_category,
                     "product_variants": order.product_variants,
-                    "has_template": order.has_template,
-                    "template_jobs": order.template_jobs,
+                    "product_skus": order.product_skus,
                     "deadline_at_ext": (
                         order.deadline_at_ext.isoformat() if order.deadline_at_ext else None
                     ),

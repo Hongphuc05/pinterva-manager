@@ -11,7 +11,6 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from app.adapters.playwright_support import capture_evidence
 from app.adapters.printerval.gallery_scraper import (
     PLAYWRIGHT_EXTRACT_GALLERY_SNIPPET,
-    extract_gallery_images_from_html,
 )
 from app.adapters.printerval.image_helper import download_and_save_image
 from app.adapters.printerval.interface import ALL_JOB_TYPES
@@ -23,6 +22,7 @@ from app.adapters.printerval.models import (
     DiscoverResult,
     OrderDetailResult,
     OrderSummary,
+    ProductSku,
     ProductVariant,
     WriteResult,
 )
@@ -368,18 +368,6 @@ def _extract_row_sales_url(row) -> str | None:
     return None
 
 
-def _extract_row_has_template(row) -> bool:
-    if row.locator(".label.label-success:has-text('template')").count() > 0:
-        return True
-    if row.locator(":has-text('Đã có template')").count() > 0:
-        return True
-    if row.locator("button[ng-click*='openModalTemplateJob']").count() > 0:
-        return True
-    if row.locator("button:has-text('template')").count() > 0 or row.locator("button:has-text('Template')").count() > 0:
-        return True
-    return False
-
-
 class PlaywrightPrintervalAdapter:
     def __init__(
         self,
@@ -504,7 +492,6 @@ class PlaywrightPrintervalAdapter:
             product_name = headings.first.inner_text().strip() if headings.count() > 0 else ""
 
             raw_img_url = _extract_row_thumbnail_url(row)
-            has_template = _extract_row_has_template(row)
 
             local_path = (
                 download_and_save_image(order_id, raw_img_url, platform_id=platform_id)
@@ -519,7 +506,6 @@ class PlaywrightPrintervalAdapter:
                     product_name=product_name,
                     designer=designer_value,
                     status=status_value,
-                    has_template=has_template,
                     thumbnail_url=final_thumbnail,
                 )
             )
@@ -540,11 +526,44 @@ class PlaywrightPrintervalAdapter:
         headings = row.locator("h5")
         product_name = headings.first.inner_text().strip() if headings.count() > 0 else None
 
-        sku_item = row.locator(".product-sku-item").first
+        sku_items = row.locator(".product-sku-item")
+        sku_item = sku_items.first
         thumbnail_url = None
         sku = None
         product_category = None
         product_variants: list[ProductVariant] = []
+        product_skus: list[ProductSku] = []
+        for index in range(sku_items.count()):
+            item = sku_items.nth(index)
+            item_sku = None
+            item_category = None
+            item_variants: list[ProductVariant] = []
+            sku_span = item.locator("[ng-bind='productSku.product_sku']")
+            if sku_span.count() > 0:
+                item_sku = sku_span.first.inner_text().strip() or None
+            for line in item.inner_text().splitlines():
+                line = line.strip()
+                if line.startswith("Category:"):
+                    item_category = line[len("Category:") :].strip() or None
+                    break
+            for vdiv in item.locator("div[ng-repeat^='variant in productSku.variants']").all():
+                line = vdiv.inner_text().strip()
+                if " : " in line:
+                    name, _, value = line.partition(" : ")
+                    if name.strip() and value.strip():
+                        item_variants.append(ProductVariant(name=name.strip(), value=value.strip()))
+            image_link = item.locator("a:has-text('Image')").first
+            item_image_url = (
+                image_link.get_attribute("ng-href") or image_link.get_attribute("href")
+                if image_link.count() > 0
+                else None
+            )
+            product_skus.append(ProductSku(
+                sku=item_sku,
+                image_url=item_image_url.strip() if item_image_url else None,
+                category=item_category,
+                variants=item_variants,
+            ))
         if sku_item.count() > 0:
             sku_span = sku_item.locator("[ng-bind='productSku.product_sku']")
             if sku_span.count() > 0:
@@ -564,8 +583,6 @@ class PlaywrightPrintervalAdapter:
         if raw_url:
             local_path = download_and_save_image(external_order_id, raw_url, platform_id=platform_id)
             thumbnail_url = local_path or raw_url
-
-        has_template = _extract_row_has_template(row)
 
         multiple_design_checkbox = row.locator("#multiple-design")
         multiple_design = (
@@ -648,10 +665,6 @@ class PlaywrightPrintervalAdapter:
                     if not any(f["url"] == href for f in source_files):
                         source_files.append({"name": name, "url": href.strip()})
 
-        template_jobs = None
-        if has_template:
-            template_jobs = self._extract_template_jobs_from_modal(row)
-
         sales_url = _extract_row_sales_url(row)
         product_image_urls = None
         if sales_url:
@@ -677,8 +690,7 @@ class PlaywrightPrintervalAdapter:
             sku=sku,
             product_category=product_category,
             product_variants=product_variants,
-            has_template=has_template,
-            template_jobs=template_jobs,
+            product_skus=product_skus,
             multiple_design=multiple_design,
             double_sided=double_sided,
             priority_label=priority_label,
@@ -690,60 +702,6 @@ class PlaywrightPrintervalAdapter:
             source_download_all_url=source_download_all_url,
             product_image_urls=product_image_urls,
         )
-
-    def _extract_template_jobs_from_modal(self, row) -> list[dict] | None:
-        btn = row.locator("button[ng-click*='openModalTemplateJob'], button:has-text('Xem template'), button:has-text('template'), button:has-text('Template')").first
-        if btn.count() == 0:
-            return None
-        try:
-            btn.click()
-            page = self.page
-            modal = page.locator(".modal-dialog, .modal-content").first
-            modal.wait_for(state="visible", timeout=3000)
-
-            provider_name = None
-            note = None
-            psd_files: list[dict] = []
-
-            modal_text = modal.inner_text()
-            for line in modal_text.splitlines():
-                line = line.strip()
-                if "Nhà in:" in line or "Nhà in :" in line:
-                    provider_name = line.partition(":")[2].strip()
-                elif "Note:" in line or "Note :" in line:
-                    if not note:
-                        note = line.partition(":")[2].strip()
-
-            for link in modal.locator("a[href]").all():
-                href = link.get_attribute("href")
-                if href and ("drive.google.com" in href or "dropbox" in href or "http" in href):
-                    psd_files.append({"url": href.strip()})
-
-            for img in modal.locator("img").all():
-                src = img.get_attribute("src") or img.get_attribute("ng-src")
-                if src and not any(k in src.lower() for k in ["flag", "icon", "avatar"]):
-                    if psd_files:
-                        psd_files[0]["image_url"] = src.strip()
-                    else:
-                        psd_files.append({"image_url": src.strip()})
-                    break
-
-            close_btn = modal.locator("button:has-text('Đóng'), button:has-text('Close'), .close").first
-            if close_btn.count() > 0:
-                close_btn.click()
-            else:
-                page.keyboard.press("Escape")
-
-            if provider_name or note or psd_files:
-                return [{
-                    "provider_name": provider_name or "C-EZ",
-                    "note": note or "",
-                    "psd_file": psd_files if psd_files else []
-                }]
-        except Exception:
-            pass
-        return None
-
 
     def _search_and_get_row_cached(self, external_order_id: str):
         if self._last_row_cache is not None and self._last_row_cache[0] == external_order_id:
@@ -804,8 +762,8 @@ class PlaywrightPrintervalAdapter:
             # (see _extract_custom_config) — a plain product order legitimately has
             # none. That's not a validation failure: treating it as one permanently
             # dead-lettered import_claimed_orders before it ever reached
-            # get_order_detail, which is what actually fills in thumbnail/template/sku
-            # for these orders — the real cause of orders showing no image/template on
+            # get_order_detail, which is what actually fills in thumbnail/SKU data
+            # for these orders — the real cause of orders showing no image/SKU data on
             # the dashboard despite having them on Printerval.
             return AssetResult(success=True, external_order_id=external_order_id)
         src = link.get_attribute("href")

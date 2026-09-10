@@ -123,6 +123,8 @@ def discover_waiting_orders_with_summaries(
                 existing_order.sku = summary.sku
             if not existing_order.product_category and summary.product_category:
                 existing_order.product_category = summary.product_category
+            if summary.product_skus:
+                existing_order.product_skus = summary.product_skus
             if summary.sku_image_url:
                 existing_order.sku_image_url = summary.sku_image_url
             if summary.external_order_url:
@@ -132,11 +134,6 @@ def discover_waiting_orders_with_summaries(
             if summary.source_download_all_url:
                 existing_order.source_download_all_url = summary.source_download_all_url
             apply_crawled_product_gallery(existing_order, summary.product_image_urls)
-            if summary.template_jobs:
-                existing_order.template_jobs = summary.template_jobs
-                existing_order.has_template = True
-            elif summary.has_template:
-                existing_order.has_template = True
 
     new_ids = [oid for oid in discovered_ids if oid not in existing_map and f"DJ{oid}" not in existing_map and (oid[2:] if oid.startswith("DJ") else oid) not in existing_map]
     new_summaries = [o for o in result.orders if o.external_order_id in new_ids]
@@ -214,8 +211,7 @@ def scan_orders_fast(
                     thumbnail_url=summary.thumbnail_url,
                     sku=summary.sku,
                     product_category=summary.product_category,
-                    template_jobs=summary.template_jobs,
-                    has_template=bool(summary.template_jobs),
+                    product_skus=summary.product_skus,
                     printerval_designer=summary.designer,
                     printerval_designer_synced_at=datetime.now(UTC) if summary.designer else None,
                     printerval_status=summary.status.lower(),
@@ -249,9 +245,8 @@ def scan_orders_fast(
                     order.product_category = detail.product_category
                 if detail.product_variants:
                     order.product_variants = [variant.model_dump() for variant in detail.product_variants]
-                order.has_template = detail.has_template
-                if detail.template_jobs:
-                    order.template_jobs = detail.template_jobs
+                if detail.product_skus:
+                    order.product_skus = [product_sku.model_dump() for product_sku in detail.product_skus]
                 order.multiple_design = detail.multiple_design
                 order.double_sided = detail.double_sided
                 order.created_at_ext = detail.created_at
@@ -321,13 +316,12 @@ def _claim_one_order(
             thumbnail_url=summary.thumbnail_url if summary else None,
             sku=summary.sku if summary else None,
             product_category=summary.product_category if summary else None,
+            product_skus=summary.product_skus if summary else None,
             sku_image_url=summary.sku_image_url if summary else None,
             external_order_url=summary.external_order_url if summary else None,
             source_files=summary.source_files if summary else None,
             source_download_all_url=summary.source_download_all_url if summary else None,
             product_image_urls=summary.product_image_urls if summary else None,
-            template_jobs=summary.template_jobs if summary else None,
-            has_template=summary.has_template if summary else False,
         )
         session.add(order)
         session.flush()
@@ -460,7 +454,7 @@ def retry_failed_claims(
 def _apply_order_detail_result(order: Order, detail_result) -> None:
     """Copy a successful get_order_detail result onto an Order — shared by
     import_claimed_orders (first import) and refresh_order_detail (re-fetch for an
-    order already past that point, e.g. the mother site added a template later).
+    order already past that point, e.g. product SKU data changed later).
     Only overwrite what discover-time already captured (from the list API response)
     when the detail scrape actually found a value — Playwright's DOM extraction can
     legitimately come back empty for a field (selector didn't match this row's
@@ -482,9 +476,8 @@ def _apply_order_detail_result(order: Order, detail_result) -> None:
         order.product_category = detail_result.product_category
     if detail_result.product_variants:
         order.product_variants = [v.model_dump() for v in detail_result.product_variants]
-    order.has_template = detail_result.has_template
-    if detail_result.template_jobs:
-        order.template_jobs = detail_result.template_jobs
+    if detail_result.product_skus:
+        order.product_skus = [product_sku.model_dump() for product_sku in detail_result.product_skus]
     order.multiple_design = detail_result.multiple_design
     order.double_sided = detail_result.double_sided
     order.priority_label = detail_result.priority_label
@@ -509,12 +502,12 @@ def _apply_order_detail_result(order: Order, detail_result) -> None:
 
 
 def refresh_order_detail(session: Session, adapter: PrintervalAdapter, order: Order) -> dict:
-    """Re-fetch and overwrite an order's full detail (template, source files, images,
+    """Re-fetch and overwrite an order's full detail (SKU data, source files, images,
     deadline, product info...) from Printerval, regardless of its current internal
     state. Unlike import_claimed_orders (first import, gated on state, transitions
     OPEN -> OPEN via apply_transition), this never touches Order.state — it's a pure
     metadata refresh for an order the mother site changed *after* the one-time import
-    (e.g. a template added later), triggered on demand from the "Trạng Thái Đơn" tab.
+    (e.g. a SKU changed later), triggered on demand from the "Trạng Thái Đơn" tab.
 
     Not idempotency-key-gated: like retry_failed_claims, a manual "refresh now" click
     is a genuinely new request each time, and re-running this is always safe — it only
@@ -686,7 +679,7 @@ _CSV_FIELDNAMES = [
     "sku",
     "product_category",
     "thumbnail_url",
-    "has_template",
+    "product_sku_count",
     "created_at",
 ]
 
@@ -724,7 +717,7 @@ def export_platform_orders_csv(session: Session, platform_id: uuid.UUID | None) 
                     "sku": order.sku or "",
                     "product_category": order.product_category or "",
                     "thumbnail_url": order.thumbnail_url or "",
-                    "has_template": order.has_template,
+                    "product_sku_count": len(order.product_skus or []),
                     "created_at": order.created_at.isoformat() if order.created_at else "",
                 }
             )

@@ -42,7 +42,6 @@ PERSONALIZED_ROW = {
         }
     ),
     "attributes": {"outsource_note": "https://drive.google.com/drive/folders/abc"},
-    "templateJobs": [{"provider_name": "C-EZ", "note": "", "psd_file": []}],
 }
 
 PLAIN_ROW = {
@@ -57,7 +56,6 @@ PLAIN_ROW = {
     "product": {"name": "Plain Mug", "sku": "P0001", "image_url": "https://assets.printerval.com/mug.jpg", "category_name": "Mugs"},
     "meta_data": "{}",
     "attributes": {},
-    "templateJobs": None,
 }
 
 
@@ -227,7 +225,6 @@ def test_parse_order_detail_from_row_personalized(monkeypatch):
     assert result.created_at.isoformat() == "2026-09-07T05:31:05"
     assert result.order_created_at.isoformat() == "2026-09-07T05:16:07"
     assert result.deadline_at.isoformat() == "2026-09-08T05:16:07"
-    assert result.has_template is True
     assert result.design_tool_url == "https://design-tool.printerval.com/?tab=design-job&code=Printerval-DJ3968034"
     assert [v.model_dump() for v in result.product_variants] == [
         {"name": "Size", "value": "L"},
@@ -249,5 +246,46 @@ def test_parse_order_detail_from_row_plain_product_has_no_design_tool_url_or_cus
     assert result.success is True
     assert result.design_tool_url is None
     assert result.custom_config is None
-    assert result.has_template is False
     assert result.product_variants == []
+
+
+def test_parse_order_detail_preserves_each_sku_and_its_variants(monkeypatch):
+    monkeypatch.setattr("app.adapters.printerval.row_mapper.download_and_save_image", lambda *a, **k: None)
+    row = {
+        "id": 3971873,
+        "product": {"name": "Raglan", "category_name": "Football Raglan Shirts"},
+        "meta_data": json.dumps({"product_skus": {
+            "xl": {"product_sku": "P27172826-DE-UNI-XL-R-t1710IFp", "image_url": "https://assets.example/xl.jpg", "variants": "Size: XL, Type: Unisex, Style: Rundhalsausschnitt Shirt"},
+            "2xl": {"product_sku": "P27172826-DE-UNI-2XL-eQF170pk", "image_url": "https://assets.example/2xl.jpg", "variants": "Size: 2XL, Type: Unisex, Style: Rundhalsausschnitt Shirt"},
+        }}),
+    }
+
+    result = parse_order_detail_from_row(row, "DJ3971873")
+
+    assert [item.sku for item in result.product_skus] == [
+        "P27172826-DE-UNI-XL-R-t1710IFp", "P27172826-DE-UNI-2XL-eQF170pk"
+    ]
+    assert [[variant.model_dump() for variant in item.variants] for item in result.product_skus] == [
+        [{"name": "Size", "value": "XL"}, {"name": "Type", "value": "Unisex"}, {"name": "Style", "value": "Rundhalsausschnitt Shirt"}],
+        [{"name": "Size", "value": "2XL"}, {"name": "Type", "value": "Unisex"}, {"name": "Style", "value": "Rundhalsausschnitt Shirt"}],
+    ]
+
+
+def test_extract_source_files_combines_sources_from_each_sku_configuration():
+    row = {
+        "meta_data": json.dumps({"product_skus": {
+            "xl": {"configurations": json.dumps({"layers": json.dumps([
+                {"value": "https://assets.example/xl-1.png"},
+            ])})},
+            "2xl": {"configurations": json.dumps({"layers": json.dumps([
+                {"value": "https://assets.example/2xl-1.png"},
+                {"value": "https://assets.example/2xl-2.png"},
+            ])})},
+        }}),
+    }
+
+    assert extract_source_files(row) == [
+        {"name": "xl-1.png", "url": "https://assets.example/xl-1.png"},
+        {"name": "2xl-1.png", "url": "https://assets.example/2xl-1.png"},
+        {"name": "2xl-2.png", "url": "https://assets.example/2xl-2.png"},
+    ]

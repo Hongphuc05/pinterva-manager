@@ -322,7 +322,12 @@ def test_claim_batch_idempotency_key_stays_within_column_limit_for_large_batches
 def test_import_claimed_orders_persists_order_detail_fields(db_session):
     from datetime import datetime
 
-    from app.adapters.printerval.models import CustomConfig, CustomConfigEntry, ProductVariant
+    from app.adapters.printerval.models import (
+        CustomConfig,
+        CustomConfigEntry,
+        ProductSku,
+        ProductVariant,
+    )
 
     adapter = FakePrintervalAdapter()
     _seed_waiting_order(
@@ -332,7 +337,12 @@ def test_import_claimed_orders_persists_order_detail_fields(db_session):
         sku="P123-XL",
         product_category="Baseball Jerseys",
         product_variants=[ProductVariant(name="Size", value="XL")],
-        has_template=True,
+        product_skus=[ProductSku(
+            sku="P123-XL",
+            image_url="https://assets.printerval.com/sku-xl.webp",
+            category="Baseball Jerseys",
+            variants=[ProductVariant(name="Size", value="XL")],
+        ).model_dump()],
         multiple_design=True,
         double_sided=False,
         priority_label="label label-default label-danger",
@@ -358,7 +368,13 @@ def test_import_claimed_orders_persists_order_detail_fields(db_session):
     assert order.sku == "P123-XL"
     assert order.product_category == "Baseball Jerseys"
     assert order.product_variants == [{"name": "Size", "value": "XL"}]
-    assert order.has_template is True
+    assert order.product_skus == [{
+        "sku": "P123-XL",
+        "image_url": "https://assets.printerval.com/sku-xl.webp",
+        "category": "Baseball Jerseys",
+        "variants": [{"name": "Size", "value": "XL"}],
+        "custom_config": None,
+    }]
     assert order.multiple_design is True
     assert order.double_sided is False
     assert order.priority_label == "label label-default label-danger"
@@ -430,32 +446,29 @@ def test_export_platform_orders_csv_is_a_fresh_deduplicated_snapshot(db_session,
     assert not other_platform_dir.exists()
 
 
-def test_refresh_order_detail_picks_up_a_template_added_after_the_original_import(db_session):
-    """The operator's exact scenario: an order was already claimed+imported with no
-    template; the mother site adds one later. import_claimed_orders never runs again
-    for this order (gated on state) — refresh_order_detail is the only thing that
-    picks up the change, on demand, regardless of the order's current state."""
+def test_refresh_order_detail_picks_up_multiple_skus_added_after_the_original_import(db_session):
+    """A refresh must replace the one-SKU snapshot when Printerval later exposes
+    multiple sellable variants for the same design job."""
     adapter = FakePrintervalAdapter()
-    _seed_waiting_order(adapter, "DJ0000001", has_template=False, template_jobs=None)
+    _seed_waiting_order(adapter, "DJ0000001", product_skus=[])
     order = Order(
         external_order_id="DJ0000001",
         state=OrderState.IN_PROGRESS.value,  # already past the one-time import step
-        has_template=False,
-        template_jobs=None,
+        product_skus=None,
     )
     db_session.add(order)
     db_session.commit()
 
-    # Mother site adds a template later.
-    adapter._orders["DJ0000001"].has_template = True
-    adapter._orders["DJ0000001"].template_jobs = [{"provider_name": "C-EZ"}]
+    adapter._orders["DJ0000001"].product_skus = [
+        {"sku": "P123-XL", "category": "Shirts", "variants": [{"name": "Size", "value": "XL"}]},
+        {"sku": "P123-2XL", "category": "Shirts", "variants": [{"name": "Size", "value": "2XL"}]},
+    ]
 
     result = refresh_order_detail(db_session, adapter, order)
 
     assert result == {"success": True}
     assert order.state == OrderState.IN_PROGRESS.value  # never touched
-    assert order.has_template is True
-    assert order.template_jobs == [{"provider_name": "C-EZ"}]
+    assert [item["sku"] for item in order.product_skus] == ["P123-XL", "P123-2XL"]
 
 
 def test_refresh_order_detail_dead_letters_on_download_failure_without_touching_the_order(db_session):

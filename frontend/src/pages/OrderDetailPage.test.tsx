@@ -24,7 +24,7 @@ describe('OrderDetailPage', () => {
                 sku: 'SKU1',
                 product_category: null,
                 product_variants: null,
-                has_template: false,
+                product_skus: [],
                 multiple_design: false,
                 double_sided: false,
                 deadline_at_ext: null,
@@ -56,6 +56,6 @@ describe('OrderDetailPage', () => {
       </AuthProvider>
     )
     await waitFor(() => expect(screen.getByText(/Test Mug/)).toBeInTheDocument())
-    expect(screen.getByText(/SKU1/)).toBeInTheDocument()
+    expect(screen.getAllByText(/SKU1/).length).toBeGreaterThan(0)
   })
 })

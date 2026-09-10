@@ -14,7 +14,6 @@ from pathlib import Path
 from app.adapters.errors import ErrorClass
 from app.adapters.printerval.api_client import (
     PrintervalApiClient,
-    PrintervalApiConfigurationError,
     PrintervalApiError,
 )
 from app.adapters.printerval.image_helper import (
@@ -31,6 +30,7 @@ from app.adapters.printerval.models import (
     WriteResult,
 )
 from app.adapters.printerval.row_mapper import (
+    extract_product_skus,
     extract_source_asset_url,
     parse_external_order_id,
     parse_order_detail_from_row,
@@ -146,10 +146,6 @@ class PrintervalApiAdapter:
                 )
                 final_thumbnail = local_path or raw_image_url
 
-                template_jobs = row.get("templateJobs")
-                if not isinstance(template_jobs, list):
-                    template_jobs = None
-
                 designer_email = (
                     str(row.get("attributes", {}).get("designer_email") or "").strip().lower()
                     if isinstance(row.get("attributes"), dict)
@@ -167,9 +163,9 @@ class PrintervalApiAdapter:
                         product_name=product_name,
                         thumbnail_url=final_thumbnail,
                         status=status,
-                        template_jobs=template_jobs,
                         sku=sku,
                         product_category=category,
+                        product_skus=[product_sku.model_dump() for product_sku in extract_product_skus(row)],
                         designer=designer_name,
                     )
                 )

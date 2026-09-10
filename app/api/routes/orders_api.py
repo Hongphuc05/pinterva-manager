@@ -64,7 +64,7 @@ class OrderSummaryOut(BaseModel):
     sku: str | None = None
     thumbnail_url: str | None = None
     assigned_designer_name: str | None = None
-    template_jobs: list[dict] | None = None
+    product_skus: list[dict] | None = None
     deadline_at_ext: datetime | None = None
     created_at: datetime
     # Read-only mirror of Printerval's own site status — never written back to the
@@ -188,7 +188,6 @@ class OrderDetailOut(BaseModel):
     sku: str | None
     product_category: str | None
     product_variants: list[dict] | None
-    has_template: bool
     multiple_design: bool
     double_sided: bool
     priority_label: str | None
@@ -198,7 +197,7 @@ class OrderDetailOut(BaseModel):
     fix_approved_by_admin: bool = False
     order_note: str
     custom_config: dict | None
-    template_jobs: list[dict] | None = None
+    product_skus: list[dict] | None = None
     assigned_designer_name: str | None = None
     assignment_id: uuid.UUID | None = None
     sub_status: str | None = None
@@ -437,11 +436,10 @@ def api_refresh_order_detail(
     db: Session = Depends(get_db),
 ):
     """"Cập nhật toàn bộ" for one order from the "Trạng Thái Đơn" tab — re-fetches
-    everything the crawl's one-time import would have captured (template, source
+    everything the crawl's one-time import would have captured (SKU details, source
     files, images, deadline, product info...), for an order that's already past
     that point. import_claimed_orders only ever runs once per order (gated on state);
-    this exists because the mother site can add/change a template *after* that (the
-    exact scenario the operator flagged), and nothing else ever picks that up.
+    this exists because product and source details can change after the first import.
     Synchronous, same shape as /orders/refresh — a single order's detail fetch is
     normally sub-second on the fast HTTP path."""
     order = get_order_detail_for_user(db, user, order_id)

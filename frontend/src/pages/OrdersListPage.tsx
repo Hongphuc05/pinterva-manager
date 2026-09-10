@@ -5,7 +5,6 @@ import { useAuth } from '../auth/AuthContext'
 import { usePlatform } from '../auth/PlatformContext'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { ImageModal } from '../components/ImageModal'
-import { TemplateModal, type TemplateJob } from '../components/TemplateModal'
 import { StatusDropdown } from '../components/StatusDropdown'
 import { Pagination, paginate } from '../components/Pagination'
 import { STATE_MAP } from '../utils/statusTranslation'
@@ -19,7 +18,6 @@ import {
   Layers,
   ChevronRight,
   User,
-  FileText,
   UserPlus,
   X,
   Loader2,
@@ -37,7 +35,7 @@ type OrderSummary = {
   sku: string | null
   thumbnail_url: string | null
   assigned_designer_name: string | null
-  template_jobs: TemplateJob[] | null
+  product_skus: { sku?: string | null }[] | null
   deadline_at_ext: string | null
   sku_image_url: string | null
   external_order_url: string | null
@@ -94,7 +92,6 @@ export function OrdersListPage() {
   const [statusOptions, setStatusOptions] = useState<string[]>([])
   const [statusFilter, setStatusFilter] = useState('')
   const [designerFilter, setDesignerFilter] = useState('')
-  const [hasTemplateFilter, setHasTemplateFilter] = useState('')
   const [batchFilter, setBatchFilter] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [flash, setFlash] = useState<string | null>(null)
@@ -108,7 +105,6 @@ export function OrdersListPage() {
 
   // Modals state
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
-  const [activeTemplateJobs, setActiveTemplateJobs] = useState<{ jobs: TemplateJob[]; orderId: string } | null>(null)
 
   // Assignment Modal state
   const [assigningOrder, setAssigningOrder] = useState<OrderSummary | null>(null)
@@ -373,7 +369,7 @@ export function OrdersListPage() {
       : orders
     : orders
 
-  // Filter client-side search & template filters
+  // Filter client-side order list.
   const filteredOrders = baseOrders.filter((o) => {
     if (searchQuery) {
       const q = searchQuery.toLowerCase()
@@ -396,19 +392,13 @@ export function OrdersListPage() {
       }
     }
 
-    if (hasTemplateFilter) {
-      const hasT = o.template_jobs && o.template_jobs.length > 0
-      if (hasTemplateFilter === 'yes' && !hasT) return false
-      if (hasTemplateFilter === 'no' && hasT) return false
-    }
-
     return true
   })
 
   // Reset page when filters change
   useEffect(() => {
     setCurrentPage(1)
-  }, [statusFilter, designerFilter, hasTemplateFilter, batchFilter, searchQuery, activeDesignerTab])
+  }, [statusFilter, designerFilter, batchFilter, searchQuery, activeDesignerTab])
 
   const paginatedOrders = paginate(filteredOrders, currentPage)
 
@@ -445,14 +435,6 @@ export function OrdersListPage() {
         isOpen={!!selectedImage}
         onClose={() => setSelectedImage(null)}
         imageUrl={selectedImage}
-      />
-
-      {/* Template Details Modal */}
-      <TemplateModal
-        isOpen={!!activeTemplateJobs}
-        onClose={() => setActiveTemplateJobs(null)}
-        templateJobs={activeTemplateJobs?.jobs}
-        orderId={activeTemplateJobs?.orderId}
       />
 
       {/* Flash / Error Banner */}
@@ -658,17 +640,6 @@ export function OrdersListPage() {
               </select>
             )}
 
-            {/* Filter by Template */}
-            <select
-              className="text-xs border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 font-medium focus:outline-none focus:border-[#0052CC]"
-              value={hasTemplateFilter}
-              onChange={(e) => setHasTemplateFilter(e.target.value)}
-            >
-              <option value="">Tất cả Template</option>
-              <option value="yes">Có Template</option>
-              <option value="no">Chưa có Template</option>
-            </select>
-
             {user?.role === 'admin' && (
               <input
                 className="text-xs border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 font-medium focus:outline-none focus:border-[#0052CC] w-28"
@@ -678,12 +649,11 @@ export function OrdersListPage() {
               />
             )}
 
-            {(statusFilter || designerFilter || hasTemplateFilter || batchFilter || searchQuery) && (
+            {(statusFilter || designerFilter || batchFilter || searchQuery) && (
               <button
                 onClick={() => {
                   setStatusFilter('')
                   setDesignerFilter('')
-                  setHasTemplateFilter('')
                   setBatchFilter('')
                   setSearchQuery('')
                 }}
@@ -795,7 +765,6 @@ export function OrdersListPage() {
                 <th className="py-3 px-4">{isAdmin ? 'Mã Đơn Hàng' : 'Tên Đơn Hàng'}</th>
                 <th className="py-3 px-4">Trạng Thái</th>
                 <th className="py-3 px-4">DES Đảm Nhận</th>
-                <th className="py-3 px-4">Template</th>
                 <th className="py-3 px-4">Deadline Printerval</th>
                 <th className="py-3 px-4">Ngày Tạo</th>
                 <th className="py-3 px-4 text-right">Thao Tác</th>
@@ -804,7 +773,7 @@ export function OrdersListPage() {
             <tbody className="divide-y divide-slate-100 text-xs">
               {paginatedOrders.length === 0 ? (
                 <tr>
-                  <td colSpan={isAdmin ? 9 : 8} className="py-12 text-center text-slate-400">
+                  <td colSpan={isAdmin ? 8 : 7} className="py-12 text-center text-slate-400">
                     {ordersLoading ? (
                       <>
                         <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin opacity-50" />
@@ -916,6 +885,11 @@ export function OrdersListPage() {
                               {o.source_files.length} file source
                             </span>
                           )}
+                          {o.product_skus && o.product_skus.length > 1 && (
+                            <span className="text-[10px] font-bold text-slate-600 px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200">
+                              {o.product_skus.length} mẫu hàng
+                            </span>
+                          )}
                         </div>
 
                         {/* Note Outsource Preview for Fix orders */}
@@ -981,21 +955,6 @@ export function OrdersListPage() {
                               </span>
                             )}
                           </p>
-                        )}
-                      </td>
-
-                      {/* Template Button */}
-                      <td className="py-2.5 px-4">
-                        {o.template_jobs && o.template_jobs.length > 0 ? (
-                          <button
-                            onClick={() => setActiveTemplateJobs({ jobs: o.template_jobs!, orderId: o.external_order_id })}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-white bg-[#0052CC] hover:bg-[#0041A3] rounded-lg transition-colors shadow-2xs cursor-pointer"
-                          >
-                            <FileText className="h-3 w-3" />
-                            <span>Xem template của job</span>
-                          </button>
-                        ) : (
-                          <span className="text-slate-300">-</span>
                         )}
                       </td>
 

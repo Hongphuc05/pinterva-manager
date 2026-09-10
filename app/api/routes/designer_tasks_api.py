@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import User
@@ -51,8 +51,7 @@ class TaskOrderOut(BaseModel):
     sku: str | None
     product_category: str | None = None
     product_variants: list[dict] | None = None
-    has_template: bool = False
-    template_jobs: list[dict] | None = None
+    product_skus: list[dict] | None = None
     deadline_at_ext: str | None
     note_outsource: str | None = None
     order_note: str

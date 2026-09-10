@@ -69,7 +69,7 @@ def sync_selected_order_statuses(
 ) -> dict[str, int]:
     """Fast, manually requested status mirror for one visible UI tab.
 
-    This deliberately does *not* re-crawl source/template/detail.  Each chosen order
+    This deliberately does *not* re-crawl source/SKU/detail. Each chosen order
     is looked up by its own DJ code, first using its last observed Printerval state.
     Reads run with a small, configurable concurrency cap; ORM writes remain on this
     caller thread and are committed once, avoiding a SQLAlchemy session race.
@@ -200,7 +200,7 @@ def sync_platform_order_statuses(
 ) -> dict:
     """Look up each Order we already track for this platform (one find_order call
     each, hinted by its last-known status) and update Order.printerval_status,
-    printerval_designer, and full order details (source, template, notes, etc.).
+    printerval_designer, and full order details (source, SKU data, notes, etc.).
 
     Deliberately scoped to OUR orders, not a bulk page-through of Printerval's full
     history. Updates are committed per-order with StaleDataError handling so concurrent
@@ -260,7 +260,7 @@ def sync_platform_order_statuses(
                     order.printerval_designer_synced_at = datetime.now(UTC)
                 order.printerval_status_synced_at = datetime.now(UTC)
 
-                # Re-apply full detail metadata (source files, template jobs, custom config, notes, deadlines)
+                # Re-apply full detail metadata (source files, SKU data, custom config, notes, deadlines).
                 detail_result = parse_order_detail_from_row(
                     row, order.external_order_id, platform_id=str(platform.id), download_images=False
                 )

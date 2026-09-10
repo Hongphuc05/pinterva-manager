@@ -4,9 +4,9 @@ import { apiFetch, ApiError, resolveAssetUrl } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { ImageModal } from '../components/ImageModal'
-import { TemplateModal, type TemplateJob } from '../components/TemplateModal'
 import { SourceFilesCard, type SourceFile } from '../components/SourceFilesCard'
 import { ProductGalleryCard } from '../components/ProductGalleryCard'
+import { ProductSkusCard, type ProductSku } from '../components/ProductSkusCard'
 import { CustomConfigurationSection } from '../components/CustomConfigurationSection'
 import { StatusDropdown } from '../components/StatusDropdown'
 import { getStatusInfo } from '../utils/statusTranslation'
@@ -49,7 +49,6 @@ type OrderDetail = {
   sku: string | null
   product_category: string | null
   product_variants: { name: string; value: string }[] | null
-  has_template: boolean
   multiple_design: boolean
   double_sided: boolean
   deadline_at_ext: string | null
@@ -61,7 +60,7 @@ type OrderDetail = {
     original: { key: string; value: string }[]
     translated_vn?: { key: string; value: string }[]
   } | null
-  template_jobs: TemplateJob[] | null
+  product_skus: ProductSku[] | null
   assigned_designer_name: string | null
   assignment_id?: string | null
   sub_status?: string | null
@@ -103,7 +102,6 @@ export function OrderDetailPage() {
   // Modal states
   const [showImageModal, setShowImageModal] = useState(false)
   const [selectedImageIndex, setSelectedImageIndex] = useState(0)
-  const [showTemplateModal, setShowTemplateModal] = useState(false)
   const [showSubmitModal, setShowSubmitModal] = useState(false)
 
   // Task execution states
@@ -267,14 +265,6 @@ export function OrderDetailPage() {
         }
         initialIndex={selectedImageIndex}
         altText={isAdmin ? order.external_order_id : (order.product_name || 'Ảnh sản phẩm')}
-      />
-
-      {/* Template Modal */}
-      <TemplateModal
-        isOpen={showTemplateModal}
-        onClose={() => setShowTemplateModal(false)}
-        templateJobs={order.template_jobs}
-        orderId={order.external_order_id}
       />
 
       {/* Submit & Review Confirmation Modal */}
@@ -556,16 +546,6 @@ export function OrderDetailPage() {
               </a>
             )}
 
-            {order.template_jobs && order.template_jobs.length > 0 && (
-              <button
-                onClick={() => setShowTemplateModal(true)}
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-[#0052CC] hover:bg-[#0041A3] rounded-xl transition-colors shadow-2xs cursor-pointer"
-              >
-                <FileText className="h-3.5 w-3.5" />
-                <span>Xem template của job</span>
-              </button>
-            )}
-
             {order.design_tool_url && (
               <a
                 href={order.design_tool_url}
@@ -814,20 +794,8 @@ export function OrderDetailPage() {
           </div>
 
           <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-            <span className="text-slate-400 font-semibold block uppercase text-[10px]">Mẫu Template</span>
-            <div className="flex items-center justify-between">
-              <p className="font-semibold text-slate-700">
-                {order.has_template || (order.template_jobs && order.template_jobs.length > 0) ? 'Đã có sẵn mẫu' : 'Chưa có mẫu'}
-              </p>
-              {order.template_jobs && order.template_jobs.length > 0 && (
-                <button
-                  onClick={() => setShowTemplateModal(true)}
-                  className="text-[11px] font-bold text-[#0052CC] hover:underline cursor-pointer"
-                >
-                  Xem chi tiết mẫu
-                </button>
-              )}
-            </div>
+            <span className="text-slate-400 font-semibold block uppercase text-[10px]">Mẫu hàng</span>
+            <p className="font-semibold text-slate-700">{order.product_skus?.length || (order.sku ? 1 : 0)} mẫu hàng</p>
           </div>
 
           <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
@@ -865,6 +833,13 @@ export function OrderDetailPage() {
         )}
 
         {/* Product Gallery (All Images) */}
+        <ProductSkusCard
+          productSkus={order.product_skus}
+          fallbackSku={order.sku}
+          fallbackCategory={order.product_category}
+          fallbackVariants={order.product_variants}
+        />
+
         {order.product_image_urls && order.product_image_urls.length > 0 && (
           <ProductGalleryCard
             images={order.product_image_urls}

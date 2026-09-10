@@ -106,13 +106,14 @@ class Order(Base):
     sku: Mapped[str | None] = mapped_column(String(128), nullable=True)
     product_category: Mapped[str | None] = mapped_column(String(128), nullable=True)
     product_variants: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # Normalized list of every sellable SKU included in this design job.  One order
+    # may contain multiple sizes/variants; each item keeps its own image,
+    # category, variants and custom configuration.
+    product_skus: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     # Loại design job (2D/3D/ART/...) — chưa xác nhận được vị trí hiển thị per-order
     # trong DOM (chỉ là tiêu chí filter, không phải field hiển thị). Cột giữ chỗ, không
     # ai ghi vào cột này ở V1 — xem 2026-09-07-order-detail-mirror-design.md §3.
     job_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    has_template: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default=text("false")
-    )
     multiple_design: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
@@ -144,7 +145,6 @@ class Order(Base):
         Text, nullable=False, default="", server_default=text("''")
     )
     custom_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    template_jobs: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     design_tool_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     sku_image_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     external_order_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
