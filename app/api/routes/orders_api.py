@@ -1158,7 +1158,7 @@ def api_update_printerval_credentials(
         "platform_id": str(platform.id),
         "platform_name": platform.name,
         "account_username": platform.account_username,
-        "message": f"Đã đăng nhập tài khoản Printerval thành công: {username_clean}",
+        "message": f"Đã đăng nhập tài khoản Printerval thành công: {platform.account_username}",
     }
 
 

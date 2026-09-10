@@ -193,6 +193,57 @@ def test_successful_cookie_update_clears_stale_platform_sync_error(client, db_se
     assert db_session.get(PlatformSyncState, platform.id).last_error is None
 
 
+def test_platform_credentials_patch_is_scoped_and_does_not_return_secret(client, db_session, monkeypatch):
+    """The replacement credential endpoint must update only its URL platform.
+
+    This protects a multi-account operator from accidentally replacing account A's
+    cookie while adding account B through the settings modal.
+    """
+    from app.adapters.printerval.api_client import PrintervalApiClient
+
+    first = Platform(name="First", account_username="first@printerval.com", session_cookie="first-cookie")
+    second = Platform(name="Second", account_username="second@printerval.com", session_cookie="second-cookie")
+    db_session.add_all([first, second])
+    db_session.commit()
+    monkeypatch.setattr(PrintervalApiClient, "login", lambda self: None)
+    monkeypatch.setattr(PrintervalApiClient, "discover_waiting_page", lambda self, **k: None)
+    monkeypatch.setattr(PrintervalApiClient, "close", lambda self: None)
+    _, token = _login(client, db_session, "admin", "admin_scoped_credential_patch")
+
+    response = client.patch(
+        f"/api/platforms/{second.id}/credentials",
+        json={
+            "username": "second@printerval.com",
+            "team_outsource": "team-second",
+            "session_cookie": "second-new-cookie",
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert "session_cookie" not in response.json()
+    db_session.refresh(first)
+    db_session.refresh(second)
+    assert first.session_cookie == "first-cookie"
+    assert second.session_cookie == "second-new-cookie"
+    assert second.team_outsource == "team-second"
+
+
+def test_platform_credentials_patch_rejects_username_for_another_platform(client, db_session):
+    platform = Platform(name="First", account_username="first@printerval.com")
+    db_session.add(platform)
+    db_session.commit()
+    _, token = _login(client, db_session, "admin", "admin_reject_credential_retarget")
+
+    response = client.patch(
+        f"/api/platforms/{platform.id}/credentials",
+        json={"username": "other@printerval.com", "team_outsource": "team"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 409
+
+
 def test_printerval_credentials_rejects_a_login_that_fails_against_the_real_site(client, db_session, monkeypatch):
     """Regression test: a wrong password used to save silently — nothing verified it
     could actually log in — and only surfaced as a mysterious "crawl thất bại" during

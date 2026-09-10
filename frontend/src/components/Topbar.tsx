@@ -21,7 +21,7 @@ export function Topbar() {
   const [crawlDesigners, setCrawlDesigners] = useState<string[]>([])
   const [isFastSyncing, setIsFastSyncing] = useState(false)
   const [fastSyncError, setFastSyncError] = useState<string | null>(null)
-  const { status: syncStatus } = useSyncStatus()
+  const { status: syncStatus, triggerRun } = useSyncStatus()
 
   async function handleLogout() {
     await logout()
@@ -60,11 +60,16 @@ export function Topbar() {
     function onEnd() {
       setIsFastSyncing(false)
     }
+    function onSubmitted() {
+      setIsFastSyncing(false)
+    }
     window.addEventListener('sync-printerval-start', onStart)
     window.addEventListener('sync-printerval-end', onEnd)
+    window.addEventListener('sync-printerval-submitted', onSubmitted)
     return () => {
       window.removeEventListener('sync-printerval-start', onStart)
       window.removeEventListener('sync-printerval-end', onEnd)
+      window.removeEventListener('sync-printerval-submitted', onSubmitted)
     }
   }, [])
 
@@ -86,11 +91,8 @@ export function Topbar() {
 
     if (!handled) {
       try {
-        await apiFetch('/orders/sync-printerval-status', {
-          method: 'POST',
-          body: JSON.stringify({}),
-        })
-        window.dispatchEvent(new CustomEvent('orders-updated'))
+        await triggerRun()
+        window.dispatchEvent(new CustomEvent('sync-printerval-submitted'))
       } catch (err: any) {
         setFastSyncError(err?.message || 'Lỗi khi đồng bộ từ Printerval')
       } finally {

@@ -41,8 +41,21 @@ export function PrintervalSettingsModal({ isOpen, onClose }: PrintervalSettingsM
     setLoading(true)
 
     try {
-      if (!activePlatform) {
-        throw new Error('Chưa chọn Acc Mẹ Printerval')
+      const accountUsername = username.trim()
+      // A credential belongs to exactly one Acc Mẹ.  Do not PATCH the currently
+      // selected platform when the operator is adding another account; that would
+      // silently overwrite the old account's credential and team scope.
+      let targetPlatform = platforms.find(
+        (platform) => platform.account_username.toLowerCase() === accountUsername.toLowerCase(),
+      )
+      if (!targetPlatform) {
+        targetPlatform = await apiFetch<typeof platforms[number]>('/platforms', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: `Acc Mẹ: ${accountUsername}`,
+            account_username: accountUsername,
+          }),
+        })
       }
       const res = await apiFetch<{
         ok: boolean
@@ -50,7 +63,7 @@ export function PrintervalSettingsModal({ isOpen, onClose }: PrintervalSettingsM
         platform_name: string
         account_username: string
         message: string
-      }>(`/platforms/${activePlatform.id}/credentials`, {
+      }>(`/platforms/${targetPlatform.id}/credentials`, {
         method: 'PATCH',
         body: JSON.stringify({
           username: username.trim(),
@@ -209,7 +222,8 @@ export function PrintervalSettingsModal({ isOpen, onClose }: PrintervalSettingsM
                           onClick={() => {
                             setUsername(p.account_username)
                             setTeamOutsource(p.team_outsource || '')
-                            setSessionCookie(p.session_cookie || '')
+                            setPassword('')
+                            setSessionCookie('')
                             setActiveTab('new')
                           }}
                           className="px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer border border-slate-200"

@@ -36,9 +36,8 @@ function toSyncStatus(job: SyncJob | null): SyncStatus {
 const IDLE_POLL_MS = 15000
 const RUNNING_POLL_MS = 3000
 
-/** Polls GET /orders/sync-status for the current platform's read-only status-mirror
- * job — polls faster while it's running so the UI's spin indicator catches the
- * moment it stops. Shared by Topbar (icon) and OrderStatusPage (table + button). */
+/** Polls the durable sync job for the active platform. Polling is only a transport
+ * detail: the job state survives page reloads and can be rendered by any admin view. */
 export function useSyncStatus() {
   const [status, setStatus] = useState<SyncStatus | null>(null)
   const [isTriggering, setIsTriggering] = useState(false)
@@ -69,12 +68,12 @@ export function useSyncStatus() {
     }
   }, [poll])
 
-  const triggerRun = useCallback(async () => {
+  const triggerRun = useCallback(async (orderIds?: string[]) => {
     setIsTriggering(true)
     try {
       const res = await apiFetch<SyncJob>('/sync-jobs', {
         method: 'POST',
-        body: JSON.stringify({ type: 'status_sync' }),
+        body: JSON.stringify({ type: 'status_sync', ...(orderIds?.length ? { order_ids: orderIds } : {}) }),
       })
       setStatus(toSyncStatus(res))
       if (timerRef.current) clearTimeout(timerRef.current)

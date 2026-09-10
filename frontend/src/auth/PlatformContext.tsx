@@ -7,7 +7,6 @@ export interface Platform {
   name: string
   account_username: string
   team_outsource?: string
-  session_cookie?: string
   is_active: boolean
   created_at: string
 }

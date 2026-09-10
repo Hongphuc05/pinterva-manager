@@ -7,6 +7,7 @@ import { DashboardLayout } from '../components/DashboardLayout'
 import { ImageModal } from '../components/ImageModal'
 import { StatusDropdown } from '../components/StatusDropdown'
 import { Pagination, paginate } from '../components/Pagination'
+import { useSyncStatus } from '../hooks/useSyncStatus'
 import { STATE_MAP } from '../utils/statusTranslation'
 import { 
   Package, 
@@ -100,7 +101,7 @@ export function OrdersListPage() {
   const [activeDesignerTab, setActiveDesignerTab] = useState<'todo' | 'doing' | 'review' | 'all'>('todo')
   const [adminTab, setAdminTab] = useState<'unprocessed' | 'processed' | 'all'>('unprocessed')
   const [kpiFilter, setKpiFilter] = useState<'all' | 'open' | 'in_progress' | 'done' | null>(null)
-  const [syncingPrinterval, setSyncingPrinterval] = useState(false)
+  const { status: syncStatus, triggerRun, isTriggering } = useSyncStatus()
   const [currentPage, setCurrentPage] = useState(1)
 
   // Highlight state for newly crawled jobs
@@ -331,25 +332,21 @@ export function OrdersListPage() {
   }, [activePlatform?.id, statusFilter, batchFilter, designerFilter])
 
   async function handleSyncPrintervalStatus(orderIds?: string[]) {
-    setSyncingPrinterval(true)
     window.dispatchEvent(new CustomEvent('sync-printerval-start'))
     try {
-      const res = await apiFetch<{ synced_count: number; updated_count: number; message: string }>(
-        '/orders/sync-printerval-status',
-        {
-          method: 'POST',
-          body: JSON.stringify(orderIds && orderIds.length > 0 ? { order_ids: orderIds } : {}),
-        }
-      )
-      await loadOrders()
-      setFlash(res.message || 'Đã đồng bộ trạng thái đơn từ Printerval.')
+      await triggerRun(orderIds)
+      setFlash('Đã xếp đồng bộ trạng thái Printerval trong nền.')
+      window.dispatchEvent(new CustomEvent('sync-printerval-submitted'))
     } catch (err: any) {
       setError(err?.message || 'Lỗi khi đồng bộ từ Printerval.')
-    } finally {
-      setSyncingPrinterval(false)
-      window.dispatchEvent(new CustomEvent('sync-printerval-end'))
     }
   }
+
+  useEffect(() => {
+    if (syncStatus && !syncStatus.is_running && syncStatus.last_finished_at) {
+      loadOrders().catch(() => {})
+    }
+  }, [syncStatus?.is_running, syncStatus?.last_finished_at])
 
   // Calculate Designer Workflow groups
   const todoOrders = orders.filter(
@@ -743,12 +740,12 @@ export function OrdersListPage() {
           <button
             type="button"
             onClick={() => handleSyncPrintervalStatus()}
-            disabled={syncingPrinterval}
+            disabled={isTriggering || !!syncStatus?.is_running}
             className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-xl border border-purple-200 shadow-2xs transition-all cursor-pointer shrink-0 disabled:opacity-50"
             title="Đồng bộ kết quả duyệt/fix từ Printerval"
           >
-            <RefreshCw className={`h-3.5 w-3.5 text-purple-600 ${syncingPrinterval ? 'animate-spin' : ''}`} />
-            <span>{syncingPrinterval ? 'Đang đồng bộ...' : 'Làm Mới Từ Printerval'}</span>
+            <RefreshCw className={`h-3.5 w-3.5 text-purple-600 ${isTriggering || syncStatus?.is_running ? 'animate-spin' : ''}`} />
+            <span>{isTriggering || syncStatus?.is_running ? 'Đang đồng bộ...' : 'Làm Mới Từ Printerval'}</span>
           </button>
         </div>
       )}

@@ -14,7 +14,6 @@ from app.adapters.db.session import SessionLocal
 from app.api.deps import get_current_platform_id, get_current_user, get_db, require_role
 from app.application.sync_jobs import (
     ACTIVE_STATUSES,
-    STATUS_SYNC,
     create_or_get_status_sync_job,
     run_status_sync_job,
 )
@@ -24,8 +23,10 @@ router = APIRouter(prefix="/sync-jobs", tags=["sync-jobs"])
 
 class CreateSyncJobRequest(BaseModel):
     type: Literal["status_sync"]
-    order_ids: list[str] | None = Field(default=None, max_length=100)
-    filters: dict[str, str] | None = None
+    # The browser resolves the current tab/filter to an immutable order-ID snapshot
+    # before submitting. This avoids a job unexpectedly touching orders that move
+    # into or out of a mutable filter while it is queued.
+    order_ids: list[str] | None = Field(default=None, max_length=500)
 
 
 class SyncJobOut(BaseModel):
@@ -112,7 +113,7 @@ def create_sync_job(
         platform=platform,
         actor=user,
         order_ids=[str(value) for value in parsed_ids],
-        filters=payload.filters,
+        filters=None,
     )
     if created:
         _dispatch_status_job(job.id)

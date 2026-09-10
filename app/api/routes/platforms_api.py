@@ -105,6 +105,11 @@ def update_platform_credentials(
     platform = db.get(Platform, platform_id)
     if platform is None or not platform.is_active:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Platform not found")
+    if req.username.strip().lower() != platform.account_username.lower():
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Username không khớp Acc Mẹ này. Hãy tạo hoặc chọn đúng Acc Mẹ trước khi cập nhật credential.",
+        )
     try:
         platform = verify_and_save_platform_credentials(
             db,
