@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { apiFetch } from '../api/client'
 
 export type SyncStatus = {
@@ -23,68 +23,88 @@ type SyncJob = {
   finished_at: string | null
 }
 
+type SyncSnapshot = { status: SyncStatus | null; isTriggering: boolean }
+
+const IDLE_POLL_MS = 15_000
+const RUNNING_POLL_MS = 3_000
+const listeners = new Set<(snapshot: SyncSnapshot) => void>()
+let snapshot: SyncSnapshot = { status: null, isTriggering: false }
+let pollTimer: ReturnType<typeof setTimeout> | null = null
+let pollInFlight: Promise<void> | null = null
+
 function toSyncStatus(job: SyncJob | null): SyncStatus {
   return {
     is_running: job?.status === 'queued' || job?.status === 'running',
     last_started_at: job?.started_at ?? null,
     last_finished_at: job?.finished_at ?? null,
-    last_result: job ? { processed: job.processed, total: job.total, updated: job.updated, failed: job.failed } : null,
+    last_result: job
+      ? { processed: job.processed, total: job.total, updated: job.updated, failed: job.failed }
+      : null,
     last_error: job?.error_summary ?? null,
   }
 }
 
-const IDLE_POLL_MS = 15000
-const RUNNING_POLL_MS = 3000
+function publish(next: Partial<SyncSnapshot>) {
+  snapshot = { ...snapshot, ...next }
+  listeners.forEach((listener) => listener(snapshot))
+}
 
-/** Polls the durable sync job for the active platform. Polling is only a transport
- * detail: the job state survives page reloads and can be rendered by any admin view. */
-export function useSyncStatus() {
-  const [status, setStatus] = useState<SyncStatus | null>(null)
-  const [isTriggering, setIsTriggering] = useState(false)
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const mountedRef = useRef(true)
+function schedulePoll(delay: number) {
+  if (pollTimer) clearTimeout(pollTimer)
+  if (listeners.size === 0) return
+  pollTimer = setTimeout(() => {
+    void refreshSyncStatus()
+  }, delay)
+}
 
-  const poll = useCallback(async () => {
+async function refreshSyncStatus() {
+  if (pollInFlight) return pollInFlight
+  pollInFlight = (async () => {
     try {
-      const res = await apiFetch<SyncJob | null>('/sync-jobs/current')
-      if (!mountedRef.current) return
-      const next = toSyncStatus(res)
-      setStatus(next)
-      if (timerRef.current) clearTimeout(timerRef.current)
-      timerRef.current = setTimeout(poll, next.is_running ? RUNNING_POLL_MS : IDLE_POLL_MS)
+      const job = await apiFetch<SyncJob | null>('/sync-jobs/current')
+      const status = toSyncStatus(job)
+      publish({ status })
+      schedulePoll(status.is_running ? RUNNING_POLL_MS : IDLE_POLL_MS)
     } catch {
-      if (!mountedRef.current) return
-      if (timerRef.current) clearTimeout(timerRef.current)
-      timerRef.current = setTimeout(poll, IDLE_POLL_MS)
+      schedulePoll(IDLE_POLL_MS)
+    } finally {
+      pollInFlight = null
+    }
+  })()
+  return pollInFlight
+}
+
+async function triggerSyncRun(orderIds?: string[]) {
+  publish({ isTriggering: true })
+  try {
+    const job = await apiFetch<SyncJob>('/sync-jobs', {
+      method: 'POST',
+      body: JSON.stringify({ type: 'status_sync', ...(orderIds?.length ? { order_ids: orderIds } : {}) }),
+    })
+    publish({ status: toSyncStatus(job) })
+    schedulePoll(RUNNING_POLL_MS)
+  } finally {
+    publish({ isTriggering: false })
+  }
+}
+
+/** A platform-wide external store. Topbar and the active Orders view subscribe to
+ * the same poller, so one visible page produces one `/sync-jobs/current` request. */
+export function useSyncStatus() {
+  const [current, setCurrent] = useState<SyncSnapshot>(snapshot)
+
+  useEffect(() => {
+    listeners.add(setCurrent)
+    void refreshSyncStatus()
+    return () => {
+      listeners.delete(setCurrent)
+      if (listeners.size === 0 && pollTimer) {
+        clearTimeout(pollTimer)
+        pollTimer = null
+      }
     }
   }, [])
 
-  useEffect(() => {
-    mountedRef.current = true
-    poll()
-    return () => {
-      mountedRef.current = false
-      if (timerRef.current) clearTimeout(timerRef.current)
-    }
-  }, [poll])
-
-  const triggerRun = useCallback(async (orderIds?: string[]) => {
-    setIsTriggering(true)
-    try {
-      const res = await apiFetch<SyncJob>('/sync-jobs', {
-        method: 'POST',
-        body: JSON.stringify({ type: 'status_sync', ...(orderIds?.length ? { order_ids: orderIds } : {}) }),
-      })
-      setStatus(toSyncStatus(res))
-      if (timerRef.current) clearTimeout(timerRef.current)
-      timerRef.current = setTimeout(poll, RUNNING_POLL_MS)
-    } catch (err) {
-      console.error('Failed to trigger sync:', err)
-      throw err
-    } finally {
-      setIsTriggering(false)
-    }
-  }, [poll])
-
-  return { status, triggerRun, isTriggering }
+  const triggerRun = useCallback((orderIds?: string[]) => triggerSyncRun(orderIds), [])
+  return { status: current.status, triggerRun, isTriggering: current.isTriggering }
 }
