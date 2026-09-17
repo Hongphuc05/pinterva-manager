@@ -164,5 +164,41 @@ Chỉ rollback tới image còn tồn tại trên VPS và đã được kiểm t
 
 ## Google Sheets
 
-Backup Google Sheet chưa được bật trong Phase 1. Phase 3 sẽ thêm task hằng ngày và mount
-credential JSON từ ngoài repo. Không đặt JSON service account vào `.env.production`.
+Google Sheet là snapshot báo cáo một chiều, không phải database backup/restore. Khi bật,
+Celery Beat ghi đè tab cấu hình lúc `ORDER_SHEET_BACKUP_HOUR:ORDER_SHEET_BACKUP_MINUTE`
+theo `CELERY_TIMEZONE`, chỉ với hai cột `Mã đơn` và `Link DES nộp bài`.
+
+Trước khi bật trên VPS, mày phải tạo Service Account, enable Google Sheets API, tạo Sheet
+và share quyền **Editor** cho email của Service Account. Sau đó đặt JSON bên ngoài repo:
+
+```bash
+sudo mkdir -p /srv/tacahu-ops/secrets
+sudo install -o 10001 -g 10001 -m 600 /path/to/downloaded-service-account.json \
+  /srv/tacahu-ops/secrets/google-service-account.json
+```
+
+Trong `.env.production`, điền path container, path JSON trên VPS và link Sheet, rồi bật job:
+
+```dotenv
+GOOGLE_SERVICE_ACCOUNT_FILE=/run/secrets/google-service-account.json
+GOOGLE_SERVICE_ACCOUNT_HOST_FILE=/srv/tacahu-ops/secrets/google-service-account.json
+GOOGLE_SHEETS_ORDER_BACKUP_URL=https://docs.google.com/spreadsheets/d/<id>/edit
+GOOGLE_SHEETS_ORDER_BACKUP_TAB=Order Backup
+ORDER_SHEET_BACKUP_ENABLED=true
+```
+
+JSON credential không đi vào `.env.production`, Git hoặc Docker image. Preflight sẽ chặn
+deploy nếu job bật mà file/path/link bị thiếu. Lần đầu chỉ chạy task thủ công sau khi mày
+đã kiểm tra sheet thử nghiệm; không chạy lên Google Sheet thật trong lúc phát triển.
+
+Sau khi config Sheet thử nghiệm trên VPS, gửi một task thủ công rồi xem log worker:
+
+```bash
+docker compose --env-file .env.production -f compose.production.yaml exec celery-general \
+  celery -A app.workers.celery_app call \
+  app.workers.order_sheet_backup_tasks.export_order_sheet_backup
+docker compose --env-file .env.production -f compose.production.yaml logs --tail=100 celery-general
+```
+
+Sau khi task hoàn tất, mở lại Sheet bằng trình duyệt để xác nhận tab chỉ có hai cột và
+không có dòng trùng. Không dùng lệnh này với Sheet production cho đến khi Sheet thử đã pass.

@@ -268,6 +268,20 @@ Không gửi JSON key hoặc Cloudflare token trong chat/repo.
 5. Test lỗi transient retry và lỗi 403 fail rõ ràng.
 6. Sau khi mày cấu hình Sheet thử nghiệm: chạy một task thủ công, đọc lại Sheet bằng request mới và xác nhận hai cột chính xác.
 
+### 6.6 Kết quả triển khai Phase 3
+
+- `GoogleSheetsAdapter` và fake adapter dùng replace snapshot: clear toàn bộ tab rồi
+  batch-write header + dữ liệu, vì vậy retry không tạo dòng trùng.
+- Export chỉ ghi hai cột `Mã đơn`, `Link DES nộp bài`; mỗi order chọn `ResultVersion`
+  mới nhất theo `submitted_at`, fallback `created_at`, và để link trống nếu chưa nộp.
+- Celery Beat chỉ đăng ký lịch khi `ORDER_SHEET_BACKUP_ENABLED=true`; giờ chạy theo
+  `CELERY_TIMEZONE`, mặc định `00:10 Asia/Ho_Chi_Minh`.
+- Mỗi ngày/config Sheet có một `operations` record idempotent làm audit và khóa overlap.
+  Retry exponential chỉ áp dụng cho lỗi transient/rate-limit/unknown outcome; lỗi cấu hình
+  hoặc 403/404 không retry. Không lưu raw Google error text vào audit.
+- Credential JSON được bind-mount read-only từ VPS vào container và bị preflight kiểm tra;
+  không có credential hay request Google thật trong test/repo.
+
 ## 7. Phase 4 — Cutover VPS
 
 ### 7.1 Thao tác trên VPS do mày thực hiện
@@ -289,9 +303,10 @@ Chỉ làm sau khi Phase 1–3 pass review/test.
 
 ```bash
 cd /srv/tacahu-ops
-git checkout <approved-commit-or-tag>
+git fetch --tags origin
+git checkout --detach <approved-commit-or-tag>
 ./scripts/production-preflight.sh
-./scripts/deploy-production.sh
+./scripts/deploy-production.sh --build
 docker compose -f compose.production.yaml --env-file .env.production ps
 ```
 

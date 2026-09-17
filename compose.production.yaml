@@ -18,6 +18,9 @@ x-backend: &backend
     - ${DATA_DIR:?Set DATA_DIR in .env.production}/platform_data:/app/platform_data
     - ${DATA_DIR:?Set DATA_DIR in .env.production}/playwright_evidence:/app/playwright-evidence
     - ${DATA_DIR:?Set DATA_DIR in .env.production}/chrome_profiles:/app/chrome-profiles
+    # The service-account JSON lives outside Git/image. When reporting is disabled,
+    # /dev/null is mounted and the application never attempts to read it.
+    - ${GOOGLE_SERVICE_ACCOUNT_HOST_FILE:-/dev/null}:${GOOGLE_SERVICE_ACCOUNT_FILE:-/run/secrets/google-service-account.json}:ro
   logging:
     driver: local
     options:

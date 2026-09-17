@@ -62,6 +62,20 @@ if [[ "$(value CORS_ORIGINS)" != *"https://tacahu.fun"* ]]; then
   exit 2
 fi
 
+if [[ "$(value ORDER_SHEET_BACKUP_ENABLED)" == "true" ]]; then
+  for key in GOOGLE_SERVICE_ACCOUNT_FILE GOOGLE_SERVICE_ACCOUNT_HOST_FILE GOOGLE_SHEETS_ORDER_BACKUP_URL; do
+    require_value "$key"
+  done
+  if [[ ! -f "$(value GOOGLE_SERVICE_ACCOUNT_HOST_FILE)" ]]; then
+    echo "Google service account file does not exist on the VPS." >&2
+    exit 2
+  fi
+  if [[ ! "$(value GOOGLE_SHEETS_ORDER_BACKUP_URL)" =~ ^https://docs\.google\.com/spreadsheets/d/[A-Za-z0-9_-]+ ]]; then
+    echo "GOOGLE_SHEETS_ORDER_BACKUP_URL must be a docs.google.com spreadsheet URL." >&2
+    exit 2
+  fi
+fi
+
 if [[ "$WITH_TUNNEL" == true ]]; then
   require_value CLOUDFLARE_TUNNEL_TOKEN
 fi

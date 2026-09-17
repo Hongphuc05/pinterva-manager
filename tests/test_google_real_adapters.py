@@ -54,8 +54,9 @@ def test_export_snapshot_writes_rows_to_real_sheet(fixture_sheet):
 
     adapter = GoogleSheetsAdapter(credentials_path=CREDENTIALS_PATH)
     result = adapter.export_snapshot(
-        rows=[{"order_id": "DJ0000001", "status": "Done"}],
+        rows=[{"Mã đơn": "DJ0000001", "Link DES nộp bài": "https://drive/result"}],
         sheet_id=fixture_sheet,
+        tab_name="Sheet1",
         exported_at=datetime.now(UTC),
     )
     assert result.success is True

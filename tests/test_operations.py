@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import event, text
 
+from app.adapters.db.models import Operation
 from app.application.operations import (
     PENDING_LEASE,
     IdempotencyKeyReusedError,
@@ -99,6 +100,21 @@ def test_reclaiming_a_stale_operation_renews_the_lease(db_session, engine):
         return {"ok": True}
 
     assert run_idempotent(db_session, "key-renew", "test_command", inner) == {"ok": True}
+
+
+def test_retrying_a_failed_operation_reclaims_it_as_pending_before_side_effect(db_session):
+    def fail_once():
+        raise RuntimeError("first attempt fails")
+
+    with pytest.raises(RuntimeError):
+        run_idempotent(db_session, "key-retry", "test_command", fail_once)
+
+    def retry():
+        operation = db_session.query(Operation).filter_by(idempotency_key="key-retry").one()
+        assert operation.status == "pending"
+        return {"ok": True}
+
+    assert run_idempotent(db_session, "key-retry", "test_command", retry) == {"ok": True}
 
 
 # --- Finding 4: concurrent insert race ---------------------------------------

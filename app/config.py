@@ -1,6 +1,7 @@
 from functools import lru_cache
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import model_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_SECRET_KEY = "dev-secret-change-me"
@@ -37,6 +38,38 @@ class Settings(BaseSettings):
     printerval_username: str | None = None
     printerval_password: str | None = None
     printerval_team_outsource: str | None = None
+    # Google Sheets is an optional one-way reporting projection. It stays disabled
+    # unless all production configuration is deliberately provided.
+    google_service_account_file: str | None = None
+    google_sheets_order_backup_url: str | None = None
+    google_sheets_order_backup_tab: str = "Order Backup"
+    order_sheet_backup_enabled: bool = False
+    order_sheet_backup_hour: int = 0
+    order_sheet_backup_minute: int = 10
+    celery_timezone: str = "Asia/Ho_Chi_Minh"
+
+    @field_validator("order_sheet_backup_hour")
+    @classmethod
+    def _validate_order_sheet_backup_hour(cls, value: int) -> int:
+        if not 0 <= value <= 23:
+            raise ValueError("ORDER_SHEET_BACKUP_HOUR must be between 0 and 23")
+        return value
+
+    @field_validator("order_sheet_backup_minute")
+    @classmethod
+    def _validate_order_sheet_backup_minute(cls, value: int) -> int:
+        if not 0 <= value <= 59:
+            raise ValueError("ORDER_SHEET_BACKUP_MINUTE must be between 0 and 59")
+        return value
+
+    @field_validator("celery_timezone")
+    @classmethod
+    def _validate_celery_timezone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError("CELERY_TIMEZONE must be a valid IANA timezone") from exc
+        return value
 
     @model_validator(mode="after")
     def _reject_default_secret_in_production(self) -> "Settings":
@@ -46,6 +79,13 @@ class Settings(BaseSettings):
             raise ValueError(
                 "SECRET_KEY is still the built-in default while COOKIE_SECURE is true — "
                 "set a real SECRET_KEY before deploying"
+            )
+        if self.order_sheet_backup_enabled and (
+            not self.google_service_account_file or not self.google_sheets_order_backup_url
+        ):
+            raise ValueError(
+                "GOOGLE_SERVICE_ACCOUNT_FILE and GOOGLE_SHEETS_ORDER_BACKUP_URL are required "
+                "when ORDER_SHEET_BACKUP_ENABLED is true"
             )
         return self
 

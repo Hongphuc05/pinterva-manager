@@ -73,6 +73,10 @@ def run_idempotent(
         if existing.status == "pending" and not _lease_expired(existing):
             raise OperationInProgressError(idempotency_key)
         existing.retry_count += 1
+        # A retry must renew its lease as pending before side effects begin. Leaving
+        # the row as failed made a second worker treat an already-running retry as
+        # independently retryable, which is unsafe for external snapshot writes.
+        existing.status = "pending"
         # Commit before running fn() so `updated_at` (onupdate=now()) is renewed:
         # otherwise the row keeps its stale timestamp and a second worker would
         # reclaim the same lease while we are still working.
