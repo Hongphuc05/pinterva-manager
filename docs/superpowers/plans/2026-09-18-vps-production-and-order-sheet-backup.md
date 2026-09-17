@@ -199,6 +199,20 @@ CELERY_TIMEZONE=Asia/Ho_Chi_Minh
 - Restore rehearsal thành công.
 - Không có secret bị Git track.
 
+### 5.5 Kết quả triển khai Phase 2
+
+- Chuẩn hóa release production theo `APP_VERSION` trong `compose.production.yaml`;
+  deploy chỉ ghi nhận release sau healthcheck, rollback chỉ dùng image tag có sẵn và
+  không tự hạ Alembic schema.
+- Thêm preflight kiểm tra `APP_VERSION`, backup directory, secrets bắt buộc, HTTPS
+  origin, dung lượng, Git worktree và Compose config.
+- Thêm backup PostgreSQL custom-format, backup asset, SHA-256, retention cấu hình và
+  tùy chọn copy rclone sau khi local backup thành công.
+- Thêm restore command có xác nhận phá hủy rõ ràng; archive được kiểm tra trước khi
+  ghi vào database.
+- Thêm systemd timers hằng ngày, status/log helpers và runbook production. Các
+  tài liệu PC/Vercel cũ được đánh dấu legacy để tránh dùng nhầm.
+
 ## 6. Phase 3 — Job backup Google Sheets
 
 ### 6.1 Adapter

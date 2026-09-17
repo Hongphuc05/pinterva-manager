@@ -1,4 +1,12 @@
-# Self-hosted production runtime
+# Legacy self-hosted production runtime
+
+> **Không dùng tài liệu này để triển khai mới.** Nó mô tả stack PC/managed
+> PostgreSQL cũ với `BACKEND_VERSION` và frontend Vercel. Production chuẩn cho
+> `tacahu.fun` chạy toàn bộ SPA, API, PostgreSQL và Redis trên VPS bằng
+> [`PRODUCTION_DOCKER.md`](./PRODUCTION_DOCKER.md), dùng
+> `compose.production.yaml` và `APP_VERSION`.
+
+Tài liệu được giữ lại chỉ để tra cứu lịch sử, không còn là runbook vận hành.
 
 Production Compose is [compose.yaml](../compose.yaml). It deliberately contains prebuilt image references only; `compose.dev.yaml` is the optional local-build overlay.
 

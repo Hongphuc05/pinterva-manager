@@ -44,7 +44,16 @@ fi
 
 for _ in $(seq 1 30); do
   if "${compose[@]}" exec -T api python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3).read()" >/dev/null 2>&1; then
-    echo "Deployment healthy: $(git -C "$ROOT_DIR" rev-parse --short HEAD)"
+    data_dir="$(awk -F= '$1 == "DATA_DIR" { sub(/^[^=]*=/, ""); print; exit }' "$ENV_FILE")"
+    release="$(awk -F= '$1 == "APP_VERSION" { sub(/^[^=]*=/, ""); print; exit }' "$ENV_FILE")"
+    release_dir="$data_dir/releases"
+    mkdir -p "$release_dir"
+    current="$(cat "$release_dir/current" 2>/dev/null || true)"
+    if [[ -n "$current" && "$current" != "$release" ]]; then
+      printf '%s\n' "$current" > "$release_dir/previous"
+    fi
+    printf '%s\n' "$release" > "$release_dir/current"
+    echo "Deployment healthy: $release"
     "${compose[@]}" ps
     exit 0
   fi

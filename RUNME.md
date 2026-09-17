@@ -145,8 +145,8 @@ source .venv/bin/activate
 PYTHONPATH=. pytest -q
 ```
 
-Kết quả kiểm chứng gần nhất: **249 passed, 2 deselected**. Frontend production build,
-Python compile, Ruff và Docker Compose validation đều pass.
+Kết quả kiểm chứng gần nhất: **267 passed, 1 skipped, 2 deselected**. Frontend production
+build, Ruff và Docker Compose validation đều pass.
 
 ## 8. Production và local là hai cấu hình khác nhau
 

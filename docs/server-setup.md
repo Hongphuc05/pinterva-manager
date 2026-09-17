@@ -1,4 +1,7 @@
-# Hướng Dẫn Thiết Lập PC Windows 10 Pro Chạy Server 24/7 (Tacahu Ops)
+# Legacy: Hướng Dẫn Thiết Lập PC Windows 10 Pro Chạy Server 24/7 (Tacahu Ops)
+
+> **Không dùng tài liệu này cho VPS `tacahu.fun`.** Đây là hướng dẫn WSL/PC cũ.
+> Dùng [`PRODUCTION_DOCKER.md`](./PRODUCTION_DOCKER.md) cho deployment VPS hiện tại.
 
 Tài liệu hướng dẫn thiết lập máy tính **Windows 10 Pro** chạy 24/7 làm production server cho backend Tacahu Ops Dashboard thông qua **WSL2 (Ubuntu 20.04 LTS)** và **Docker**.
 

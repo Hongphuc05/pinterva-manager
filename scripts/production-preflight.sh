@@ -35,9 +35,22 @@ require_value() {
   fi
 }
 
-for key in DATA_DIR POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD DATABASE_URL REDIS_URL SECRET_KEY CORS_ORIGINS; do
+for key in APP_VERSION DATA_DIR BACKUP_DIR POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD DATABASE_URL REDIS_URL SECRET_KEY CORS_ORIGINS; do
   require_value "$key"
 done
+
+if [[ ! "$(value APP_VERSION)" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "APP_VERSION may contain only letters, digits, dots, underscores and hyphens." >&2
+  exit 2
+fi
+
+release_ref="$(value APP_VERSION)"
+head_commit="$(git -C "$ROOT_DIR" rev-parse HEAD)"
+release_commit="$(git -C "$ROOT_DIR" rev-parse -q --verify "${release_ref}^{commit}" 2>/dev/null || true)"
+if [[ -z "$release_commit" || "$release_commit" != "$head_commit" ]]; then
+  echo "APP_VERSION must be a commit SHA or Git tag that resolves to the checked-out HEAD." >&2
+  exit 2
+fi
 
 if [[ "$(value COOKIE_SECURE)" != "true" ]]; then
   echo "COOKIE_SECURE must be true in production." >&2
@@ -56,6 +69,12 @@ fi
 DATA_DIR="$(value DATA_DIR)"
 if [[ ! -d "$DATA_DIR" ]]; then
   echo "DATA_DIR does not exist: $DATA_DIR" >&2
+  exit 2
+fi
+
+BACKUP_DIR="$(value BACKUP_DIR)"
+if [[ ! -d "$BACKUP_DIR" ]]; then
+  echo "BACKUP_DIR does not exist: $BACKUP_DIR" >&2
   exit 2
 fi
 

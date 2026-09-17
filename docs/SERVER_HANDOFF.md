@@ -1,4 +1,10 @@
-# Chuyển Tacahu Ops sang một Ubuntu PC mới
+# Legacy: chuyển Tacahu Ops sang một Ubuntu PC mới
+
+> **Không dùng tài liệu này để dựng VPS mới.** Flow PC/WSL, frontend Vercel,
+> `BACKEND_VERSION` và image GHCR trong tài liệu này là kiến trúc cũ. Runbook
+> chuẩn hiện tại cho `tacahu.fun` là [`PRODUCTION_DOCKER.md`](./PRODUCTION_DOCKER.md).
+
+Tài liệu được giữ lại để tham chiếu hệ thống cũ.
 
 Frontend vẫn ở `https://tacahu-ops.vercel.app/`. PC chỉ chạy image backend đã build sẵn từ GHCR, Redis, Celery và Cloudflare Tunnel. Nó không cần Python, Node, npm, pip hay build source.
 

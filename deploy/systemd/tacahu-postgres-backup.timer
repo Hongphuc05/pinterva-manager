@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Tacahu Ops PostgreSQL backup daily
+
+[Timer]
+OnCalendar=*-*-* 00:30:00
+Persistent=true
+RandomizedDelaySec=5m
+Unit=tacahu-postgres-backup.service
+
+[Install]
+WantedBy=timers.target

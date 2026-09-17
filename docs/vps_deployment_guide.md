@@ -1,4 +1,8 @@
-# 🚀 Kế Hoạch & Hướng Dẫn Triển Khai Tacahu Ops Lên Server VPS (Từ A đến Z)
+# Legacy: Kế Hoạch & Hướng Dẫn Triển Khai Tacahu Ops Lên Server VPS
+
+> **Không dùng tài liệu này để triển khai `tacahu.fun`.** Nó tham chiếu
+> `compose.local.yaml`, `.env` và layout cũ. Runbook VPS hiện hành là
+> [`PRODUCTION_DOCKER.md`](./PRODUCTION_DOCKER.md).
 
 Tài liệu này hướng dẫn chi tiết toàn bộ quy trình đưa hệ thống **Tacahu Ops** (Backend FastAPI, Celery Workers, Redis, PostgreSQL, Frontend React/Vite) cùng tiện ích **CopyImage Chrome Extension** lên máy chủ **VPS Linux (Ubuntu 22.04 / 24.04 LTS)** để hoạt động hoàn hảo 24/7.
 

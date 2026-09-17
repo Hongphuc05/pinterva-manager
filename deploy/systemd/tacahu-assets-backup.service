@@ -1,0 +1,11 @@
+[Unit]
+Description=Tacahu Ops asset backup
+Wants=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+User=__DEPLOY_USER__
+WorkingDirectory=/srv/tacahu-ops
+Environment=ENV_FILE=/srv/tacahu-ops/.env.production
+ExecStart=/srv/tacahu-ops/scripts/backup-production-assets.sh
