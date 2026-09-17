@@ -486,19 +486,19 @@ describe('OrdersListPage', () => {
     await waitFor(() => expect(screen.getByText('DJ-SUPP-1')).toBeInTheDocument())
 
     // Check Support 3 tabs
-    expect(screen.getByRole('button', { name: /Tất cả các đơn/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Chưa kiểm tra/i })).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: /Trùng lặp/i }).length).toBeGreaterThan(0)
     expect(screen.getAllByRole('button', { name: /Không trùng lặp/i }).length).toBeGreaterThan(0)
 
-    // Check action buttons for Support on All Orders tab
-    expect(screen.getAllByRole('button', { name: /^Trùng$/i }).length).toBeGreaterThan(0)
-    expect(screen.getAllByRole('button', { name: /^Không trùng$/i }).length).toBeGreaterThan(0)
+    // Check action buttons for Support on Chưa kiểm tra tab
+    expect(screen.getAllByRole('button', { name: /Trùng lặp/i }).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('button', { name: /Không trùng lặp/i }).length).toBeGreaterThan(0)
 
     // Verify "Quét Đơn Mới" is NOT present for Support
     expect(screen.queryByText(/Quét Đơn Mới/i)).not.toBeInTheDocument()
   })
 
-  it('renders Doing and Review orders in Support Tab 1 (Tất cả các đơn)', async () => {
+  it('renders Waiting and Doing unchecked orders in Support Tab 1 (Chưa kiểm tra), while classified orders go to their respective tabs', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn((url: string) => {
@@ -569,9 +569,11 @@ describe('OrdersListPage', () => {
       </BrowserRouter>
     )
 
+    // Unchecked Waiting & Doing are in Tab 1 ("Chưa kiểm tra")
     await waitFor(() => expect(screen.getByText('DJ-WAITING')).toBeInTheDocument())
     expect(screen.getByText('DJ-DOING')).toBeInTheDocument()
-    expect(screen.getByText('DJ-REVIEW')).toBeInTheDocument()
+    // Classified non_duplicate order is NOT in Tab 1 ("Chưa kiểm tra")
+    expect(screen.queryByText('DJ-REVIEW')).not.toBeInTheDocument()
   })
 
   it('renders orange exclamation badge on Admin across all tabs when uncheck, and supports Hủy chia', async () => {

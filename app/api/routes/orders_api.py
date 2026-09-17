@@ -535,6 +535,7 @@ class OrderDetailOut(BaseModel):
     id: uuid.UUID
     external_order_id: str
     state: str
+    work_domain: str = "standard"
     batch_id: uuid.UUID | None
     product_name: str | None
     thumbnail_url: str | None

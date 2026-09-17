@@ -194,19 +194,22 @@ export function Topbar() {
 
       {/* Action Controls */}
       <div className="flex items-center gap-3">
+        {(user.role === 'admin' || user.role === 'support') && (
+          <button
+            onClick={() => user.role === 'admin' ? setShowSettingsModal(true) : null}
+            className={`flex items-center gap-2 px-3 py-1.5 text-xs font-semibold bg-blue-50/80 hover:bg-blue-100/80 border border-blue-200 text-[#0052CC] rounded-xl shadow-2xs transition-all ${user.role === 'admin' ? 'cursor-pointer' : 'cursor-default'}`}
+            title={user.role === 'admin' ? "Click để đổi Workspace hoặc Đăng nhập Acc Mẹ Printerval mới" : "Acc Mẹ Printerval đang hoạt động"}
+          >
+            <KeyRound className="h-4 w-4 text-[#0052CC]" />
+            <span>Acc Mẹ Printerval:</span>
+            <strong className="font-mono text-slate-800 bg-white px-2 py-0.5 rounded border border-blue-100">
+              {activePlatform?.account_username || 'Chưa chọn Acc Mẹ'}
+            </strong>
+          </button>
+        )}
+
         {user.role === 'admin' && (
           <>
-            <button
-              onClick={() => setShowSettingsModal(true)}
-              className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold bg-blue-50/80 hover:bg-blue-100/80 border border-blue-200 text-[#0052CC] rounded-xl shadow-2xs transition-all cursor-pointer"
-              title="Click để đổi Workspace hoặc Đăng nhập Acc Mẹ Printerval mới"
-            >
-              <KeyRound className="h-4 w-4 text-[#0052CC]" />
-              <span>Acc Mẹ Printerval:</span>
-              <strong className="font-mono text-slate-800 bg-white px-2 py-0.5 rounded border border-blue-100">
-                {activePlatform?.account_username || 'Chưa chọn Acc Mẹ'}
-              </strong>
-            </button>
 
             <button
               onClick={() => {

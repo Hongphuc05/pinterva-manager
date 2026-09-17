@@ -721,17 +721,23 @@ export function OrdersListPage() {
   }, [syncStatus?.is_running, syncStatus?.last_finished_at])
 
   // Support 3 Sub-Tabs Groups
-  // 1. Tất cả các đơn (chứa toàn bộ đơn của admin)
-  const supportAllOrders = useMemo(() => {
-    return orders.filter((o) => o.work_domain !== 'duplicate')
+  // 1. Chưa kiểm tra (chứa toàn bộ đơn waiting và doing chưa kiểm tra của admin)
+  const supportUncheckedOrders = useMemo(() => {
+    return orders.filter((o) => {
+      if (o.work_domain === 'duplicate') return false
+      const isUncheck = !o.duplicate_check_status || o.duplicate_check_status === 'uncheck'
+      const st = (o.state || '').toUpperCase()
+      const isWaitingOrDoing = ['WAITING', 'OPEN_FOR_ALLOCATION', 'DISCOVERED', 'PENDING', 'OPEN', 'IN_PROGRESS', 'DOING', 'ASSIGNED'].includes(st)
+      return isUncheck && isWaitingOrDoing
+    })
   }, [orders])
 
-  // 2. Trùng lặp (thuộc duplicate domain / trello)
+  // 2. Trùng lặp (thuộc duplicate domain / trello hoặc đã gắn tag duplicate)
   const supportDuplicateOrders = useMemo(() => {
     return orders.filter((o) => o.work_domain === 'duplicate' || o.duplicate_check_status === 'duplicate')
   }, [orders])
 
-  // 3. Không trùng lặp
+  // 3. Không trùng lặp (đã kiểm tra và đánh dấu không trùng)
   const supportNonDuplicateOrders = useMemo(() => {
     return orders.filter((o) => o.work_domain !== 'duplicate' && o.duplicate_check_status === 'non_duplicate')
   }, [orders])
@@ -862,7 +868,7 @@ export function OrdersListPage() {
   if (isSupport) {
     baseOrders =
       supportTab === 'all'
-        ? supportAllOrders
+        ? supportUncheckedOrders
         : supportTab === 'duplicate'
         ? supportDuplicateOrders
         : supportNonDuplicateOrders
@@ -1501,7 +1507,7 @@ export function OrdersListPage() {
         <div className="space-y-3">
           <div className="bg-white p-2 rounded-2xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 w-full lg:w-auto">
-              {/* 1. ALL WAITING ORDERS (CẦN KIỂM TRA TRÙNG LẶP) */}
+              {/* 1. UNCHECKED ORDERS (CHƯA KIỂM TRA) */}
               <button
                 type="button"
                 onClick={() => handleSwitchSupportTab('all')}
@@ -1512,17 +1518,17 @@ export function OrdersListPage() {
                 }`}
               >
                 <Clock className="h-3.5 w-3.5" />
-                <span>Tất cả các đơn</span>
+                <span>Chưa kiểm tra</span>
                 <span
                   className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
                     supportTab === 'all' ? 'bg-white/25 text-white' : 'bg-amber-200/80 text-amber-900'
                   }`}
                 >
-                  {supportAllOrders.length}
+                  {supportUncheckedOrders.length}
                 </span>
               </button>
 
-              {/* 2. DUPLICATE ORDERS (TRÙNG LẶP - TRELLO) */}
+              {/* 2. DUPLICATE ORDERS (TRÙNG LẶP) */}
               <button
                 type="button"
                 onClick={() => handleSwitchSupportTab('duplicate')}
@@ -2105,13 +2111,13 @@ export function OrdersListPage() {
         )}
       </div>
 
-      {/* Row-based Data Table UI (1 Row / Order Standard 9 Columns) */}
+      {/* Row-based Data Table UI */}
       <div className="rounded-xl border border-[hsl(var(--border))] bg-white shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-semibold uppercase text-slate-500 tracking-wider">
-                {(isAdmin || isSupport) && (
+              {isSupport ? (
+                <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-semibold uppercase text-slate-500 tracking-wider">
                   <th className="py-3 px-3 w-10 text-center">
                     <input
                       type="checkbox"
@@ -2123,33 +2129,52 @@ export function OrdersListPage() {
                       className="rounded border-slate-300 text-[#0052CC] focus:ring-[#0052CC] h-3.5 w-3.5 cursor-pointer"
                     />
                   </th>
-                )}
-                <th className="py-3 px-3 w-14 text-center">Ảnh</th>
-                <th className="py-3 px-4">{isManager ? 'Mã Đơn' : 'Tên Đơn Hàng'}</th>
-                <th className="py-3 px-4">Trạng Thái</th>
-                <th className="py-3 px-4">Des Đảm Nhận</th>
-                <th className="py-3 px-4 whitespace-nowrap">
-                  <button type="button" onClick={() => toggleDateSort('status_changed_at')} className="inline-flex items-center gap-1 hover:text-[#0052CC]" title="Sắp xếp theo thời gian chuyển vào tab (UTC+7)">
-                    Thời Gian <ArrowDownUp className={`h-3.5 w-3.5 ${dateSort.field === 'status_changed_at' ? 'text-[#0052CC]' : ''}`} />
-                  </button>
-                </th>
-                <th className="py-3 px-4 whitespace-nowrap">
-                  <button type="button" onClick={() => toggleDateSort('order_created_at_ext')} className="inline-flex items-center gap-1 hover:text-[#0052CC]" title="Sắp xếp theo Order at">
-                    Order At <ArrowDownUp className={`h-3.5 w-3.5 ${dateSort.field === 'order_created_at_ext' ? 'text-[#0052CC]' : ''}`} />
-                  </button>
-                </th>
-                <th className="py-3 px-4 whitespace-nowrap">
-                  <button type="button" onClick={() => toggleDateSort('created_at')} className="inline-flex items-center gap-1 hover:text-[#0052CC]" title="Sắp xếp theo ngày tạo (crawl)">
-                    Ngày tạo (crawl) <ArrowDownUp className={`h-3.5 w-3.5 ${dateSort.field === 'created_at' ? 'text-[#0052CC]' : ''}`} />
-                  </button>
-                </th>
-                <th className="py-3 px-4 text-right">Thao Tác</th>
-              </tr>
+                  <th className="py-3 px-3 w-16 text-center">Ảnh</th>
+                  <th className="py-3 px-4">Thông Tin Đơn Hàng</th>
+                  <th className="py-3 px-4 text-right w-72">Phân Loại / Thao Tác</th>
+                </tr>
+              ) : (
+                <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-semibold uppercase text-slate-500 tracking-wider">
+                  {isAdmin && (
+                    <th className="py-3 px-3 w-10 text-center">
+                      <input
+                        type="checkbox"
+                        checked={
+                          paginatedOrders.length > 0 &&
+                          paginatedOrders.every((o) => selectedOrderIds.includes(o.id))
+                        }
+                        onChange={(e) => handleSelectAll(e.target.checked)}
+                        className="rounded border-slate-300 text-[#0052CC] focus:ring-[#0052CC] h-3.5 w-3.5 cursor-pointer"
+                      />
+                    </th>
+                  )}
+                  <th className="py-3 px-3 w-14 text-center">Ảnh</th>
+                  <th className="py-3 px-4">{isAdmin ? 'Mã Đơn' : 'Tên Đơn Hàng'}</th>
+                  <th className="py-3 px-4">Trạng Thái</th>
+                  <th className="py-3 px-4">Des Đảm Nhận</th>
+                  <th className="py-3 px-4 whitespace-nowrap">
+                    <button type="button" onClick={() => toggleDateSort('status_changed_at')} className="inline-flex items-center gap-1 hover:text-[#0052CC]" title="Sắp xếp theo thời gian chuyển vào tab (UTC+7)">
+                      Thời Gian <ArrowDownUp className={`h-3.5 w-3.5 ${dateSort.field === 'status_changed_at' ? 'text-[#0052CC]' : ''}`} />
+                    </button>
+                  </th>
+                  <th className="py-3 px-4 whitespace-nowrap">
+                    <button type="button" onClick={() => toggleDateSort('order_created_at_ext')} className="inline-flex items-center gap-1 hover:text-[#0052CC]" title="Sắp xếp theo Order at">
+                      Order At <ArrowDownUp className={`h-3.5 w-3.5 ${dateSort.field === 'order_created_at_ext' ? 'text-[#0052CC]' : ''}`} />
+                    </button>
+                  </th>
+                  <th className="py-3 px-4 whitespace-nowrap">
+                    <button type="button" onClick={() => toggleDateSort('created_at')} className="inline-flex items-center gap-1 hover:text-[#0052CC]" title="Sắp xếp theo ngày tạo (crawl)">
+                      Ngày tạo (crawl) <ArrowDownUp className={`h-3.5 w-3.5 ${dateSort.field === 'created_at' ? 'text-[#0052CC]' : ''}`} />
+                    </button>
+                  </th>
+                  <th className="py-3 px-4 text-right">Thao Tác</th>
+                </tr>
+              )}
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
               {paginatedOrders.length === 0 ? (
                 <tr>
-                  <td colSpan={isAdmin || isSupport ? 9 : 8} className="py-12 text-center text-slate-400">
+                  <td colSpan={isSupport ? 4 : isAdmin ? 9 : 8} className="py-12 text-center text-slate-400">
                     {ordersLoading ? (
                       <>
                         <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin opacity-50 text-[#0052CC]" />
@@ -2187,446 +2212,514 @@ export function OrdersListPage() {
                       }`}
                       title="Click vào dòng để xem chi tiết đơn hàng"
                     >
-                      {(isAdmin || isSupport) && (
-                        <td className="py-2.5 px-3 text-center" onClick={(e) => e.stopPropagation()}>
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onClick={(e) => {
-                              if (e.shiftKey && lastSelectedIndex !== null) {
-                                const start = Math.min(lastSelectedIndex, idx)
-                                const end = Math.max(lastSelectedIndex, idx)
-                                const rangeIds = paginatedOrders.slice(start, end + 1).map((item) => item.id)
-                                setSelectedOrderIds((prev) => Array.from(new Set([...prev, ...rangeIds])))
-                              } else {
-                                setSelectedOrderIds((prev) =>
-                                  prev.includes(o.id) ? prev.filter((id) => id !== o.id) : [...prev, o.id]
-                                )
-                                setLastSelectedIndex(idx)
-                              }
-                            }}
-                            onChange={() => {}}
-                            className="rounded border-slate-300 text-[#0052CC] focus:ring-[#0052CC] h-3.5 w-3.5 cursor-pointer"
-                          />
-                        </td>
-                      )}
+                      {isSupport ? (
+                        <>
+                          {/* 1. Support Checkbox */}
+                          <td className="py-3 px-3 text-center" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onClick={(e) => {
+                                if (e.shiftKey && lastSelectedIndex !== null) {
+                                  const start = Math.min(lastSelectedIndex, idx)
+                                  const end = Math.max(lastSelectedIndex, idx)
+                                  const rangeIds = paginatedOrders.slice(start, end + 1).map((item) => item.id)
+                                  setSelectedOrderIds((prev) => Array.from(new Set([...prev, ...rangeIds])))
+                                } else {
+                                  setSelectedOrderIds((prev) =>
+                                    prev.includes(o.id) ? prev.filter((id) => id !== o.id) : [...prev, o.id]
+                                  )
+                                  setLastSelectedIndex(idx)
+                                }
+                              }}
+                              onChange={() => {}}
+                              className="rounded border-slate-300 text-[#0052CC] focus:ring-[#0052CC] h-3.5 w-3.5 cursor-pointer"
+                            />
+                          </td>
 
-                      {/* Image Thumbnail with Click-to-Zoom */}
-                      <td className="py-2.5 px-3 text-center" onClick={(e) => e.stopPropagation()}>
-                        {o.thumbnail_url ? (
-                          <img
-                            src={resolveAssetUrl(o.thumbnail_url)}
-                            alt={isManager ? o.external_order_id : (o.product_name || 'Đơn thiết kế')}
-                            title="Click để xem ảnh phóng to"
-                            onClick={() => setSelectedImage(resolveAssetUrl(o.thumbnail_url) ?? null)}
-                            className="h-16 w-16 rounded-xl object-cover border border-slate-200 mx-auto shadow-xs cursor-pointer hover:scale-105 transition-transform hover:ring-2 hover:ring-[#0052CC]"
-                          />
-                        ) : (
-                          <div className="h-16 w-16 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center mx-auto text-slate-400">
-                            <Package className="h-7 w-7" />
-                          </div>
-                        )}
-                      </td>
+                          {/* 2. Support Image Preview */}
+                          <td className="py-3 px-3 text-center" onClick={(e) => e.stopPropagation()}>
+                            {o.thumbnail_url ? (
+                              <img
+                                src={resolveAssetUrl(o.thumbnail_url)}
+                                alt={o.external_order_id}
+                                title="Click để xem ảnh phóng to"
+                                onClick={() => setSelectedImage(resolveAssetUrl(o.thumbnail_url) ?? null)}
+                                className="h-16 w-16 rounded-xl object-cover border border-slate-200 mx-auto shadow-xs cursor-pointer hover:scale-105 transition-transform hover:ring-2 hover:ring-[#0052CC]"
+                              />
+                            ) : (
+                              <div className="h-16 w-16 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center mx-auto text-slate-400">
+                                <Package className="h-7 w-7" />
+                              </div>
+                            )}
+                          </td>
 
-                      {/* Order Code / Product Name */}
-                      <td className="py-2.5 px-4 font-semibold text-[#0052CC]">
-                        {isManager ? (
-                          <>
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <CopyableOrderCode code={o.external_order_id} />
+                          {/* 3. Support Order Info (Mã Đơn, Tên Đơn, Bộ Ảnh, Template) */}
+                          <td className="py-3 px-4">
+                            <div className="space-y-1.5">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <CopyableOrderCode code={o.external_order_id} />
+                                {o.template_missing && (
+                                  <span className="inline-flex items-center gap-1 rounded border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700">
+                                    <Flag className="h-2.5 w-2.5" />
+                                    Thiếu template
+                                  </span>
+                                )}
+                              </div>
 
-                              {/* Admin: Orange exclamation mark if NOT checked by support across ALL tabs */}
-                              {isAdmin && (!o.duplicate_check_status || o.duplicate_check_status === 'uncheck') && (
-                                <span
-                                  className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-900 shadow-2xs"
-                                  title="Support team chưa kiểm tra trùng lặp cho đơn này"
-                                >
-                                  <AlertTriangle className="h-3 w-3 text-amber-600 shrink-0" />
-                                  <span>Chưa kiểm tra</span>
-                                </span>
+                              {o.product_name && (
+                                <p className="text-xs text-slate-800 font-semibold line-clamp-2" title={o.product_name}>
+                                  {o.product_name}
+                                </p>
                               )}
 
-                              {/* Support Badges */}
-                              {isSupport && (
+                              {/* Badges: Bộ Ảnh, Template, SKU */}
+                              <div className="flex items-center gap-2 pt-0.5 flex-wrap" onClick={(e) => e.stopPropagation()}>
+                                {(() => {
+                                  const dbCount =
+                                    o.product_image_urls && o.product_image_urls.length > 0
+                                      ? o.product_image_urls.length
+                                      : o.thumbnail_url
+                                      ? 1
+                                      : 0
+                                  const liveStatus = syncStatusMap[o.id]
+                                  const imgCount =
+                                    liveStatus?.status === 'success' && typeof liveStatus?.count === 'number'
+                                      ? Math.max(liveStatus.count, dbCount)
+                                      : dbCount
+                                  return (
+                                    <span
+                                      className={`inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md border shadow-2xs ${
+                                        imgCount > 1
+                                          ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                                          : 'text-amber-800 bg-amber-50 border-amber-200'
+                                      }`}
+                                      title={`Bộ ảnh sản phẩm: ${imgCount} ảnh`}
+                                    >
+                                      <Images className="h-3 w-3" />
+                                      <span>{imgCount} ảnh</span>
+                                    </span>
+                                  )
+                                })()}
+
+                                {o.source_files && o.source_files.length > 0 && (
+                                  <span className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md">
+                                    <Layers className="h-3 w-3" />
+                                    <span>{o.source_files.length} template file</span>
+                                  </span>
+                                )}
+
+                                {o.sku_image_url && (
+                                  <a
+                                    href={o.sku_image_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-[11px] font-bold text-[#0052CC] hover:underline inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-50 border border-blue-100"
+                                    title="Xem ảnh SKU Printerval"
+                                  >
+                                    <span>Ảnh SKU</span>
+                                    <ExternalLink className="h-2.5 w-2.5" />
+                                  </a>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* 4. Support Actions: 2 Buttons in Tab 1 OR Tag with 'X' in Tabs 2 & 3 */}
+                          <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center justify-end gap-2">
+                              {supportTab === 'all' && (
                                 <>
-                                  {(o.work_domain === 'duplicate' || o.duplicate_check_status === 'duplicate') && (
-                                    <span className="inline-flex rounded border border-violet-200 bg-violet-50 px-1.5 py-0.2 text-[10px] font-bold text-violet-700">
-                                      Trùng lặp
-                                    </span>
-                                  )}
-                                  {o.duplicate_check_status === 'non_duplicate' && (
-                                    <span className="inline-flex rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.2 text-[10px] font-bold text-emerald-700">
-                                      Không trùng
-                                    </span>
-                                  )}
-                                  {(!o.duplicate_check_status || o.duplicate_check_status === 'uncheck') && (
-                                    <span className="inline-flex rounded border border-amber-300 bg-amber-100 px-1.5 py-0.2 text-[10px] font-bold text-amber-900">
-                                      Chưa KT
-                                    </span>
-                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSetDuplicateStatus([o.id], 'duplicate')}
+                                    disabled={updatingDuplicateStatus}
+                                    className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-900 bg-amber-100 hover:bg-amber-200 border border-amber-300 px-3 py-1.5 rounded-lg transition-all cursor-pointer shadow-2xs hover:scale-105 active:scale-95 disabled:opacity-50"
+                                    title="Đánh dấu đơn này là Trùng lặp"
+                                  >
+                                    <Layers className="h-3.5 w-3.5 text-amber-700" />
+                                    <span>Trùng lặp</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSetDuplicateStatus([o.id], 'non_duplicate')}
+                                    disabled={updatingDuplicateStatus}
+                                    className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-900 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 px-3 py-1.5 rounded-lg transition-all cursor-pointer shadow-2xs hover:scale-105 active:scale-95 disabled:opacity-50"
+                                    title="Đánh dấu đơn này là Không trùng lặp"
+                                  >
+                                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700" />
+                                    <span>Không trùng lặp</span>
+                                  </button>
                                 </>
                               )}
 
-                              {isAdmin && o.work_domain === 'duplicate' && (
-                                <span className="inline-flex rounded border border-violet-200 bg-violet-50 px-1.5 py-0.2 text-[10px] font-bold text-violet-700">
-                                  Đơn trùng
+                              {supportTab === 'duplicate' && (
+                                <div className="inline-flex items-center gap-1.5 rounded-lg bg-purple-100 border border-purple-300 px-3 py-1.5 text-xs font-bold text-purple-900 shadow-2xs group">
+                                  <Layers className="h-3.5 w-3.5 text-purple-700" />
+                                  <span>Trùng lặp</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSetDuplicateStatus([o.id], 'uncheck')}
+                                    disabled={updatingDuplicateStatus}
+                                    className="ml-1 p-0.5 rounded-full hover:bg-purple-200 text-purple-700 hover:text-purple-950 transition-all cursor-pointer hover:scale-110"
+                                    title="Hủy tag Trùng lặp (quay lại tab Chưa kiểm tra)"
+                                  >
+                                    <X className="h-3.5 w-3.5 stroke-[2.5]" />
+                                  </button>
+                                </div>
+                              )}
+
+                              {supportTab === 'non_duplicate' && (
+                                <div className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-100 border border-emerald-300 px-3 py-1.5 text-xs font-bold text-emerald-900 shadow-2xs group">
+                                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700" />
+                                  <span>Không trùng lặp</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSetDuplicateStatus([o.id], 'uncheck')}
+                                    disabled={updatingDuplicateStatus}
+                                    className="ml-1 p-0.5 rounded-full hover:bg-emerald-200 text-emerald-700 hover:text-emerald-950 transition-all cursor-pointer hover:scale-110"
+                                    title="Hủy tag Không trùng lặp (quay lại tab Chưa kiểm tra)"
+                                  >
+                                    <X className="h-3.5 w-3.5 stroke-[2.5]" />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          {isAdmin && (
+                            <td className="py-2.5 px-3 text-center" onClick={(e) => e.stopPropagation()}>
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onClick={(e) => {
+                                  if (e.shiftKey && lastSelectedIndex !== null) {
+                                    const start = Math.min(lastSelectedIndex, idx)
+                                    const end = Math.max(lastSelectedIndex, idx)
+                                    const rangeIds = paginatedOrders.slice(start, end + 1).map((item) => item.id)
+                                    setSelectedOrderIds((prev) => Array.from(new Set([...prev, ...rangeIds])))
+                                  } else {
+                                    setSelectedOrderIds((prev) =>
+                                      prev.includes(o.id) ? prev.filter((id) => id !== o.id) : [...prev, o.id]
+                                    )
+                                    setLastSelectedIndex(idx)
+                                  }
+                                }}
+                                onChange={() => {}}
+                                className="rounded border-slate-300 text-[#0052CC] focus:ring-[#0052CC] h-3.5 w-3.5 cursor-pointer"
+                              />
+                            </td>
+                          )}
+
+                          {/* Image Thumbnail with Click-to-Zoom */}
+                          <td className="py-2.5 px-3 text-center" onClick={(e) => e.stopPropagation()}>
+                            {o.thumbnail_url ? (
+                              <img
+                                src={resolveAssetUrl(o.thumbnail_url)}
+                                alt={isAdmin ? o.external_order_id : (o.product_name || 'Đơn thiết kế')}
+                                title="Click để xem ảnh phóng to"
+                                onClick={() => setSelectedImage(resolveAssetUrl(o.thumbnail_url) ?? null)}
+                                className="h-16 w-16 rounded-xl object-cover border border-slate-200 mx-auto shadow-xs cursor-pointer hover:scale-105 transition-transform hover:ring-2 hover:ring-[#0052CC]"
+                              />
+                            ) : (
+                              <div className="h-16 w-16 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center mx-auto text-slate-400">
+                                <Package className="h-7 w-7" />
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Order Code / Product Name */}
+                          <td className="py-2.5 px-4 font-semibold text-[#0052CC]">
+                            {isAdmin ? (
+                              <>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <CopyableOrderCode code={o.external_order_id} />
+
+                                  {/* Admin: Orange exclamation mark if NOT checked by support across ALL tabs */}
+                                  {(!o.duplicate_check_status || o.duplicate_check_status === 'uncheck') && (
+                                    <span
+                                      className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-900 shadow-2xs"
+                                      title="Support team chưa kiểm tra trùng lặp cho đơn này"
+                                    >
+                                      <AlertTriangle className="h-3 w-3 text-amber-600 shrink-0" />
+                                      <span>Chưa kiểm tra</span>
+                                    </span>
+                                  )}
+
+                                  {o.work_domain === 'duplicate' && (
+                                    <span className="inline-flex rounded border border-violet-200 bg-violet-50 px-1.5 py-0.2 text-[10px] font-bold text-violet-700">
+                                      Đơn trùng
+                                    </span>
+                                  )}
+                                  {o.template_missing && (
+                                    <span className="inline-flex rounded border border-rose-200 bg-rose-50 px-1.5 py-0.2 text-[10px] font-bold text-rose-700">Thiếu temp</span>
+                                  )}
+                                </div>
+
+                                {o.product_name && (
+                                  <p className="text-[11px] text-slate-500 font-normal line-clamp-1 mt-0.5" title={o.product_name}>
+                                    {o.product_name}
+                                  </p>
+                                )}
+                              </>
+                            ) : (
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <Link
+                                    to={`/orders/${o.id}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      dismissHighlight(o.id)
+                                    }}
+                                    className="hover:underline flex items-center gap-1 text-xs font-bold text-slate-900 leading-snug"
+                                    title={o.product_name || 'Đơn hàng thiết kế'}
+                                  >
+                                    <span className="line-clamp-2">{o.product_name || 'Đơn hàng thiết kế'}</span>
+                                  </Link>
+                                  {o.template_missing && (
+                                    <span className="inline-flex rounded border border-rose-200 bg-rose-50 px-1.5 py-0.2 text-[10px] font-bold text-rose-700 shrink-0">Thiếu temp</span>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Badges and links */}
+                            <div className="flex items-center gap-2 mt-1 flex-wrap" onClick={(e) => e.stopPropagation()}>
+                              {o.sku_image_url && (
+                                <a
+                                  href={o.sku_image_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-[10px] font-bold text-[#0052CC] hover:underline inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-blue-50 border border-blue-100"
+                                  title="Xem ảnh SKU Printerval"
+                                >
+                                  <span>Image</span>
+                                  <ExternalLink className="h-2.5 w-2.5" />
+                                </a>
+                              )}
+                              {isAdmin && o.external_order_url && (
+                                <a
+                                  href={o.external_order_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-[10px] font-bold text-[#0052CC] hover:underline inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-blue-50 border border-blue-100"
+                                  title="Mở đơn trên Printerval"
+                                >
+                                  <span>Order</span>
+                                  <ExternalLink className="h-2.5 w-2.5" />
+                                </a>
+                              )}
+                              {o.source_files && o.source_files.length > 0 && (
+                                <span className="text-[10px] font-bold text-slate-600 px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200">
+                                  {o.source_files.length} file source
                                 </span>
                               )}
-                              {o.template_missing && (
-                                <span className="inline-flex rounded border border-rose-200 bg-rose-50 px-1.5 py-0.2 text-[10px] font-bold text-rose-700">Thiếu temp</span>
-                              )}
+
+                              {/* Image Count & Sync Status Badge */}
+                              {(() => {
+                                const dbCount =
+                                  o.product_image_urls && o.product_image_urls.length > 0
+                                    ? o.product_image_urls.length
+                                    : o.thumbnail_url
+                                    ? 1
+                                    : 0
+                                const liveStatus = syncStatusMap[o.id]
+                                const imgCount =
+                                  liveStatus?.status === 'success' && typeof liveStatus?.count === 'number'
+                                    ? Math.max(liveStatus.count, dbCount)
+                                    : dbCount
+                                const isSynced = imgCount > 1
+                                return isSynced ? (
+                                  <span
+                                    className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 shadow-2xs"
+                                    title={`Đã đồng bộ đủ bộ ảnh (${imgCount} ảnh)`}
+                                  >
+                                    <span>{imgCount} ảnh</span>
+                                    <Check className="h-3 w-3 text-emerald-600 stroke-[3]" />
+                                  </span>
+                                ) : (
+                                  <span
+                                    className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 shadow-2xs"
+                                    title={`Chưa đồng bộ bộ ảnh (${imgCount || 1} ảnh)`}
+                                  >
+                                    <span>{imgCount || 1} ảnh</span>
+                                  </span>
+                                )
+                              })()}
                             </div>
 
-                            {o.product_name && (
-                              <p className="text-[11px] text-slate-500 font-normal line-clamp-1 mt-0.5" title={o.product_name}>
-                                {o.product_name}
-                              </p>
+                            {/* Note Outsource preview for Fix orders */}
+                            {o.state === 'REVISION' && o.note_outsource && (
+                              <div className="mt-1.5 p-2 rounded-lg bg-orange-50 border border-orange-200 text-[11px] text-orange-950 font-normal">
+                                <div className="font-bold flex items-center gap-1 text-orange-900 mb-0.5">
+                                  <AlertTriangle className="h-3 w-3 text-orange-600 shrink-0" />
+                                  <span>QC Printerval:</span>
+                                </div>
+                                <div className="whitespace-pre-wrap break-all leading-tight text-slate-800 line-clamp-2">
+                                  {o.note_outsource}
+                                </div>
+                              </div>
                             )}
-                          </>
-                        ) : (
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <Link
-                                to={`/orders/${o.id}`}
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  dismissHighlight(o.id)
+                          </td>
+
+                          {/* Status Column: Dropdown for Admin, Clear Badges for Designer */}
+                          <td className="py-2.5 px-4" onClick={(e) => e.stopPropagation()}>
+                            {isAdmin ? (
+                              <StatusDropdown
+                                orderId={o.id}
+                                externalOrderId={o.external_order_id}
+                                currentState={o.state}
+                                disabled={Boolean(o.template_missing)}
+                                onStatusChanged={(newState) => {
+                                  markTabMoved(o.id)
+                                  setOrders((prev) =>
+                                    prev.map((item) => (item.id === o.id ? { ...item, state: newState } : item))
+                                  )
                                 }}
-                                className="hover:underline flex items-center gap-1 text-xs font-bold text-slate-900 leading-snug"
-                                title={o.product_name || 'Đơn hàng thiết kế'}
-                              >
-                                <span className="line-clamp-2">{o.product_name || 'Đơn hàng thiết kế'}</span>
-                              </Link>
-                              {o.template_missing && (
-                                <span className="inline-flex rounded border border-rose-200 bg-rose-50 px-1.5 py-0.2 text-[10px] font-bold text-rose-700 shrink-0">Thiếu temp</span>
-                              )}
-                            </div>
-                          </div>
-                        )}
+                              />
+                            ) : (
+                              <div>
+                                {o.template_missing ? (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold rounded-lg bg-rose-100 text-rose-800 border border-rose-300 select-none shadow-2xs">
+                                    <Flag className="h-3 w-3" />
+                                    <span>Chờ cập nhật</span>
+                                  </span>
+                                ) : ['REVISION', 'REVISION_REQUESTED', 'FIX'].includes((o.state || '').toUpperCase()) ? (
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold rounded-lg bg-rose-100 text-rose-800 border border-rose-300 select-none shadow-2xs">
+                                    <span className="h-2 w-2 rounded-full bg-rose-500 animate-pulse" />
+                                    <span>Cần sửa gấp</span>
+                                  </span>
+                                ) : ['QC_PENDING', 'RESULT_SUBMITTED', 'SUBMITTING_TO_SITE', 'REVIEW'].includes((o.state || '').toUpperCase()) ? (
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold rounded-lg bg-purple-100 text-purple-800 border border-purple-300 select-none shadow-2xs">
+                                    <span className="h-2 w-2 rounded-full bg-purple-500" />
+                                    <span>Chờ duyệt</span>
+                                  </span>
+                                ) : ['DONE', 'CLAIMED_IMPORTED', 'COMPLETED', 'SKIPPED'].includes((o.state || '').toUpperCase()) ? (
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold rounded-lg bg-emerald-100 text-emerald-800 border border-emerald-300 select-none shadow-2xs">
+                                    <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                                    <span>Hoàn thành</span>
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold rounded-lg bg-blue-100 text-blue-800 border border-blue-300 select-none shadow-2xs">
+                                    <span className="h-2 w-2 rounded-full bg-blue-500" />
+                                    <span>{['WAITING', 'OPEN_FOR_ALLOCATION', 'DISCOVERED', 'PENDING', 'OPEN'].includes((o.state || '').toUpperCase()) ? 'Chờ chia' : 'Đang làm'}</span>
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                            {isAdmin && o.printerval_status && (
+                              <div className="mt-1 text-[10px] font-mono text-slate-400 flex items-center gap-1">
+                                <span>Prin:</span>
+                                <span className="font-semibold text-slate-600 inline-flex items-center gap-1">
+                                  {recentPrintervalChanges[o.id]?.statusChanged && (Date.now() - (recentPrintervalChanges[o.id]?.timestamp || 0) < 300000) && (
+                                    <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shadow-xs shrink-0" title="Trạng thái Printerval mới cập nhật (hiển thị 5 phút hoặc khi click)" />
+                                  )}
+                                  <span>{o.printerval_status}</span>
+                                </span>
+                              </div>
+                            )}
+                          </td>
 
-                        {/* Badges and links */}
-                        <div className="flex items-center gap-2 mt-1 flex-wrap" onClick={(e) => e.stopPropagation()}>
-                          {o.sku_image_url && (
-                            <a
-                              href={o.sku_image_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-[10px] font-bold text-[#0052CC] hover:underline inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-blue-50 border border-blue-100"
-                              title="Xem ảnh SKU Printerval"
-                            >
-                              <span>Image</span>
-                              <ExternalLink className="h-2.5 w-2.5" />
-                            </a>
-                          )}
-                          {isAdmin && o.external_order_url && (
-                            <a
-                              href={o.external_order_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-[10px] font-bold text-[#0052CC] hover:underline inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-blue-50 border border-blue-100"
-                              title="Mở đơn trên Printerval"
-                            >
-                              <span>Order</span>
-                              <ExternalLink className="h-2.5 w-2.5" />
-                            </a>
-                          )}
-                          {o.source_files && o.source_files.length > 0 && (
-                            <span className="text-[10px] font-bold text-slate-600 px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200">
-                              {o.source_files.length} file source
-                            </span>
-                          )}
-
-                          {/* Image Count & Sync Status Badge */}
-                          {(() => {
-                            const dbCount =
-                              o.product_image_urls && o.product_image_urls.length > 0
-                                ? o.product_image_urls.length
-                                : o.thumbnail_url
-                                ? 1
-                                : 0
-                            const liveStatus = syncStatusMap[o.id]
-                            const imgCount =
-                              liveStatus?.status === 'success' && typeof liveStatus?.count === 'number'
-                                ? Math.max(liveStatus.count, dbCount)
-                                : dbCount
-                            const isSynced = imgCount > 1
-                            return isSynced ? (
+                          {/* DES Đảm Nhận */}
+                          <td className="py-2.5 px-4 font-medium text-slate-700" onClick={(e) => e.stopPropagation()}>
+                            {o.assigned_designer_name ? (
                               <span
-                                className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 shadow-2xs"
-                                title={`Đã đồng bộ đủ bộ ảnh (${imgCount} ảnh)`}
+                                onClick={() => isAdmin && setAssigningOrder(o)}
+                                className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-blue-50 text-[#0052CC] font-semibold text-xs ${
+                                  isAdmin ? 'cursor-pointer hover:bg-blue-100 hover:scale-105 transition-all' : ''
+                                }`}
+                                title={isAdmin ? 'Click để đổi Designer đảm nhận' : undefined}
                               >
-                                <span>{imgCount} ảnh</span>
-                                <Check className="h-3 w-3 text-emerald-600 stroke-[3]" />
+                                <User className="h-3 w-3" />
+                                <span>{o.assigned_designer_name}</span>
                               </span>
                             ) : (
                               <span
-                                className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 shadow-2xs"
-                                title={`Chưa đồng bộ bộ ảnh (${imgCount || 1} ảnh)`}
+                                onClick={() => isAdmin && setAssigningOrder(o)}
+                                className={`text-slate-400 font-normal text-xs ${
+                                  isAdmin ? 'cursor-pointer hover:text-[#0052CC] hover:underline font-semibold' : ''
+                                }`}
+                                title={isAdmin ? 'Click để phân công Designer' : undefined}
                               >
-                                <span>{imgCount || 1} ảnh</span>
+                                {isAdmin ? '+ Phân công' : 'Chưa phân bổ'}
                               </span>
-                            )
-                          })()}
-                        </div>
+                            )}
+                            {isAdmin && (o.printerval_designer || o.printerval_assignment_lifecycle === 'pending') && (
+                              <div className="mt-0.5 text-[10px] font-medium text-slate-500 flex items-center gap-1 max-w-[160px] truncate" title={o.printerval_designer || ''}>
+                                <span>Prin:</span>
+                                <span className="inline-flex items-center gap-1 truncate">
+                                  {recentPrintervalChanges[o.id]?.designerChanged && (Date.now() - (recentPrintervalChanges[o.id]?.timestamp || 0) < 300000) && (
+                                    <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shadow-xs shrink-0" title="Designer Printerval mới cập nhật (hiển thị 5 phút hoặc khi click)" />
+                                  )}
+                                  <span className="truncate">{o.printerval_designer || '—'}</span>
+                                </span>
+                                {o.printerval_assignment_lifecycle === 'pending' && (
+                                  <Loader2 className="h-2.5 w-2.5 animate-spin inline-block ml-1 text-[#0052CC]" />
+                                )}
+                              </div>
+                            )}
+                          </td>
 
-                        {/* Note Outsource preview for Fix orders */}
-                        {o.state === 'REVISION' && o.note_outsource && (
-                          <div className="mt-1.5 p-2 rounded-lg bg-orange-50 border border-orange-200 text-[11px] text-orange-950 font-normal">
-                            <div className="font-bold flex items-center gap-1 text-orange-900 mb-0.5">
-                              <AlertTriangle className="h-3 w-3 text-orange-600 shrink-0" />
-                              <span>QC Printerval:</span>
-                            </div>
-                            <div className="whitespace-pre-wrap break-all leading-tight text-slate-800 line-clamp-2">
-                              {o.note_outsource}
-                            </div>
-                          </div>
-                        )}
-                      </td>
-
-                      {/* Status Column: Dropdown for Admin, Clear Badges for Designer / Support */}
-                      <td className="py-2.5 px-4" onClick={(e) => e.stopPropagation()}>
-                        {isAdmin ? (
-                          <StatusDropdown
-                            orderId={o.id}
-                            externalOrderId={o.external_order_id}
-                            currentState={o.state}
-                            disabled={Boolean(o.template_missing)}
-                            onStatusChanged={(newState) => {
-                              markTabMoved(o.id)
-                              setOrders((prev) =>
-                                prev.map((item) => (item.id === o.id ? { ...item, state: newState } : item))
+                          {/* Thời Gian (Vào Tab UTC+7) */}
+                          <td className="py-2.5 px-4 whitespace-nowrap">
+                            {(() => {
+                              const split = formatUtc7Split(o.status_changed_at || o.created_at)
+                              if (!split) return <span className="text-slate-300 font-mono text-xs">-</span>
+                              return (
+                                <div className="flex flex-col leading-tight" title="Thời gian chuyển vào tab / trạng thái gần nhất (UTC+7)">
+                                  <span className="font-mono text-xs font-bold text-slate-800">{split.time}</span>
+                                  <span className="font-mono text-[11px] text-slate-500">{split.date}</span>
+                                </div>
                               )
-                            }}
-                          />
-                        ) : (
-                          <div>
-                            {o.template_missing ? (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold rounded-lg bg-rose-100 text-rose-800 border border-rose-300 select-none shadow-2xs">
-                                <Flag className="h-3 w-3" />
-                                <span>Chờ cập nhật</span>
-                              </span>
-                            ) : ['REVISION', 'REVISION_REQUESTED', 'FIX'].includes((o.state || '').toUpperCase()) ? (
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold rounded-lg bg-rose-100 text-rose-800 border border-rose-300 select-none shadow-2xs">
-                                <span className="h-2 w-2 rounded-full bg-rose-500 animate-pulse" />
-                                <span>Cần sửa gấp</span>
-                              </span>
-                            ) : ['QC_PENDING', 'RESULT_SUBMITTED', 'SUBMITTING_TO_SITE', 'REVIEW'].includes((o.state || '').toUpperCase()) ? (
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold rounded-lg bg-purple-100 text-purple-800 border border-purple-300 select-none shadow-2xs">
-                                <span className="h-2 w-2 rounded-full bg-purple-500" />
-                                <span>Chờ duyệt</span>
-                              </span>
-                            ) : ['DONE', 'CLAIMED_IMPORTED', 'COMPLETED', 'SKIPPED'].includes((o.state || '').toUpperCase()) ? (
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold rounded-lg bg-emerald-100 text-emerald-800 border border-emerald-300 select-none shadow-2xs">
-                                <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                                <span>Hoàn thành</span>
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold rounded-lg bg-blue-100 text-blue-800 border border-blue-300 select-none shadow-2xs">
-                                <span className="h-2 w-2 rounded-full bg-blue-500" />
-                                <span>{['WAITING', 'OPEN_FOR_ALLOCATION', 'DISCOVERED', 'PENDING', 'OPEN'].includes((o.state || '').toUpperCase()) ? 'Chờ chia' : 'Đang làm'}</span>
-                              </span>
-                            )}
-                          </div>
-                        )}
-                        {isAdmin && o.printerval_status && (
-                          <div className="mt-1 text-[10px] font-mono text-slate-400 flex items-center gap-1">
-                            <span>Prin:</span>
-                            <span className="font-semibold text-slate-600 inline-flex items-center gap-1">
-                              {recentPrintervalChanges[o.id]?.statusChanged && (Date.now() - (recentPrintervalChanges[o.id]?.timestamp || 0) < 300000) && (
-                                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shadow-xs shrink-0" title="Trạng thái Printerval mới cập nhật (hiển thị 5 phút hoặc khi click)" />
-                              )}
-                              <span>{o.printerval_status}</span>
-                            </span>
-                          </div>
-                        )}
-                      </td>
+                            })()}
+                          </td>
 
-                      {/* DES Đảm Nhận */}
-                      <td className="py-2.5 px-4 font-medium text-slate-700" onClick={(e) => e.stopPropagation()}>
-                        {o.assigned_designer_name ? (
-                          <span
-                            onClick={() => isAdmin && setAssigningOrder(o)}
-                            className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-blue-50 text-[#0052CC] font-semibold text-xs ${
-                              isAdmin ? 'cursor-pointer hover:bg-blue-100 hover:scale-105 transition-all' : ''
-                            }`}
-                            title={isAdmin ? 'Click để đổi Designer đảm nhận' : undefined}
-                          >
-                            <User className="h-3 w-3" />
-                            <span>{o.assigned_designer_name}</span>
-                          </span>
-                        ) : (
-                          <span
-                            onClick={() => isAdmin && setAssigningOrder(o)}
-                            className={`text-slate-400 font-normal text-xs ${
-                              isAdmin ? 'cursor-pointer hover:text-[#0052CC] hover:underline font-semibold' : ''
-                            }`}
-                            title={isAdmin ? 'Click để phân công Designer' : undefined}
-                          >
-                            {isAdmin ? '+ Phân công' : 'Chưa phân bổ'}
-                          </span>
-                        )}
-                        {isAdmin && (o.printerval_designer || o.printerval_assignment_lifecycle === 'pending') && (
-                          <div className="mt-0.5 text-[10px] font-medium text-slate-500 flex items-center gap-1 max-w-[160px] truncate" title={o.printerval_designer || ''}>
-                            <span>Prin:</span>
-                            <span className="inline-flex items-center gap-1 truncate">
-                              {recentPrintervalChanges[o.id]?.designerChanged && (Date.now() - (recentPrintervalChanges[o.id]?.timestamp || 0) < 300000) && (
-                                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shadow-xs shrink-0" title="Designer Printerval mới cập nhật (hiển thị 5 phút hoặc khi click)" />
-                              )}
-                              <span className="truncate">{o.printerval_designer || '—'}</span>
-                            </span>
-                            {o.printerval_assignment_lifecycle === 'pending' && (
-                              <Loader2 className="h-2.5 w-2.5 animate-spin inline-block ml-1 text-[#0052CC]" />
-                            )}
-                          </div>
-                        )}
-                      </td>
+                          {/* Printerval Order Created At (Order At) */}
+                          <td className="py-2.5 px-4 whitespace-nowrap">
+                            {(() => {
+                              const split = formatUtc7Split(o.order_created_at_ext)
+                              if (!split) return <span className="text-slate-300 font-mono text-xs">-</span>
+                              return (
+                                <div className="flex flex-col leading-tight" title="Thời gian khách đặt hàng (Order at)">
+                                  <span className="font-mono text-xs font-semibold text-slate-700">{split.time}</span>
+                                  <span className="font-mono text-[11px] text-slate-400">{split.date}</span>
+                                </div>
+                              )
+                            })()}
+                          </td>
 
-                      {/* Thời Gian (Vào Tab UTC+7) */}
-                      <td className="py-2.5 px-4 whitespace-nowrap">
-                        {(() => {
-                          const split = formatUtc7Split(o.status_changed_at || o.created_at)
-                          if (!split) return <span className="text-slate-300 font-mono text-xs">-</span>
-                          return (
-                            <div className="flex flex-col leading-tight" title="Thời gian chuyển vào tab / trạng thái gần nhất (UTC+7)">
-                              <span className="font-mono text-xs font-bold text-slate-800">{split.time}</span>
-                              <span className="font-mono text-[11px] text-slate-500">{split.date}</span>
-                            </div>
-                          )
-                        })()}
-                      </td>
+                          {/* Created At (Tacahu Import Time) */}
+                          <td className="py-2.5 px-4 whitespace-nowrap">
+                            {(() => {
+                              const split = formatUtc7Split(o.created_at)
+                              if (!split) return <span className="text-slate-300 font-mono text-xs">-</span>
+                              return (
+                                <div className="flex flex-col leading-tight" title="Thời gian tạo trong Tacahu">
+                                  <span className="font-mono text-xs font-medium text-slate-600">{split.time}</span>
+                                  <span className="font-mono text-[11px] text-slate-400">{split.date}</span>
+                                </div>
+                              )
+                            })()}
+                          </td>
 
-                      {/* Printerval Order Created At (Order At) */}
-                      <td className="py-2.5 px-4 whitespace-nowrap">
-                        {(() => {
-                          const split = formatUtc7Split(o.order_created_at_ext)
-                          if (!split) return <span className="text-slate-300 font-mono text-xs">-</span>
-                          return (
-                            <div className="flex flex-col leading-tight" title="Thời gian khách đặt hàng (Order at)">
-                              <span className="font-mono text-xs font-semibold text-slate-700">{split.time}</span>
-                              <span className="font-mono text-[11px] text-slate-400">{split.date}</span>
-                            </div>
-                          )
-                        })()}
-                      </td>
-
-                      {/* Created At (Tacahu Import Time) */}
-                      <td className="py-2.5 px-4 whitespace-nowrap">
-                        {(() => {
-                          const split = formatUtc7Split(o.created_at)
-                          if (!split) return <span className="text-slate-300 font-mono text-xs">-</span>
-                          return (
-                            <div className="flex flex-col leading-tight" title="Thời gian tạo trong Tacahu">
-                              <span className="font-mono text-xs font-medium text-slate-600">{split.time}</span>
-                              <span className="font-mono text-[11px] text-slate-400">{split.date}</span>
-                            </div>
-                          )
-                        })()}
-                      </td>
-
-                      {/* Actions Contextual to Active Tab */}
-                      <td className="py-2.5 px-4 text-right" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center justify-end gap-1.5 flex-wrap">
-                          {/* Support Actions Contextual to Support Tabs */}
-                          {isSupport && supportTab === 'all' && (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => handleSetDuplicateStatus([o.id], 'duplicate')}
-                                disabled={updatingDuplicateStatus}
-                                className="inline-flex items-center gap-1 text-xs font-bold text-amber-800 bg-amber-100 hover:bg-amber-200 border border-amber-300 px-2.5 py-1 rounded-lg transition-colors cursor-pointer shadow-2xs"
-                                title="Đánh dấu đơn này là Trùng lặp (chuyển sang Trello)"
-                              >
-                                <Layers className="h-3 w-3 text-amber-700" />
-                                <span>Trùng</span>
-                              </button>
-                              {o.duplicate_check_status === 'non_duplicate' ? (
+                          {/* Actions Contextual to Active Tab */}
+                          <td className="py-2.5 px-4 text-right" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                              {/* Doing Tab Action: Revoke Assignment for Admin */}
+                              {isAdmin && adminTab === 'doing' && (
                                 <button
                                   type="button"
-                                  onClick={() => handleSetDuplicateStatus([o.id], 'uncheck')}
-                                  disabled={updatingDuplicateStatus}
-                                  className="inline-flex items-center gap-1 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 px-2 py-1 rounded-lg transition-colors cursor-pointer shadow-2xs"
-                                  title="Chuyển về trạng thái Chưa kiểm tra"
+                                  onClick={() => handleRevokeAssignment([o.id])}
+                                  className="inline-flex items-center gap-1 text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-2.5 py-1 rounded-lg transition-colors cursor-pointer shadow-2xs"
+                                  title="Hủy phân công đơn này (trả về trạng thái Waiting)"
                                 >
-                                  <RotateCcw className="h-3 w-3" />
-                                  <span>Chưa KT</span>
-                                </button>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => handleSetDuplicateStatus([o.id], 'non_duplicate')}
-                                  disabled={updatingDuplicateStatus}
-                                  className="inline-flex items-center gap-1 text-xs font-bold text-emerald-800 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 px-2.5 py-1 rounded-lg transition-colors cursor-pointer shadow-2xs"
-                                  title="Đánh dấu đơn này là Không trùng lặp"
-                                >
-                                  <Check className="h-3 w-3 text-emerald-700 stroke-[3]" />
-                                  <span>Không trùng</span>
+                                  <UserX className="h-3 w-3 text-rose-600" />
+                                  <span>Hủy chia</span>
                                 </button>
                               )}
-                            </>
-                          )}
-
-                          {isSupport && supportTab === 'duplicate' && (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => handleSetDuplicateStatus([o.id], 'non_duplicate')}
-                                disabled={updatingDuplicateStatus}
-                                className="inline-flex items-center gap-1 text-xs font-bold text-emerald-800 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 px-2.5 py-1 rounded-lg transition-colors cursor-pointer shadow-2xs"
-                                title="Bỏ trùng lặp (chuyển thành Không trùng)"
-                              >
-                                <Check className="h-3 w-3 text-emerald-700" />
-                                <span>Không trùng</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleSetDuplicateStatus([o.id], 'uncheck')}
-                                disabled={updatingDuplicateStatus}
-                                className="inline-flex items-center gap-1 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 px-2 py-1 rounded-lg transition-colors cursor-pointer shadow-2xs"
-                                title="Chuyển về trạng thái Chưa kiểm tra"
-                              >
-                                <RotateCcw className="h-3 w-3" />
-                                <span>Chưa KT</span>
-                              </button>
-                            </>
-                          )}
-
-                          {isSupport && supportTab === 'non_duplicate' && (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => handleSetDuplicateStatus([o.id], 'duplicate')}
-                                disabled={updatingDuplicateStatus}
-                                className="inline-flex items-center gap-1 text-xs font-bold text-amber-800 bg-amber-100 hover:bg-amber-200 border border-amber-300 px-2.5 py-1 rounded-lg transition-colors cursor-pointer shadow-2xs"
-                                title="Đổi thành Trùng lặp"
-                              >
-                                <Layers className="h-3 w-3 text-amber-700" />
-                                <span>Trùng</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleSetDuplicateStatus([o.id], 'uncheck')}
-                                disabled={updatingDuplicateStatus}
-                                className="inline-flex items-center gap-1 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 px-2 py-1 rounded-lg transition-colors cursor-pointer shadow-2xs"
-                                title="Chuyển về trạng thái Chưa kiểm tra"
-                              >
-                                <RotateCcw className="h-3 w-3" />
-                                <span>Chưa KT</span>
-                              </button>
-                            </>
-                          )}
-
-                          {/* Doing Tab Action: Revoke Assignment for Admin */}
-                          {isAdmin && adminTab === 'doing' && (
-                            <button
-                              type="button"
-                              onClick={() => handleRevokeAssignment([o.id])}
-                              className="inline-flex items-center gap-1 text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-2.5 py-1 rounded-lg transition-colors cursor-pointer shadow-2xs"
-                              title="Hủy phân công đơn này (trả về trạng thái Waiting)"
-                            >
-                              <UserX className="h-3 w-3 text-rose-600" />
-                              <span>Hủy chia</span>
-                            </button>
-                          )}
 
                           {/* Fix Tab Actions: Accept Fix (Chấp nhận & giao Des) OR Reject Fix (Từ chối & gửi lại Review) */}
                           {isAdmin && adminTab === 'fix' && (
@@ -2722,9 +2815,11 @@ export function OrdersListPage() {
                           </Link>
                         </div>
                       </td>
-                    </tr>
-                  )
-                })
+                    </>
+                  )}
+                </tr>
+              )
+            })
               )}
             </tbody>
           </table>
