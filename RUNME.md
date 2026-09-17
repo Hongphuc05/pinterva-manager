@@ -151,8 +151,10 @@ Python compile, Ruff và Docker Compose validation đều pass.
 ## 8. Production và local là hai cấu hình khác nhau
 
 - `compose.local.yaml`: dùng trên Mac để chạy trọn hệ thống bằng một lệnh.
-- `compose.yaml`: backend production/self-hosted; frontend production có thể vẫn chạy
-  trên Vercel.
+- `compose.production.yaml`: dùng riêng trên VPS cho PostgreSQL, Redis, FastAPI + React
+  SPA, Celery workers, Celery Beat và Cloudflare Tunnel.
 
-Không dùng `compose.local.yaml` để deploy production. Xem
-[docs/SELF_HOSTED_PRODUCTION.md](docs/SELF_HOSTED_PRODUCTION.md) khi triển khai server.
+Không dùng `compose.local.yaml` để deploy production và không dùng
+`compose.production.yaml` thay local runtime. Hướng dẫn production nằm tại
+[docs/PRODUCTION_DOCKER.md](docs/PRODUCTION_DOCKER.md). Phase production không tự build
+Docker: lệnh deploy yêu cầu truyền `--build` một cách tường minh.
