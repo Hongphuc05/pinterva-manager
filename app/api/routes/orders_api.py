@@ -1,20 +1,24 @@
-from __future__ import annotations
-
-import hashlib
-import hmac
+import base64
 import math
+import re
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import (
+    ApprovalDecision,
+    ApprovalRequest,
     Assignment,
+    ExternalObservation,
+    FinanceNote,
     Order,
+    OrderAsset,
     Platform,
     PrintervalAssignmentRequest,
     ResultVersion,
@@ -34,7 +38,12 @@ from app.api.deps import (
     get_current_platform_id,
     get_current_user,
     get_db,
+    require_any_role,
     require_role,
+)
+from app.application.assignment_commands import (
+    AssignmentCommandError,
+    revoke_assignment_command,
 )
 from app.application.crawl import DiscoverFailedError, refresh_order_detail, scan_orders_fast
 from app.application.order_queries import (
@@ -49,6 +58,10 @@ from app.application.printerval_assignment_requests import (
     create_request,
 )
 from app.config import get_settings
+from app.domain.access import (
+    ROLE_ADMIN,
+    ROLE_SUPPORT,
+)
 from app.domain.models import OrderState
 
 router = APIRouter()
@@ -74,11 +87,14 @@ class OrderSummaryOut(BaseModel):
     # site from here (see app/application/status_sync.py).
     printerval_status: str | None = None
     printerval_status_synced_at: datetime | None = None
+    status_changed_at: datetime | None = None
     note_outsource: str = ""
     previous_note_outsource: str | None = None
     fix_approved_by_admin: bool = False
+    fix_rejected_by_admin: bool = False
     designer_note: str = ""
     template_missing: bool = False
+    duplicate_check_status: str = "uncheck"
     sku_image_url: str | None = None
     external_order_url: str | None = None
     source_files: list[dict] | None = None
@@ -87,90 +103,422 @@ class OrderSummaryOut(BaseModel):
     printerval_designer: str | None = None
     printerval_assignment_lifecycle: str | None = None
     printerval_assignment_error: str | None = None
+    is_paid: bool = False
+    paid_at: datetime | None = None
+    review_submitted_at: datetime | None = None
 
 
 class OrdersListResponse(BaseModel):
     orders: list[OrderSummaryOut]
 
 
-class GalleryBridgeImportRequest(BaseModel):
-    platform_id: uuid.UUID
+CRAWLED_ASSETS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "crawled_assets"
+
+
+def _is_allowed_gallery_url(url: str) -> bool:
+    u_lower = url.lower().strip()
+    if u_lower.startswith("/crawled_assets/") or u_lower.startswith("/assets/") or u_lower.startswith("/order_assets/"):
+        return True
+    if u_lower.startswith("data:image/"):
+        return True
+    parsed = urlparse(url)
+    return parsed.scheme in ("https", "http") and bool(parsed.hostname)
+
+
+class GalleryImportItem(BaseModel):
     external_order_id: str
     image_urls: list[str]
     product_url: str | None = None
 
 
-class GalleryBridgeImportResponse(BaseModel):
+class SingleGalleryImportResponse(BaseModel):
+    ok: bool
     order_id: uuid.UUID
+    external_order_id: str
     image_count: int
 
 
-def _is_allowed_gallery_url(url: str) -> bool:
-    parsed = urlparse(url)
-    host = (parsed.hostname or "").lower()
-    return (
-        parsed.scheme == "https"
-        and bool(host)
-        and (
-            host == "printerval.com"
-            or host.endswith(".printerval.com")
-            or host.endswith(".customily.com")
-        )
-    )
+class BatchGalleryImportRequest(BaseModel):
+    platform_id: uuid.UUID | None = None
+    items: list[GalleryImportItem]
 
 
-@router.post("/integrations/printerval-gallery", response_model=GalleryBridgeImportResponse)
-def import_printerval_gallery_from_extension(
-    payload: GalleryBridgeImportRequest,
-    x_gallery_bridge_token: str | None = Header(default=None),
+class BatchGalleryImportResponse(BaseModel):
+    ok: bool
+    synced_orders_count: int
+    total_images_count: int
+    message: str
+
+
+@router.post("/integrations/printerval-gallery", response_model=SingleGalleryImportResponse)
+def import_single_printerval_gallery(
+    payload: GalleryImportItem,
+    platform_id: uuid.UUID | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    """Receive a gallery captured by CopyImage in an authenticated Chrome session.
+    """Receive and update product gallery for a single order from Chrome extension."""
+    from app.application.gallery_helper import deduplicate_gallery_urls
 
-    This endpoint deliberately does not accept the normal web session.  Its token is
-    scoped to one platform and cannot read or modify orders outside gallery URLs.
-    """
-    platform = db.get(Platform, payload.platform_id)
-    supplied_hash = hashlib.sha256((x_gallery_bridge_token or "").encode()).hexdigest()
-    if (
-        platform is None
-        or not platform.is_active
-        or not platform.gallery_bridge_token_hash
-        or not hmac.compare_digest(platform.gallery_bridge_token_hash, supplied_hash)
-    ):
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "CopyImage token không hợp lệ")
-
-    external_order_id = payload.external_order_id.strip()
-    if not external_order_id:
+    raw_id = payload.external_order_id.strip()
+    if not raw_id:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Thiếu mã đơn Printerval")
-    if len(payload.image_urls) > 50:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Tối đa 50 ảnh cho một đơn")
 
-    image_urls: list[str] = []
-    for raw_url in payload.image_urls:
-        url = raw_url.strip()
-        if not _is_allowed_gallery_url(url):
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY, "URL ảnh không thuộc Printerval"
-            )
-        if url not in image_urls:
-            image_urls.append(url)
+    m = re.search(r"([A-Za-z0-9_-]+)", raw_id)
+    external_order_id = m.group(1).upper() if m else raw_id.upper()
+
+    raw_allowed = [u.strip() for u in payload.image_urls if _is_allowed_gallery_url(u.strip())]
+    image_urls = deduplicate_gallery_urls(raw_allowed)
     if not image_urls:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Không có ảnh hợp lệ để đồng bộ")
 
-    order = (
-        db.query(Order)
-        .filter(Order.platform_id == platform.id, Order.external_order_id == external_order_id)
-        .one_or_none()
-    )
+    from sqlalchemy import func
+    query = db.query(Order).filter(func.upper(Order.external_order_id) == external_order_id)
+    if platform_id:
+        query = query.filter(Order.platform_id == platform_id)
+    order = query.first()
     if order is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn thuộc platform này")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Không tìm thấy đơn {external_order_id}")
 
-    # The browser page is the authoritative product gallery.  Replace stale fallback
-    # thumbnails atomically; normal crawls use a merge helper and cannot erase it.
     order.product_image_urls = image_urls
     db.commit()
-    return GalleryBridgeImportResponse(order_id=order.id, image_count=len(image_urls))
+    return SingleGalleryImportResponse(
+        ok=True,
+        order_id=order.id,
+        external_order_id=order.external_order_id,
+        image_count=len(image_urls),
+    )
+
+
+@router.post("/integrations/printerval-gallery/batch", response_model=BatchGalleryImportResponse)
+def import_batch_printerval_gallery(
+    payload: BatchGalleryImportRequest,
+    db: Session = Depends(get_db),
+):
+    """Receive and update product galleries for multiple orders in bulk from Chrome extension."""
+    from app.application.gallery_helper import deduplicate_gallery_urls
+
+    if not payload.items:
+        return BatchGalleryImportResponse(
+            ok=True,
+            synced_orders_count=0,
+            total_images_count=0,
+            message="Danh sách đơn trống, không có gì để đồng bộ.",
+        )
+
+    # Collect valid mapping of external_order_id -> image_urls
+    clean_map: dict[str, list[str]] = {}
+    for item in payload.items:
+        raw_id = item.external_order_id.strip()
+        if not raw_id:
+            continue
+        m = re.search(r"([A-Za-z0-9_-]+)", raw_id)
+        ext_id = m.group(1).upper() if m else raw_id.upper()
+        raw_allowed = [u.strip() for u in item.image_urls if _is_allowed_gallery_url(u.strip())]
+        valid_urls = deduplicate_gallery_urls(raw_allowed)
+        if valid_urls:
+            clean_map[ext_id] = valid_urls
+
+    if not clean_map:
+        return BatchGalleryImportResponse(
+            ok=True,
+            synced_orders_count=0,
+            total_images_count=0,
+            message="Không tìm thấy ảnh hợp lệ trong payload.",
+        )
+
+    from sqlalchemy import func
+    query = db.query(Order).filter(func.upper(Order.external_order_id).in_(list(clean_map.keys())))
+    if payload.platform_id:
+        query = query.filter(Order.platform_id == payload.platform_id)
+    orders = query.all()
+
+    synced_count = 0
+    total_imgs = 0
+    for order in orders:
+        key = (order.external_order_id or "").strip().upper()
+        imgs = clean_map.get(key)
+        if imgs:
+            order.product_image_urls = imgs
+            synced_count += 1
+            total_imgs += len(imgs)
+
+    db.commit()
+    return BatchGalleryImportResponse(
+        ok=True,
+        synced_orders_count=synced_count,
+        total_images_count=total_imgs,
+        message=f"Đã đồng bộ thành công {total_imgs} ảnh cho {synced_count} đơn hàng!",
+    )
+
+
+class PendingGalleryOrder(BaseModel):
+    id: uuid.UUID
+    external_order_id: str
+    product_name: str | None = None
+    thumbnail_url: str | None = None
+    sales_url: str | None = None
+    image_count: int = 0
+
+
+class PendingGalleriesResponse(BaseModel):
+    orders: list[PendingGalleryOrder]
+
+
+@router.get("/orders/pending-galleries", response_model=PendingGalleriesResponse)
+def api_get_pending_galleries(
+    state: str | None = Query(default=None),
+    limit: int = Query(default=2000, ge=1, le=10000),
+    user: User = Depends(require_role("admin")),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    """List orders for the active platform to inspect/sync product galleries."""
+    query = db.query(Order).filter(Order.platform_id == platform_id)
+    if state:
+        st = state.strip().upper()
+        if st in ("WAITING", "OPEN"):
+            query = query.filter(Order.state.in_(["WAITING", "OPEN_FOR_ALLOCATION", "DISCOVERED", "PENDING", "OPEN"]))
+        else:
+            query = query.filter(Order.state == st)
+    orders = (
+        query
+        .order_by(Order.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    result = []
+    for order in orders:
+        sales_url = None
+        if order.product_skus and isinstance(order.product_skus, list):
+            for sku_item in order.product_skus:
+                if isinstance(sku_item, dict) and sku_item.get("sales_url"):
+                    sales_url = sku_item["sales_url"]
+                    break
+        if not sales_url and order.external_order_url and "orders?id=" not in order.external_order_url:
+            sales_url = order.external_order_url
+
+        if not sales_url:
+            sku_to_check = order.sku
+            if not sku_to_check and order.product_skus and isinstance(order.product_skus, list):
+                for sku_item in order.product_skus:
+                    if isinstance(sku_item, dict) and sku_item.get("sku"):
+                        sku_to_check = sku_item["sku"]
+                        break
+            if sku_to_check:
+                match = re.search(r'[pP](\d+)', str(sku_to_check))
+                if match:
+                    pid = match.group(1)
+                    title = (order.product_name or 'product').lower()
+                    slug = re.sub(r'[^a-zA-Z0-9]+', '-', title).strip('-')
+                    # Detect German storefront words
+                    is_de = any(w in title for w in ['mit ', 'für ', 'und ', 'geschenk', 'becher', 'tasse', 'kissen', 'mütze', 'größe', 'weiss', 'weiß', 'schwarz'])
+                    if is_de:
+                        sales_url = f"https://printerval.com/de/{slug}-p{pid}"
+                    else:
+                        sales_url = f"https://printerval.com/{slug}-p{pid}"
+
+        img_urls = order.product_image_urls or []
+        result.append(
+            PendingGalleryOrder(
+                id=order.id,
+                external_order_id=order.external_order_id,
+                product_name=order.product_name,
+                thumbnail_url=order.thumbnail_url,
+                sales_url=sales_url,
+                image_count=len(img_urls),
+            )
+        )
+    return PendingGalleriesResponse(orders=result)
+
+
+class UpdateGalleryPayload(BaseModel):
+    image_urls: list[str]
+    product_url: str | None = None
+    designer_note: str | None = None
+    note_outsource: str | None = None
+
+
+class UpdateGalleryResponse(BaseModel):
+    ok: bool
+    order_id: uuid.UUID
+    image_count: int
+    designer_note: str | None = None
+    note_outsource: str | None = None
+
+
+class UploadGalleryImageRequest(BaseModel):
+    filename: str
+    content_base64: str
+
+
+class UploadGalleryImageResponse(BaseModel):
+    ok: bool
+    image_url: str
+
+
+@router.post("/orders/{order_id}/upload-gallery-image", response_model=UploadGalleryImageResponse)
+def api_upload_gallery_image(
+    order_id: str,
+    payload: UploadGalleryImageRequest,
+    user: User = Depends(require_role("admin")),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    """Admin endpoint to upload a product gallery image from local device."""
+    order = get_order_detail_for_user(db, user, order_id)
+    if order is None or order.platform_id != platform_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
+
+    filename = payload.filename or "image.png"
+    ext = Path(filename).suffix.lower()
+    if ext not in (".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif"):
+        ext = ".png"
+
+    raw_data = payload.content_base64
+    if "," in raw_data:
+        raw_data = raw_data.split(",", 1)[1]
+
+    try:
+        content = base64.b64decode(raw_data)
+    except Exception:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Dữ liệu ảnh base64 không hợp lệ")
+
+    if len(content) > 25 * 1024 * 1024:  # 25MB limit
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "File ảnh vượt quá dung lượng cho phép (25MB)")
+
+    safe_name = f"{uuid.uuid4().hex}{ext}"
+    target_dir = CRAWLED_ASSETS_DIR / "galleries" / str(order.id)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_path = target_dir / safe_name
+
+    with open(target_path, "wb") as f:
+        f.write(content)
+
+    rel_url = f"/crawled_assets/galleries/{order.id}/{safe_name}"
+    return UploadGalleryImageResponse(ok=True, image_url=rel_url)
+
+
+@router.patch("/orders/{order_id}/gallery", response_model=UpdateGalleryResponse)
+def api_update_order_gallery(
+    order_id: str,
+    payload: UpdateGalleryPayload,
+    user: User = Depends(require_role("admin")),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    """Admin-only update of an order's product gallery images and notes."""
+    order = get_order_detail_for_user(db, user, order_id)
+    if order is None or order.platform_id != platform_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
+
+    from app.application.gallery_helper import deduplicate_gallery_urls
+
+    raw_allowed = [u.strip() for u in payload.image_urls if u.strip() and _is_allowed_gallery_url(u.strip())]
+    clean_images = deduplicate_gallery_urls(raw_allowed)
+
+    order.product_image_urls = clean_images
+    if payload.designer_note is not None:
+        order.designer_note = payload.designer_note.strip()
+    if payload.note_outsource is not None:
+        order.note_outsource = payload.note_outsource.strip()
+
+    db.add(WorkflowEvent(
+        order_id=order.id,
+        from_state=order.state,
+        to_state=order.state,
+        actor_id=user.id,
+        evidence={
+            "action": "UPDATE_GALLERY_IMAGES",
+            "actor_role": "admin",
+            "actor_name": user.full_name or user.username,
+            "description": f"Admin cập nhật {len(clean_images)} ảnh chi tiết sản phẩm / ghi chú.",
+            "image_count": len(clean_images),
+        },
+    ))
+    db.commit()
+    return UpdateGalleryResponse(
+        ok=True,
+        order_id=order.id,
+        image_count=len(clean_images),
+        designer_note=order.designer_note,
+        note_outsource=order.note_outsource,
+    )
+
+
+@router.post("/orders/{order_id}/sync-gallery", response_model=UpdateGalleryResponse)
+def api_trigger_order_gallery_sync(
+    order_id: str,
+    user: User = Depends(require_role("admin")),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    """Admin endpoint to scrape & sync product gallery directly on the server."""
+    order = get_order_detail_for_user(db, user, order_id)
+    if order is None or order.platform_id != platform_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
+
+    # Determine sales_url
+    sales_url = None
+    if order.product_skus and isinstance(order.product_skus, list):
+        for sku_item in order.product_skus:
+            if isinstance(sku_item, dict) and sku_item.get("sales_url"):
+                sales_url = sku_item["sales_url"]
+                break
+    if not sales_url and order.external_order_url and "orders?id=" not in order.external_order_url:
+        sales_url = order.external_order_url
+    if not sales_url:
+        sku_to_check = order.sku
+        if not sku_to_check and order.product_skus and isinstance(order.product_skus, list):
+            for sku_item in order.product_skus:
+                if isinstance(sku_item, dict) and sku_item.get("sku"):
+                    sku_to_check = sku_item["sku"]
+                    break
+        if sku_to_check:
+            match = re.search(r'[pP](\d+)', str(sku_to_check))
+            if match:
+                pid = match.group(1)
+                title = (order.product_name or 'product').lower()
+                slug = re.sub(r'[^a-zA-Z0-9]+', '-', title).strip('-')
+                is_de = any(w in title for w in ['mit ', 'für ', 'und ', 'geschenk', 'becher', 'tasse', 'kissen', 'mütze', 'größe', 'weiss', 'weiß', 'schwarz'])
+                if is_de:
+                    sales_url = f"https://printerval.com/de/{slug}-p{pid}"
+                else:
+                    sales_url = f"https://printerval.com/{slug}-p{pid}"
+
+    if not sales_url:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Không xác định được link sản phẩm")
+
+    try:
+        from playwright.sync_api import sync_playwright
+
+        from app.adapters.printerval.gallery_scraper import PLAYWRIGHT_EXTRACT_GALLERY_SNIPPET
+
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True, args=['--disable-blink-features=AutomationControlled'])
+            context = browser.new_context(
+                user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
+            )
+            page = context.new_page()
+            page.goto(sales_url, timeout=25000, wait_until='domcontentloaded')
+            page.wait_for_timeout(2500)
+            res = page.evaluate(PLAYWRIGHT_EXTRACT_GALLERY_SNIPPET, sales_url)
+            browser.close()
+
+            if res.get('success') and res.get('images'):
+                clean_images = []
+                for u in res['images']:
+                    u = u.strip()
+                    if u and _is_allowed_gallery_url(u) and u not in clean_images:
+                        clean_images.append(u)
+                if clean_images:
+                    order.product_image_urls = clean_images
+                    db.commit()
+                    return UpdateGalleryResponse(ok=True, order_id=order.id, image_count=len(clean_images))
+    except Exception:
+        pass
+
+    raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Không bóc tách được ảnh sản phẩm từ trang")
+
 
 
 class ResultVersionOut(BaseModel):
@@ -197,11 +545,15 @@ class OrderDetailOut(BaseModel):
     double_sided: bool
     priority_label: str | None
     deadline_at_ext: datetime | None
+    order_created_at_ext: datetime | None = None
+    created_at_ext: datetime | None = None
     note_outsource: str
     previous_note_outsource: str | None = None
     fix_approved_by_admin: bool = False
+    fix_rejected_by_admin: bool = False
     designer_note: str = ""
     template_missing: bool = False
+    duplicate_check_status: str = "uncheck"
     order_note: str
     custom_config: dict | None
     product_skus: list[dict] | None = None
@@ -217,6 +569,7 @@ class OrderDetailOut(BaseModel):
     product_image_urls: list[str] | None = None
     printerval_designer: str | None = None
     printerval_status: str | None = None
+    status_changed_at: datetime | None = None
     created_at: datetime
 
 
@@ -348,12 +701,21 @@ def api_orders_list(
     status_filter: str | None = Query(default=None, alias="status"),
     batch_id: str | None = None,
     designer_id: str | None = None,
+    work_domain: str | None = None,
+    duplicate_check_status: str | None = None,
     user: User = Depends(get_current_user),
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
     orders = list_orders_for_user(
-        db, user, status=status_filter, batch_id=batch_id, designer_id=designer_id, platform_id=platform_id
+        db,
+        user,
+        status=status_filter,
+        batch_id=batch_id,
+        designer_id=designer_id,
+        platform_id=platform_id,
+        work_domain=work_domain,
+        duplicate_check_status=duplicate_check_status,
     )
     order_ids = [o.id for o in orders]
     assignments = (
@@ -742,6 +1104,7 @@ def api_bulk_printerval_assignment(
                 assignment.status = "approved"
         if mapped_state:
             order.state = mapped_state.value
+            order.status_changed_at = datetime.now(UTC)
         order.printerval_status = payload.printerval_status.lower()
         order.printerval_status_synced_at = datetime.now(UTC)
 
@@ -753,6 +1116,116 @@ def api_bulk_printerval_assignment(
         request_ids=[],
         queued_count=len(orders),
     )
+
+
+
+STATE_LABEL_VI: dict[str, str] = {
+    "OPEN": "Waiting",
+    "WAITING": "Waiting",
+    "OPEN_FOR_ALLOCATION": "Waiting",
+    "DISCOVERED": "Waiting",
+    "PENDING": "Waiting",
+    "IN_PROGRESS": "Doing",
+    "DOING": "Doing",
+    "ASSIGNED": "Doing",
+    "QC_PENDING": "Review",
+    "REVIEW": "Review",
+    "REVISION": "Fix",
+    "FIX": "Fix",
+    "REVISION_REQUESTED": "Fix",
+    "DONE": "Done",
+    "COMPLETED": "Done",
+    "CLAIMED_IMPORTED": "Done",
+    "CANCELLED": "Đã hủy",
+    "EXCEPTION": "Lỗi",
+}
+
+
+def get_friendly_state_label(state: str | None) -> str:
+    if not state:
+        return "Mới"
+    return STATE_LABEL_VI.get(state.upper(), state)
+
+
+def format_event_description(
+    from_state: str | None,
+    to_state: str,
+    action: str | None,
+    actor_name: str | None,
+    actor_role: str | None,
+    designer_name: str | None,
+    raw_desc: str | None = None,
+) -> str:
+    from_st = (from_state or "").upper()
+    to_st = (to_state or "").upper()
+    act = (action or "").upper()
+    actor_display = f"{'Admin ' if actor_role == 'admin' else ('Designer ' if actor_role == 'designer' else '')}{actor_name}" if actor_name else ""
+
+    # If raw_desc is already custom and good (not the default 'Chuyển trạng thái từ...')
+    if raw_desc and not raw_desc.startswith("Chuyển trạng thái từ ") and "chuyển trạng thái từ " not in raw_desc.lower():
+        return raw_desc
+
+    # Assignment
+    if act in ("ASSIGN", "REASSIGN") or (from_st in ("OPEN", "DISCOVERED", "OPEN_FOR_ALLOCATION") and to_st in ("WAITING", "IN_PROGRESS", "DOING")):
+        target_des = designer_name or "Designer"
+        if actor_display:
+            return f"{actor_display} phân công đơn cho {target_des}"
+        return f"Phân công đơn cho {target_des}"
+
+    # Waiting -> Doing
+    if (from_st in ("WAITING", "OPEN_FOR_ALLOCATION", "DISCOVERED", "PENDING", "OPEN", "") and to_st in ("IN_PROGRESS", "DOING")) or act == "START_DOING":
+        if actor_display:
+            return f"{actor_display} nhận đơn vào Doing"
+        return "Nhận đơn vào Doing"
+
+    # Doing -> Review (Initial submission)
+    if (from_st in ("IN_PROGRESS", "DOING", "ASSIGNED") and to_st in ("QC_PENDING", "REVIEW")) or (act == "SUBMIT_REVIEW" and from_st not in ("REVISION", "FIX", "REVISION_REQUESTED")):
+        if actor_display:
+            return f"{actor_display} nộp bài sang Review"
+        return "Designer nộp bài sang Review"
+
+    # Fix -> Review (Resubmission after fix)
+    if (from_st in ("REVISION", "FIX", "REVISION_REQUESTED") and to_st in ("QC_PENDING", "REVIEW")) or act == "RESUBMIT_FIX":
+        if actor_display:
+            return f"{actor_display} nộp lại bài sau khi fix"
+        return "Designer nộp lại bài sau khi fix"
+
+    # Review -> Fix (Admin requests fix)
+    if (from_st in ("QC_PENDING", "REVIEW") and to_st in ("REVISION", "FIX", "REVISION_REQUESTED")) or act == "REQUEST_FIX":
+        if actor_display:
+            return f"{actor_display} yêu cầu sửa bài (Fix)"
+        return "Admin yêu cầu sửa bài (Fix)"
+
+    # Review -> Done (Admin approves)
+    if (from_st in ("QC_PENDING", "REVIEW") and to_st in ("DONE", "COMPLETED")) or act == "APPROVE_DONE":
+        if actor_display:
+            return f"{actor_display} duyệt hoàn thành đơn hàng (Done)"
+        return "Admin duyệt hoàn thành đơn hàng (Done)"
+
+    # Review -> Doing (Revert to edit)
+    if (from_st in ("QC_PENDING", "REVIEW") and to_st in ("IN_PROGRESS", "DOING")) or act == "REVERT_TO_DOING":
+        if actor_display:
+            return f"{actor_display} chuyển lại về Doing để chỉnh sửa"
+        return "Chuyển lại về Doing để chỉnh sửa"
+
+    # Move to Waiting
+    if to_st in ("WAITING", "OPEN_FOR_ALLOCATION") or act == "SET_WAITING":
+        if actor_display:
+            return f"{actor_display} chuyển đơn về Waiting"
+        return "Chuyển đơn về Waiting"
+
+    # Flag missing template
+    if act == "FLAG_MISSING_TEMPLATE":
+        if actor_display:
+            return f"{actor_display} báo đơn thiếu template"
+        return "Designer báo đơn thiếu template"
+
+    # Generic friendly fallback
+    from_lbl = get_friendly_state_label(from_state)
+    to_lbl = get_friendly_state_label(to_state)
+    if actor_display:
+        return f"{actor_display}: {from_lbl} → {to_lbl}"
+    return f"{from_lbl} → {to_lbl}"
 
 
 @router.get("/orders/{order_id}", response_model=OrderDetailResponse)
@@ -802,16 +1275,15 @@ def api_order_detail(
         actor_role = (e.evidence or {}).get("actor_role") or (actor_info[1] if actor_info else None)
         action = (e.evidence or {}).get("action")
         designer_name = (e.evidence or {}).get("designer_name")
-        description = (e.evidence or {}).get("description")
-
-        if not description:
-            from_st = e.from_state or "Mới"
-            to_st = e.to_state
-            if action == "ASSIGN":
-                description = f"{actor_name or 'Admin'} phân công đơn hàng cho {designer_name or 'Designer'}"
-            else:
-                actor_label = f" ({actor_name})" if actor_name else ""
-                description = f"Chuyển trạng thái từ {from_st} sang {to_st}{actor_label}"
+        description = format_event_description(
+            from_state=e.from_state,
+            to_state=e.to_state,
+            action=action,
+            actor_name=actor_name,
+            actor_role=actor_role,
+            designer_name=designer_name,
+            raw_desc=(e.evidence or {}).get("description"),
+        )
 
         history_out.append(
             WorkflowEventOut(
@@ -838,7 +1310,7 @@ def api_order_detail(
 @router.post("/orders/refresh", response_model=RefreshResponse)
 def api_orders_refresh(
     payload: RefreshRequest = RefreshRequest(),
-    user: User = Depends(require_role("admin")),
+    user: User = Depends(require_any_role(ROLE_ADMIN, ROLE_SUPPORT)),
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
@@ -1325,6 +1797,7 @@ def api_update_order_state(
 
     old_state = order.state
     order.state = target_state.value
+    order.status_changed_at = datetime.now(UTC)
 
     submitted_link = (payload.drive_url or "").strip()
     submitted_note = (payload.note_outsource or "").strip()
@@ -1359,17 +1832,23 @@ def api_update_order_state(
         )
         db.add(rv)
 
+    actor_disp = f"{'Designer ' if user.role == 'designer' else ('Admin ' if user.role == 'admin' else '')}{actor_name}"
     if target_state == OrderState.IN_PROGRESS:
         if old_state in (OrderState.QC_PENDING.value, "REVIEW"):
             action_type = "REVERT_TO_DOING"
-            desc = f"{'Designer ' + actor_name if user.role == 'designer' else actor_name} chuyển lại về Doing (Đang làm) để chỉnh sửa bài"
+            desc = f"{actor_disp} chuyển lại về Doing để chỉnh sửa bài"
         else:
             action_type = "START_DOING"
-            desc = f"{'Designer ' + actor_name if user.role == 'designer' else actor_name} bắt đầu làm thiết kế (Doing)"
+            desc = f"{actor_disp} nhận đơn vào Doing"
     elif target_state == OrderState.QC_PENDING:
-        action_type = "SUBMIT_REVIEW"
-        desc = f"{'Designer ' + actor_name if user.role == 'designer' else actor_name} nộp bài và chuyển sang Review (Chờ duyệt)"
         order.fix_approved_by_admin = False
+        order.fix_rejected_by_admin = False
+        if old_state in (OrderState.REVISION.value, "FIX", "REVISION_REQUESTED"):
+            action_type = "RESUBMIT_FIX"
+            desc = f"{actor_disp} nộp lại bài sau khi fix"
+        else:
+            action_type = "SUBMIT_REVIEW"
+            desc = f"{actor_disp} nộp bài sang Review"
         # Sync Review status & Note outsource to Printerval
         try:
             from app.workers.assignment_sync_tasks import sync_order_review_to_printerval_task
@@ -1378,17 +1857,20 @@ def api_update_order_state(
             pass
     elif target_state == OrderState.REVISION:
         action_type = "REQUEST_FIX"
-        desc = f"{'Admin ' + actor_name if user.role == 'admin' else actor_name} kiểm tra bài và yêu cầu sửa lại (Fix)"
+        desc = f"{actor_disp} yêu cầu sửa bài (Fix)"
         order.fix_approved_by_admin = False
+        order.fix_rejected_by_admin = False
     elif target_state == OrderState.DONE:
         action_type = "APPROVE_DONE"
-        desc = f"{'Admin ' + actor_name if user.role == 'admin' else actor_name} kiểm tra và duyệt hoàn thành đơn hàng (Done)"
+        desc = f"{actor_disp} duyệt hoàn thành đơn hàng (Done)"
     elif target_state == OrderState.WAITING:
         action_type = "SET_WAITING"
-        desc = f"{actor_name} chuyển trạng thái đơn về Waiting (Chờ làm)"
+        desc = f"{actor_disp} chuyển đơn về Waiting"
     else:
         action_type = "CHANGE_STATE"
-        desc = f"{actor_name} chuyển trạng thái từ {old_state or 'Mới'} sang {target_state.value}"
+        from_lbl = get_friendly_state_label(old_state)
+        to_lbl = get_friendly_state_label(target_state.value)
+        desc = f"{actor_disp}: {from_lbl} → {to_lbl}"
 
     evidence_payload = {
         "action": action_type,
@@ -1425,6 +1907,8 @@ def api_update_order_state(
 
 
 class ApproveFixRequest(BaseModel):
+    designer_id: uuid.UUID | None = None
+    designer_note: str | None = None
     note_outsource: str | None = None
 
 
@@ -1447,13 +1931,36 @@ def api_approve_fix(
     if order is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
 
+    if payload.designer_note is not None:
+        order.designer_note = payload.designer_note.strip()
     if payload.note_outsource is not None:
         order.note_outsource = payload.note_outsource.strip()
 
+    assigned_designer_name = None
+    if payload.designer_id:
+        target_des = db.get(User, payload.designer_id)
+        if target_des:
+            assigned_designer_name = target_des.full_name or target_des.username
+            curr_assignment = (
+                db.query(Assignment)
+                .filter(Assignment.order_id == order.id, Assignment.status != "cancelled")
+                .first()
+            )
+            if curr_assignment:
+                curr_assignment.designer_id = target_des.id
+                curr_assignment.status = "approved"
+            else:
+                db.add(Assignment(order_id=order.id, designer_id=target_des.id, status="approved"))
+
     order.state = OrderState.REVISION.value
     order.fix_approved_by_admin = True
+    order.status_changed_at = datetime.now(UTC)
 
     admin_name = user.full_name or user.username
+    desc = f"Admin {admin_name} chấp nhận Fix & giao bài cho {assigned_designer_name or 'Designer'}"
+    if order.designer_note:
+        desc += f" (Note Des: {order.designer_note})"
+
     event = WorkflowEvent(
         order_id=order.id,
         from_state=OrderState.REVISION.value,
@@ -1463,7 +1970,9 @@ def api_approve_fix(
             "action": "APPROVE_FIX_FOR_DESIGNER",
             "actor_name": admin_name,
             "actor_role": user.role,
-            "description": f"Admin {admin_name} check & duyệt note sửa cho Designer: {order.note_outsource or 'Không có note'}",
+            "designer_name": assigned_designer_name,
+            "description": desc,
+            "designer_note": order.designer_note,
             "note_outsource": order.note_outsource,
         },
     )
@@ -1476,8 +1985,9 @@ def api_approve_fix(
         "order_id": str(order.id),
         "external_order_id": order.external_order_id,
         "fix_approved_by_admin": True,
+        "designer_note": order.designer_note,
         "note_outsource": order.note_outsource,
-        "message": "Đã check & duyệt và gửi yêu cầu sửa bài xuống cho Designer.",
+        "message": "Đã chấp nhận Fix và giao bài cho Designer.",
     }
 
 
@@ -1509,20 +2019,22 @@ def api_reject_fix_to_review(
         order.note_outsource = payload.note_outsource.strip()
 
     old_state = order.state
-    order.state = OrderState.QC_PENDING.value
+    order.state = OrderState.REVISION.value
     order.fix_approved_by_admin = False
+    order.fix_rejected_by_admin = True
+    order.status_changed_at = datetime.now(UTC)
 
     admin_name = user.full_name or user.username
     event = WorkflowEvent(
         order_id=order.id,
         from_state=old_state,
-        to_state=OrderState.QC_PENDING.value,
+        to_state=OrderState.REVISION.value,
         actor_id=user.id,
         evidence={
             "action": "REJECT_FIX_TO_REVIEW",
             "actor_name": admin_name,
             "actor_role": user.role,
-            "description": f"Admin {admin_name} hủy Fix, chỉnh lại note outsource và trả về Review trên Printerval",
+            "description": f"Admin {admin_name} từ chối Fix và gửi lại Review trên Printerval",
             "note_outsource": order.note_outsource,
         },
     )
@@ -1543,6 +2055,8 @@ def api_reject_fix_to_review(
         "external_order_id": order.external_order_id,
         "state": order.state,
         "note_outsource": order.note_outsource,
+        "fix_approved_by_admin": order.fix_approved_by_admin,
+        "fix_rejected_by_admin": order.fix_rejected_by_admin,
         "message": "Đã hủy Fix, cập nhật note outsource và chuyển lại trạng thái Review trên Printerval.",
     }
 
@@ -1852,12 +2366,15 @@ def api_get_orders_history(
         actor_role = (event.evidence or {}).get("actor_role") or (actor_info[1] if actor_info else None)
         action_type = (event.evidence or {}).get("action")
         designer_name = (event.evidence or {}).get("designer_name")
-        desc = (event.evidence or {}).get("description")
-        if not desc:
-            from_st = event.from_state or "Mới"
-            desc = f"Chuyển trạng thái từ {from_st} sang {event.to_state}"
-            if actor_name:
-                desc += f" bởi {actor_name}"
+        desc = format_event_description(
+            from_state=event.from_state,
+            to_state=event.to_state,
+            action=action_type,
+            actor_name=actor_name,
+            actor_role=actor_role,
+            designer_name=designer_name,
+            raw_desc=(event.evidence or {}).get("description"),
+        )
 
         items.append(
             OrderHistoryItemOut(
@@ -1939,16 +2456,15 @@ def api_get_single_order_history(
         actor_role = (e.evidence or {}).get("actor_role") or (actor_info[1] if actor_info else None)
         action = (e.evidence or {}).get("action")
         designer_name = (e.evidence or {}).get("designer_name")
-        description = (e.evidence or {}).get("description")
-
-        if not description:
-            from_st = e.from_state or "Mới"
-            to_st = e.to_state
-            if action == "ASSIGN":
-                description = f"{actor_name or 'Admin'} phân công đơn hàng cho {designer_name or 'Designer'}"
-            else:
-                actor_label = f" ({actor_name})" if actor_name else ""
-                description = f"Chuyển trạng thái từ {from_st} sang {to_st}{actor_label}"
+        description = format_event_description(
+            from_state=e.from_state,
+            to_state=e.to_state,
+            action=action,
+            actor_name=actor_name,
+            actor_role=actor_role,
+            designer_name=designer_name,
+            raw_desc=(e.evidence or {}).get("description"),
+        )
 
         history_out.append(
             WorkflowEventOut(
@@ -1967,3 +2483,106 @@ def api_get_single_order_history(
         )
 
     return history_out
+
+
+class BulkDeleteOrdersPayload(BaseModel):
+    order_ids: list[str]
+
+
+@router.post("/orders/bulk-delete")
+def api_bulk_delete_orders(
+    payload: BulkDeleteOrdersPayload,
+    user: User = Depends(require_role("admin")),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    """Admin endpoint to permanently delete selected orders and their cascades from database."""
+    if not payload.order_ids:
+        return {"ok": True, "deleted_count": 0}
+
+    parsed_ids = []
+    for oid in payload.order_ids:
+        try:
+            parsed_ids.append(uuid.UUID(oid))
+        except ValueError:
+            pass
+
+    if not parsed_ids:
+        return {"ok": True, "deleted_count": 0}
+
+    orders = db.query(Order).filter(Order.id.in_(parsed_ids), Order.platform_id == platform_id).all()
+    valid_ids = [o.id for o in orders]
+    if not valid_ids:
+        return {"ok": True, "deleted_count": 0}
+
+    # 1. Delete FinanceNotes
+    db.query(FinanceNote).filter(FinanceNote.order_id.in_(valid_ids)).delete(synchronize_session=False)
+
+    # 2. Gather assignments & result versions
+    assignments = db.query(Assignment).filter(Assignment.order_id.in_(valid_ids)).all()
+    asgn_ids = [a.id for a in assignments]
+
+    rv_ids = []
+    if asgn_ids:
+        result_versions = db.query(ResultVersion).filter(ResultVersion.assignment_id.in_(asgn_ids)).all()
+        rv_ids = [rv.id for rv in result_versions]
+
+    # 3. Delete ApprovalDecisions & ApprovalRequests linked to ResultVersions, Assignments, or Orders
+    approval_reqs_filter = []
+    if rv_ids:
+        approval_reqs_filter.append(ApprovalRequest.target_version_id.in_(rv_ids))
+    if asgn_ids:
+        approval_reqs_filter.append(ApprovalRequest.target_id.in_(asgn_ids))
+    approval_reqs_filter.append(ApprovalRequest.target_id.in_(valid_ids))
+
+    approval_reqs = db.query(ApprovalRequest).filter(or_(*approval_reqs_filter)).all()
+    ar_ids = [ar.id for ar in approval_reqs]
+    if ar_ids:
+        db.query(ApprovalDecision).filter(ApprovalDecision.approval_request_id.in_(ar_ids)).delete(synchronize_session=False)
+        db.query(ApprovalRequest).filter(ApprovalRequest.id.in_(ar_ids)).delete(synchronize_session=False)
+
+    # 4. Delete ResultVersions
+    if rv_ids:
+        db.query(ResultVersion).filter(ResultVersion.id.in_(rv_ids)).delete(synchronize_session=False)
+
+    # 5. Delete Assignments (clear replacement_of_id self references first)
+    if asgn_ids:
+        db.query(Assignment).filter(Assignment.id.in_(asgn_ids)).update({"replacement_of_id": None}, synchronize_session=False)
+        db.query(Assignment).filter(Assignment.id.in_(asgn_ids)).delete(synchronize_session=False)
+
+    # 6. Delete WorkflowEvents
+    db.query(WorkflowEvent).filter(WorkflowEvent.order_id.in_(valid_ids)).delete(synchronize_session=False)
+
+    # 7. Delete ExternalObservations
+    db.query(ExternalObservation).filter(ExternalObservation.order_id.in_(valid_ids)).delete(synchronize_session=False)
+
+    # 8. Delete OrderAssets
+    db.query(OrderAsset).filter(OrderAsset.order_id.in_(valid_ids)).delete(synchronize_session=False)
+
+    # 9. Delete PrintervalAssignmentRequests
+    db.query(PrintervalAssignmentRequest).filter(PrintervalAssignmentRequest.order_id.in_(valid_ids)).delete(synchronize_session=False)
+
+    # 10. Delete Orders
+    db.query(Order).filter(Order.id.in_(valid_ids)).delete(synchronize_session=False)
+
+    db.commit()
+    return {"ok": True, "deleted_count": len(valid_ids)}
+
+
+@router.post("/orders/{order_id}/revoke-assignment")
+def revoke_single_order_assignment(
+    order_id: uuid.UUID,
+    user: User = Depends(require_role("admin")),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    try:
+        revoke_assignment_command(
+            db,
+            platform_id=platform_id,
+            actor=user,
+            order_ids=[order_id],
+        )
+    except AssignmentCommandError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    return {"ok": True, "message": "Đã hủy chia đơn thành công, đơn đã quay về trạng thái Waiting."}

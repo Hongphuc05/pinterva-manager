@@ -21,8 +21,10 @@ def list_orders_for_user(
     batch_id: str | None = None,
     designer_id: str | None = None,
     platform_id: uuid.UUID | None = None,
+    work_domain: str | None = None,
+    duplicate_check_status: str | None = None,
 ) -> list[Order]:
-    """Admin sees all platform orders (optionally filtered).
+    """Admin and Support see all platform orders (optionally filtered).
     Designer sees ONLY orders assigned to themselves.
     """
     if user.role == ROLE_DESIGNER:
@@ -34,13 +36,15 @@ def list_orders_for_user(
         query = query.filter(Order.platform_id == platform_id)
 
     if user.role == ROLE_DESIGNER_TRELLO:
-        # Trello designers work in a shared, deliberately separate queue. Their
-        # board command applies the finer ownership policy.
+        # Trello designers work in a shared, deliberately separate queue.
         query = query.filter(Order.work_domain == WORK_DOMAIN_DUPLICATE)
     elif user.role == ROLE_DESIGNER:
-        # A legacy Printerval designer label may remain on an order after it is
-        # moved to the shared board. Domain is authoritative for visibility.
         query = query.filter(Order.work_domain == WORK_DOMAIN_STANDARD)
+    elif work_domain:
+        query = query.filter(Order.work_domain == work_domain)
+
+    if duplicate_check_status:
+        query = query.filter(Order.duplicate_check_status == duplicate_check_status)
 
     if designer_id:
         if designer_id == "unassigned":
@@ -79,6 +83,8 @@ def list_orders_for_user(
                     (Order.state.in_(["REVISION", "FIX"]) & (Order.fix_approved_by_admin.is_(True))),
                 )
             )
+            if not work_domain:
+                query = query.filter(Order.work_domain == WORK_DOMAIN_STANDARD)
         elif st_upper in ("WAITING", "OPEN_FOR_ALLOCATION", "DISCOVERED", "PENDING"):
             query = query.filter(
                 or_(
@@ -86,6 +92,8 @@ def list_orders_for_user(
                     Order.printerval_status.ilike("waiting"),
                 )
             )
+            if not work_domain:
+                query = query.filter(Order.work_domain == WORK_DOMAIN_STANDARD)
         elif st_upper in ("DOING", "IN_PROGRESS", "ASSIGNED"):
             query = query.filter(
                 or_(
@@ -93,6 +101,8 @@ def list_orders_for_user(
                     Order.printerval_status.ilike("doing"),
                 )
             )
+            if not work_domain:
+                query = query.filter(Order.work_domain == WORK_DOMAIN_STANDARD)
         elif st_upper in ("DONE", "COMPLETED", "CLAIMED_IMPORTED"):
             query = query.filter(
                 or_(
@@ -100,6 +110,8 @@ def list_orders_for_user(
                     Order.printerval_status.ilike("done"),
                 )
             )
+            if not work_domain:
+                query = query.filter(Order.work_domain == WORK_DOMAIN_STANDARD)
         elif st_upper in ("REVIEW", "QC_PENDING", "RESULT_SUBMITTED"):
             query = query.filter(
                 or_(
@@ -107,6 +119,8 @@ def list_orders_for_user(
                     Order.printerval_status.ilike("review"),
                 )
             )
+            if not work_domain:
+                query = query.filter(Order.work_domain == WORK_DOMAIN_STANDARD)
         elif st_upper in ("FIX", "REVISION", "REVISION_REQUESTED"):
             query = query.filter(
                 or_(
@@ -114,6 +128,8 @@ def list_orders_for_user(
                     Order.printerval_status.ilike("fix"),
                 )
             )
+            if not work_domain:
+                query = query.filter(Order.work_domain == WORK_DOMAIN_STANDARD)
         else:
             query = query.filter(
                 or_(

@@ -11,12 +11,18 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.models import Order, Platform, SyncJob, User
 from app.adapters.db.session import SessionLocal
-from app.api.deps import get_current_platform_id, get_current_user, get_db, require_role
+from app.api.deps import (
+    get_current_platform_id,
+    get_current_user,
+    get_db,
+    require_any_role,
+)
 from app.application.sync_jobs import (
     ACTIVE_STATUSES,
     create_or_get_status_sync_job,
     run_status_sync_job,
 )
+from app.domain.access import ROLE_ADMIN, ROLE_DESIGNER_TRELLO
 
 router = APIRouter(prefix="/sync-jobs", tags=["sync-jobs"])
 
@@ -26,7 +32,7 @@ class CreateSyncJobRequest(BaseModel):
     # The browser resolves the current tab/filter to an immutable order-ID snapshot
     # before submitting. This avoids a job unexpectedly touching orders that move
     # into or out of a mutable filter while it is queued.
-    order_ids: list[str] | None = Field(default=None, max_length=500)
+    order_ids: list[str] | None = Field(default=None, max_length=10000)
 
 
 class SyncJobOut(BaseModel):
@@ -82,7 +88,7 @@ def _dispatch_status_job(job_id: uuid.UUID) -> None:
 @router.post("", response_model=SyncJobOut, status_code=status.HTTP_202_ACCEPTED)
 def create_sync_job(
     payload: CreateSyncJobRequest,
-    user: User = Depends(require_role("admin")),
+    user: User = Depends(require_any_role(ROLE_ADMIN, ROLE_DESIGNER_TRELLO)),
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):

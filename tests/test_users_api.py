@@ -90,6 +90,24 @@ def test_admin_can_create_designer_trello_user(client, db_session):
     assert response.json()["platform_id"] is not None
 
 
+def test_admin_can_create_support_user(client, db_session):
+    _, token = _login(client, db_session, "admin", "admin_support_creator")
+    response = client.post(
+        "/api/users",
+        json={
+            "username": "support_agent_1",
+            "password": "supportpassword",
+            "full_name": "Support Agent",
+            "role": "support",
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["role"] == "support"
+    assert response.json()["username"] == "support_agent_1"
+
+
 def test_delete_user_as_admin(client, db_session):
     admin_user, token = _login(client, db_session, "admin", "admin_deleter")
     # Create target user to delete

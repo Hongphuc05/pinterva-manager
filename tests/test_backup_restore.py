@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 import uuid
 
@@ -20,9 +21,28 @@ def _pg_env_and_url(sqlalchemy_url: str):
     return env, u
 
 
+def _postgres_client_major(command: str) -> int:
+    version = subprocess.check_output([command, "--version"], text=True)
+    match = re.search(r"(\d+)(?:\.\d+)?", version)
+    assert match, f"Unable to determine {command} version: {version!r}"
+    return int(match.group(1))
+
+
 def test_backup_then_restore_roundtrip(db_session, engine, tmp_path):
     from app.adapters.db.models import User
     from app.application.auth import hash_password
+
+    # PostgreSQL restore clients newer than the server can emit session settings the
+    # server does not recognize (for example pg_restore 18 -> PostgreSQL 16). This
+    # is an environment mismatch, not a backup/restore behavior regression. CI and
+    # production must install a client no newer than the target server.
+    server_major = engine.dialect.server_version_info[0]
+    restore_major = _postgres_client_major("pg_restore")
+    if restore_major > server_major:
+        pytest.skip(
+            f"pg_restore {restore_major} is newer than PostgreSQL {server_major}; "
+            "run this round-trip test with a compatible PostgreSQL client"
+        )
 
     marker_username = f"backup-test-{uuid.uuid4().hex[:8]}"
     db_session.add(

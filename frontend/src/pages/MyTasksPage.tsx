@@ -13,7 +13,8 @@ import {
   Package,
   ChevronRight,
   FolderArchive,
-  Flag
+  Flag,
+  Check
 } from 'lucide-react'
 
 type ResultVersion = {
@@ -47,6 +48,7 @@ type Task = {
     external_order_url: string | null
     source_files: { name: string; url: string }[] | null
     source_download_all_url: string | null
+    product_image_urls?: string[] | null
     design_tool_url: string | null
   }
   result_versions: ResultVersion[]
@@ -262,6 +264,30 @@ export function MyTasksPage() {
                           <span>{sourceCount} file source</span>
                         </span>
                       )}
+
+                      {/* Image Count & Sync Status Badge */}
+                      {(() => {
+                        const imgCount = (task.order.product_image_urls && task.order.product_image_urls.length > 0)
+                          ? task.order.product_image_urls.length
+                          : (task.order.thumbnail_url ? 1 : 0)
+                        const isSynced = imgCount > 1
+                        return isSynced ? (
+                          <span
+                            className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 shadow-2xs"
+                            title={`Đã đồng bộ đủ bộ ảnh (${imgCount} ảnh)`}
+                          >
+                            <span>{imgCount} ảnh</span>
+                            <Check className="h-3 w-3 text-emerald-600 stroke-[3]" />
+                          </span>
+                        ) : (
+                          <span
+                            className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 shadow-2xs"
+                            title={`Chưa đồng bộ bộ ảnh (${imgCount || 1} ảnh)`}
+                          >
+                            <span>{imgCount || 1} ảnh</span>
+                          </span>
+                        )
+                      })()}
 
                       {task.order.product_skus && task.order.product_skus.length > 1 && (
                         <span className="inline-flex items-center gap-1 text-slate-600 font-semibold bg-slate-100 px-2 py-0.5 rounded border border-slate-200">

@@ -1,96 +1,141 @@
-import hashlib
+import pytest
+from fastapi.testclient import TestClient
 
-from app.adapters.db.models import Order, Platform, User
-from app.application.auth import hash_password
+from app.adapters.db.models import Order, Platform
+from app.api.deps import DEFAULT_PLATFORM_ID, get_db
+from app.api.main import create_app
+from app.domain.models import OrderState
 
 
-def _login(client, db_session):
-    user = User(
-        username="gallery_token_admin",
-        full_name="Gallery Admin",
-        role="admin",
-        password_hash=hash_password("pass123"),
-        active=True,
+@pytest.fixture()
+def client(db_session):
+    app = create_app()
+
+    def _override_get_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = _override_get_db
+    with TestClient(app) as c:
+        yield c
+    app.dependency_overrides.clear()
+
+
+def _seed_platform(db_session):
+    platform = Platform(
+        id=DEFAULT_PLATFORM_ID,
+        name="Default Platform",
+        account_username="admin",
+        is_active=True,
     )
-    db_session.add(user)
+    db_session.merge(platform)
     db_session.commit()
-    response = client.post("/api/login", json={"username": user.username, "password": "pass123"})
-    assert response.status_code == 200
-    return response.json()["access_token"]
+    return platform
 
 
-def test_extension_gallery_import_replaces_single_fallback_for_its_platform(client, db_session):
-    platform = Platform(name="Platform A", account_username="a@printerval.com")
-    db_session.add(platform)
-    db_session.flush()
-    token = "test-gallery-token"
-    platform.gallery_bridge_token_hash = hashlib.sha256(token.encode()).hexdigest()
+def test_import_single_printerval_gallery_success(client, db_session):
+    _seed_platform(db_session)
     order = Order(
-        external_order_id="DJ123",
-        platform_id=platform.id,
-        state="OPEN",
-        product_image_urls=["https://assets.printerval.com/old-thumbnail.jpg"],
+        external_order_id="DJ1001",
+        platform_id=DEFAULT_PLATFORM_ID,
+        state=OrderState.OPEN.value,
+        product_image_urls=["https://assets.printerval.com/unsafe/500x500/old.jpg"],
     )
     db_session.add(order)
     db_session.commit()
 
-    response = client.post(
-        "/api/integrations/printerval-gallery",
-        json={
-            "platform_id": str(platform.id),
-            "external_order_id": "DJ123",
-            "image_urls": [
-                "https://gdn.printerval.com/unsafe/960x960/assets.printerval.com/one.jpg",
-                "https://assets.printerval.com/two.jpg",
-            ],
-        },
-        headers={"X-Gallery-Bridge-Token": token},
-    )
+    payload = {
+        "external_order_id": "DJ1001",
+        "image_urls": [
+            "https://assets.printerval.com/unsafe/960x960/img1.jpg",
+            "https://assets.printerval.com/unsafe/960x960/img2.jpg",
+            "https://assets.printerval.com/unsafe/960x960/img1.jpg",  # duplicate to test deduplication
+        ],
+        "product_url": "https://printerval.com/us/sample-product-p123",
+    }
+    resp = client.post("/api/integrations/printerval-gallery", json=payload)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["external_order_id"] == "DJ1001"
+    assert data["image_count"] == 2
 
-    assert response.status_code == 200
-    assert response.json()["image_count"] == 2
     db_session.refresh(order)
     assert order.product_image_urls == [
-        "https://gdn.printerval.com/unsafe/960x960/assets.printerval.com/one.jpg",
-        "https://assets.printerval.com/two.jpg",
+        "https://assets.printerval.com/img1.jpg",
+        "https://assets.printerval.com/img2.jpg",
     ]
 
 
-def test_extension_gallery_import_rejects_bad_token_and_cross_platform_order(client, db_session):
-    platform = Platform(name="Platform A", account_username="a@printerval.com")
-    other_platform = Platform(name="Platform B", account_username="b@printerval.com")
-    db_session.add_all([platform, other_platform])
-    db_session.flush()
-    token = "valid-token"
-    platform.gallery_bridge_token_hash = hashlib.sha256(token.encode()).hexdigest()
-    db_session.add(Order(external_order_id="DJ999", platform_id=other_platform.id, state="OPEN"))
+def test_import_single_printerval_gallery_not_found(client, db_session):
+    _seed_platform(db_session)
+    payload = {
+        "external_order_id": "DJ_NON_EXISTING",
+        "image_urls": ["https://assets.printerval.com/unsafe/960x960/img1.jpg"],
+    }
+    resp = client.post("/api/integrations/printerval-gallery", json=payload)
+    assert resp.status_code == 404
+
+
+def test_import_single_printerval_gallery_invalid_urls(client, db_session):
+    _seed_platform(db_session)
+    payload = {
+        "external_order_id": "DJ1001",
+        "image_urls": ["javascript:alert(1)"],
+    }
+    resp = client.post("/api/integrations/printerval-gallery", json=payload)
+    assert resp.status_code == 422
+
+
+def test_import_batch_printerval_gallery_success(client, db_session):
+    _seed_platform(db_session)
+    o1 = Order(external_order_id="DJ2001", platform_id=DEFAULT_PLATFORM_ID, state=OrderState.OPEN.value)
+    o2 = Order(external_order_id="DJ2002", platform_id=DEFAULT_PLATFORM_ID, state=OrderState.OPEN.value)
+    db_session.add_all([o1, o2])
     db_session.commit()
 
     payload = {
-        "platform_id": str(platform.id),
-        "external_order_id": "DJ999",
-        "image_urls": ["https://assets.printerval.com/one.jpg"],
+        "platform_id": str(DEFAULT_PLATFORM_ID),
+        "items": [
+            {
+                "external_order_id": "DJ2001",
+                "image_urls": [
+                    "https://assets.printerval.com/unsafe/960x960/o1_1.jpg",
+                    "https://assets.printerval.com/unsafe/960x960/o1_2.jpg",
+                ],
+            },
+            {
+                "external_order_id": "DJ2002",
+                "image_urls": [
+                    "https://assets.printerval.com/unsafe/960x960/o2_1.jpg",
+                    "https://assets.printerval.com/unsafe/960x960/o2_2.jpg",
+                    "https://assets.printerval.com/unsafe/960x960/o2_3.jpg",
+                ],
+            },
+            {
+                "external_order_id": "DJ_IGNORED",
+                "image_urls": ["https://assets.printerval.com/unsafe/960x960/ignored.jpg"],
+            },
+        ],
     }
-    assert client.post(
-        "/api/integrations/printerval-gallery", json=payload, headers={"X-Gallery-Bridge-Token": "bad"}
-    ).status_code == 401
-    assert client.post(
-        "/api/integrations/printerval-gallery", json=payload, headers={"X-Gallery-Bridge-Token": token}
-    ).status_code == 404
+
+    resp = client.post("/api/integrations/printerval-gallery/batch", json=payload)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["synced_orders_count"] == 2
+    assert data["total_images_count"] == 5
+
+    db_session.refresh(o1)
+    db_session.refresh(o2)
+    assert len(o1.product_image_urls) == 2
+    assert len(o2.product_image_urls) == 3
 
 
-def test_admin_can_rotate_a_platform_gallery_token(client, db_session):
-    platform = Platform(name="Platform A", account_username="a@printerval.com")
-    db_session.add(platform)
-    db_session.commit()
-    token = _login(client, db_session)
-
-    response = client.post(
-        f"/api/platforms/{platform.id}/gallery-bridge-token",
-        headers={"Authorization": f"Bearer {token}"},
-    )
-
-    assert response.status_code == 200
-    returned_token = response.json()["token"]
-    db_session.refresh(platform)
-    assert platform.gallery_bridge_token_hash == hashlib.sha256(returned_token.encode()).hexdigest()
+def test_import_batch_printerval_gallery_empty_items(client, db_session):
+    _seed_platform(db_session)
+    payload = {"items": []}
+    resp = client.post("/api/integrations/printerval-gallery/batch", json=payload)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["synced_orders_count"] == 0

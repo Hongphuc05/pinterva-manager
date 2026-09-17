@@ -36,7 +36,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }
 
   const refreshPlatforms = async () => {
-    if (!user || !isAdmin) return
+    if (!user || (!isAdmin && user?.role !== 'support')) return
     setIsLoading(true)
     try {
       const list = await apiFetch<Platform[]>('/platforms')
@@ -71,7 +71,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }
 
   useEffect(() => {
-    if (user && isAdmin) {
+    if (user && (isAdmin || user.role === 'support')) {
       refreshPlatforms()
     }
   }, [user, isAdmin])

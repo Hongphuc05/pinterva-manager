@@ -8,7 +8,8 @@ import {
   Users,
   History,
   Coins,
-  Columns3
+  Columns3,
+  Globe
 } from 'lucide-react'
 
 export function Sidebar() {
@@ -19,6 +20,7 @@ export function Sidebar() {
 
   const isAdmin = user.role === 'admin'
   const isTrelloDesigner = user.role === 'designer-trello'
+  const isSupport = user.role === 'support'
 
   const adminSections = [
     {
@@ -27,6 +29,7 @@ export function Sidebar() {
         { label: 'Đơn Hàng', path: '/orders', icon: ListOrdered },
         { label: 'Tiến Độ Team', path: '/designer-board', icon: UserCheck },
         { label: 'Board Đơn trùng lặp', path: '/kanban', icon: Columns3 },
+        { label: 'Mở Printerval', path: '/printerval-hub', icon: Globe },
       ],
     },
     {
@@ -42,27 +45,37 @@ export function Sidebar() {
     },
   ]
 
+  const supportSections = [
+    {
+      label: 'Vận hành',
+      items: [
+        { label: 'Đơn Hàng', path: '/orders', icon: ListOrdered },
+        { label: 'Board Đơn trùng lặp', path: '/kanban', icon: Columns3 },
+      ],
+    },
+  ]
+
   const designerSections = [
     {
       label: 'Công việc',
       items: [
         { label: 'Nhiệm Vụ Của Tôi', path: '/orders', icon: ListOrdered },
-        { label: 'Lịch Sử Của Tôi', path: '/order-history', icon: History },
-        { label: 'Tài Chính Của Tôi', path: '/finance', icon: Coins },
+        { label: 'Tài Chính', path: '/finance', icon: Coins },
       ],
     },
   ]
 
   const trelloDesignerSections = [
     {
-      label: 'Đơn trùng lặp',
+      label: 'Công việc',
       items: [
-        { label: 'Board kéo thả', path: '/kanban', icon: Columns3 },
+        { label: 'Board Đơn trùng lặp', path: '/kanban', icon: Columns3 },
+        { label: 'Tài Chính', path: '/finance', icon: Coins },
       ],
     },
   ]
 
-  const navSections = isAdmin ? adminSections : isTrelloDesigner ? trelloDesignerSections : designerSections
+  const navSections = isAdmin ? adminSections : isSupport ? supportSections : isTrelloDesigner ? trelloDesignerSections : designerSections
 
   return (
     <aside className="w-64 bg-[#0052CC] text-white flex flex-col fixed lg:sticky top-0 h-screen z-50 shadow-lg select-none">

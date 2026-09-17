@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { apiFetch, resolveAssetUrl } from '../api/client'
+import { useAuth } from '../auth/AuthContext'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { ImageModal } from '../components/ImageModal'
 import { StatusDropdown } from '../components/StatusDropdown'
+import { CopyableOrderCode } from '../components/CopyableOrderCode'
 import { 
   Users, 
   Search, 
@@ -48,6 +50,8 @@ type DesignerWorkload = {
 }
 
 export function DesignerBoardPage() {
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
   const [designers, setDesigners] = useState<DesignerWorkload[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -238,7 +242,7 @@ export function DesignerBoardPage() {
           <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-4 shadow-2xs">
             <div className="text-[11px] font-bold text-blue-700 uppercase tracking-wider flex items-center gap-1.5">
               <span className="h-2 w-2 rounded-full bg-blue-500"></span>
-              <span>Đang Làm (Doing)</span>
+              <span>Đang làm</span>
             </div>
             <div className="text-2xl font-black font-mono text-blue-800 mt-1">{totalDoing}</div>
             <div className="text-[10px] text-blue-600/80 mt-1 font-medium">Đang trong quá trình thiết kế</div>
@@ -251,7 +255,7 @@ export function DesignerBoardPage() {
           }`}>
             <div className="text-[11px] font-bold text-purple-700 uppercase tracking-wider flex items-center gap-1.5">
               <span className={`h-2 w-2 rounded-full bg-purple-500 ${totalReview > 0 ? 'animate-ping' : ''}`}></span>
-              <span>Chờ Duyệt (Review)</span>
+              <span>Chờ duyệt</span>
             </div>
             <div className="text-2xl font-black font-mono text-purple-800 mt-1">{totalReview}</div>
             <div className="text-[10px] text-purple-600/80 mt-1 font-medium">
@@ -521,15 +525,17 @@ export function DesignerBoardPage() {
                                       </div>
                                     )}
                                     <div className="flex-1 min-w-0">
+                                      {isAdmin && (
+                                        <div>
+                                          <CopyableOrderCode code={o.external_order_id} />
+                                        </div>
+                                      )}
                                       <Link
                                         to={`/orders/${o.id}`}
-                                        className="text-xs font-mono font-bold text-[#0052CC] hover:underline truncate block"
+                                        className="text-xs font-bold text-slate-800 hover:text-[#0052CC] hover:underline truncate block mt-0.5"
                                       >
-                                        {o.external_order_id}
-                                      </Link>
-                                      <p className="text-[10px] text-slate-500 truncate mt-0.5">
                                         {o.product_name || 'Đơn 2D Custom'}
-                                      </p>
+                                      </Link>
                                       {o.deadline_at_ext && (
                                         <p className="text-[10px] text-slate-400 font-mono mt-0.5 flex items-center gap-1">
                                           <Clock className="h-2.5 w-2.5" />
@@ -624,15 +630,17 @@ export function DesignerBoardPage() {
                                       </div>
                                     )}
                                     <div className="flex-1 min-w-0">
+                                      {isAdmin && (
+                                        <div>
+                                          <CopyableOrderCode code={o.external_order_id} />
+                                        </div>
+                                      )}
                                       <Link
                                         to={`/orders/${o.id}`}
-                                        className="text-xs font-mono font-bold text-[#0052CC] hover:underline truncate block"
+                                        className="text-xs font-bold text-slate-800 hover:text-[#0052CC] hover:underline truncate block mt-0.5"
                                       >
-                                        {o.external_order_id}
-                                      </Link>
-                                      <p className="text-[10px] text-slate-500 truncate mt-0.5">
                                         {o.product_name || 'Đơn 2D Custom'}
-                                      </p>
+                                      </Link>
                                       {o.deadline_at_ext && (
                                         <p className="text-[10px] text-slate-400 font-mono mt-0.5 flex items-center gap-1">
                                           <Clock className="h-2.5 w-2.5" />
@@ -732,12 +740,16 @@ export function DesignerBoardPage() {
                                     )}
                                     <div className="flex-1 min-w-0">
                                       <div className="flex items-center justify-between gap-1">
-                                        <Link
-                                          to={`/orders/${o.id}`}
-                                          className="text-xs font-mono font-bold text-[#0052CC] hover:underline truncate block"
-                                        >
-                                          {o.external_order_id}
-                                        </Link>
+                                        {isAdmin ? (
+                                          <CopyableOrderCode code={o.external_order_id} />
+                                        ) : (
+                                          <Link
+                                            to={`/orders/${o.id}`}
+                                            className="text-xs font-bold text-slate-800 hover:text-[#0052CC] hover:underline truncate block"
+                                          >
+                                            {o.product_name || 'Đơn 2D Custom'}
+                                          </Link>
+                                        )}
                                         {o.fix_approved_by_admin ? (
                                           <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-emerald-100 text-emerald-800 shrink-0">
                                             Đã gửi Des
@@ -748,9 +760,11 @@ export function DesignerBoardPage() {
                                           </span>
                                         )}
                                       </div>
-                                      <p className="text-[10px] text-slate-500 truncate mt-0.5">
-                                        {o.product_name || 'Đơn 2D Custom'}
-                                      </p>
+                                      {isAdmin && (
+                                        <p className="text-[10px] text-slate-500 truncate mt-0.5">
+                                          {o.product_name || 'Đơn 2D Custom'}
+                                        </p>
+                                      )}
                                       {o.deadline_at_ext && (
                                         <p className="text-[10px] text-slate-400 font-mono mt-0.5 flex items-center gap-1">
                                           <Clock className="h-2.5 w-2.5" />
@@ -878,15 +892,17 @@ export function DesignerBoardPage() {
                                         </div>
                                       )}
                                       <div className="flex-1 min-w-0">
+                                        {isAdmin && (
+                                          <div>
+                                            <CopyableOrderCode code={o.external_order_id} />
+                                          </div>
+                                        )}
                                         <Link
                                           to={`/orders/${o.id}`}
-                                          className="text-xs font-mono font-bold text-emerald-700 hover:underline truncate block"
+                                          className="text-xs font-bold text-emerald-800 hover:underline truncate block mt-0.5"
                                         >
-                                          {o.external_order_id}
-                                        </Link>
-                                        <p className="text-[10px] text-slate-400 truncate mt-0.5">
                                           {o.product_name || 'Đơn 2D Custom'}
-                                        </p>
+                                        </Link>
                                       </div>
                                     </div>
                                     <div className="pt-1 flex items-center justify-between">

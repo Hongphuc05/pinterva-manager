@@ -3,10 +3,13 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { usePlatform } from '../auth/PlatformContext'
 import { apiFetch } from '../api/client'
-import { Bell, LogOut, RefreshCw, CheckCircle2, AlertCircle, X, KeyRound } from 'lucide-react'
+import { Bell, LogOut, RefreshCw, AlertCircle, KeyRound, Images, Loader2, Pause, Play } from 'lucide-react'
 import { PrintervalSettingsModal } from './PrintervalSettingsModal'
 import { CrawlFilterModal } from './CrawlFilterModal'
+import { SyncGalleryModal } from './SyncGalleryModal'
 import { useSyncStatus } from '../hooks/useSyncStatus'
+import { useGallerySync } from '../context/GallerySyncContext'
+import { useToast } from '../context/ToastContext'
 
 export function Topbar() {
   const { user, logout } = useAuth()
@@ -14,14 +17,22 @@ export function Topbar() {
   const navigate = useNavigate()
   const location = useLocation()
   const [refreshing, setRefreshing] = useState(false)
-  const [flashMessage, setFlashMessage] = useState<string | null>(null)
-  const [isError, setIsError] = useState(false)
   const [showSettingsModal, setShowSettingsModal] = useState(false)
   const [showCrawlModal, setShowCrawlModal] = useState(false)
   const [crawlDesigners, setCrawlDesigners] = useState<string[]>([])
   const [isFastSyncing, setIsFastSyncing] = useState(false)
   const [fastSyncError, setFastSyncError] = useState<string | null>(null)
   const { status: syncStatus, triggerRun } = useSyncStatus()
+  const {
+    isSyncing: isGallerySyncing,
+    isPaused: isGalleryPaused,
+    pauseSync,
+    resumeSync,
+    progress: galleryProgress,
+    pendingWaitingCount,
+    openModal: openGalleryModal,
+    triggerSyncWaiting,
+  } = useGallerySync()
 
   async function handleLogout() {
     await logout()
@@ -36,20 +47,24 @@ export function Topbar() {
     if (path === '/allocation') return 'Phân Bổ Kéo-Thả'
     if (path === '/kanban') return 'Board Đơn trùng lặp'
     if (path === '/my-tasks') return 'My Tasks'
-    if (path === '/printerval-login') return 'Đăng Nhập Printerval'
+    if (path === '/printerval-hub' || path === '/printerval-login') return 'Mở Printerval & Đồng Bộ Ảnh'
     if (path === '/order-status') return 'Trạng Thái Đơn'
     if (path === '/users') return 'Quản Lý Tài Khoản'
     return 'Dashboard'
   }
 
-  // Auto-dismiss toast notification popup after 7 seconds (7000ms)
+  const { showToast } = useToast()
+
+  // Listen for gallery sync notification events
   useEffect(() => {
-    if (!flashMessage) return
-    const timer = setTimeout(() => {
-      setFlashMessage(null)
-    }, 7000)
-    return () => clearTimeout(timer)
-  }, [flashMessage])
+    function onGalleryNotify(e: any) {
+      if (e.detail?.message) {
+        showToast(e.detail.message, e.detail.type || 'info')
+      }
+    }
+    window.addEventListener('gallery-sync-notify', onGalleryNotify)
+    return () => window.removeEventListener('gallery-sync-notify', onGalleryNotify)
+  }, [showToast])
 
   // Listen for sync-printerval events to drive the circular animation
   useEffect(() => {
@@ -104,8 +119,6 @@ export function Topbar() {
 
   async function handleRefreshCrawl(jobType: string, status: string, designer: string, dateFrom: string, dateTo: string) {
     setRefreshing(true)
-    setFlashMessage(null)
-    setIsError(false)
     try {
       const res = await apiFetch<{ flash: string }>('/orders/refresh', {
         method: 'POST',
@@ -117,15 +130,14 @@ export function Topbar() {
           date_to: dateTo || undefined,
         }),
       })
-      setFlashMessage(res.flash)
-      setIsError(res.flash.includes('thất bại') || res.flash.includes('lỗi'))
+      const isErr = res.flash.includes('thất bại') || res.flash.includes('lỗi')
+      showToast(res.flash, isErr ? 'error' : 'success')
       setShowCrawlModal(false)
 
       // Dispatch live update event so active views refresh immediately without destroying the toast popup
       window.dispatchEvent(new CustomEvent('orders-updated'))
     } catch (e: any) {
-      setIsError(true)
-      setFlashMessage(e?.message || 'Quét đơn thất bại — kiểm tra cấu hình tài khoản Printerval API.')
+      showToast(e?.message || 'Quét đơn thất bại — kiểm tra cấu hình tài khoản Printerval API.', 'error')
     } finally {
       setRefreshing(false)
     }
@@ -180,19 +192,6 @@ export function Topbar() {
         )
       })()}
 
-      {/* Toast Notification Banner */}
-      {flashMessage && (
-        <div className={`fixed top-4 right-6 z-50 p-3 px-4 rounded-xl text-xs font-semibold shadow-lg flex items-center gap-2.5 transition-all animate-in fade-in slide-in-from-top-2 ${
-          isError ? 'bg-red-600 text-white' : 'bg-[#0052CC] text-white'
-        }`}>
-          {isError ? <AlertCircle className="h-4 w-4 text-red-200 shrink-0" /> : <CheckCircle2 className="h-4 w-4 text-emerald-300 shrink-0" />}
-          <span>{flashMessage}</span>
-          <button onClick={() => setFlashMessage(null)} className="ml-2 p-0.5 hover:bg-white/20 rounded-md transition-colors">
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      )}
-
       {/* Action Controls */}
       <div className="flex items-center gap-3">
         {user.role === 'admin' && (
@@ -232,6 +231,78 @@ export function Topbar() {
               <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin text-white' : 'text-white'}`} />
               <span>{refreshing ? 'Đang Quét Đơn...' : 'Quét Đơn Printerval'}</span>
             </button>
+
+            {/* Gallery Sync Button / Live Progress Bar */}
+            {!isGallerySyncing ? (
+              <button
+                type="button"
+                onClick={() => triggerSyncWaiting(false)}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 shadow-2xs transition-all cursor-pointer"
+                title="Đồng bộ bộ ảnh cho toàn bộ đơn trong Waiting (tự động bỏ qua các đơn đã có đủ ảnh)"
+              >
+                <Images className="h-3.5 w-3.5 text-purple-600" />
+                <span>Đồng bộ bộ ảnh</span>
+                {pendingWaitingCount > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full bg-purple-200/80 text-purple-900 text-[10px] font-bold font-mono">
+                    {pendingWaitingCount}
+                  </span>
+                )}
+              </button>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={openGalleryModal}
+                  className={`relative flex items-center gap-2 px-3.5 py-1.5 text-xs font-bold rounded-xl text-white shadow-md transition-all cursor-pointer overflow-hidden border select-none ${
+                    isGalleryPaused
+                      ? 'bg-amber-600 hover:bg-amber-700 border-amber-400/40'
+                      : 'bg-purple-600 hover:bg-purple-700 border-purple-400/40'
+                  }`}
+                  title="Bấm để xem chi tiết tiến trình từng đơn"
+                >
+                  {galleryProgress && (
+                    <div
+                      className={`absolute inset-0 transition-all duration-300 pointer-events-none ${
+                        isGalleryPaused ? 'bg-amber-900/40' : 'bg-purple-900/40'
+                      }`}
+                      style={{ width: `${Math.round((galleryProgress.current / galleryProgress.total) * 100)}%` }}
+                    />
+                  )}
+                  {!isGalleryPaused ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-white relative z-10 shrink-0" />
+                  ) : (
+                    <Pause className="h-3.5 w-3.5 text-amber-200 relative z-10 shrink-0" />
+                  )}
+                  <span className="relative z-10 font-mono">
+                    {isGalleryPaused ? 'Tạm dừng đồng bộ' : 'Đang đồng bộ ảnh'}{' '}
+                    {galleryProgress ? `${galleryProgress.current}/${galleryProgress.total}` : '...'}
+                  </span>
+                  {galleryProgress && (
+                    <span className="relative z-10 text-[10px] bg-white/20 px-1.5 py-0.5 rounded font-mono font-bold">
+                      {Math.round((galleryProgress.current / galleryProgress.total) * 100)}%
+                    </span>
+                  )}
+                </button>
+
+                {/* Pause / Resume Quick Button */}
+                <button
+                  type="button"
+                  onClick={isGalleryPaused ? resumeSync : pauseSync}
+                  className={`p-1.5 rounded-xl border transition-all cursor-pointer shadow-2xs ${
+                    isGalleryPaused
+                      ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-300'
+                      : 'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-300'
+                  }`}
+                  title={isGalleryPaused ? 'Tiếp tục đồng bộ ảnh' : 'Tạm dừng đồng bộ ảnh'}
+                >
+                  {isGalleryPaused ? (
+                    <Play className="h-4 w-4 fill-emerald-600 text-emerald-600" />
+                  ) : (
+                    <Pause className="h-4 w-4 fill-amber-600 text-amber-600" />
+                  )}
+                </button>
+              </div>
+            )}
           </>
         )}
 
@@ -296,6 +367,7 @@ export function Topbar() {
         loading={refreshing}
         designers={crawlDesigners}
       />
+      <SyncGalleryModal />
     </header>
   )
 }

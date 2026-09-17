@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from app.adapters.db.models import Assignment, Order, Platform, User, WorkflowEvent
 from app.api.deps import get_current_platform_id, get_db
 from app.api.main import create_app
-from app.application.auth import hash_password
+from app.application.auth import create_session_token, hash_password
 
 
 @pytest.fixture()
@@ -22,23 +22,27 @@ def client(db_session):
     app.dependency_overrides.clear()
 
 
-def _login(client, db_session, role: str, username: str) -> tuple[User, dict[str, str]]:
+def _login(client, db_session, role: str, username: str, platform_id: uuid.UUID | None = None) -> tuple[User, dict[str, str]]:
     user = User(
         username=username,
         full_name=username,
         role=role,
         password_hash=hash_password("pass123"),
         active=True,
+        platform_id=platform_id if role not in ("admin", "support") else None,
     )
     db_session.add(user)
     db_session.commit()
-    response = client.post("/api/login", json={"username": username, "password": "pass123"})
-    assert response.status_code == 200
-    return user, {"Authorization": f"Bearer {response.json()['access_token']}"}
+    token = create_session_token(str(user.id), role)
+    client.cookies.set("tacahu_session", token)
+    headers = {"Authorization": f"Bearer {token}"}
+    if platform_id:
+        headers["X-Platform-Id"] = str(platform_id)
+    return user, headers
 
 
 def _platform(db_session, name: str = "Duplicate board platform") -> Platform:
-    platform = Platform(name=name, account_username=f"{uuid.uuid4()}@example.com")
+    platform = Platform(id=uuid.uuid4(), name=name, account_username=f"{uuid.uuid4()}@example.com")
     db_session.add(platform)
     db_session.commit()
     return platform
@@ -48,7 +52,7 @@ def test_admin_can_put_orders_in_duplicate_domain_and_board_shows_missing_form(
     client, db_session
 ):
     platform = _platform(db_session)
-    admin, headers = _login(client, db_session, "admin", "duplicate-domain-admin")
+    admin, headers = _login(client, db_session, "admin", "duplicate-domain-admin", platform.id)
     trello_designer = User(
         username="trello-designer-a",
         full_name="Trello A",
@@ -86,15 +90,16 @@ def test_admin_can_put_orders_in_duplicate_domain_and_board_shows_missing_form(
     db_session.refresh(order)
     db_session.refresh(active_assignment)
     assert order.work_domain == "duplicate"
-    assert order.state == "IN_PROGRESS"
+    assert order.state == "WAITING"
     assert active_assignment.status == "cancelled"
     assert db_session.query(WorkflowEvent).filter_by(order_id=order.id).count() == 1
     assert board.status_code == 200
-    assert [column["title"] for column in board.json()["columns"]] == ["Thiếu form", "Trello A"]
+    assert [column["title"] for column in board.json()["columns"]] == ["Đơn hàng", "Thiếu form", "Trello A", "Done"]
+    # New duplicate order starts in "Đơn hàng" column with WAITING state
     assert board.json()["columns"][0]["cards"][0]["id"] == str(order.id)
     assert board.json()["columns"][0]["metrics"] == {
         "total": 1,
-        "doing": 1,
+        "doing": 0,
         "review": 0,
         "fix": 0,
         "done": 0,
@@ -102,9 +107,84 @@ def test_admin_can_put_orders_in_duplicate_domain_and_board_shows_missing_form(
     assert board.json()["cross_designer_drag_enabled"] is True
 
 
+def test_move_card_between_orders_missing_form_designer_and_done(client, db_session):
+    platform = _platform(db_session)
+    admin, headers = _login(client, db_session, "admin", "admin-move-tester", platform.id)
+    trello_designer = User(
+        username="trello-des-b",
+        full_name="Trello B",
+        role="designer-trello",
+        password_hash="hash",
+        platform_id=platform.id,
+    )
+    order = Order(external_order_id="DUP-FLOW", platform_id=platform.id, work_domain="duplicate")
+    db_session.add_all([trello_designer, order])
+    db_session.commit()
+    client.app.dependency_overrides[get_current_platform_id] = lambda: platform.id
+
+    try:
+        # 1. Move to "missing_form"
+        res_mf = client.post(
+            "/api/duplicate-board/move",
+            json={"order_id": str(order.id), "target_column_id": "missing_form"},
+            headers=headers,
+        )
+        assert res_mf.status_code == 200
+        assert res_mf.json()["template_missing"] is True
+
+        board1 = client.get("/api/duplicate-board", headers=headers).json()
+        assert len(board1["columns"][1]["cards"]) == 1
+        assert board1["columns"][1]["cards"][0]["id"] == str(order.id)
+
+        # 2. Claim to Trello B designer
+        res_des = client.post(
+            "/api/duplicate-board/move",
+            json={"order_id": str(order.id), "target_designer_id": str(trello_designer.id)},
+            headers=headers,
+        )
+        assert res_des.status_code == 200
+        assert res_des.json()["assignee_id"] == str(trello_designer.id)
+        assert res_des.json()["template_missing"] is False
+
+        board2 = client.get("/api/duplicate-board", headers=headers).json()
+        assert len(board2["columns"][2]["cards"]) == 1
+        assert board2["columns"][2]["cards"][0]["id"] == str(order.id)
+
+        # 3. Move to Done
+        res_done = client.post(
+            "/api/duplicate-board/move",
+            json={"order_id": str(order.id), "target_column_id": "done"},
+            headers=headers,
+        )
+        assert res_done.status_code == 200
+        assert res_done.json()["state"] == "DONE"
+        assert res_done.json()["assignee_id"] == str(trello_designer.id)
+
+        board3 = client.get("/api/duplicate-board", headers=headers).json()
+        assert len(board3["columns"][3]["cards"]) == 1
+        assert board3["columns"][3]["cards"][0]["id"] == str(order.id)
+
+        # 4. If order gets FIX from Printerval sync, it should jump back to Trello B's column
+        db_session.refresh(order)
+        order.state = "REVISION"
+        order.note_outsource = "Cần sửa logo"
+        db_session.commit()
+
+        board4 = client.get("/api/duplicate-board", headers=headers).json()
+        # Done column is now empty
+        assert len(board4["columns"][3]["cards"]) == 0
+        # Designer column has the order in FIX state!
+        assert len(board4["columns"][2]["cards"]) == 1
+        assert board4["columns"][2]["cards"][0]["state"] == "REVISION"
+        assert board4["columns"][2]["cards"][0]["note_outsource"] == "Cần sửa logo"
+
+    finally:
+        del client.app.dependency_overrides[get_current_platform_id]
+
+
 def test_trello_designer_can_claim_self_but_cannot_assign_another_user(client, db_session):
     platform = _platform(db_session)
-    actor, headers = _login(client, db_session, "designer-trello", "trello-actor")
+    actor, headers = _login(client, db_session, "designer-trello", "trello-actor", platform.id)
     actor.platform_id = platform.id
     other = User(
         username="trello-other",
@@ -148,7 +228,7 @@ def test_trello_designer_can_claim_self_but_cannot_assign_another_user(client, d
 
 def test_trello_designer_can_move_between_any_columns_when_admin_enables_cross_drag(client, db_session):
     platform = _platform(db_session)
-    actor, headers = _login(client, db_session, "designer-trello", "trello-cross-actor")
+    actor, headers = _login(client, db_session, "designer-trello", "trello-cross-actor", platform.id)
     actor.platform_id = platform.id
     other = User(
         username="trello-cross-other",
@@ -177,7 +257,7 @@ def test_trello_designer_can_move_between_any_columns_when_admin_enables_cross_d
 
 def test_admin_can_toggle_cross_designer_drag(client, db_session):
     platform = _platform(db_session)
-    _, headers = _login(client, db_session, "admin", "duplicate-domain-settings-admin")
+    _, headers = _login(client, db_session, "admin", "duplicate-domain-settings-admin", platform.id)
     client.app.dependency_overrides[get_current_platform_id] = lambda: platform.id
 
     try:
@@ -197,7 +277,7 @@ def test_admin_can_toggle_cross_designer_drag(client, db_session):
 
 def test_regular_designer_cannot_read_duplicate_board(client, db_session):
     platform = _platform(db_session)
-    _, headers = _login(client, db_session, "designer", "regular-cannot-board")
+    _, headers = _login(client, db_session, "designer", "regular-cannot-board", platform.id)
     client.app.dependency_overrides[get_current_platform_id] = lambda: platform.id
     try:
         response = client.get("/api/duplicate-board", headers=headers)
@@ -208,7 +288,7 @@ def test_regular_designer_cannot_read_duplicate_board(client, db_session):
 
 def test_regular_designer_cannot_see_duplicate_order_via_legacy_printerval_match(client, db_session):
     platform = _platform(db_session)
-    designer, headers = _login(client, db_session, "designer", "regular-duplicate-hidden")
+    designer, headers = _login(client, db_session, "designer", "regular-duplicate-hidden", platform.id)
     designer.platform_id = platform.id
     designer.full_name = "Regular External Name"
     order = Order(
@@ -227,3 +307,120 @@ def test_regular_designer_cannot_see_duplicate_order_via_legacy_printerval_match
 
     assert response.status_code == 200
     assert response.json()["orders"] == []
+
+
+def test_support_can_set_duplicate_check_status_and_reversible(client, db_session):
+    platform = _platform(db_session)
+    support, headers = _login(client, db_session, "support", "support-duplicate-check-user", platform.id)
+
+    order = Order(
+        external_order_id="ORD-CHK-1",
+        platform_id=platform.id,
+        work_domain="standard",
+        duplicate_check_status="uncheck",
+        state="WAITING",
+    )
+    db_session.add(order)
+    db_session.commit()
+    client.app.dependency_overrides[get_current_platform_id] = lambda: platform.id
+
+    try:
+        # 1. Support marks order as duplicate
+        res1 = client.post(
+            "/api/orders/duplicate-check-status",
+            json={"order_ids": [str(order.id)], "status": "duplicate"},
+            headers=headers,
+        )
+        assert res1.status_code == 200
+        assert res1.json()["changed_count"] == 1
+        db_session.refresh(order)
+        assert order.work_domain == "duplicate"
+        assert order.duplicate_check_status == "duplicate"
+        assert order.state == "WAITING"
+
+        # 2. Support marks order as non_duplicate (reversible flow)
+        res2 = client.post(
+            "/api/orders/duplicate-check-status",
+            json={"order_ids": [str(order.id)], "status": "non_duplicate"},
+            headers=headers,
+        )
+        assert res2.status_code == 200
+        assert res2.json()["changed_count"] == 1
+        db_session.refresh(order)
+        assert order.work_domain == "standard"
+        assert order.duplicate_check_status == "non_duplicate"
+        assert order.state == "WAITING"
+
+        # 3. Support resets order to uncheck
+        res3 = client.post(
+            "/api/orders/duplicate-check-status",
+            json={"order_ids": [str(order.id)], "status": "uncheck"},
+            headers=headers,
+        )
+        assert res3.status_code == 200
+        db_session.refresh(order)
+        assert order.duplicate_check_status == "uncheck"
+        assert order.work_domain == "standard"
+
+    finally:
+        del client.app.dependency_overrides[get_current_platform_id]
+
+
+def test_admin_can_revoke_assignment(client, db_session):
+    platform = _platform(db_session)
+    admin, headers = _login(client, db_session, "admin", "admin-revoker", platform.id)
+    designer = User(
+        username="assigned-des-1",
+        full_name="Assigned Des",
+        role="designer",
+        password_hash="hash",
+        platform_id=platform.id,
+    )
+    order = Order(
+        external_order_id="ORD-REVOKE-1",
+        platform_id=platform.id,
+        work_domain="standard",
+        state="IN_PROGRESS",
+        printerval_designer="Assigned Des",
+    )
+    db_session.add_all([designer, order])
+    db_session.flush()
+    assignment = Assignment(order_id=order.id, designer_id=designer.id, status="approved")
+    db_session.add(assignment)
+    db_session.commit()
+    client.app.dependency_overrides[get_current_platform_id] = lambda: platform.id
+
+    try:
+        # Admin revokes assignment
+        res = client.post(
+            "/api/assignments/revoke",
+            json={"order_ids": [str(order.id)]},
+            headers=headers,
+        )
+        assert res.status_code == 200
+        assert res.json()["revoked_count"] == 1
+
+        db_session.refresh(order)
+        db_session.refresh(assignment)
+        assert order.state == "WAITING"
+        assert order.printerval_designer is None
+        assert assignment.status == "cancelled"
+
+        # Test single order endpoint as well
+        order.state = "IN_PROGRESS"
+        order.printerval_designer = "Assigned Des"
+        assignment2 = Assignment(order_id=order.id, designer_id=designer.id, status="approved")
+        db_session.add(assignment2)
+        db_session.commit()
+
+        res_single = client.post(
+            f"/api/orders/{order.id}/revoke-assignment",
+            headers=headers,
+        )
+        assert res_single.status_code == 200
+        db_session.refresh(order)
+        assert order.state == "WAITING"
+        assert order.printerval_designer is None
+
+    finally:
+        del client.app.dependency_overrides[get_current_platform_id]

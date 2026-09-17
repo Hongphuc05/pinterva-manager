@@ -87,6 +87,35 @@ def _parse_variants(sku_data: dict[str, Any] | None) -> list[ProductVariant]:
     return variants
 
 
+def _is_internal_or_price_key(key: str, val: Any) -> bool:
+    k = str(key).lower().strip()
+    if k in ("price_addtocart", "giá_thêm_vào_giỏ_hàng", "price", "prx_discount", "discount", "cart", "total", "subtotal"):
+        return True
+    if k.startswith("price_") or k.startswith("giá_thêm_") or "addtocart" in k:
+        return True
+    if isinstance(val, dict) and ("price" in val or "prx_discount" in val):
+        return True
+    if isinstance(val, str):
+        val_s = val.strip()
+        if (val_s.startswith("{") and val_s.endswith("}")) and ("price" in val_s or "prx_discount" in val_s):
+            return True
+    return False
+
+
+def _is_image_config_entry(key: str, val: Any) -> bool:
+    """Filter out photo/image entries from custom config text table since they belong
+    in the order's source_files/gallery rather than raw JSON strings."""
+    if isinstance(val, dict) and val.get("type") == "image":
+        return True
+    if isinstance(val, str):
+        val_s = val.strip()
+        if val_s.startswith("{") and val_s.endswith("}") and '"type": "image"' in val_s:
+            return True
+        if val_s.startswith("http") and any(ext in val_s.lower() for ext in (".jpg", ".jpeg", ".png", ".webp")):
+            return True
+    return False
+
+
 def _parse_custom_config(sku_data: dict[str, Any] | None) -> CustomConfig | None:
     if not sku_data:
         return None
@@ -100,18 +129,26 @@ def _parse_custom_config(sku_data: dict[str, Any] | None) -> CustomConfig | None
         config = raw_config
     if not isinstance(config, dict) or not config:
         return None
-    # Keep nested image/text arrays valid JSON. `str(list)` creates Python syntax,
-    # which made downstream clients treat an entire configuration group as one value.
+
     def serialize(value: Any) -> str:
         return json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else str(value)
 
-    original = [CustomConfigEntry(key=str(k), value=serialize(v)) for k, v in config.items()]
+    def clean_entries(raw_dict: dict[str, Any]) -> list[CustomConfigEntry]:
+        results: list[CustomConfigEntry] = []
+        for k, v in raw_dict.items():
+            if _is_internal_or_price_key(k, v):
+                continue
+            if _is_image_config_entry(k, v):
+                continue
+            val_str = serialize(v)
+            # Remove any raw domain leaks
+            val_str = val_str.replace("https://assets.printerval.com", "").replace("http://assets.printerval.com", "")
+            results.append(CustomConfigEntry(key=str(k).strip(), value=val_str))
+        return results
+
+    original = clean_entries(config)
     raw_translated = sku_data.get("translated_configurations")
-    translated = (
-        [CustomConfigEntry(key=str(k), value=serialize(v)) for k, v in raw_translated.items()]
-        if isinstance(raw_translated, dict)
-        else []
-    )
+    translated = clean_entries(raw_translated) if isinstance(raw_translated, dict) else []
     return CustomConfig(original=original, translated_vn=translated)
 
 

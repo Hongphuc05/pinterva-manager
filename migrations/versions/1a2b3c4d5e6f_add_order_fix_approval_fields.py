@@ -27,10 +27,20 @@ def upgrade() -> None:
     )
     op.add_column(
         'orders',
+        sa.Column(
+            'fix_rejected_by_admin',
+            sa.Boolean(),
+            nullable=False,
+            server_default=sa.text('false'),
+        ),
+    )
+    op.add_column(
+        'orders',
         sa.Column('previous_note_outsource', sa.Text(), nullable=True),
     )
 
 
 def downgrade() -> None:
     op.drop_column('orders', 'previous_note_outsource')
+    op.drop_column('orders', 'fix_rejected_by_admin')
     op.drop_column('orders', 'fix_approved_by_admin')

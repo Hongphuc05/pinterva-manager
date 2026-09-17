@@ -19,7 +19,8 @@ export const STATUS_OPTIONS: StatusOption[] = [
     label: 'Waiting',
     badgeClass: 'bg-slate-100 text-slate-700 border-slate-300',
     dotColor: 'bg-slate-400',
-    description: 'Chờ Designer bắt đầu làm',
+    adminOnly: true,
+    description: 'Đang chờ được phân công',
   },
   {
     key: 'IN_PROGRESS',
@@ -148,7 +149,20 @@ export function StatusDropdown({
   const normalizedState = localState.toUpperCase()
   let currentOpt = STATUS_OPTIONS.find((opt) => {
     if (opt.key === normalizedState) return true
-    if (opt.key === 'WAITING' && (normalizedState === 'ASSIGNED' || normalizedState === 'WAITING')) return true
+    if (
+      opt.key === 'WAITING' &&
+      (
+        normalizedState === 'ASSIGNED' ||
+        normalizedState === 'WAITING' ||
+        normalizedState === 'OPEN' ||
+        normalizedState === 'DISCOVERED' ||
+        normalizedState === 'OPEN_FOR_ALLOCATION' ||
+        normalizedState === 'CLAIMED_IMPORTED' ||
+        normalizedState === 'ASSIGNMENT_PENDING_APPROVAL'
+      )
+    ) {
+      return true
+    }
     if (opt.key === 'IN_PROGRESS' && (normalizedState === 'DOING' || normalizedState === 'IN_PROGRESS')) return true
     if (opt.key === 'QC_PENDING' && (normalizedState === 'REVIEW' || normalizedState === 'RESULT_SUBMITTED' || normalizedState === 'SUBMITTING_TO_SITE')) return true
     if (opt.key === 'REVISION' && (normalizedState === 'FIX' || normalizedState === 'REVISION_REQUESTED')) return true
@@ -156,13 +170,9 @@ export function StatusDropdown({
     return false
   })
 
-  // Fallback for OPEN or other states
-  const isOpenForAllocation = ['OPEN', 'DISCOVERED', 'OPEN_FOR_ALLOCATION'].includes(normalizedState)
-  const displayLabel = currentOpt ? currentOpt.label : isOpenForAllocation ? 'Chờ phân công' : localState
+  const displayLabel = currentOpt ? currentOpt.label : localState
   const displayBadgeClass = currentOpt
     ? currentOpt.badgeClass
-    : isOpenForAllocation
-    ? 'bg-amber-100 text-amber-800 border-amber-300'
     : 'bg-slate-100 text-slate-700 border-slate-300'
 
   async function handleSelect(opt: StatusOption) {

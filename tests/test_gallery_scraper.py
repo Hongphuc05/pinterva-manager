@@ -52,6 +52,23 @@ def test_extract_gallery_images_from_html_extracts_and_filters():
     assert images[1] == "https://gdn.printerval.com/unsafe/960x960/assets.printerval.com/photo2.jpg"
 
 
+def test_extract_gallery_images_with_fancy_loading_gallery_and_ads():
+    html = """
+    <div>
+        <img loading="lazy" src="https://cdn.printerval.com/unsafe/540x540/assets.printerval.com/2026/08/15/custom-product-57d5cb20b362897cc01d2dd2612d55e8.png" width="170" height="170" alt="Disover FC Bayerns Munchens" data-loading="fancyLoadingProductGallery0" referrerpolicy="no-referrer">
+        <img loading="lazy" src="https://cdn.printerval.com/unsafe/540x540/assets.printerval.com/2026/08/15/custom-product-6e91430ebe4fa7a89a3358ce5af45580.png" width="170" height="170" alt="Disover FC Bayerns Munchens" data-loading="fancyLoadingProductGallery1" referrerpolicy="no-referrer">
+        <img src="https://assets.printerval.com/2025/11/27/printerval-logo-cb27ae8fff7bb5806b168cb7be47160b.svg">
+        <img src="https://cdn.printerval.com/unsafe/540x540/assets.printerval.com/product-ads/2026/06/06/output_image_2b1bc58c0090e3b9.jpg">
+        <img src="https://cdn.printerval.com/unsafe/160x160/assets.printerval.com/2023/12/22/tumblers-2b3465730cc7ac493afe8462b15bbf66-d8847de3b93b85600fb353e174b862b1.webp">
+        <img src="https://assets.printerval.com/2025/06/05/paypal-9ff7ad86405abd981886e544111015f4.svg">
+    </div>
+    """
+    images = extract_gallery_images_from_html(html)
+    assert len(images) == 2
+    assert images[0] == "https://cdn.printerval.com/unsafe/960x960/assets.printerval.com/2026/08/15/custom-product-57d5cb20b362897cc01d2dd2612d55e8.png"
+    assert images[1] == "https://cdn.printerval.com/unsafe/960x960/assets.printerval.com/2026/08/15/custom-product-6e91430ebe4fa7a89a3358ce5af45580.png"
+
+
 def test_extract_gallery_images_from_html_fallback():
     fallback = "https://gdn.printerval.com/fallback.jpg"
     assert extract_gallery_images_from_html("", fallback_image_url=fallback) == [fallback]

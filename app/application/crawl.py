@@ -36,26 +36,22 @@ class DiscoverFailedError(Exception):
 
 
 def apply_crawled_product_gallery(order: Order, incoming: list[str] | None) -> None:
-    """Apply a server-crawled gallery without discarding a richer browser capture.
+    """Apply a server-crawled gallery without discarding a richer gallery capture.
 
     Server requests can legitimately be reduced to one thumbnail by Cloudflare.
-    Once CopyImage has stored a multi-image gallery, that fallback must never erase
+    Once a multi-image gallery is stored, a single-thumbnail fallback must never erase
     it on later status/detail crawls.
     """
-    candidates = [
-        url.strip() for url in (incoming or []) if isinstance(url, str) and url.strip()
-    ]
+    from app.application.gallery_helper import deduplicate_gallery_urls
+
+    candidates = deduplicate_gallery_urls(incoming or [])
     if not candidates:
         return
-    current = [
-        url.strip()
-        for url in (order.product_image_urls or [])
-        if isinstance(url, str) and url.strip()
-    ]
+    current = deduplicate_gallery_urls(order.product_image_urls or [])
     if len(current) > 1 and len(candidates) <= 1:
         return
     chosen = candidates if len(candidates) > 1 else [*current, *candidates]
-    order.product_image_urls = list(dict.fromkeys(chosen))
+    order.product_image_urls = deduplicate_gallery_urls(chosen)
 
 
 def discover_waiting_orders_with_summaries(

@@ -35,10 +35,6 @@ class Platform(Base):
     # platform is the root-cause fix.
     team_outsource: Mapped[str | None] = mapped_column(String(128), nullable=True)
     session_cookie: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # A scoped secret used only by the operator's CopyImage Chrome extension to
-    # upload a product gallery captured in their already-authenticated browser.
-    # Store a digest, never the bearer token itself.
-    gallery_bridge_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     printerval_designer_options: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     printerval_status_options: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     printerval_options_synced_at: Mapped[datetime | None] = mapped_column(
@@ -58,7 +54,7 @@ class Platform(Base):
 class User(Base):
     __tablename__ = "users"
     __table_args__ = (
-        CheckConstraint("role IN ('admin', 'designer', 'designer-trello')", name="ck_users_role"),
+        CheckConstraint("role IN ('admin', 'designer', 'designer-trello', 'support')", name="ck_users_role"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
@@ -100,7 +96,13 @@ class Batch(Base):
 
 class Order(Base):
     __tablename__ = "orders"
-    __table_args__ = (UniqueConstraint("platform_id", "external_order_id", name="uq_orders_platform_external_id"),)
+    __table_args__ = (
+        UniqueConstraint("platform_id", "external_order_id", name="uq_orders_platform_external_id"),
+        CheckConstraint(
+            "duplicate_check_status IN ('uncheck', 'duplicate', 'non_duplicate')",
+            name="ck_orders_duplicate_check_status",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     external_order_id: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -110,6 +112,9 @@ class Order(Base):
     # workflow state so moving a card between people never mutates production state.
     work_domain: Mapped[str] = mapped_column(
         String(32), nullable=False, default="standard", server_default=text("'standard'")
+    )
+    duplicate_check_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="uncheck", server_default=text("'uncheck'")
     )
     state: Mapped[str] = mapped_column(String(32), nullable=False, default="OPEN")
     version: Mapped[int] = mapped_column(nullable=False, default=1)
@@ -154,6 +159,9 @@ class Order(Base):
     fix_approved_by_admin: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=text("false"), nullable=False
     )
+    fix_rejected_by_admin: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false"), nullable=False
+    )
     # Internal instruction from Admin to the assigned Designer.  This is kept
     # separate from `note_outsource`, which mirrors Printerval QC feedback.
     designer_note: Mapped[str] = mapped_column(
@@ -189,9 +197,23 @@ class Order(Base):
     # — a READ-ONLY mirror kept in sync by a scheduled job + manual refresh, distinct
     # from `state` (our own internal workflow state machine, claude.md §5). Nothing in
     # this app ever writes this value back to Printerval; see claude.md §2 invariant #5
-    # and §3 C5 — only a QC Approve decision's own job is allowed to write site state.
     printerval_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
     printerval_status_synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    status_changed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    is_paid: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false"), nullable=False
+    )
+    paid_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    paid_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    review_submitted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
@@ -425,4 +447,27 @@ class SyncJob(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class FinanceNote(Base):
+    """Admin notes on orders or designers for tracking, payroll notes, and reviews."""
+
+    __tablename__ = "finance_notes"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    platform_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("platforms.id"), nullable=True)
+    target_type: Mapped[str] = mapped_column(String(32), nullable=False)  # 'order' or 'designer'
+    order_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("orders.id"), nullable=True)
+    order_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    designer_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    designer_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    author_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    author_name: Mapped[str] = mapped_column(String(255), nullable=False, default="Admin")
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )

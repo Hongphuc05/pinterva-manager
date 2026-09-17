@@ -7,12 +7,28 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-JUNK_KEYWORDS = ("avatar", "gift", "banner", "icon", "badge", "flag")
+JUNK_KEYWORDS = (
+    "avatar",
+    "gift",
+    "banner",
+    "icon",
+    "badge",
+    "flag",
+    "product-ads",
+    "logo",
+    "paypal",
+    "screenshot-",
+    "files/2020-",
+    "files/product/",
+)
 GALLERY_SELECTORS = (
+    'img[data-loading*="ProductGallery"]',
+    'img[data-loading*="fancyLoadingProductGallery"]',
     ".product-gallery-item-image",
     ".product-thumbnail-slide img",
     ".product-image-container img",
     ".main-image img",
+    ".product-gallery img",
 )
 
 
@@ -22,7 +38,7 @@ def normalize_gallery_image_url(src: str) -> str:
         clean = f"https:{clean}"
     elif not clean.startswith("http"):
         clean = f"https://printerval.com{clean}" if clean.startswith("/") else f"https://{clean}"
-    # Upgrade thumbnail resolution to 960x960 as done in CopyImage extension
+    # Upgrade thumbnail resolution to 960x960 for crystal-clear preview
     clean = re.sub(r"/unsafe/[^/]+/", "/unsafe/960x960/", clean)
     return clean
 
@@ -39,18 +55,23 @@ class _GalleryHTMLParser(HTMLParser):
         self._tag_stack.append({"tag": tag, "classes": tag_classes})
 
         if tag == "img":
-            # Check if this img or any parent has relevant gallery classes
-            is_gallery_candidate = False
-            for cls in (
-                "product-gallery-item-image",
-                "product-thumbnail-slide",
-                "product-image-container",
-                "main-image",
-                "gallery",
-            ):
-                if any(cls in frame["classes"] for frame in self._tag_stack):
-                    is_gallery_candidate = True
-                    break
+            data_loading = str(attr_dict.get("data-loading") or "").strip().lower()
+            is_gallery_candidate = "productgallery" in data_loading or "fancyloadingproductgallery" in data_loading
+
+            if not is_gallery_candidate:
+                # Check if this img or any parent has relevant gallery classes
+                for cls in (
+                    "product-gallery-item-image",
+                    "product-thumbnail-slide",
+                    "product-image-container",
+                    "main-image",
+                    "gallery",
+                    "product-gallery",
+                    "product-images",
+                ):
+                    if any(cls in frame["classes"] for frame in self._tag_stack):
+                        is_gallery_candidate = True
+                        break
 
             # Also check if image src is an assets.printerval.com URL
             src_val = (
@@ -61,13 +82,11 @@ class _GalleryHTMLParser(HTMLParser):
             )
             if src_val:
                 src_str = src_val.strip()
-                if "assets.printerval.com" in src_str or "gdn.printerval.com" in src_str:
-                    is_gallery_candidate = True
-
-                if is_gallery_candidate:
-                    src_lower = src_str.lower()
-                    if not any(k in src_lower for k in JUNK_KEYWORDS):
-                        self.image_urls.append(normalize_gallery_image_url(src_str))
+                src_lower = src_str.lower()
+                if ("assets.printerval.com" in src_str or "gdn.printerval.com" in src_str or "cdn.printerval.com" in src_str):
+                    if "custom-product" in src_lower or is_gallery_candidate:
+                        if not any(k in src_lower for k in JUNK_KEYWORDS):
+                            self.image_urls.append(normalize_gallery_image_url(src_str))
 
     def handle_endtag(self, tag: str) -> None:
         for i in range(len(self._tag_stack) - 1, -1, -1):
@@ -80,9 +99,7 @@ def extract_gallery_images_from_html(
     html: str | None,
     fallback_image_url: str | None = None,
 ) -> list[str]:
-    """Extract and deduplicate gallery image URLs from product page HTML.
-    Mirrors the exact extraction & cleaning algorithm in the CopyImage extension.
-    """
+    """Extract and deduplicate gallery image URLs from product page HTML."""
     if not html or not html.strip():
         return [fallback_image_url] if fallback_image_url else []
 
@@ -94,7 +111,7 @@ def extract_gallery_images_from_html(
         # If parser found none through strict class checks, fallback to regex for assets.printerval
         if not images:
             raw_matches = re.findall(
-                r'(?:src|data-src|loading-src|ng-src)=["\']([^"\']*(?:assets\.printerval\.com|gdn\.printerval\.com)[^"\']*)["\']',
+                r'(?:src|data-src|loading-src|ng-src)=["\']([^"\']*(?:assets\.printerval\.com|gdn\.printerval\.com|cdn\.printerval\.com)[^"\']*)["\']',
                 html,
                 re.IGNORECASE,
             )
@@ -125,15 +142,36 @@ async (salesUrl) => {
         const html = await res.text();
         const parser = new DOMParser();
         const doc = parser.parseFromString(html, 'text/html');
-        const imgElements = doc.querySelectorAll('.product-gallery-item-image, .product-thumbnail-slide img, .product-image-container img, .main-image img');
-        
+
         let rawImgs = [];
-        imgElements.forEach(img => {
+
+        // 1. Primary: Match gallery images by specific data-loading attribute in order
+        const galleryImgs = doc.querySelectorAll('img[data-loading*="fancyLoadingProductGallery"], img[data-loading*="ProductGallery"]');
+        galleryImgs.forEach(img => {
             const src = img.getAttribute('src') || img.getAttribute('data-src') || img.getAttribute('loading-src') || img.getAttribute('ng-src');
             if (src) rawImgs.push(src);
         });
 
-        const junkKeywords = ['avatar', 'gift', 'banner', 'icon', 'badge', 'flag'];
+        // 2. Secondary: If none found, match standard gallery container elements
+        if (rawImgs.length === 0) {
+            const containerImgs = doc.querySelectorAll('.product-gallery-item-image, .product-thumbnail-slide img, .product-image-container img, .main-image img, .product-gallery img');
+            containerImgs.forEach(img => {
+                const src = img.getAttribute('src') || img.getAttribute('data-src') || img.getAttribute('loading-src') || img.getAttribute('ng-src');
+                if (src) rawImgs.push(src);
+            });
+        }
+
+        // 3. Fallback: Search for custom-product images or product assets
+        if (rawImgs.length === 0) {
+            doc.querySelectorAll('img').forEach(img => {
+                const src = img.getAttribute('src') || img.getAttribute('data-src') || img.getAttribute('loading-src') || img.getAttribute('ng-src') || '';
+                if (src.includes('custom-product') || (src.includes('assets.printerval.com') && !src.includes('product-ads') && !src.includes('logo'))) {
+                    rawImgs.push(src);
+                }
+            });
+        }
+
+        const junkKeywords = ['avatar', 'gift', 'banner', 'icon', 'badge', 'flag', 'product-ads', 'logo', 'paypal', 'screenshot-'];
         let normalizedImgs = [];
         rawImgs.forEach(src => {
             const hasJunk = junkKeywords.some(k => src.toLowerCase().includes(k));

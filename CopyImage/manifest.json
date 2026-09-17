@@ -1,16 +1,35 @@
 {
   "manifest_version": 3,
-  "name": "Printerval Admin POD Tool",
-  "version": "13.0",
-  "permissions": ["activeTab", "scripting", "storage"],
-  "host_permissions": ["<all_urls>"],
-  "background": { "service_worker": "background.js" },
-  "action": {},
+  "name": "Tacahu POD - Printerval Gallery Sync & Copy Tool",
+  "version": "16.0",
+  "description": "Tự động quét, xem trước, click-to-copy và đồng bộ hàng loạt bộ ảnh sản phẩm từ Printerval về Tacahu Ops.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://*.printerval.com/*",
+    "https://printerval.com/*",
+    "http://localhost:*/*",
+    "http://127.0.0.1:*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Tacahu Gallery Bridge"
+  },
   "options_page": "options.html",
   "content_scripts": [
     {
-      "matches": ["https://*.printerval.com/*", "https://printerval.com/*"],
-      "js": ["content.js"]
+      "matches": [
+        "https://*.printerval.com/*",
+        "https://printerval.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
     }
   ]
 }

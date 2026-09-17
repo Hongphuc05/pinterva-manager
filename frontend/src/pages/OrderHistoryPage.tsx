@@ -1,10 +1,10 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Link } from 'react-router-dom'
 import { apiFetch, resolveAssetUrl } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { DashboardLayout } from '../components/DashboardLayout'
-import { getStatusInfo } from '../utils/statusTranslation'
+import { getStatusInfo, resolveExternalUrl } from '../utils/statusTranslation'
 import { OrderHistoryTimelineModal } from '../components/OrderHistoryTimelineModal'
+import { CopyableOrderCode } from '../components/CopyableOrderCode'
 import {
   History,
   Search,
@@ -356,7 +356,18 @@ export function OrderHistoryPage() {
                       (item.evidence?.note?.includes('http') ? item.evidence.note : null)
 
                     return (
-                      <tr key={item.id} className="hover:bg-gray-50/80 transition-colors">
+                      <tr
+                        key={item.id}
+                        onClick={() =>
+                          setSelectedModalOrder({
+                            id: item.order_id,
+                            external_order_id: item.external_order_id,
+                            product_name: item.product_name,
+                          })
+                        }
+                        className="hover:bg-blue-50/60 transition-colors cursor-pointer"
+                        title="Click vào dòng để xem timeline lịch sử thay đổi"
+                      >
                         {/* Timestamp */}
                         <td className="px-5 py-4 whitespace-nowrap text-xs text-gray-500 font-mono">
                           <div className="flex items-center gap-1.5">
@@ -382,13 +393,7 @@ export function OrderHistoryPage() {
                             <div className="max-w-[200px]">
                               {isAdmin ? (
                                 <>
-                                  <Link
-                                    to={`/orders/${item.order_id}`}
-                                    className="font-bold text-gray-900 hover:text-[#0052CC] truncate block text-sm font-mono"
-                                    title={item.external_order_id}
-                                  >
-                                    #{item.external_order_id}
-                                  </Link>
+                                  <CopyableOrderCode code={item.external_order_id} showHash />
                                   {item.product_name && (
                                     <p className="text-xs text-gray-400 truncate" title={item.product_name}>
                                       {item.product_name}
@@ -396,13 +401,12 @@ export function OrderHistoryPage() {
                                   )}
                                 </>
                               ) : (
-                                <Link
-                                  to={`/orders/${item.order_id}`}
-                                  className="font-bold text-gray-900 hover:text-[#0052CC] line-clamp-2 block text-xs"
+                                <span
+                                  className="font-bold text-gray-900 line-clamp-2 block text-xs"
                                   title={item.product_name || 'Đơn hàng'}
                                 >
                                   {item.product_name || 'Đơn thiết kế'}
-                                </Link>
+                                </span>
                               )}
                             </div>
                           </div>
@@ -475,21 +479,29 @@ export function OrderHistoryPage() {
                               <span>Designer: {item.designer_name}</span>
                             </div>
                           )}
-                          {driveLink && (
-                            <a
-                              href={driveLink}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex items-center gap-1 mt-1 text-xs text-[#0052CC] hover:text-blue-800 font-medium hover:underline"
-                            >
-                              <ExternalLink className="w-3 h-3" />
-                              Link nộp bài Design
-                            </a>
-                          )}
+                          {driveLink && (() => {
+                            const validDriveUrl = resolveExternalUrl(driveLink)
+                            return validDriveUrl ? (
+                              <a
+                                href={validDriveUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="inline-flex items-center gap-1 mt-1 text-xs text-[#0052CC] hover:text-blue-800 font-medium hover:underline"
+                              >
+                                <ExternalLink className="w-3 h-3" />
+                                Link nộp bài Design
+                              </a>
+                            ) : (
+                              <div className="mt-1 text-[11px] text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded inline-block font-mono border border-slate-200">
+                                Bài nộp: {driveLink}
+                              </div>
+                            )
+                          })()}
                         </td>
 
                         {/* Quick view button */}
-                        <td className="px-5 py-4 whitespace-nowrap text-right">
+                        <td className="px-5 py-4 whitespace-nowrap text-right" onClick={(e) => e.stopPropagation()}>
                           <button
                             onClick={() =>
                               setSelectedModalOrder({

@@ -6,32 +6,47 @@ export type StateInfo = {
 
 export const STATE_MAP: Record<string, StateInfo> = {
   OPEN: {
-    label: 'Chờ phân công',
-    description: 'Đơn hàng vừa cào về hoặc đã nhập kho, sẵn sàng để giao cho Designer.',
-    badgeClass: 'bg-amber-100 text-amber-800 border-amber-200',
+    label: 'Chờ nhận',
+    description: 'Đang chờ được phân công.',
+    badgeClass: 'bg-slate-100 text-slate-700 border-slate-300',
   },
   WAITING: {
-    label: 'Waiting',
-    description: 'Đã phân công, chờ Designer bắt đầu thực hiện.',
+    label: 'Chờ nhận',
+    description: 'Đang chờ được phân công.',
     badgeClass: 'bg-slate-100 text-slate-700 border-slate-300',
   },
   IN_PROGRESS: {
-    label: 'Doing',
+    label: 'Đang làm',
+    description: 'Designer đang thực hiện thiết kế.',
+    badgeClass: 'bg-blue-100 text-blue-800 border-blue-300',
+  },
+  DOING: {
+    label: 'Đang làm',
     description: 'Designer đang thực hiện thiết kế.',
     badgeClass: 'bg-blue-100 text-blue-800 border-blue-300',
   },
   QC_PENDING: {
-    label: 'Review',
-    description: 'Designer đã làm xong, đang chờ Admin kiểm tra duyệt.',
+    label: 'Chờ duyệt',
+    description: 'Designer đã làm xong, đang chờ duyệt.',
+    badgeClass: 'bg-purple-100 text-purple-800 border-purple-300',
+  },
+  REVIEW: {
+    label: 'Chờ duyệt',
+    description: 'Đang chờ duyệt bài thiết kế.',
     badgeClass: 'bg-purple-100 text-purple-800 border-purple-300',
   },
   REVISION: {
-    label: 'Fix',
-    description: 'Admin yêu cầu Designer sửa lại bài.',
+    label: 'Cần sửa',
+    description: 'Yêu cầu Designer sửa lại bài.',
+    badgeClass: 'bg-orange-100 text-orange-800 border-orange-300',
+  },
+  FIX: {
+    label: 'Cần sửa',
+    description: 'Yêu cầu Designer sửa lại bài.',
     badgeClass: 'bg-orange-100 text-orange-800 border-orange-300',
   },
   DONE: {
-    label: 'Done',
+    label: 'Hoàn thành',
     description: 'Đơn hàng đã được duyệt hoàn tất 100%.',
     badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-300',
   },
@@ -42,20 +57,20 @@ export const STATE_MAP: Record<string, StateInfo> = {
   },
   EXCEPTION: {
     label: 'Lỗi / Ngoại lệ',
-    description: 'Đơn gặp sự cố cào dữ liệu hoặc lỗi cần Admin kiểm tra.',
+    description: 'Đơn gặp sự cố cào dữ liệu hoặc lỗi cần kiểm tra.',
     badgeClass: 'bg-red-100 text-red-800 border-red-200',
   },
   // Legacy compatibility mappings
-  DISCOVERED: { label: 'Chờ phân công', description: 'Đơn hàng vừa cào về', badgeClass: 'bg-amber-100 text-amber-800 border-amber-200' },
-  CLAIMED_IMPORTED: { label: 'Chờ phân công', description: 'Đã nhập kho', badgeClass: 'bg-amber-100 text-amber-800 border-amber-200' },
-  OPEN_FOR_ALLOCATION: { label: 'Chờ phân công', description: 'Sẵn sàng phân công', badgeClass: 'bg-amber-100 text-amber-800 border-amber-200' },
-  ASSIGNMENT_PENDING_APPROVAL: { label: 'Chờ phân công', description: 'Chờ duyệt gán', badgeClass: 'bg-amber-100 text-amber-800 border-amber-200' },
-  ASSIGNED: { label: 'Waiting', description: 'Đã phân công, chờ Designer thực hiện', badgeClass: 'bg-slate-100 text-slate-700 border-slate-300' },
-  RESULT_SUBMITTED: { label: 'Review', description: 'Đã nộp kết quả', badgeClass: 'bg-purple-100 text-purple-800 border-purple-300' },
-  SUBMITTING_TO_SITE: { label: 'Review', description: 'Đang đẩy Printerval', badgeClass: 'bg-purple-100 text-purple-800 border-purple-300' },
+  DISCOVERED: { label: 'Chờ nhận', description: 'Đang chờ được phân công', badgeClass: 'bg-slate-100 text-slate-700 border-slate-300' },
+  CLAIMED_IMPORTED: { label: 'Chờ nhận', description: 'Đang chờ được phân công', badgeClass: 'bg-slate-100 text-slate-700 border-slate-300' },
+  OPEN_FOR_ALLOCATION: { label: 'Chờ nhận', description: 'Đang chờ được phân công', badgeClass: 'bg-slate-100 text-slate-700 border-slate-300' },
+  ASSIGNMENT_PENDING_APPROVAL: { label: 'Chờ nhận', description: 'Đang chờ được phân công', badgeClass: 'bg-slate-100 text-slate-700 border-slate-300' },
+  ASSIGNED: { label: 'Chờ nhận', description: 'Đang chờ được phân công', badgeClass: 'bg-slate-100 text-slate-700 border-slate-300' },
+  RESULT_SUBMITTED: { label: 'Chờ duyệt', description: 'Đã nộp kết quả', badgeClass: 'bg-purple-100 text-purple-800 border-purple-300' },
+  SUBMITTING_TO_SITE: { label: 'Chờ duyệt', description: 'Đã nộp kết quả', badgeClass: 'bg-purple-100 text-purple-800 border-purple-300' },
   REASSIGNMENT_REQUIRED: { label: 'Lỗi / Ngoại lệ', description: 'Cần gán lại', badgeClass: 'bg-red-100 text-red-800 border-red-200' },
-  REVISION_REQUESTED: { label: 'Fix', description: 'Cần sửa lại', badgeClass: 'bg-orange-100 text-orange-800 border-orange-300' },
-  SKIPPED: { label: 'Done', description: 'Đã hoàn tất', badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-300' },
+  REVISION_REQUESTED: { label: 'Cần sửa', description: 'Cần sửa lại', badgeClass: 'bg-orange-100 text-orange-800 border-orange-300' },
+  SKIPPED: { label: 'Hoàn thành', description: 'Đã hoàn tất', badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-300' },
 }
 
 export function getStatusInfo(state: string): StateInfo {
@@ -119,4 +134,44 @@ export function getPrintervalStatusInfo(status: string | null): StateInfo {
       badgeClass: 'bg-slate-100 text-slate-700 border-slate-200',
     }
   )
+}
+
+/**
+ * Safely resolves and validates an external URL.
+ * Returns the fully-qualified URL (e.g. "https://drive.google.com/...") if valid.
+ * Returns null if the string is plain text/notes (e.g. "1", "Đã nộp bài") or empty.
+ */
+export function resolveExternalUrl(raw: string | null | undefined): string | null {
+  if (!raw || typeof raw !== 'string') return null
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+
+  // 1. If text contains a full http/https URL, extract it
+  const fullUrlMatch = trimmed.match(/https?:\/\/[^\s<>"']+/)
+  if (fullUrlMatch) {
+    try {
+      const parsed = new URL(fullUrlMatch[0])
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+        return parsed.href
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // 2. Check if it's a domain-like string (e.g., drive.google.com/xxx, dropbox.com/xxx)
+  // Must have a valid domain format ending in letters (e.g. .com, .vn, .org)
+  const domainPattern = /^[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*\.[a-zA-Z]{2,}(?:\/[^\s]*)?$/
+  if (domainPattern.test(trimmed)) {
+    try {
+      const parsed = new URL(`https://${trimmed}`)
+      if (parsed.hostname.includes('.') && !parsed.hostname.endsWith('.')) {
+        return parsed.href
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  return null
 }

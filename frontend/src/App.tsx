@@ -1,6 +1,8 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './auth/AuthContext'
 import { PlatformProvider } from './auth/PlatformContext'
+import { GallerySyncProvider } from './context/GallerySyncContext'
+import { ToastProvider } from './context/ToastContext'
 import { ProtectedRoute } from './auth/ProtectedRoute'
 import { LoginPage } from './pages/LoginPage'
 import { OrdersListPage } from './pages/OrdersListPage'
@@ -10,13 +12,16 @@ import { DesignerBoardPage } from './pages/DesignerBoardPage'
 import { OrderHistoryPage } from './pages/OrderHistoryPage'
 import { FinancePage } from './pages/FinancePage'
 import { DuplicateBoardPage } from './pages/DuplicateBoardPage'
+import { PrintervalHubPage } from './pages/PrintervalHubPage'
 
 function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
         <PlatformProvider>
-          <Routes>
+          <ToastProvider>
+            <GallerySyncProvider>
+              <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route
             path="/orders"
@@ -71,8 +76,16 @@ function App() {
             }
           />
           <Route
+            path="/printerval-hub"
+            element={
+              <ProtectedRoute>
+                <PrintervalHubPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/printerval-login"
-            element={<Navigate to="/orders" replace />}
+            element={<Navigate to="/printerval-hub" replace />}
           />
           <Route
             path="/my-tasks"
@@ -92,6 +105,8 @@ function App() {
           />
           <Route path="/" element={<Navigate to="/orders" replace />} />
         </Routes>
+            </GallerySyncProvider>
+          </ToastProvider>
         </PlatformProvider>
       </AuthProvider>
     </BrowserRouter>

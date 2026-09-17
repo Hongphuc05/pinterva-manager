@@ -8,7 +8,11 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.models import User
 from app.api.deps import get_current_platform_id, get_db, require_role
-from app.application.assignment_commands import AssignmentCommandError, queue_assignment_command
+from app.application.assignment_commands import (
+    AssignmentCommandError,
+    queue_assignment_command,
+    revoke_assignment_command,
+)
 
 router = APIRouter(prefix="/assignments", tags=["assignments"])
 
@@ -23,6 +27,15 @@ class CreateAssignmentRequest(BaseModel):
 class CreateAssignmentResponse(BaseModel):
     request_ids: list[uuid.UUID]
     queued_count: int
+
+
+class RevokeAssignmentRequest(BaseModel):
+    order_ids: list[uuid.UUID] = Field(min_length=1, max_length=100)
+
+
+class RevokeAssignmentResponse(BaseModel):
+    revoked_count: int
+    message: str
 
 
 @router.post("", response_model=CreateAssignmentResponse, status_code=status.HTTP_202_ACCEPTED)
@@ -47,4 +60,26 @@ def create_assignments(
     return CreateAssignmentResponse(
         request_ids=[request.id for request in requests],
         queued_count=queued_count,
+    )
+
+
+@router.post("/revoke", response_model=RevokeAssignmentResponse, status_code=status.HTTP_200_OK)
+def revoke_assignments(
+    payload: RevokeAssignmentRequest,
+    user: User = Depends(require_role("admin")),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    try:
+        revoked_count = revoke_assignment_command(
+            db,
+            platform_id=platform_id,
+            actor=user,
+            order_ids=payload.order_ids,
+        )
+    except AssignmentCommandError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    return RevokeAssignmentResponse(
+        revoked_count=revoked_count,
+        message=f"Đã hủy chia đơn thành công cho {revoked_count} đơn hàng.",
     )

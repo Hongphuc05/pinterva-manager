@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -32,7 +33,12 @@ def apply_transition(
         actor_id=actor_id,
         evidence=evidence,
     )
+    now_utc = datetime.now(UTC)
     order.state = target_state.value
+    order.status_changed_at = now_utc
+    if target_state == OrderState.QC_PENDING:
+        order.review_submitted_at = now_utc
+
     session.add(event)
     session.add(order)
     if commit:

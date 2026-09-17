@@ -1,12 +1,14 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { describe, it, expect, vi } from 'vitest'
+import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { BrowserRouter } from 'react-router-dom'
 import { AuthProvider } from '../auth/AuthContext'
 import { PlatformProvider } from '../auth/PlatformContext'
+import { GallerySyncProvider } from '../context/GallerySyncContext'
+import { ToastProvider } from '../context/ToastContext'
 import { OrdersListPage } from './OrdersListPage'
 
 describe('OrdersListPage', () => {
-  beforeEach(() => {
+  it('renders orders and Printerval status filter for admin', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn((url: string) => {
@@ -29,7 +31,71 @@ describe('OrdersListPage', () => {
                 {
                   id: 'a1',
                   external_order_id: 'DJ1',
+                  product_name: 'Dallas Sport Tank Top',
                   state: 'DISCOVERED',
+                  batch_id: null,
+                  sku: 'SKU1',
+                  thumbnail_url: null,
+                  printerval_status: 'waiting',
+                  order_created_at_ext: '2026-09-10T14:28:00',
+                  deadline_at_ext: null,
+                  created_at: '2026-01-01T00:00:00',
+                },
+              ],
+            }),
+          })
+        }
+        return Promise.reject(new Error(`unexpected fetch: ${url}`))
+      })
+    )
+
+    render(
+      <BrowserRouter>
+        <AuthProvider>
+          <PlatformProvider>
+            <ToastProvider>
+              <GallerySyncProvider>
+                <OrdersListPage />
+              </GallerySyncProvider>
+            </ToastProvider>
+          </PlatformProvider>
+        </AuthProvider>
+      </BrowserRouter>
+    )
+    await waitFor(() => expect(screen.getByText('DJ1')).toBeInTheDocument())
+    expect(screen.getAllByText('Waiting').length).toBeGreaterThan(0)
+    expect(screen.getByText('Order At')).toBeInTheDocument()
+    expect(screen.getByText('14:28:00')).toBeInTheDocument()
+    expect(screen.getByText('10/09/2026')).toBeInTheDocument()
+    expect(screen.getByText('Tất cả trạng thái Printerval')).toBeInTheDocument()
+  })
+
+  it('hides order code DJ1 and renders 4 tabs for designer', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) => {
+        if (url.includes('/api/me')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ id: 'des1', role: 'designer', full_name: 'Designer 1' }),
+          })
+        }
+        if (url.includes('/api/platforms')) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ platforms: [] }) })
+        }
+        if (url.includes('/api/orders')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              orders: [
+                {
+                  id: 'a1',
+                  external_order_id: 'DJ1_SECRET_CODE',
+                  product_name: 'Super Cool T-Shirt',
+                  state: 'IN_PROGRESS',
+                  template_missing: false,
                   batch_id: null,
                   sku: 'SKU1',
                   thumbnail_url: null,
@@ -44,22 +110,537 @@ describe('OrdersListPage', () => {
         return Promise.reject(new Error(`unexpected fetch: ${url}`))
       })
     )
-  })
 
-  it('renders orders from the API', async () => {
     render(
       <BrowserRouter>
         <AuthProvider>
           <PlatformProvider>
-            <OrdersListPage />
+            <ToastProvider>
+              <GallerySyncProvider>
+                <OrdersListPage />
+              </GallerySyncProvider>
+            </ToastProvider>
           </PlatformProvider>
         </AuthProvider>
       </BrowserRouter>
     )
-    await waitFor(() => expect(screen.getByText('DJ1')).toBeInTheDocument())
-    expect(screen.getByText('Chờ phân công')).toBeInTheDocument()
-    expect(screen.getByText('Order At')).toBeInTheDocument()
-    expect(screen.getByText('14:28:00 10/9/2026')).toBeInTheDocument()
+
+    // Verify 5 tabs exist (Doing, Fix, Review, Waiting Update, Paid)
+    await waitFor(() => expect(screen.getByText(/Đang làm/i)).toBeInTheDocument())
+    expect(screen.getByText(/Cần Sửa Gấp \(Fix\)/i)).toBeInTheDocument()
+    expect(screen.getAllByText(/Chờ duyệt/i).length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText(/Chờ Cập Nhật/i)).toBeInTheDocument()
+    expect(screen.getByText(/Đã thanh toán/i)).toBeInTheDocument()
+    expect(screen.queryByText(/Hoàn Thành \(Done\)/i)).not.toBeInTheDocument()
+
+    // Verify To-do and All tasks tabs are removed
+    expect(screen.queryByText(/Việc Cần Làm \(Todo\)/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Tất Cả Nhiệm Vụ/i)).not.toBeInTheDocument()
+
+    // Verify order code is HIDDEN, but product name is visible
+    expect(screen.queryByText('DJ1_SECRET_CODE')).not.toBeInTheDocument()
+    expect(screen.getByText('Super Cool T-Shirt')).toBeInTheDocument()
+
+    // Verify action buttons
+    expect(screen.getByText('Nộp bài')).toBeInTheDocument()
+    expect(screen.getByText('Báo thiếu temp')).toBeInTheDocument()
+  })
+
+  it('renders Thời Gian column and Fix tab action buttons for Admin', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) => {
+        if (url.includes('/api/me')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ id: 'admin1', role: 'admin', full_name: 'Admin User' }),
+          })
+        }
+        if (url.includes('/api/platforms')) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ platforms: [] }) })
+        }
+        if (url.includes('/api/users')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => [
+              { id: 'des1', username: 'des1', full_name: 'Designer One', role: 'designer' },
+            ],
+          })
+        }
+        if (url.includes('/api/orders')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              orders: [
+                {
+                  id: 'fix1',
+                  external_order_id: 'DJ999',
+                  product_name: 'Fix Needed Hoodie',
+                  state: 'REVISION',
+                  batch_id: null,
+                  sku: 'SKU999',
+                  thumbnail_url: null,
+                  printerval_status: 'fix',
+                  assigned_designer_name: 'Designer One',
+                  status_changed_at: '2026-09-11T07:30:00Z',
+                  order_created_at_ext: '2026-09-10T14:28:00',
+                  deadline_at_ext: null,
+                  created_at: '2026-09-10T00:00:00Z',
+                  note_outsource: 'Please resize back logo',
+                },
+              ],
+            }),
+          })
+        }
+        return Promise.reject(new Error(`unexpected fetch: ${url}`))
+      })
+    )
+
+    // Simulate opening with tab=fix
+    window.history.pushState({}, '', '/orders?tab=fix')
+
+    render(
+      <BrowserRouter>
+        <AuthProvider>
+          <PlatformProvider>
+            <ToastProvider>
+              <GallerySyncProvider>
+                <OrdersListPage />
+              </GallerySyncProvider>
+            </ToastProvider>
+          </PlatformProvider>
+        </AuthProvider>
+      </BrowserRouter>
+    )
+
+    await waitFor(() => expect(screen.getByText('DJ999')).toBeInTheDocument())
+
+    // Verify Thời Gian column header exists
+    expect(screen.getByText('Thời Gian')).toBeInTheDocument()
+    expect(screen.getByText('Lọc thời gian:')).toBeInTheDocument()
+
+    // Verify Fix Tab action buttons exist: "Chấp nhận Fix" and "Từ chối Fix"
+    expect(screen.getByText('Chấp nhận Fix')).toBeInTheDocument()
+    expect(screen.getByText('Từ chối Fix')).toBeInTheDocument()
+
+    // Verify old manual approve/fix buttons do NOT exist
+    expect(screen.queryByText('Duyệt Done')).not.toBeInTheDocument()
+  })
+
+  it('renders and filters by synced images button', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) => {
+        if (url.includes('/api/me')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ id: '1', role: 'admin', full_name: 'Admin' }),
+          })
+        }
+        if (url.includes('/api/platforms')) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ platforms: [] }) })
+        }
+        if (url.includes('/api/orders')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              orders: [
+                {
+                  id: 'ord-synced',
+                  external_order_id: 'ORDER-SYNCED-01',
+                  product_name: 'Product With Multi Gallery',
+                  state: 'WAITING',
+                  batch_id: null,
+                  sku: 'SKU1',
+                  thumbnail_url: 'https://thumb.url/1.png',
+                  product_image_urls: ['https://thumb.url/1.png', 'https://thumb.url/2.png'],
+                  printerval_status: 'waiting',
+                  order_created_at_ext: '2026-09-10T14:28:00',
+                  deadline_at_ext: null,
+                  created_at: '2026-01-01T00:00:00',
+                },
+                {
+                  id: 'ord-unsynced',
+                  external_order_id: 'ORDER-UNSYNCED-02',
+                  product_name: 'Product Unsynced',
+                  state: 'WAITING',
+                  batch_id: null,
+                  sku: 'SKU2',
+                  thumbnail_url: 'https://thumb.url/thumb.png',
+                  product_image_urls: null,
+                  printerval_status: 'waiting',
+                  order_created_at_ext: '2026-09-10T14:28:00',
+                  deadline_at_ext: null,
+                  created_at: '2026-01-01T00:00:00',
+                },
+              ],
+            }),
+          })
+        }
+        return Promise.reject(new Error(`unexpected fetch: ${url}`))
+      })
+    )
+
+    window.history.pushState({}, '', '/orders?tab=waiting')
+
+    render(
+      <BrowserRouter>
+        <AuthProvider>
+          <PlatformProvider>
+            <ToastProvider>
+              <GallerySyncProvider>
+                <OrdersListPage />
+              </GallerySyncProvider>
+            </ToastProvider>
+          </PlatformProvider>
+        </AuthProvider>
+      </BrowserRouter>
+    )
+
+    await waitFor(() => expect(screen.getByText('ORDER-SYNCED-01')).toBeInTheDocument())
+    expect(screen.getByText('ORDER-UNSYNCED-02')).toBeInTheDocument()
+
+    // Synced filter button exists and shows count 1
+    const syncedFilterBtn = screen.getByRole('button', { name: /Đơn đã đồng bộ ảnh/i })
+    expect(syncedFilterBtn).toBeInTheDocument()
+    expect(syncedFilterBtn).toHaveTextContent('1')
+
+    // Click filter button
+    fireEvent.click(syncedFilterBtn)
+
+    // Now only the synced order should be present
+    await waitFor(() => {
+      expect(screen.getByText('ORDER-SYNCED-01')).toBeInTheDocument()
+      expect(screen.queryByText('ORDER-UNSYNCED-02')).not.toBeInTheDocument()
+    })
+  })
+
+  it('renders Fix sub-filters and proper status badges for approved/rejected fix orders', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) => {
+        if (url.includes('/api/me')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ id: 'admin1', role: 'admin', full_name: 'Admin User' }),
+          })
+        }
+        if (url.includes('/api/platforms')) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ platforms: [] }) })
+        }
+        if (url.includes('/api/users')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => [
+              { id: 'des1', username: 'des1', full_name: 'Designer One', role: 'designer' },
+            ],
+          })
+        }
+        if (url.includes('/api/orders')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              orders: [
+                {
+                  id: 'fix-pending',
+                  external_order_id: 'DJ-PENDING',
+                  product_name: 'Fix Pending Item',
+                  state: 'REVISION',
+                  fix_approved_by_admin: false,
+                  fix_rejected_by_admin: false,
+                  printerval_status: 'fix',
+                  assigned_designer_name: 'Designer One',
+                  created_at: '2026-09-10T00:00:00Z',
+                },
+                {
+                  id: 'fix-approved',
+                  external_order_id: 'DJ-APPROVED',
+                  product_name: 'Fix Approved Item',
+                  state: 'REVISION',
+                  fix_approved_by_admin: true,
+                  fix_rejected_by_admin: false,
+                  printerval_status: 'fix',
+                  assigned_designer_name: 'Designer One',
+                  created_at: '2026-09-10T00:00:00Z',
+                },
+                {
+                  id: 'fix-rejected',
+                  external_order_id: 'DJ-REJECTED',
+                  product_name: 'Fix Rejected Item',
+                  state: 'REVISION',
+                  fix_approved_by_admin: false,
+                  fix_rejected_by_admin: true,
+                  printerval_status: 'fix',
+                  assigned_designer_name: 'Designer One',
+                  created_at: '2026-09-10T00:00:00Z',
+                },
+              ],
+            }),
+          })
+        }
+        return Promise.reject(new Error())
+      })
+    )
+
+    window.history.pushState({}, '', '/orders?tab=fix')
+
+    render(
+      <BrowserRouter>
+        <AuthProvider>
+          <PlatformProvider>
+            <ToastProvider>
+              <GallerySyncProvider>
+                <OrdersListPage />
+              </GallerySyncProvider>
+            </ToastProvider>
+          </PlatformProvider>
+        </AuthProvider>
+      </BrowserRouter>
+    )
+
+    await waitFor(() => expect(screen.getByText('DJ-PENDING')).toBeInTheDocument())
+    expect(screen.getByText('DJ-APPROVED')).toBeInTheDocument()
+    expect(screen.getByText('DJ-REJECTED')).toBeInTheDocument()
+
+    // Verify sub-filter buttons exist
+    expect(screen.getByText('Chưa lựa chọn')).toBeInTheDocument()
+    expect(screen.getByText('Đã chấp nhận Fix')).toBeInTheDocument()
+    expect(screen.getByText('Đã từ chối Fix')).toBeInTheDocument()
+
+    // Verify badges and action buttons
+    expect(screen.getByText('Chấp nhận Fix')).toBeInTheDocument()
+    expect(screen.getByText('Từ chối Fix')).toBeInTheDocument()
+    expect(screen.getByText('Đã gửi fix cho des')).toBeInTheDocument()
+    expect(screen.getByText('Đã từ chối fix')).toBeInTheDocument()
+  })
+
+  it('renders 3 tabs and duplicate check actions for support role', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) => {
+        if (url.includes('/api/me')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ id: 'supp1', role: 'support', full_name: 'Support User' }),
+          })
+        }
+        if (url.includes('/api/platforms')) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ platforms: [] }) })
+        }
+        if (url.includes('/api/orders/duplicate-check-status')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ updated: 1 }),
+          })
+        }
+        if (url.includes('/api/orders')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              orders: [
+                {
+                  id: 'supp-order-1',
+                  external_order_id: 'DJ-SUPP-1',
+                  product_name: 'Support Product',
+                  state: 'DISCOVERED',
+                  work_domain: 'standard',
+                  duplicate_check_status: 'uncheck',
+                  printerval_status: 'waiting',
+                  created_at: '2026-09-18T00:00:00Z',
+                },
+              ],
+            }),
+          })
+        }
+        return Promise.reject(new Error(`unexpected fetch: ${url}`))
+      })
+    )
+
+    window.history.pushState({}, '', '/orders')
+
+    render(
+      <BrowserRouter>
+        <AuthProvider>
+          <PlatformProvider>
+            <ToastProvider>
+              <GallerySyncProvider>
+                <OrdersListPage />
+              </GallerySyncProvider>
+            </ToastProvider>
+          </PlatformProvider>
+        </AuthProvider>
+      </BrowserRouter>
+    )
+
+    await waitFor(() => expect(screen.getByText('DJ-SUPP-1')).toBeInTheDocument())
+
+    // Check Support 3 tabs
+    expect(screen.getByRole('button', { name: /Tất cả các đơn/i })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: /Trùng lặp/i }).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('button', { name: /Không trùng lặp/i }).length).toBeGreaterThan(0)
+
+    // Check action buttons for Support on All Orders tab
+    expect(screen.getAllByRole('button', { name: /^Trùng$/i }).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('button', { name: /^Không trùng$/i }).length).toBeGreaterThan(0)
+
+    // Verify "Quét Đơn Mới" is NOT present for Support
+    expect(screen.queryByText(/Quét Đơn Mới/i)).not.toBeInTheDocument()
+  })
+
+  it('renders Doing and Review orders in Support Tab 1 (Tất cả các đơn)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) => {
+        if (url.includes('/api/me')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ id: 'supp1', role: 'support', full_name: 'Support User' }),
+          })
+        }
+        if (url.includes('/api/platforms')) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ platforms: [] }) })
+        }
+        if (url.includes('/api/orders')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              orders: [
+                {
+                  id: 'o-waiting',
+                  external_order_id: 'DJ-WAITING',
+                  product_name: 'Waiting Product',
+                  state: 'WAITING',
+                  work_domain: 'standard',
+                  duplicate_check_status: 'uncheck',
+                  created_at: '2026-09-18T00:00:00Z',
+                },
+                {
+                  id: 'o-doing',
+                  external_order_id: 'DJ-DOING',
+                  product_name: 'Doing Product',
+                  state: 'IN_PROGRESS',
+                  work_domain: 'standard',
+                  duplicate_check_status: 'uncheck',
+                  created_at: '2026-09-18T00:00:00Z',
+                },
+                {
+                  id: 'o-review',
+                  external_order_id: 'DJ-REVIEW',
+                  product_name: 'Review Product',
+                  state: 'QC_PENDING',
+                  work_domain: 'standard',
+                  duplicate_check_status: 'non_duplicate',
+                  created_at: '2026-09-18T00:00:00Z',
+                },
+              ],
+            }),
+          })
+        }
+        return Promise.reject(new Error(`unexpected fetch: ${url}`))
+      })
+    )
+
+    window.history.pushState({}, '', '/orders')
+
+    render(
+      <BrowserRouter>
+        <AuthProvider>
+          <PlatformProvider>
+            <ToastProvider>
+              <GallerySyncProvider>
+                <OrdersListPage />
+              </GallerySyncProvider>
+            </ToastProvider>
+          </PlatformProvider>
+        </AuthProvider>
+      </BrowserRouter>
+    )
+
+    await waitFor(() => expect(screen.getByText('DJ-WAITING')).toBeInTheDocument())
+    expect(screen.getByText('DJ-DOING')).toBeInTheDocument()
+    expect(screen.getByText('DJ-REVIEW')).toBeInTheDocument()
+  })
+
+  it('renders orange exclamation badge on Admin across all tabs when uncheck, and supports Hủy chia', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) => {
+        if (url.includes('/api/me')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ id: 'admin1', role: 'admin', full_name: 'Admin User' }),
+          })
+        }
+        if (url.includes('/api/platforms')) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ platforms: [] }) })
+        }
+        if (url.includes('/api/assignments/revoke')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ message: 'Đã hủy chia đơn thành công cho 1 đơn hàng.', revoked_count: 1 }),
+          })
+        }
+        if (url.includes('/api/orders')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              orders: [
+                {
+                  id: 'o-doing-1',
+                  external_order_id: 'DJ-DOING-1',
+                  product_name: 'Doing Shirt',
+                  state: 'IN_PROGRESS',
+                  work_domain: 'standard',
+                  duplicate_check_status: 'uncheck',
+                  created_at: '2026-09-18T00:00:00Z',
+                },
+              ],
+            }),
+          })
+        }
+        return Promise.reject(new Error(`unexpected fetch: ${url}`))
+      })
+    )
+
+    window.history.pushState({}, '', '/orders?tab=doing')
+
+    render(
+      <BrowserRouter>
+        <AuthProvider>
+          <PlatformProvider>
+            <ToastProvider>
+              <GallerySyncProvider>
+                <OrdersListPage />
+              </GallerySyncProvider>
+            </ToastProvider>
+          </PlatformProvider>
+        </AuthProvider>
+      </BrowserRouter>
+    )
+
+    await waitFor(() => expect(screen.getByText('DJ-DOING-1')).toBeInTheDocument())
+    // Exclamation mark badge in Doing tab
+    expect(screen.getByText('Chưa kiểm tra')).toBeInTheDocument()
+
+    // Revoke button in Doing tab
+    const revokeBtn = screen.getByRole('button', { name: /Hủy chia/i })
+    expect(revokeBtn).toBeInTheDocument()
+    fireEvent.click(revokeBtn)
   })
 })
-

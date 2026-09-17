@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import secrets
 import uuid
 from datetime import datetime
 
@@ -10,7 +8,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import Platform, User
-from app.api.deps import get_db, require_role
+from app.api.deps import get_db, require_any_role, require_role
 from app.application.platform_credentials import (
     PlatformCredentialsError,
     verify_and_save_platform_credentials,
@@ -34,12 +32,6 @@ class CreatePlatformRequest(BaseModel):
     account_username: str
 
 
-class GalleryBridgeTokenOut(BaseModel):
-    platform_id: uuid.UUID
-    token: str
-    message: str
-
-
 class UpdatePlatformCredentialsRequest(BaseModel):
     username: str
     password: str | None = None
@@ -59,7 +51,7 @@ class PlatformCredentialsOut(BaseModel):
 @router.get("", response_model=list[PlatformOut])
 def list_platforms(
     db: Session = Depends(get_db),
-    admin: User = Depends(require_role("admin")),
+    user: User = Depends(require_any_role("admin", "support")),
 ):
     platforms = db.query(Platform).filter(Platform.is_active == True).order_by(Platform.created_at.asc()).all()  # noqa: E712
     return platforms
@@ -128,30 +120,6 @@ def update_platform_credentials(
         account_username=platform.account_username,
         team_outsource=platform.team_outsource,
         message=f"Đã xác thực tài khoản Printerval thành công: {platform.account_username}",
-    )
-
-
-@router.post("/{platform_id}/gallery-bridge-token", response_model=GalleryBridgeTokenOut)
-def create_gallery_bridge_token(
-    platform_id: uuid.UUID,
-    db: Session = Depends(get_db),
-    admin: User = Depends(require_role("admin")),
-):
-    """Rotate the narrowly-scoped token used by the local CopyImage extension.
-
-    The plaintext token is intentionally returned once only.  The database stores
-    its SHA-256 digest, so a database export cannot be used to submit galleries.
-    """
-    platform = db.get(Platform, platform_id)
-    if not platform or not platform.is_active:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Platform not found")
-    token = secrets.token_urlsafe(32)
-    platform.gallery_bridge_token_hash = hashlib.sha256(token.encode()).hexdigest()
-    db.commit()
-    return GalleryBridgeTokenOut(
-        platform_id=platform.id,
-        token=token,
-        message="Đã tạo token CopyImage. Sao chép token này vào phần Cài đặt của extension.",
     )
 
 

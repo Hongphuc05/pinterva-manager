@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiFetch } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
-import { getStatusInfo } from '../utils/statusTranslation'
+import { getStatusInfo, resolveExternalUrl } from '../utils/statusTranslation'
 import {
   X,
   Clock,
@@ -40,6 +40,40 @@ interface OrderHistoryTimelineModalProps {
   productName?: string | null
 }
 
+function formatActor(name: string | null, role: string | null): { name: string; role: string } {
+  const cleanName = (name || '').trim()
+  const cleanRole = (role || '').trim()
+  if (cleanName.toLowerCase().includes('printerval')) {
+    return { name: 'Hệ thống', role: 'System' }
+  }
+  return {
+    name: cleanName || 'Hệ thống',
+    role: cleanRole || 'User',
+  }
+}
+
+function formatTimelineDescription(event: OrderTimelineEvent, fromLabel?: string, toLabel?: string): string {
+  let desc = event.description || ''
+  if (!desc) {
+    return `Chuyển trạng thái từ ${fromLabel || 'Mới'} sang ${toLabel || 'Đang làm'}`
+  }
+
+  // Replace Printerval with neutral terms and simplify descriptions
+  desc = desc.replace(/Printerval trả về Fix với note:\s*/gi, 'Yêu cầu sửa bài: ')
+  desc = desc.replace(/Printerval trả về Fix/gi, 'Yêu cầu sửa bài')
+  desc = desc.replace(/Designer\s+([^\s]+)\s+nộp bài và chuyển sang Review\s*\(Chờ duyệt\)/gi, '$1 nộp bài thiết kế')
+  desc = desc.replace(/Admin\s+([^\s]+)\s+chấp nhận Fix & giao bài cho\s+([^\s]+)\s*\(Note Des:\s*([^)]+)\)/gi, 'Giao sửa bài cho $2 (Ghi chú: $3)')
+  desc = desc.replace(/Admin\s+([^\s]+)\s+chấp nhận Fix & giao bài cho\s+([^\s]+)/gi, 'Giao sửa bài cho $2')
+  desc = desc.replace(/Admin\s+([^\s]+)\s+xác nhận thanh toán đơn hàng/gi, 'Đã thanh toán công')
+  desc = desc.replace(/\(Chờ duyệt\)/gi, '')
+  desc = desc.replace(/\(Đang làm\)/gi, '')
+  desc = desc.replace(/\(Cần sửa\)/gi, '')
+  desc = desc.replace(/Printerval/gi, 'Hệ thống')
+  desc = desc.replace(/\s+/g, ' ').trim()
+
+  return desc
+}
+
 export function OrderHistoryTimelineModal({
   isOpen,
   onClose,
@@ -69,6 +103,22 @@ export function OrderHistoryTimelineModal({
       })
   }, [isOpen, orderId])
 
+  const cleanEvents = (events || []).filter((event, index, arr) => {
+    if (index === 0) return true
+    const prev = arr[index - 1]
+    const timeDiff = Math.abs(new Date(event.created_at).getTime() - new Date(prev.created_at).getTime())
+    // Deduplicate identical consecutive events within 5 seconds
+    if (
+      timeDiff < 5000 &&
+      event.from_state === prev.from_state &&
+      event.to_state === prev.to_state &&
+      event.description === prev.description
+    ) {
+      return false
+    }
+    return true
+  })
+
   if (!isOpen) return null
 
   function getActionBadge(event: OrderTimelineEvent) {
@@ -87,7 +137,21 @@ export function OrderHistoryTimelineModal({
         dot: 'bg-orange-500',
       }
     }
-    if (act === 'SUBMIT_REVIEW') {
+    if (act === 'APPROVE_FIX_FOR_DESIGNER') {
+      return {
+        icon: UserPlus,
+        color: 'text-amber-700 bg-amber-100 border-amber-300',
+        dot: 'bg-amber-500',
+      }
+    }
+    if (act === 'REJECT_FIX_TO_REVIEW') {
+      return {
+        icon: Send,
+        color: 'text-purple-700 bg-purple-100 border-purple-300',
+        dot: 'bg-purple-500',
+      }
+    }
+    if (act === 'SUBMIT_REVIEW' || act === 'RESUBMIT_FIX') {
       return {
         icon: Send,
         color: 'text-purple-700 bg-purple-100 border-purple-300',
@@ -170,14 +234,14 @@ export function OrderHistoryTimelineModal({
             <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs">
               {error}
             </div>
-          ) : events.length === 0 ? (
+          ) : cleanEvents.length === 0 ? (
             <div className="py-12 text-center text-slate-400">
               <Clock className="h-8 w-8 mx-auto mb-2 opacity-30" />
               <p className="text-xs font-semibold text-slate-600">Chưa có bản ghi lịch sử nào cho đơn này</p>
             </div>
           ) : (
             <div className="relative pl-6 space-y-6 before:absolute before:left-2.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
-              {events.map((event, idx) => {
+              {cleanEvents.map((event, idx) => {
                 const badge = getActionBadge(event)
                 const fromInfo = event.from_state ? getStatusInfo(event.from_state) : null
                 const toInfo = getStatusInfo(event.to_state)
@@ -199,36 +263,35 @@ export function OrderHistoryTimelineModal({
                           <span>{new Date(event.created_at).toLocaleString('vi-VN')}</span>
                         </div>
 
-                        {event.actor_name && (
-                          <div className="flex items-center gap-1.5">
-                            <span
-                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                                event.actor_role === 'admin'
-                                  ? 'bg-purple-100 text-purple-800'
-                                  : 'bg-blue-100 text-blue-800'
-                              }`}
-                            >
-                              {event.actor_role === 'admin' ? (
-                                <Shield className="h-2.5 w-2.5" />
-                              ) : (
-                                <User className="h-2.5 w-2.5" />
-                              )}
-                              <span>{event.actor_role || 'User'}</span>
-                            </span>
-                            <span className="font-semibold text-slate-800 text-xs">{event.actor_name}</span>
-                          </div>
-                        )}
+                        {(() => {
+                          const actor = formatActor(event.actor_name, event.actor_role)
+                          return (
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                  actor.role.toLowerCase() === 'admin'
+                                    ? 'bg-purple-100 text-purple-800'
+                                    : actor.role.toLowerCase() === 'system'
+                                    ? 'bg-slate-100 text-slate-700'
+                                    : 'bg-blue-100 text-blue-800'
+                                }`}
+                              >
+                                {actor.role.toLowerCase() === 'admin' ? (
+                                  <Shield className="h-2.5 w-2.5" />
+                                ) : (
+                                  <User className="h-2.5 w-2.5" />
+                                )}
+                                <span>{actor.role}</span>
+                              </span>
+                              <span className="font-semibold text-slate-800 text-xs">{actor.name}</span>
+                            </div>
+                          )
+                        })()}
                       </div>
 
                       {/* Middle row: Description */}
                       <div className="text-xs text-slate-800 font-medium leading-relaxed">
-                        {event.description || (
-                          <span>
-                            Chuyển trạng thái từ{' '}
-                            <strong className="text-slate-600">{fromInfo ? fromInfo.label : 'Mới'}</strong> sang{' '}
-                            <strong className="text-[#0052CC]">{toInfo.label}</strong>
-                          </span>
-                        )}
+                        {formatTimelineDescription(event, fromInfo?.label, toInfo?.label)}
                       </div>
 
                       {/* Status Badges Flow */}
@@ -253,19 +316,28 @@ export function OrderHistoryTimelineModal({
                       </div>
 
                       {/* Drive Link (if submitted) */}
-                      {driveLink && (
-                        <div className="pt-2 border-t border-slate-100">
-                          <a
-                            href={driveLink}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 text-xs font-mono text-[#0052CC] hover:underline font-semibold bg-blue-50/60 px-2.5 py-1 rounded-lg border border-blue-200 break-all"
-                          >
-                            <ExternalLink className="h-3 w-3 shrink-0" />
-                            <span className="truncate">Link Drive bài nộp: {driveLink}</span>
-                          </a>
-                        </div>
-                      )}
+                      {driveLink && (() => {
+                        const validDriveUrl = resolveExternalUrl(driveLink)
+                        return validDriveUrl ? (
+                          <div className="pt-2 border-t border-slate-100">
+                            <a
+                              href={validDriveUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 text-xs font-mono text-[#0052CC] hover:underline font-semibold bg-blue-50/60 px-2.5 py-1 rounded-lg border border-blue-200 break-all"
+                            >
+                              <ExternalLink className="h-3 w-3 shrink-0" />
+                              <span className="truncate">Link Drive bài nộp: {validDriveUrl}</span>
+                            </a>
+                          </div>
+                        ) : (
+                          <div className="pt-2 border-t border-slate-100">
+                            <div className="inline-flex items-center gap-1.5 text-xs font-mono text-slate-700 font-medium bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200 break-all">
+                              <span>Ghi chú bài nộp: {driveLink}</span>
+                            </div>
+                          </div>
+                        )
+                      })()}
                     </div>
                   </div>
                 )

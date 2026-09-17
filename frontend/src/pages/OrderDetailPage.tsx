@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { apiFetch, ApiError, resolveAssetUrl } from '../api/client'
+import { deduplicateGalleryUrls } from '../utils/galleryHelper'
 import { useAuth } from '../auth/AuthContext'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { ImageModal } from '../components/ImageModal'
@@ -8,8 +9,9 @@ import { SourceFilesCard, type SourceFile } from '../components/SourceFilesCard'
 import { ProductGalleryCard } from '../components/ProductGalleryCard'
 import { ProductSkusCard, type ProductSku } from '../components/ProductSkusCard'
 import { CustomConfigurationSection } from '../components/CustomConfigurationSection'
+import { CopyableOrderCode } from '../components/CopyableOrderCode'
 import { StatusDropdown } from '../components/StatusDropdown'
-import { getStatusInfo } from '../utils/statusTranslation'
+import { getStatusInfo, resolveExternalUrl } from '../utils/statusTranslation'
 import { 
   ArrowLeft, 
   Package, 
@@ -54,9 +56,12 @@ type OrderDetail = {
   multiple_design: boolean
   double_sided: boolean
   deadline_at_ext: string | null
+  order_created_at_ext?: string | null
+  created_at_ext?: string | null
   note_outsource: string
   previous_note_outsource?: string | null
   fix_approved_by_admin?: boolean
+  fix_rejected_by_admin?: boolean
   designer_note: string
   template_missing: boolean
   order_note: string
@@ -298,17 +303,55 @@ export function OrderDetailPage() {
   const isFix = normState === 'REVISION' || normState === 'FIX' || normState === 'REVISION_REQUESTED'
   const isDone = normState === 'DONE' || normState === 'SKIPPED'
 
+  // Extract all variants to display at header (Type, Size, etc.)
+  const variantsToDisplay = (() => {
+    const list: { name: string; value: string }[] = []
+    const seen = new Set<string>()
+
+    const addVariant = (name?: string | null, value?: string | null) => {
+      if (!name || !value) return
+      const k = `${name.trim().toLowerCase()}:${value.trim().toLowerCase()}`
+      if (!seen.has(k)) {
+        seen.add(k)
+        list.push({ name: name.trim(), value: value.trim() })
+      }
+    }
+
+    if (order.product_variants && Array.isArray(order.product_variants)) {
+      order.product_variants.forEach((v) => addVariant(v.name, v.value))
+    }
+
+    if (order.product_skus && Array.isArray(order.product_skus)) {
+      order.product_skus.forEach((sku) => {
+        if (sku.variants && Array.isArray(sku.variants)) {
+          sku.variants.forEach((v) => addVariant(v.name, v.value))
+        }
+      })
+    }
+
+    return list
+  })()
+
+  // Find sample image (from sku_image_url or product_skus)
+  const sampleMockupUrl =
+    order.sku_image_url ||
+    order.product_skus?.find((s) => s.image_url)?.image_url ||
+    null
+
   return (
     <DashboardLayout>
       {/* Zoom Image Modal */}
       <ImageModal
         isOpen={showImageModal}
         onClose={() => setShowImageModal(false)}
-        images={
-          order.product_image_urls && order.product_image_urls.length > 0
+        images={deduplicateGalleryUrls([
+          ...(order.product_image_urls && order.product_image_urls.length > 0
             ? order.product_image_urls
-            : (order.thumbnail_url ? [order.thumbnail_url] : (order.sku_image_url ? [order.sku_image_url] : []))
-        }
+            : order.thumbnail_url
+            ? [order.thumbnail_url]
+            : []),
+          ...(sampleMockupUrl ? [sampleMockupUrl] : []),
+        ])}
         initialIndex={selectedImageIndex}
         altText={isAdmin ? order.external_order_id : (order.product_name || 'Ảnh sản phẩm')}
         hideExternalLink={!isAdmin}
@@ -343,9 +386,9 @@ export function OrderDetailPage() {
                   Kết quả / Ghi chú nộp bài (Tùy chọn):
                 </span>
                 {driveUrl.trim() ? (
-                  driveUrl.trim().startsWith('http://') || driveUrl.trim().startsWith('https://') ? (
+                  resolveExternalUrl(driveUrl.trim()) ? (
                     <a
-                      href={driveUrl.trim()}
+                      href={resolveExternalUrl(driveUrl.trim())!}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="font-mono text-[11px] text-[#0052CC] hover:underline break-all flex items-center gap-1 font-semibold"
@@ -430,12 +473,13 @@ export function OrderDetailPage() {
         <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 pb-6 border-b border-slate-100">
           <div className="flex items-start gap-4">
             {(() => {
-              const gallery =
+              const gallery = deduplicateGalleryUrls(
                 order.product_image_urls && order.product_image_urls.length > 0
                   ? order.product_image_urls
                   : order.thumbnail_url
                   ? [order.thumbnail_url]
                   : []
+              )
               const currentImg =
                 gallery[selectedImageIndex] || gallery[0] || order.thumbnail_url
 
@@ -500,18 +544,41 @@ export function OrderDetailPage() {
             <div className="space-y-1">
               <div className="flex flex-wrap items-center gap-3">
                 {isAdmin ? (
-                  <h1 className="text-xl font-bold font-mono text-[#0052CC]">{order.external_order_id}</h1>
+                  <CopyableOrderCode code={order.external_order_id} textSize="text-xl" />
                 ) : (
                   <h1 className="text-xl font-bold text-slate-900">{order.product_name || 'Đơn hàng thiết kế'}</h1>
                 )}
-                <StatusDropdown
-                  orderId={order.id}
-                  currentState={order.state}
-                  onStatusChanged={(newState) => {
-                    setOrder((prev) => prev ? { ...prev, state: newState } : null)
-                    loadOrderDetail()
-                  }}
-                />
+                {isAdmin ? (
+                  <StatusDropdown
+                    orderId={order.id}
+                    currentState={order.state}
+                    onStatusChanged={(newState) => {
+                      setOrder((prev) => prev ? { ...prev, state: newState } : null)
+                      loadOrderDetail()
+                    }}
+                  />
+                ) : (
+                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold rounded-lg border select-none ${
+                    order.template_missing
+                      ? 'bg-rose-100 text-rose-800 border-rose-300'
+                      : isReview
+                      ? 'bg-purple-100 text-purple-800 border-purple-300'
+                      : isDone
+                      ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                      : 'bg-blue-100 text-blue-800 border-blue-300'
+                  }`}>
+                    <span className={`h-2 w-2 rounded-full ${
+                      order.template_missing
+                        ? 'bg-rose-500'
+                        : isReview
+                        ? 'bg-purple-500'
+                        : isDone
+                        ? 'bg-emerald-500'
+                        : 'bg-blue-500'
+                    }`} />
+                    <span>{order.template_missing ? 'Chờ cập nhật' : isReview ? 'Chờ duyệt' : isDone ? 'Hoàn thành' : 'Đang làm'}</span>
+                  </span>
+                )}
 
                 {order.assigned_designer_name && (
                   <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-blue-50 text-[#0052CC] text-xs font-semibold border border-blue-100">
@@ -532,7 +599,7 @@ export function OrderDetailPage() {
               {isAdmin && (
                 <p className="text-sm font-semibold text-slate-800 mt-1">{order.product_name ?? 'Đơn hàng 2D Custom'}</p>
               )}
-              <div className="flex flex-wrap items-center gap-4 mt-2 text-xs text-slate-500 font-mono">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 mt-2 text-xs text-slate-500 font-mono">
                 {isAdmin && (
                   <>
                     <span>SKU: <strong className="text-slate-700">{order.sku ?? '-'}</strong></span>
@@ -540,7 +607,13 @@ export function OrderDetailPage() {
                   </>
                 )}
                 <span>Category: <strong className="text-slate-700">{order.product_category ?? '-'}</strong></span>
-                {order.sku_image_url && (
+                {variantsToDisplay.map((v, idx) => (
+                  <span key={idx} className="flex items-center gap-3">
+                    <span>•</span>
+                    <span>{v.name}: <strong className="text-slate-700">{v.value}</strong></span>
+                  </span>
+                ))}
+                {sampleMockupUrl && (
                   <>
                     <span>•</span>
                     <button
@@ -575,7 +648,7 @@ export function OrderDetailPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3 shrink-0">
-            {order.sku_image_url && (
+            {sampleMockupUrl && (
               <button
                 type="button"
                 onClick={() => {
@@ -631,12 +704,16 @@ export function OrderDetailPage() {
                     <Flame className="h-4 w-4 text-orange-600" />
                     <span>Yêu Cầu Sửa Bài (QC):</span>
                     {order.fix_approved_by_admin ? (
-                      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800">
-                        Admin đã duyệt gửi Designer sửa
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                        Đã gửi fix cho des
+                      </span>
+                    ) : order.fix_rejected_by_admin ? (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200">
+                        Đã từ chối fix
                       </span>
                     ) : (
                       <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800">
-                        Chờ Admin check & duyệt
+                        Chưa lựa chọn (Chờ Admin check)
                       </span>
                     )}
                   </div>
@@ -832,24 +909,38 @@ export function OrderDetailPage() {
                   <span>Lịch sử các bản đã nộp ({order.result_versions.length})</span>
                 </h4>
                 <div className="space-y-2">
-                  {order.result_versions.map((version) => (
-                    <div key={version.id} className="p-3 rounded-lg bg-white border border-slate-200 flex items-center justify-between text-xs">
-                      <a
-                        href={version.drive_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="font-mono font-bold text-[#0052CC] hover:underline flex items-center gap-1"
-                      >
-                        <span>Bản v{version.version_marker}</span>
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
-                      {version.qc_feedback && (
-                        <p className="text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 text-[11px] font-medium">
-                          QC Feedback: {version.qc_feedback}
-                        </p>
-                      )}
-                    </div>
-                  ))}
+                  {order.result_versions.map((version) => {
+                    const validUrl = resolveExternalUrl(version.drive_url)
+                    return (
+                      <div key={version.id} className="p-3 rounded-lg bg-white border border-slate-200 flex items-center justify-between text-xs">
+                        {validUrl ? (
+                          <a
+                            href={validUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-mono font-bold text-[#0052CC] hover:underline flex items-center gap-1"
+                          >
+                            <span>Bản v{version.version_marker}</span>
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono font-bold text-slate-800">Bản v{version.version_marker}</span>
+                            {version.drive_url && (
+                              <span className="text-slate-600 bg-slate-50 px-2 py-0.5 rounded border border-slate-200 text-[11px] font-mono">
+                                {version.drive_url}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {version.qc_feedback && (
+                          <p className="text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 text-[11px] font-medium">
+                            QC Feedback: {version.qc_feedback}
+                          </p>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
             )}
@@ -857,27 +948,57 @@ export function OrderDetailPage() {
         )}
 
         {/* Specifications Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+        {!isAdmin ? (
           <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-            <span className="text-slate-400 font-semibold block uppercase text-[10px]">Thời Hạn (Deadline)</span>
-            <p className="font-mono font-semibold text-slate-700 flex items-center gap-1">
-              <Clock className="h-3.5 w-3.5 text-amber-600" />
-              <span>{order.deadline_at_ext ? new Date(order.deadline_at_ext).toLocaleString('vi-VN') : '-'}</span>
+            <span className="text-slate-400 font-semibold block uppercase text-[10px]">
+              Thời Gian Khách Đặt (Order At)
+            </span>
+            <p className="font-mono font-semibold text-slate-800 flex items-center gap-1.5 text-sm">
+              <Clock className="h-4 w-4 text-blue-600" />
+              <span>
+                {order.order_created_at_ext
+                  ? new Date(order.order_created_at_ext).toLocaleString('vi-VN')
+                  : order.created_at_ext
+                  ? new Date(order.created_at_ext).toLocaleString('vi-VN')
+                  : new Date(order.created_at).toLocaleString('vi-VN')}
+              </span>
             </p>
           </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-xs">
+            <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
+              <span className="text-slate-400 font-semibold block uppercase text-[10px]">Thời Gian Khách Đặt (Order At)</span>
+              <p className="font-mono font-semibold text-slate-700 flex items-center gap-1">
+                <Clock className="h-3.5 w-3.5 text-blue-600" />
+                <span>
+                  {order.order_created_at_ext
+                    ? new Date(order.order_created_at_ext).toLocaleString('vi-VN')
+                    : '-'}
+                </span>
+              </p>
+            </div>
 
-          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-            <span className="text-slate-400 font-semibold block uppercase text-[10px]">Mẫu hàng</span>
-            <p className="font-semibold text-slate-700">{order.product_skus?.length || (order.sku ? 1 : 0)} mẫu hàng</p>
-          </div>
+            <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
+              <span className="text-slate-400 font-semibold block uppercase text-[10px]">Thời Hạn (Deadline)</span>
+              <p className="font-mono font-semibold text-slate-700 flex items-center gap-1">
+                <Clock className="h-3.5 w-3.5 text-amber-600" />
+                <span>{order.deadline_at_ext ? new Date(order.deadline_at_ext).toLocaleString('vi-VN') : '-'}</span>
+              </p>
+            </div>
 
-          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-            <span className="text-slate-400 font-semibold block uppercase text-[10px]">Ngày Phát Hiện (Crawl)</span>
-            <p className="font-mono font-semibold text-slate-700">
-              {new Date(order.created_at).toLocaleString('vi-VN')}
-            </p>
+            <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
+              <span className="text-slate-400 font-semibold block uppercase text-[10px]">Mẫu hàng</span>
+              <p className="font-semibold text-slate-700">{order.product_skus?.length || (order.sku ? 1 : 0)} mẫu hàng</p>
+            </div>
+
+            <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
+              <span className="text-slate-400 font-semibold block uppercase text-[10px]">Ngày Phát Hiện (Crawl)</span>
+              <p className="font-mono font-semibold text-slate-700">
+                {new Date(order.created_at).toLocaleString('vi-VN')}
+              </p>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Notes */}
         {(order.order_note || order.note_outsource || order.designer_note || isAdmin) && (
@@ -924,22 +1045,29 @@ export function OrderDetailPage() {
           </div>
         )}
 
-        {/* Product Gallery (All Images) */}
-        <ProductSkusCard
-          productSkus={order.product_skus}
-          fallbackSku={order.sku}
-          fallbackCategory={order.product_category}
-          fallbackVariants={order.product_variants}
-          isAdmin={isAdmin}
-        />
+        {/* Product SKU Card (Admin only) */}
+        {isAdmin && (
+          <ProductSkusCard
+            productSkus={order.product_skus}
+            fallbackSku={order.sku}
+            fallbackCategory={order.product_category}
+            fallbackVariants={order.product_variants}
+            isAdmin={isAdmin}
+          />
+        )}
 
-        {order.product_image_urls && order.product_image_urls.length > 0 && (
+        {(isAdmin || (order.product_image_urls && order.product_image_urls.length > 0)) && (
           <ProductGalleryCard
+            orderId={order.id}
             images={order.product_image_urls}
             orderTitle={order.product_name}
+            isAdmin={isAdmin}
             onSelectImage={(index) => {
               setSelectedImageIndex(index)
               setShowImageModal(true)
+            }}
+            onGalleryUpdated={(newImages) => {
+              setOrder((prev) => (prev ? { ...prev, product_image_urls: newImages } : null))
             }}
           />
         )}
@@ -1032,20 +1160,30 @@ export function OrderDetailPage() {
                                 {toInfo.label}
                               </span>
                             </div>
-                            {driveLink && (
-                              <>
-                                <span>•</span>
-                                <a
-                                  href={driveLink}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="inline-flex items-center gap-0.5 text-blue-600 hover:underline font-medium"
-                                >
-                                  <ExternalLink className="w-3 h-3" />
-                                  <span>Link nộp bài</span>
-                                </a>
-                              </>
-                            )}
+                            {driveLink && (() => {
+                              const validDriveUrl = resolveExternalUrl(driveLink)
+                              return validDriveUrl ? (
+                                <>
+                                  <span>•</span>
+                                  <a
+                                    href={validDriveUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-0.5 text-blue-600 hover:underline font-medium"
+                                  >
+                                    <ExternalLink className="w-3 h-3" />
+                                    <span>Link nộp bài</span>
+                                  </a>
+                                </>
+                              ) : (
+                                <>
+                                  <span>•</span>
+                                  <span className="inline-flex items-center gap-0.5 text-slate-600 font-mono text-[10px] bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                                    Bài nộp: {driveLink}
+                                  </span>
+                                </>
+                              )
+                            })()}
                           </div>
                         </div>
                       </div>

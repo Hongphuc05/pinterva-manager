@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { BrowserRouter } from 'react-router-dom'
 import { AuthProvider } from '../auth/AuthContext'
 import { PlatformProvider } from '../auth/PlatformContext'
+import { GallerySyncProvider } from '../context/GallerySyncContext'
 import { MyTasksPage } from './MyTasksPage'
 
 const activeTask = {
@@ -39,7 +40,9 @@ describe('MyTasksPage', () => {
       <BrowserRouter>
         <AuthProvider>
           <PlatformProvider>
-            <MyTasksPage />
+            <GallerySyncProvider>
+              <MyTasksPage />
+            </GallerySyncProvider>
           </PlatformProvider>
         </AuthProvider>
       </BrowserRouter>

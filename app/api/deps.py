@@ -71,22 +71,32 @@ def get_current_platform_id(
     from app.adapters.db.models import Platform
 
     header_platform_id = request.headers.get("X-Platform-Id")
-    if header_platform_id and user.role == "admin":
+    if header_platform_id and user.role in ("admin", "support"):
         try:
-            return uuid.UUID(header_platform_id)
+            parsed_id = uuid.UUID(header_platform_id)
+            target_plat = db.get(Platform, parsed_id)
+            if target_plat and target_plat.is_active:
+                return parsed_id
         except ValueError:
             pass
 
     if user.platform_id:
         return user.platform_id
 
-    # Fallback to default active platform
+    # Fallback to default active platform (prioritize real platforms over placeholder DEFAULT_PLATFORM_ID)
     default_platform = (
         db.query(Platform)
-        .filter(Platform.is_active == True)  # noqa: E712
-        .order_by(Platform.created_at.asc())
+        .filter(Platform.is_active == True, Platform.id != DEFAULT_PLATFORM_ID)  # noqa: E712
+        .order_by(Platform.created_at.desc())
         .first()
     )
+    if not default_platform:
+        default_platform = (
+            db.query(Platform)
+            .filter(Platform.is_active == True)  # noqa: E712
+            .order_by(Platform.created_at.asc())
+            .first()
+        )
     if default_platform:
         return default_platform.id
 

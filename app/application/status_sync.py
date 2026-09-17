@@ -159,47 +159,50 @@ def sync_selected_order_statuses(
                         note = str(attributes.get("outsource_note") or row.get("note") or "").strip()
                         old_state = order.state
 
-                        if norm_status == "DONE" and order.state != "DONE":
-                            order.state = "DONE"
-                            session.add(
-                                WorkflowEvent(
-                                    order_id=order.id,
-                                    from_state=old_state,
-                                    to_state="DONE",
-                                    actor_id=actor_id,
-                                    evidence={
-                                        "action": "APPROVE_DONE",
-                                        "actor_name": "Printerval",
-                                        "description": "Printerval đã duyệt hoàn thành đơn hàng (Done)",
-                                    },
+                        if order.state not in ("WAITING", "OPEN_FOR_ALLOCATION", "DISCOVERED", "PENDING"):
+                            if norm_status == "DONE" and order.state != "DONE":
+                                order.state = "DONE"
+                                order.status_changed_at = now_utc
+                                session.add(
+                                    WorkflowEvent(
+                                        order_id=order.id,
+                                        from_state=old_state,
+                                        to_state="DONE",
+                                        actor_id=actor_id,
+                                        evidence={
+                                            "action": "APPROVE_DONE",
+                                            "actor_name": "Printerval",
+                                            "description": "Printerval đã duyệt hoàn thành đơn hàng (Done)",
+                                        },
+                                    )
                                 )
-                            )
-                            changed = True
-                        elif norm_status == "FIX" and order.state != "REVISION":
-                            order.state = "REVISION"
-                            order.previous_note_outsource = order.note_outsource
-                            if note:
+                                changed = True
+                            elif norm_status == "FIX" and order.state != "REVISION":
+                                order.state = "REVISION"
+                                order.status_changed_at = now_utc
+                                order.previous_note_outsource = order.note_outsource
+                                if note:
+                                    order.note_outsource = note
+                                order.fix_approved_by_admin = False
+                                session.add(
+                                    WorkflowEvent(
+                                        order_id=order.id,
+                                        from_state=old_state,
+                                        to_state="REVISION",
+                                        actor_id=actor_id,
+                                        evidence={
+                                            "action": "REQUEST_FIX",
+                                            "actor_name": "Printerval",
+                                            "description": f"Printerval trả về Fix với note: {note or 'Không có note'}",
+                                            "note_outsource": note,
+                                        },
+                                    )
+                                )
+                                changed = True
+                            elif note and norm_status == "FIX" and note != order.note_outsource:
+                                order.previous_note_outsource = order.note_outsource
                                 order.note_outsource = note
-                            order.fix_approved_by_admin = False
-                            session.add(
-                                WorkflowEvent(
-                                    order_id=order.id,
-                                    from_state=old_state,
-                                    to_state="REVISION",
-                                    actor_id=actor_id,
-                                    evidence={
-                                        "action": "REQUEST_FIX",
-                                        "actor_name": "Printerval",
-                                        "description": f"Printerval trả về Fix với note: {note or 'Không có note'}",
-                                        "note_outsource": note,
-                                    },
-                                )
-                            )
-                            changed = True
-                        elif note and norm_status == "FIX" and note != order.note_outsource:
-                            order.previous_note_outsource = order.note_outsource
-                            order.note_outsource = note
-                            changed = True
+                                changed = True
 
                         if found_status and found_status.lower() != (order.printerval_status or "").lower():
                             order.printerval_status = found_status.lower()

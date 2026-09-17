@@ -10,8 +10,7 @@ extension và telemetry vận hành.
 - Request xác thực bằng session cookie hoặc Bearer token. Request có dữ liệu theo
   Acc Mẹ dùng `X-Platform-Id`; chỉ admin được chọn header này.
 - Platform scope là bắt buộc cho Order, Sync Job, Printerval option và gallery.
-- Không response nào được trả `account_password`, `session_cookie` hay gallery token
-  đã lưu. Token CopyImage chỉ trả plaintext một lần khi rotate.
+- Không response nào được trả `account_password` hay `session_cookie`.
 - Các command async trả job/lifecycle để UI poll; không suy đoán thành công chỉ vì
   request đã được nhận.
 
@@ -23,7 +22,6 @@ extension và telemetry vận hành.
 | Auth | `POST /login`, `POST /logout`, `GET /me` | public/auth | web | giữ nguyên V1 |
 | Platform | `GET, POST /platforms` | admin | settings modal | list đã redaction secret |
 | Platform | `PATCH /platforms/{id}/credentials` | admin | settings modal | verify rồi mới lưu credential cho đúng Acc Mẹ |
-| Platform | `POST /platforms/{id}/gallery-bridge-token` | admin | settings modal | rotate token CopyImage |
 | Platform | `DELETE /platforms/{id}` | admin | settings | deactivate/delete theo hiện trạng |
 | Order query | `GET /orders`, `GET /orders/{id}`, `GET /orders/{id}/history` | auth | admin/designer UI | scoped theo platform và quyền designer |
 | Order read | `GET /order-states`, `GET /orders/{id}/printerval-options`, `POST /platforms/printerval-options/refresh` | auth/admin | orders UI | options cache theo platform |
@@ -34,7 +32,6 @@ extension và telemetry vận hành.
 | Designer task | `GET /my-tasks`, `POST /assignments/{id}/start`, `PATCH /assignments/{id}/sub-status`, `POST /assignments/{id}/results` | designer | task UI | giữ model Assignment |
 | User | `GET, POST /users`, `GET, PATCH /users/{id}/password`, `DELETE /users/{id}` | admin | users UI | password policy tách riêng |
 | Report | `GET /designers/workload`, `GET /finance/stats`, `GET /orders-history` | auth | board/report | rename namespace trong Go phase |
-| Integration | `POST /integrations/printerval-gallery` | CopyImage token | Chrome extension | không dùng web session |
 
 ## Legacy và lộ trình thay thế
 

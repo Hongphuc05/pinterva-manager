@@ -75,7 +75,7 @@ def test_status_sync_job_is_platform_scoped_and_deduplicated(client, db_session,
     assert foreign.status_code == 404
 
 
-def test_sync_job_rejects_more_than_500_explicit_orders(client, db_session, monkeypatch):
+def test_sync_job_rejects_more_than_10000_explicit_orders(client, db_session, monkeypatch):
     from app.api.routes import sync_jobs_api
 
     monkeypatch.setattr(sync_jobs_api, "_dispatch_status_job", lambda job_id: None)
@@ -91,7 +91,7 @@ def test_sync_job_rejects_more_than_500_explicit_orders(client, db_session, monk
 
     response = client.post(
         "/api/sync-jobs",
-        json={"type": "status_sync", "order_ids": [str(uuid.uuid4()) for _ in range(501)]},
+        json={"type": "status_sync", "order_ids": [str(uuid.uuid4()) for _ in range(10001)]},
         headers={"Authorization": f"Bearer {token}", "X-Platform-Id": str(platform.id)},
     )
 

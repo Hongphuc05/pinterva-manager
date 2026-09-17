@@ -8,10 +8,10 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import User
-from app.api.deps import get_current_platform_id, get_db, require_role
+from app.api.deps import get_current_platform_id, get_db, require_any_role, require_role
 from app.application.auth import hash_password
 from app.application.password_vault import decrypt_password, encrypt_password
-from app.domain.access import ROLE_ADMIN, ROLE_DESIGNER, ROLE_DESIGNER_TRELLO
+from app.domain.access import ROLE_ADMIN, ROLE_DESIGNER, ROLE_DESIGNER_TRELLO, ROLE_SUPPORT
 
 router = APIRouter()
 
@@ -67,13 +67,13 @@ def _target_user(db: Session, user_id: str) -> User:
 
 @router.get("/users", response_model=list[UserOut])
 def list_users(
-    user: User = Depends(require_role("admin")),
+    user: User = Depends(require_any_role("admin", "support")),
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
-    # Admins see all admin users + designers assigned to the current active platform (or unassigned designers)
+    # Admins see all admin/support users + designers assigned to the current active platform (or unassigned designers)
     query = db.query(User).filter(
-        (User.role == "admin") | (User.platform_id == platform_id) | (User.platform_id.is_(None))
+        (User.role.in_([ROLE_ADMIN, ROLE_SUPPORT])) | (User.platform_id == platform_id) | (User.platform_id.is_(None))
     )
     users = query.order_by(User.created_at.desc()).all()
     return [_user_out(u) for u in users]
@@ -101,10 +101,10 @@ def create_user(
     role = payload.role.strip().lower()
     if role == "user":
         role = ROLE_DESIGNER
-    if role not in (ROLE_ADMIN, ROLE_DESIGNER, ROLE_DESIGNER_TRELLO):
+    if role not in (ROLE_ADMIN, ROLE_DESIGNER, ROLE_DESIGNER_TRELLO, ROLE_SUPPORT):
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            "Vai trò không hợp lệ (admin, designer hoặc designer-trello).",
+            "Vai trò không hợp lệ (admin, designer, designer-trello hoặc support).",
         )
 
     existing = db.query(User).filter_by(username=clean_username).one_or_none()
