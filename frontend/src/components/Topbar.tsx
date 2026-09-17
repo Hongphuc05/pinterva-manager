@@ -153,7 +153,7 @@ export function Topbar() {
           {getPageTitle(location.pathname)}
         </h2>
         <span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-mono border border-blue-200">
-          V1.0
+          V1.1
         </span>
       </div>
 
