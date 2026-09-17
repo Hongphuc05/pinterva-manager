@@ -34,9 +34,9 @@ DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/pinterval_tes
 ruff check .
 ```
 
-## Production-like Docker runtime
+## Production trên VPS
 
-The frontend remains on Vercel. Backend production uses a prebuilt GHCR image through
-`compose.yaml`; it never builds source code on the server. See
-[docs/SERVER_HANDOFF.md](docs/SERVER_HANDOFF.md) for the new-PC checklist and
-[docs/SELF_HOSTED_PRODUCTION.md](docs/SELF_HOSTED_PRODUCTION.md) for local validation.
+Production tự host cả React SPA lẫn API tại cùng domain, không phụ thuộc Vercel.
+`compose.production.yaml` chạy PostgreSQL, Redis, FastAPI, Celery workers, Celery Beat
+và Cloudflare Tunnel. Xem [docs/PRODUCTION_DOCKER.md](docs/PRODUCTION_DOCKER.md) trước
+khi triển khai; không dùng cấu hình này thay cho `compose.local.yaml` trên Mac.
