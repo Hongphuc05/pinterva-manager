@@ -2,17 +2,18 @@
 
 ## Global constraints
 
-1. Preserve all existing designer workflow semantics: task visibility, task start,
-   sub-status, missing-template report, result submission, QC feedback, history, and
-   finance access.
+1. Preserve all existing non-admin workflow semantics: designer task visibility, task
+   start, sub-status, missing-template report, result submission, QC feedback, history,
+   finance access, the Trello designer board, and support views. Role `admin` remains
+   functionally and visually unchanged.
 2. Do not change state-machine rules, idempotency keys, database schema, external
    adapters, workers, or admin API contracts.
-3. Do not expose the banned external-system term or its asset domains in a designer
+3. Do not expose the banned external-system term or its asset domains in a non-admin
    HTML document, JavaScript/CSS asset, source map, DOM text, URL, API request/response,
    error message, storage value, or direct route.
 4. Enforce authorization at the API boundary. Hiding a sidebar item is never
    authorization.
-5. Designer data uses a separate response DTO. It is mapped at the API boundary;
+5. Non-admin data uses a separate response DTO. It is mapped at the API boundary;
    source records remain exact and auditable internally.
 6. No automated test may call the live external system. No Docker rebuild, VPS deploy,
    or external write is part of this change.
@@ -25,16 +26,17 @@
 
 **Consumes:** authenticated `User.role` from `/api/me`.
 
-**Produces:** role-selected, lazy-loaded app tree. The designer chunk has no static
-dependency on admin-only modules.
+**Produces:** role-selected, lazy-loaded app tree. The non-admin chunk has no static
+dependency on admin-only modules; the existing admin tree is preserved.
 
 **Steps:**
 
 1. Extract the existing route tree into an admin entry without changing its UI.
-2. Add a designer entry with only designer pages and neutral layout components.
+2. Add a non-admin entry with designer, Trello designer, and support pages plus neutral
+   layout components.
 3. Use `React.lazy` only after authentication resolves.
 4. Add a frontend route guard to redirect direct admin URLs for non-admin accounts.
-5. Add tests for designer/admin entry selection and protected-route redirects.
+5. Add tests for each non-admin/admin entry selection and protected-route redirects.
 
 ## Task 2 — Build neutral designer read models
 
@@ -42,7 +44,7 @@ dependency on admin-only modules.
 
 **Consumes:** owned assignment/order records from `list_my_tasks`.
 
-**Produces:** DTO containing only designer-required business fields, safe asset paths,
+**Produces:** DTO containing only non-admin-required business fields, safe asset paths,
 and neutral field names. It must not contain external-system URLs, field names, or raw
 external errors.
 
@@ -61,8 +63,9 @@ only after import-graph audit.
 
 **Consumes:** neutral designer DTO and existing designer-task command endpoints.
 
-**Produces:** the same task list/detail/action behaviour without importing admin
-navigation, admin topbar, integration helpers, or external status helpers.
+**Produces:** the same designer, Trello designer, and support behaviour without
+importing admin navigation, admin topbar, integration helpers, or external status
+helpers.
 
 **Steps:**
 
@@ -84,10 +87,10 @@ designer route which can load admin source UI.
 **Steps:**
 
 1. Audit source-facing routes and attach `require_role("admin")` where missing.
-2. Ensure `/platforms/current` has a designer-safe response or replace it in the
-designer entry.
-3. Test a designer cannot fetch configuration, option lists, sync controls, extension
-downloads, or admin-only source routes.
+2. Ensure `/platforms/current` has a non-admin-safe response or replace it in the
+   non-admin entry.
+3. Test every non-admin role cannot fetch configuration, option lists, sync controls,
+   extension downloads, or admin-only source routes.
 
 ## Task 5 — Add artifact leakage gate
 
@@ -95,14 +98,14 @@ downloads, or admin-only source routes.
 
 **Consumes:** production build output.
 
-**Produces:** a failing test when designer-delivered static assets or contracts contain
+**Produces:** a failing test when non-admin-delivered static assets or contracts contain
 a banned term/domain or source map.
 
 **Steps:**
 
 1. Build the role chunks deterministically.
-2. Identify designer assets from Vite manifest/import graph.
-3. Scan all designer assets and the bootstrap document case-insensitively.
+2. Identify non-admin assets from Vite manifest/import graph.
+3. Scan all non-admin assets and the bootstrap document case-insensitively.
 4. Run the scanner after `npm run build` in local/CI verification.
 
 ## Task 6 — Regression, review, and delivery
