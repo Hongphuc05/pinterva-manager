@@ -2258,7 +2258,9 @@ export function OrdersListPage() {
                       Thời Gian <ArrowDownUp className={`h-3.5 w-3.5 ${dateSort.field === 'status_changed_at' ? 'text-[#0052CC]' : ''}`} />
                     </button>
                   </th>
-                  <th className="py-3 px-4 min-w-[320px]">Nộp Link Bài Thiết Kế</th>
+                  {activeDesignerTab === 'doing' && (
+                    <th className="py-3 px-4 min-w-[320px]">Nộp Link Bài Thiết Kế</th>
+                  )}
                 </tr>
               )}
             </thead>
@@ -2939,8 +2941,9 @@ export function OrdersListPage() {
                             })()}
                           </td>
 
-                          {/* 5. Nộp Link Bài Thiết Kế (Placeholder + Nút nộp bài trực tiếp ở ngoài) */}
-                          <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
+                          {/* 5. Nộp Link Bài Thiết Kế — chỉ hiển thị ở tab Đang làm */}
+                          {activeDesignerTab === 'doing' && (
+                            <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
                             {(() => {
                               const stateUpper = (o.state || '').toUpperCase()
                               const isCompleted = ['DONE', 'CLAIMED_IMPORTED', 'COMPLETED', 'SKIPPED'].includes(stateUpper)
@@ -3040,7 +3043,8 @@ export function OrdersListPage() {
                                 </div>
                               )
                             })()}
-                          </td>
+                            </td>
+                          )}
                         </>
                       )}
                 </tr>
