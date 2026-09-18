@@ -251,7 +251,6 @@ def scan_orders_fast(
                 order.order_created_at_ext = detail.order_created_at
                 order.deadline_at_ext = detail.deadline_at
                 order.note_outsource = detail.note_outsource
-                order.order_note = detail.order_note
                 order.custom_config = detail.custom_config.model_dump() if detail.custom_config else None
                 order.design_tool_url = detail.design_tool_url
                 if detail.sku_image_url:
@@ -485,7 +484,6 @@ def _apply_order_detail_result(order: Order, detail_result) -> None:
     order.order_created_at_ext = detail_result.order_created_at
     order.deadline_at_ext = detail_result.deadline_at
     order.note_outsource = detail_result.note_outsource
-    order.order_note = detail_result.order_note
     order.custom_config = (
         detail_result.custom_config.model_dump() if detail_result.custom_config else None
     )

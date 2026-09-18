@@ -3,7 +3,14 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
-from app.adapters.db.models import Assignment, Order, Platform, User, WorkflowEvent
+from app.adapters.db.models import (
+    Assignment,
+    Order,
+    Platform,
+    PrintervalAssignmentRequest,
+    User,
+    WorkflowEvent,
+)
 from app.api.deps import get_current_platform_id, get_db
 from app.api.main import create_app
 from app.application.auth import create_session_token, hash_password
@@ -424,3 +431,67 @@ def test_admin_can_revoke_assignment(client, db_session):
 
     finally:
         del client.app.dependency_overrides[get_current_platform_id]
+
+
+def test_move_card_to_designer_enqueues_printerval_doing_sync(client, db_session, monkeypatch):
+    platform = _platform(db_session)
+    admin, headers = _login(client, db_session, "admin", "admin-sync-tester", platform.id)
+    trello_designer = User(
+        username="trello-des-sync",
+        full_name="Trello Des Sync",
+        role="designer-trello",
+        password_hash="hash",
+        platform_id=platform.id,
+        printerval_designer_option="nguyễn thị thúy hường 2d prin",
+    )
+    order = Order(
+        external_order_id="DUP-SYNC-1",
+        platform_id=platform.id,
+        work_domain="duplicate",
+        state="WAITING",
+    )
+    db_session.add_all([trello_designer, order])
+    db_session.commit()
+    client.app.dependency_overrides[get_current_platform_id] = lambda: platform.id
+
+    delayed_requests: list[str] = []
+    from app.workers import assignment_sync_tasks
+
+    monkeypatch.setattr(
+        assignment_sync_tasks.sync_printerval_assignment_request,
+        "delay",
+        lambda req_id: delayed_requests.append(req_id),
+    )
+
+    try:
+        # Move order from orders column to trello designer column
+        res = client.post(
+            "/api/duplicate-board/move",
+            json={"order_id": str(order.id), "target_designer_id": str(trello_designer.id)},
+            headers=headers,
+        )
+        assert res.status_code == 200
+        assert res.json()["state"] == "IN_PROGRESS"
+        assert res.json()["assignee_id"] == str(trello_designer.id)
+
+        # Database state should be IN_PROGRESS (Doing)
+        db_session.refresh(order)
+        assert order.state == "IN_PROGRESS"
+
+        # PrintervalAssignmentRequest should have been created with Doing status
+        req = (
+            db_session.query(PrintervalAssignmentRequest)
+            .filter(PrintervalAssignmentRequest.order_id == order.id)
+            .first()
+        )
+        assert req is not None
+        assert req.target_status == "Doing"
+        assert req.designer_option == "nguyễn thị thúy hường 2d prin"
+        assert req.internal_designer_id == trello_designer.id
+
+        # Celery task should have been triggered
+        assert len(delayed_requests) == 1
+        assert delayed_requests[0] == str(req.id)
+    finally:
+        del client.app.dependency_overrides[get_current_platform_id]
+

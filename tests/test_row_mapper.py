@@ -221,7 +221,6 @@ def test_parse_order_detail_from_row_personalized(monkeypatch):
     assert result.double_sided is True
     assert result.multiple_design is False
     assert result.note_outsource == "https://drive.google.com/drive/folders/abc"
-    assert result.order_note == "Etsy url: https://example.test/listing/123"
     assert result.created_at.isoformat() == "2026-09-07T05:31:05"
     assert result.order_created_at.isoformat() == "2026-09-07T05:16:07"
     assert result.deadline_at.isoformat() == "2026-09-08T05:16:07"

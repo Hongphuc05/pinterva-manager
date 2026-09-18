@@ -8,11 +8,13 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import Platform, User
-from app.api.deps import get_current_platform_id, get_db, require_role
+from app.api.deps import get_current_platform_id, get_current_user, get_db, require_role
 from app.application.platform_credentials import (
     PlatformCredentialsError,
     verify_and_save_platform_credentials,
 )
+from app.application.sanitization import sanitize_platform_for_designer
+from app.domain.access import ROLE_ADMIN, ROLE_SUPPORT
 
 router = APIRouter(prefix="/platforms", tags=["platforms"])
 
@@ -60,13 +62,17 @@ def list_platforms(
 @router.get("/current", response_model=PlatformOut)
 def get_current_platform(
     platform_id: uuid.UUID = Depends(get_current_platform_id),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Return only the caller's effective platform for display purposes."""
     platform = db.get(Platform, platform_id)
     if platform is None or not platform.is_active:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Platform not found")
-    return platform
+    out = PlatformOut.model_validate(platform)
+    if user.role not in (ROLE_ADMIN, ROLE_SUPPORT):
+        out = sanitize_platform_for_designer(out)
+    return out
 
 
 @router.post("", response_model=PlatformOut, status_code=status.HTTP_201_CREATED)

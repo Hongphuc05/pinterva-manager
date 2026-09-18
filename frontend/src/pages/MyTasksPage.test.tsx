@@ -10,7 +10,7 @@ const activeTask = {
   assignment_id: 'a1', sub_status: 'doing', result_versions: [],
   order: {
     id: 'o1', external_order_id: 'TASK-1', state: 'IN_PROGRESS', product_name: 'Blue tee',
-    thumbnail_url: null, sku: 'SKU-1', deadline_at_ext: null, order_note: 'Use blue',
+    thumbnail_url: null, sku: 'SKU-1', deadline_at_ext: null,
     custom_config: null,
   },
 }

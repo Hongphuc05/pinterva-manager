@@ -17,6 +17,7 @@ from app.adapters.db.models import (
 from app.adapters.google.drive_interface import DriveAdapter
 from app.application.operations import run_idempotent
 from app.application.order_transitions import apply_transition
+from app.application.sanitization import sanitize_order_detail_for_designer
 from app.domain.models import OrderState
 
 ACTIVE_TASK_STATES = {
@@ -109,35 +110,37 @@ def list_my_tasks(session: Session, designer_id: uuid.UUID) -> list[dict]:
                     "qc_feedback": decision.comment if decision else None,
                 }
             )
+        order_dict = {
+            "id": str(order.id),
+            "external_order_id": order.external_order_id,
+            "state": order.state,
+            "product_name": order.product_name,
+            "thumbnail_url": order.thumbnail_url,
+            "sku": order.sku,
+            "product_category": order.product_category,
+            "product_variants": order.product_variants,
+            "product_skus": order.product_skus,
+            "deadline_at_ext": (
+                order.deadline_at_ext.isoformat() if order.deadline_at_ext else None
+            ),
+            "created_at": order.created_at.isoformat() if order.created_at else None,
+            "note_outsource": order.note_outsource,
+            "designer_note": order.designer_note,
+            "template_missing": order.template_missing,
+            "custom_config": order.custom_config,
+            "sku_image_url": order.sku_image_url,
+            "external_order_url": order.external_order_url,
+            "source_files": order.source_files,
+            "source_download_all_url": order.source_download_all_url,
+            "design_tool_url": order.design_tool_url,
+            "product_image_urls": order.product_image_urls or ([order.thumbnail_url] if order.thumbnail_url else []),
+        }
+        order_dict = sanitize_order_detail_for_designer(order_dict).model_dump()
         tasks.append(
             {
                 "assignment_id": str(assignment.id),
                 "sub_status": assignment.sub_status,
-                "order": {
-                    "id": str(order.id),
-                    "external_order_id": order.external_order_id,
-                    "state": order.state,
-                    "product_name": order.product_name,
-                    "thumbnail_url": order.thumbnail_url,
-                    "sku": order.sku,
-                    "product_category": order.product_category,
-                    "product_variants": order.product_variants,
-                    "product_skus": order.product_skus,
-                    "deadline_at_ext": (
-                        order.deadline_at_ext.isoformat() if order.deadline_at_ext else None
-                    ),
-                    "note_outsource": order.note_outsource,
-                    "designer_note": order.designer_note,
-                    "template_missing": order.template_missing,
-                    "order_note": order.order_note,
-                    "custom_config": order.custom_config,
-                    "sku_image_url": order.sku_image_url,
-                    "external_order_url": order.external_order_url,
-                    "source_files": order.source_files,
-                    "source_download_all_url": order.source_download_all_url,
-                    "design_tool_url": order.design_tool_url,
-                    "product_image_urls": order.product_image_urls or ([order.thumbnail_url] if order.thumbnail_url else []),
-                },
+                "order": order_dict,
                 "result_versions": history,
             }
         )

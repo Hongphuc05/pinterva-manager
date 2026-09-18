@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -57,7 +58,6 @@ class TaskOrderOut(BaseModel):
     note_outsource: str | None = None
     designer_note: str = ""
     template_missing: bool = False
-    order_note: str
     custom_config: dict | None
     sku_image_url: str | None = None
     external_order_url: str | None = None
@@ -70,7 +70,7 @@ class TaskOrderOut(BaseModel):
 class DesignerTaskOut(BaseModel):
     assignment_id: str
     sub_status: str | None
-    order: TaskOrderOut
+    order: Any
     result_versions: list[ResultVersionOut]
 
 

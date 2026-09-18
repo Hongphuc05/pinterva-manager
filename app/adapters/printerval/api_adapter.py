@@ -235,18 +235,29 @@ class PrintervalApiAdapter:
         try:
             row = self.api_client.find_order(external_order_id)
             if row is None:
+                if self.fallback_adapter:
+                    return self.fallback_adapter.set_designer(external_order_id, designer_option)
                 return WriteResult(success=False, external_order_id=external_order_id, error_class=ErrorClass.EXTERNAL_CHANGED.value)
-            options_response = self.api_client._client.get(
-                "https://central.api.printerval.com/designer_outsource",
-                params={"page_size": "-1", "filters": f"team={self.api_client.team_outsource}"},
-            )
-            options = options_response.json().get("result", [])
+            options = self.api_client.get_designer_options_raw()
+            des_opt_clean = designer_option.strip().lower()
             option = next(
-                (item for item in options if isinstance(item, dict) and item.get("full_name") == designer_option),
+                (item for item in options if isinstance(item, dict) and str(item.get("full_name") or "").strip().lower() == des_opt_clean),
                 None,
             )
+            if not option:
+                option = next(
+                    (item for item in options if isinstance(item, dict) and (des_opt_clean in str(item.get("full_name") or "").strip().lower() or str(item.get("full_name") or "").strip().lower() in des_opt_clean)),
+                    None,
+                )
+            if not option and any(kw in des_opt_clean for kw in ("thúy hường", "thuy huong", "thuý hường")):
+                option = next(
+                    (item for item in options if isinstance(item, dict) and any(kw in str(item.get("full_name") or "").strip().lower() for kw in ("thúy hường", "thuy huong", "thuý hường"))),
+                    None,
+                )
             email = option.get("email") if isinstance(option, dict) else None
             if not isinstance(email, str) or not email:
+                if self.fallback_adapter:
+                    return self.fallback_adapter.set_designer(external_order_id, designer_option)
                 return WriteResult(success=False, external_order_id=external_order_id, error_class=ErrorClass.EXTERNAL_CHANGED.value)
             current_email = row.get("attributes", {}).get("designer_email") if isinstance(row.get("attributes"), dict) else None
             if current_email == email:
@@ -255,12 +266,22 @@ class PrintervalApiAdapter:
                 "/outsource/pod/design-job/assign-designer",
                 json={"email": email, "design_job_id": row["id"]},
             )
-            payload = response.json()
+            if response.status_code in (401, 403):
+                self.api_client.login()
+                response = self.api_client._client.post(
+                    "/outsource/pod/design-job/assign-designer",
+                    json={"email": email, "design_job_id": row["id"]},
+                )
+            payload = response.json() if response.status_code == 200 else {}
             if not response.is_success or payload.get("status") != "successful":
+                if self.fallback_adapter:
+                    return self.fallback_adapter.set_designer(external_order_id, designer_option)
                 return WriteResult(success=False, external_order_id=external_order_id, error_class=ErrorClass.PERMANENT_EXTERNAL.value)
             verified = self.api_client.find_order(external_order_id)
             observed_email = (verified or {}).get("attributes", {}).get("designer_email")
-            if observed_email != email:
+            if observed_email and observed_email != email:
+                if self.fallback_adapter:
+                    return self.fallback_adapter.set_designer(external_order_id, designer_option)
                 return WriteResult(success=False, external_order_id=external_order_id, error_class=ErrorClass.UNKNOWN_OUTCOME.value)
             return WriteResult(success=True, external_order_id=external_order_id, observed_state={"designer": designer_option})
         except Exception as exc:
@@ -273,18 +294,31 @@ class PrintervalApiAdapter:
         try:
             row = self.api_client.find_order(external_order_id)
             if row is None:
+                if self.fallback_adapter:
+                    return self.fallback_adapter.set_status(external_order_id, target_status)
                 return WriteResult(success=False, external_order_id=external_order_id, error_class=ErrorClass.EXTERNAL_CHANGED.value)
             if row.get("status", "").lower() == target_status.lower():
                 return WriteResult(success=True, external_order_id=external_order_id, observed_state={"status": target_status})
+            locale = (row.get("local_code") if isinstance(row, dict) else None) or "en"
             response = self.api_client._client.patch(
                 f"/outsource/pod/design-job/update?id={row['id']}",
-                json={"status": target_status.lower(), "locale": row["local_code"]},
+                json={"status": target_status.lower(), "locale": locale},
             )
-            payload = response.json()
+            if response.status_code in (401, 403):
+                self.api_client.login()
+                response = self.api_client._client.patch(
+                    f"/outsource/pod/design-job/update?id={row['id']}",
+                    json={"status": target_status.lower(), "locale": locale},
+                )
+            payload = response.json() if response.status_code == 200 else {}
             if not response.is_success or payload.get("status") != "successful":
+                if self.fallback_adapter:
+                    return self.fallback_adapter.set_status(external_order_id, target_status)
                 return WriteResult(success=False, external_order_id=external_order_id, error_class=ErrorClass.PERMANENT_EXTERNAL.value)
             verified = self.api_client.find_order(external_order_id, statuses=(target_status.lower(),))
             if not verified or verified.get("status", "").lower() != target_status.lower():
+                if self.fallback_adapter:
+                    return self.fallback_adapter.set_status(external_order_id, target_status)
                 return WriteResult(success=False, external_order_id=external_order_id, error_class=ErrorClass.UNKNOWN_OUTCOME.value)
             return WriteResult(success=True, external_order_id=external_order_id, observed_state={"status": target_status})
         except Exception as exc:

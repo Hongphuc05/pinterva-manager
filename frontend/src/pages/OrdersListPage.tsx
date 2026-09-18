@@ -404,15 +404,17 @@ export function OrdersListPage() {
 
 
   async function handleBulkAssign() {
-    if (!bulkDesignerId || !bulkPrintervalDesigner || selectedOrderIds.length === 0) return
+    if (!bulkDesignerId || selectedOrderIds.length === 0) return
     setBulkAssigning(true)
     try {
+      const desUser = usersList.find((u) => u.id === bulkDesignerId)
+      const printervalDes = bulkPrintervalDesigner || desUser?.printerval_designer_option || DEFAULT_PRINTERVAL_DES
       const res = await apiFetch<{ queued_count: number }>('/assignments', {
         method: 'POST',
         body: JSON.stringify({
           order_ids: selectedOrderIds,
           designer_id: bulkDesignerId,
-          printerval_designer: bulkPrintervalDesigner,
+          printerval_designer: printervalDes,
           printerval_status: bulkPrintervalStatus || 'Doing',
         }),
       })
@@ -724,13 +726,13 @@ export function OrdersListPage() {
   }
 
   async function handleSyncPrintervalStatus(orderIds?: string[]) {
-    window.dispatchEvent(new CustomEvent('sync-printerval-start'))
+    window.dispatchEvent(new CustomEvent('sync-platform-start'))
     try {
       await triggerRun(orderIds)
-      showToast('Đã xếp đồng bộ trạng thái Print trong nền.', 'info')
-      window.dispatchEvent(new CustomEvent('sync-printerval-submitted'))
+      showToast('Đã xếp đồng bộ trạng thái Web mẹ trong nền.', 'info')
+      window.dispatchEvent(new CustomEvent('sync-platform-submitted'))
     } catch (err: any) {
-      showToast(err?.message || 'Lỗi khi đồng bộ từ Print.', 'error')
+      showToast(err?.message || 'Lỗi khi đồng bộ từ Web mẹ.', 'error')
     }
   }
 
@@ -1845,7 +1847,7 @@ export function OrdersListPage() {
             >
               <option value="status_changed_at">Thời Gian (Vào tab)</option>
               <option value="order_created_at_ext">Order At (Giờ đặt)</option>
-              <option value="created_at">Ngày tạo (crawl)</option>
+              {isAdmin && <option value="created_at">Ngày tạo (crawl)</option>}
             </select>
 
             {/* Date Inputs (UTC+7) */}
@@ -1964,7 +1966,14 @@ export function OrdersListPage() {
             {/* Select Internal Designer */}
             <select
               value={bulkDesignerId}
-              onChange={(e) => setBulkDesignerId(e.target.value)}
+              onChange={(e) => {
+                const desId = e.target.value
+                setBulkDesignerId(desId)
+                const desUser = usersList.find((u) => u.id === desId)
+                if (desUser?.printerval_designer_option) {
+                  setBulkPrintervalDesigner(desUser.printerval_designer_option)
+                }
+              }}
               className="bg-white text-slate-800 text-xs font-semibold px-3 py-1.5 rounded-lg border border-white/30 focus:outline-none shadow-xs"
             >
               <option value="">-- Chọn Designer phân công --</option>
@@ -2197,11 +2206,13 @@ export function OrdersListPage() {
                       Order At <ArrowDownUp className={`h-3.5 w-3.5 ${dateSort.field === 'order_created_at_ext' ? 'text-[#0052CC]' : ''}`} />
                     </button>
                   </th>
-                  <th className="py-3 px-4 whitespace-nowrap">
-                    <button type="button" onClick={() => toggleDateSort('created_at')} className="inline-flex items-center gap-1 hover:text-[#0052CC]" title="Sắp xếp theo ngày tạo (crawl)">
-                      Ngày tạo (crawl) <ArrowDownUp className={`h-3.5 w-3.5 ${dateSort.field === 'created_at' ? 'text-[#0052CC]' : ''}`} />
-                    </button>
-                  </th>
+                  {isAdmin && (
+                    <th className="py-3 px-4 whitespace-nowrap">
+                      <button type="button" onClick={() => toggleDateSort('created_at')} className="inline-flex items-center gap-1 hover:text-[#0052CC]" title="Sắp xếp theo ngày tạo (crawl)">
+                        Ngày tạo (crawl) <ArrowDownUp className={`h-3.5 w-3.5 ${dateSort.field === 'created_at' ? 'text-[#0052CC]' : ''}`} />
+                      </button>
+                    </th>
+                  )}
                   <th className="py-3 px-4 text-right">Thao Tác</th>
                 </tr>
               )}
@@ -2209,7 +2220,7 @@ export function OrdersListPage() {
             <tbody className="divide-y divide-slate-100 text-xs">
               {paginatedOrders.length === 0 ? (
                 <tr>
-                  <td colSpan={isSupport ? 4 : isAdmin ? 9 : 8} className="py-12 text-center text-slate-400">
+                  <td colSpan={isSupport ? 4 : isAdmin ? 9 : 7} className="py-12 text-center text-slate-400">
                     {ordersLoading ? (
                       <>
                         <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin opacity-50 text-[#0052CC]" />
@@ -2727,18 +2738,20 @@ export function OrdersListPage() {
                           </td>
 
                           {/* Created At (Tacahu Import Time) */}
-                          <td className="py-2.5 px-4 whitespace-nowrap">
-                            {(() => {
-                              const split = formatUtc7Split(o.created_at)
-                              if (!split) return <span className="text-slate-300 font-mono text-xs">-</span>
-                              return (
-                                <div className="flex flex-col leading-tight" title="Thời gian tạo trong Tacahu">
-                                  <span className="font-mono text-xs font-medium text-slate-600">{split.time}</span>
-                                  <span className="font-mono text-[11px] text-slate-400">{split.date}</span>
-                                </div>
-                              )
-                            })()}
-                          </td>
+                          {isAdmin && (
+                            <td className="py-2.5 px-4 whitespace-nowrap">
+                              {(() => {
+                                const split = formatUtc7Split(o.created_at)
+                                if (!split) return <span className="text-slate-300 font-mono text-xs">-</span>
+                                return (
+                                  <div className="flex flex-col leading-tight" title="Thời gian tạo trong Tacahu">
+                                    <span className="font-mono text-xs font-medium text-slate-600">{split.time}</span>
+                                    <span className="font-mono text-[11px] text-slate-400">{split.date}</span>
+                                  </div>
+                                )
+                              })()}
+                            </td>
+                          )}
 
                           {/* Actions Contextual to Active Tab */}
                           <td className="py-2.5 px-4 text-right" onClick={(e) => e.stopPropagation()}>

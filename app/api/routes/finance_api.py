@@ -19,6 +19,8 @@ from app.adapters.db.models import (
     WorkflowEvent,
 )
 from app.api.deps import DEFAULT_PLATFORM_ID, get_current_user, get_db
+from app.application.sanitization import encode_proxy_url, sanitize_text
+from app.domain.access import ROLE_ADMIN, ROLE_SUPPORT
 
 router = APIRouter(tags=["finance"])
 
@@ -580,6 +582,16 @@ def get_finance_stats(
     offset = (page - 1) * page_size
     paginated_items = tasks_to_render[offset : offset + page_size]
     total_pages = max(1, math.ceil(total_tasks_count / page_size))
+
+    if user.role not in (ROLE_ADMIN, ROLE_SUPPORT):
+        sanitized_items = []
+        for item in paginated_items:
+            c = dict(item)
+            c["printerval_status"] = None
+            if c.get("thumbnail_url"):
+                c["thumbnail_url"] = encode_proxy_url(c["thumbnail_url"])
+            sanitized_items.append(c)
+        paginated_items = sanitized_items
 
     task_outs = [CreditedTaskOut(**item) for item in paginated_items]
 

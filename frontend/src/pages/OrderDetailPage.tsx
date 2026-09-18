@@ -64,7 +64,6 @@ type OrderDetail = {
   fix_rejected_by_admin?: boolean
   designer_note: string
   template_missing: boolean
-  order_note: string
   custom_config: {
     original: { key: string; value: string }[]
     translated_vn?: { key: string; value: string }[]
@@ -1015,25 +1014,24 @@ export function OrderDetailPage() {
               <p className="font-semibold text-slate-700">{order.product_skus?.length || (order.sku ? 1 : 0)} mẫu hàng</p>
             </div>
 
-            <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-              <span className="text-slate-400 font-semibold block uppercase text-[10px]">Ngày Phát Hiện (Crawl)</span>
-              <p className="font-mono font-semibold text-slate-700">
-                {new Date(order.created_at).toLocaleString('vi-VN')}
-              </p>
-            </div>
+            {isAdmin && (
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
+                <span className="text-slate-400 font-semibold block uppercase text-[10px]">Ngày Phát Hiện (Crawl)</span>
+                <p className="font-mono font-semibold text-slate-700">
+                  {new Date(order.created_at).toLocaleString('vi-VN')}
+                </p>
+              </div>
+            )}
           </div>
         )}
 
         {/* Notes */}
-        {(order.order_note || order.note_outsource || order.designer_note || isAdmin) && (
+        {(order.note_outsource || order.designer_note || isAdmin) && (
           <div className="p-4 rounded-xl bg-blue-50/50 border border-blue-100 text-xs space-y-2">
             <h3 className="font-bold text-slate-800 flex items-center gap-1.5">
               <FileText className="h-4 w-4 text-[#0052CC]" />
               <span>Ghi Chú & Hướng Dẫn</span>
             </h3>
-            {order.order_note && (
-              <p className="text-slate-700 font-mono text-[11px] whitespace-pre-wrap"><strong className="text-slate-900">Order Note:</strong> {order.order_note}</p>
-            )}
             {order.note_outsource && (
               <p className="text-slate-700 font-mono text-[11px] whitespace-pre-wrap"><strong className="text-slate-900">Note Outsource:</strong> {order.note_outsource}</p>
             )}

@@ -4,8 +4,9 @@ import re
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -55,6 +56,12 @@ from app.application.printerval_assignment_requests import (
     PRINTERVAL_STATUSES,
     PrintervalAssignmentValidationError,
     create_request,
+)
+from app.application.sanitization import (
+    decode_proxy_url,
+    sanitize_order_detail_for_designer,
+    sanitize_order_summary_for_designer,
+    sanitize_workflow_event_for_designer,
 )
 from app.config import get_settings
 from app.domain.access import (
@@ -109,10 +116,43 @@ class OrderSummaryOut(BaseModel):
 
 
 class OrdersListResponse(BaseModel):
-    orders: list[OrderSummaryOut]
+    orders: list[Any]
 
 
 CRAWLED_ASSETS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "crawled_assets"
+
+
+@router.get("/assets/proxy")
+def api_asset_proxy(u: str = Query(...)):
+    raw_url = decode_proxy_url(u)
+    if not raw_url:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid or expired asset token")
+    try:
+        import httpx
+
+        with httpx.Client(
+            timeout=15.0,
+            follow_redirects=True,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                )
+            },
+        ) as client:
+            resp = client.get(raw_url)
+            if resp.status_code != 200:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "Asset not found")
+            content_type = resp.headers.get("content-type", "image/jpeg")
+            return Response(
+                content=resp.content,
+                media_type=content_type,
+                headers={"Cache-Control": "public, max-age=86400"},
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Failed to load asset") from exc
 
 
 def _is_allowed_gallery_url(url: str) -> bool:
@@ -594,7 +634,6 @@ class OrderDetailOut(BaseModel):
     designer_note: str = ""
     template_missing: bool = False
     duplicate_check_status: str = "uncheck"
-    order_note: str
     custom_config: dict | None
     product_skus: list[dict] | None = None
     assigned_designer_name: str | None = None
@@ -656,8 +695,8 @@ class OrderHistoryListResponse(BaseModel):
 
 
 class OrderDetailResponse(BaseModel):
-    order: OrderDetailOut
-    history: list[WorkflowEventOut]
+    order: Any
+    history: list[WorkflowEventOut | Any]
 
 
 class RefreshResponse(BaseModel):
@@ -781,10 +820,16 @@ def api_orders_list(
     for request in requests:
         request_map.setdefault(request.order_id, request)
 
+    is_admin_or_support = user.role in (ROLE_ADMIN, ROLE_SUPPORT)
     out_list = []
     for o in orders:
         item = OrderSummaryOut.model_validate(o)
         item.assigned_designer_name = designer_map.get(o.id)
+        if not item.assigned_designer_name and (
+            (user.printerval_designer_option and o.printerval_designer == user.printerval_designer_option)
+            or (user.full_name and o.printerval_designer == user.full_name)
+        ):
+            item.assigned_designer_name = user.full_name or user.username
         item.assigned_designer_id = designer_id_map.get(o.id)
         item.assignment_id = assignment_id_map.get(o.id)
         latest_request = request_map.get(o.id)
@@ -795,6 +840,8 @@ def api_orders_list(
                 if latest_request.error_message
                 else latest_request.error_class
             )
+        if not is_admin_or_support:
+            item = sanitize_order_summary_for_designer(item)
         out_list.append(item)
 
     return OrdersListResponse(orders=out_list)
@@ -1342,6 +1389,11 @@ def api_order_detail(
                 evidence=e.evidence,
             )
         )
+
+    is_admin_or_support = user.role in (ROLE_ADMIN, ROLE_SUPPORT)
+    if not is_admin_or_support:
+        order_out = sanitize_order_detail_for_designer(order_out)
+        history_out = [sanitize_workflow_event_for_designer(ev) for ev in history_out]
 
     return OrderDetailResponse(
         order=order_out,
@@ -2523,6 +2575,10 @@ def api_get_single_order_history(
                 evidence=e.evidence,
             )
         )
+
+    is_admin_or_support = user.role in (ROLE_ADMIN, ROLE_SUPPORT)
+    if not is_admin_or_support:
+        history_out = [sanitize_workflow_event_for_designer(ev) for ev in history_out]
 
     return history_out
 

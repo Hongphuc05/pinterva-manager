@@ -50,7 +50,7 @@ function App() {
           <Route
             path="/designer-board"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute allowedRoles={['admin']}>
                 <DesignerBoardPage />
               </ProtectedRoute>
             }
@@ -58,7 +58,7 @@ function App() {
           <Route
             path="/order-history"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute allowedRoles={['admin']}>
                 <OrderHistoryPage />
               </ProtectedRoute>
             }
@@ -70,7 +70,7 @@ function App() {
           <Route
             path="/users"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute allowedRoles={['admin']}>
                 <UsersPage />
               </ProtectedRoute>
             }
@@ -78,7 +78,7 @@ function App() {
           <Route
             path="/printerval-hub"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute allowedRoles={['admin']}>
                 <PrintervalHubPage />
               </ProtectedRoute>
             }

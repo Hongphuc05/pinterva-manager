@@ -21,6 +21,8 @@ from app.domain.access import (
     WORK_DOMAINS,
 )
 from app.domain.models import OrderState
+from app.application.printerval_assignment_requests import create_request
+from app.application.sanitization import encode_proxy_url, sanitize_text
 
 DONE_STATES = ("DONE", "CLAIMED_IMPORTED", "COMPLETED", "SKIPPED")
 
@@ -378,6 +380,22 @@ def move_duplicate_order(
             from_state=from_st,
             to_state=order.state,
         )
+
+        designer_option = (target.printerval_designer_option or "").strip() or "nguyễn thị thúy hường 2d prin"
+        try:
+            req = create_request(
+                session,
+                order=order,
+                internal_designer=target,
+                platform_id=platform_id,
+                designer_option=designer_option,
+                target_status="Doing",
+            )
+            from app.workers.assignment_sync_tasks import sync_printerval_assignment_request
+            sync_printerval_assignment_request.delay(str(req.id))
+        except Exception:
+            pass
+
         session.commit()
         return _card(order, target)
 
@@ -389,7 +407,7 @@ def _card(order: Order, assignee: User | None) -> dict:
         "id": str(order.id),
         "external_order_id": order.external_order_id,
         "product_name": order.product_name,
-        "thumbnail_url": order.thumbnail_url,
+        "thumbnail_url": encode_proxy_url(order.thumbnail_url),
         "deadline_at_ext": order.deadline_at_ext.isoformat() if order.deadline_at_ext else None,
         "order_created_at_ext": order.order_created_at_ext.isoformat() if order.order_created_at_ext else None,
         "created_at": order.created_at.isoformat() if order.created_at else None,
@@ -398,8 +416,8 @@ def _card(order: Order, assignee: User | None) -> dict:
         "is_paid": bool(order.is_paid),
         "template_missing": bool(order.template_missing),
         "state": order.state,
-        "note_outsource": order.note_outsource,
-        "previous_note_outsource": order.previous_note_outsource,
+        "note_outsource": sanitize_text(order.note_outsource, "Web mẹ") or "",
+        "previous_note_outsource": sanitize_text(order.previous_note_outsource, "Web mẹ"),
         "fix_approved_by_admin": order.fix_approved_by_admin,
         "assignee_id": str(assignee.id) if assignee else None,
         "assignee_name": (assignee.full_name or assignee.username) if assignee else None,

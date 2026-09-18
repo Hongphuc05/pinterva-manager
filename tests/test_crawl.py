@@ -350,7 +350,6 @@ def test_import_claimed_orders_persists_order_detail_fields(db_session):
         order_created_at=datetime(2026, 9, 7, 3, 38),
         deadline_at=datetime(2026, 9, 8, 3, 38, 52),
         note_outsource="some note",
-        order_note="ebay url: https://example.com",
         custom_config=CustomConfig(
             original=[CustomConfigEntry(key="Your Name Here", value="Machado")],
             translated_vn=[CustomConfigEntry(key="Tên của Bạn", value="Machado")],

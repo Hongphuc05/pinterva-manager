@@ -544,7 +544,6 @@ def parse_order_detail_from_row(
         double_sided=bool(row.get("double_sided_id")),
         has_uploaded_design=bool(row.get("designs")),
         note_outsource=str(attributes.get("outsource_note") or ""),
-        order_note=str(row.get("order_note") or ""),
         created_at=_parse_timestamp(row.get("created_at")),
         order_created_at=_parse_timestamp(row.get("order_created_at")),
         deadline_at=_parse_timestamp(row.get("deadline_at")),

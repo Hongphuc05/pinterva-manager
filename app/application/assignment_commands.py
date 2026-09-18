@@ -64,9 +64,10 @@ def queue_assignment_command(
     target_state = status_state_map.get(printerval_status, OrderState.IN_PROGRESS)
 
     designer_option = (printerval_designer or "").strip()
-    if not designer_option and designer is not None and designer.printerval_designer_option:
-        designer_option = designer.printerval_designer_option.strip()
-    if not designer_option and designer is not None:
+    if designer is not None and designer.printerval_designer_option:
+        if not designer_option or designer_option.lower() == "nguyễn thị thúy hường 2d prin":
+            designer_option = designer.printerval_designer_option.strip()
+    elif not designer_option and designer is not None:
         designer_option = "nguyễn thị thúy hường 2d prin"
 
     orders = (

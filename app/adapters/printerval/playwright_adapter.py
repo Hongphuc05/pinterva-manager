@@ -603,13 +603,6 @@ class PlaywrightPrintervalAdapter:
         order_created_at_text = _timestamp_label_text(row, "Order created at:")
         deadline_text = _timestamp_label_text(row, "Deadline at:")
 
-        order_note_block = row.locator("div.note:has-text('Order note:')")
-        order_note = (
-            order_note_block.locator(".pre-note").first.inner_text()
-            if order_note_block.count() > 0
-            else ""
-        )
-
         design_tool_link = row.locator("a[href*='design-tool.printerval.com']")
         design_tool_url = (
             design_tool_link.first.get_attribute("href") if design_tool_link.count() > 0 else None
@@ -678,7 +671,6 @@ class PlaywrightPrintervalAdapter:
             designer=designer,
             status=status,
             note_outsource=note_outsource,
-            order_note=order_note,
             created_at=_parse_short_datetime(created_at_text) if created_at_text else None,
             order_created_at=(
                 _parse_short_datetime(order_created_at_text) if order_created_at_text else None

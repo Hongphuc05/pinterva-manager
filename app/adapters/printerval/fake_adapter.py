@@ -23,7 +23,6 @@ class _FakeOrder:
     designer: str | None
     status: str
     note_outsource: str = ""
-    order_note: str = ""
     created_at: datetime | None = None
     order_created_at: datetime | None = None
     deadline_at: datetime | None = None
@@ -95,7 +94,6 @@ class FakePrintervalAdapter:
             designer=order.designer,
             status=order.status,
             note_outsource=order.note_outsource,
-            order_note=order.order_note,
             created_at=order.created_at,
             order_created_at=order.order_created_at,
             deadline_at=order.deadline_at,

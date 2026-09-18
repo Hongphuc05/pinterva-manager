@@ -61,7 +61,6 @@ def test_extraction_on_personalized_order_fixture(page):
     assert result.custom_config.original[0].value == "Fixture Name"
     assert result.custom_config.translated_vn[0].key == "Tên của Bạn Ở Đây"
     assert result.design_tool_url.startswith("https://design-tool.printerval.com")
-    assert "redacted-source-listing" in result.order_note
 
 
 def test_parse_short_datetime_valid():

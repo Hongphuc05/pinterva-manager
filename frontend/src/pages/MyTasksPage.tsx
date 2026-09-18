@@ -42,7 +42,6 @@ type Task = {
     note_outsource: string | null
     designer_note: string
     template_missing: boolean
-    order_note: string
     custom_config: Record<string, unknown> | null
     sku_image_url: string | null
     external_order_url: string | null

@@ -183,7 +183,7 @@ export function DuplicateBoardPage() {
     } catch (caught) {
       setSyncRequested(false)
       setError(caught instanceof ApiError ? caught.message : 'Không thể gửi tác vụ đồng bộ.')
-      window.dispatchEvent(new CustomEvent('sync-printerval-end'))
+      window.dispatchEvent(new CustomEvent('sync-platform-end'))
     }
   }, [boardOrderIds, triggerRun])
 
@@ -200,7 +200,7 @@ export function DuplicateBoardPage() {
     if (!syncRequested || isTriggering || syncStatus?.is_running) return
     setSyncRequested(false)
     void loadBoard()
-    window.dispatchEvent(new CustomEvent('sync-printerval-end'))
+    window.dispatchEvent(new CustomEvent('sync-platform-end'))
   }, [isTriggering, loadBoard, syncRequested, syncStatus?.is_running])
 
   // Get all unique designers that exist across the board
@@ -527,12 +527,12 @@ export function DuplicateBoardPage() {
               <button
                 type="button"
                 onClick={() => {
-                  window.dispatchEvent(new CustomEvent('sync-printerval-start'))
+                  window.dispatchEvent(new CustomEvent('sync-platform-start'))
                   void syncBoardStatus()
                 }}
                 disabled={syncRequested || isTriggering || syncStatus?.is_running || boardOrderIds.length === 0}
                 className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#0052CC] px-3.5 py-2 text-xs font-bold text-white shadow-xs hover:bg-[#0041A3] disabled:opacity-50 cursor-pointer"
-                title="Đồng bộ trạng thái từ Print cho tất cả đơn trên board"
+                title="Đồng bộ trạng thái từ Web mẹ cho tất cả đơn trên board"
               >
                 <RefreshCw className={`h-3.5 w-3.5 ${(syncRequested || isTriggering || syncStatus?.is_running) ? 'animate-spin' : ''}`} />
                 <span>{(syncRequested || isTriggering || syncStatus?.is_running) ? 'Đang đồng bộ...' : 'Đồng bộ trạng thái'}</span>

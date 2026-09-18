@@ -66,7 +66,7 @@ export function Topbar() {
     return () => window.removeEventListener('gallery-sync-notify', onGalleryNotify)
   }, [showToast])
 
-  // Listen for sync-printerval events to drive the circular animation
+  // Listen for sync-platform events to drive the circular animation
   useEffect(() => {
     function onStart() {
       setIsFastSyncing(true)
@@ -78,20 +78,20 @@ export function Topbar() {
     function onSubmitted() {
       setIsFastSyncing(false)
     }
-    window.addEventListener('sync-printerval-start', onStart)
-    window.addEventListener('sync-printerval-end', onEnd)
-    window.addEventListener('sync-printerval-submitted', onSubmitted)
+    window.addEventListener('sync-platform-start', onStart)
+    window.addEventListener('sync-platform-end', onEnd)
+    window.addEventListener('sync-platform-submitted', onSubmitted)
     return () => {
-      window.removeEventListener('sync-printerval-start', onStart)
-      window.removeEventListener('sync-printerval-end', onEnd)
-      window.removeEventListener('sync-printerval-submitted', onSubmitted)
+      window.removeEventListener('sync-platform-start', onStart)
+      window.removeEventListener('sync-platform-end', onEnd)
+      window.removeEventListener('sync-platform-submitted', onSubmitted)
     }
   }, [])
 
   async function handleRefreshCurrentTab() {
     setIsFastSyncing(true)
     setFastSyncError(null)
-    window.dispatchEvent(new CustomEvent('sync-printerval-start'))
+    window.dispatchEvent(new CustomEvent('sync-platform-start'))
 
     let handled = false
     const onHandled = () => {
@@ -107,12 +107,12 @@ export function Topbar() {
     if (!handled) {
       try {
         await triggerRun()
-        window.dispatchEvent(new CustomEvent('sync-printerval-submitted'))
+        window.dispatchEvent(new CustomEvent('sync-platform-submitted'))
       } catch (err: any) {
-        setFastSyncError(err?.message || 'Lỗi khi đồng bộ từ Print')
+        setFastSyncError(err?.message || 'Lỗi khi đồng bộ từ Web mẹ')
       } finally {
         setIsFastSyncing(false)
-        window.dispatchEvent(new CustomEvent('sync-printerval-end'))
+        window.dispatchEvent(new CustomEvent('sync-platform-end'))
       }
     }
   }

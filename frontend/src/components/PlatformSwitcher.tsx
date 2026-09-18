@@ -36,7 +36,7 @@ export const PlatformSwitcher: React.FC = () => {
       <button
         onClick={() => setIsModalOpen(true)}
         className="px-3 py-1.5 text-xs font-bold text-white bg-[#0052CC] hover:bg-[#0041A3] rounded-xl shadow-2xs transition-colors cursor-pointer"
-        title="Thêm nền tảng / acc mẹ Print mới"
+        title="Thêm nền tảng / acc mẹ mới"
       >
         + Thêm Acc Mẹ
       </button>
@@ -45,7 +45,7 @@ export const PlatformSwitcher: React.FC = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
           <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl p-6 border border-slate-200 text-slate-800">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-base font-bold text-slate-900">Thêm Nền Tảng (Acc Mẹ Print)</h3>
+              <h3 className="text-base font-bold text-slate-900">Thêm Nền Tảng (Acc Mẹ)</h3>
               <button
                 onClick={() => setIsModalOpen(false)}
                 className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
@@ -88,7 +88,7 @@ export const PlatformSwitcher: React.FC = () => {
                 </label>
                 <input
                   type="text"
-                  placeholder="ví dụ: Acc Mẹ Print 2 (Store US)"
+                  placeholder="ví dụ: Acc Mẹ 2 (Store US)"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className="w-full px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#0052CC]/20 focus:border-[#0052CC]"
@@ -102,7 +102,7 @@ export const PlatformSwitcher: React.FC = () => {
                 </label>
                 <input
                   type="text"
-                  placeholder="ví dụ: seller_us_02@printerval.com"
+                  placeholder="ví dụ: store_us_02@gmail.com"
                   value={accountUsername}
                   onChange={(e) => setAccountUsername(e.target.value)}
                   className="w-full px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#0052CC]/20 focus:border-[#0052CC]"

@@ -94,9 +94,13 @@ export function CustomConfigurationSection({ entries, translated = false }: Prop
       {/* Rows Table */}
       <div className="divide-y divide-slate-100">
         {filteredEntries.map((entry, index) => {
-          // Clean any potential remaining domain strings from display value
+          // Clean any potential remaining domain strings or printerval mentions
+          const displayKey = entry.key
+            .replace(/printerval/gi, 'Web mẹ')
+            .trim()
           const displayValue = entry.value
-            .replace(/https?:\/\/assets\.printerval\.com[^\s]*/gi, '')
+            .replace(/https?:\/\/[^\s]*printerval[^\s]*/gi, '')
+            .replace(/printerval/gi, 'Web mẹ')
             .trim()
 
           return (
@@ -106,7 +110,7 @@ export function CustomConfigurationSection({ entries, translated = false }: Prop
             >
               {/* Key Label */}
               <span className="font-bold text-slate-800 break-words">
-                {entry.key}
+                {displayKey}
               </span>
 
               {/* Custom Value */}

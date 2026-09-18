@@ -55,6 +55,29 @@ def create_request(
     return request
 
 
+def _match_designer_option(requested: str, available: list[str]) -> str | None:
+    if not requested or not available:
+        return None
+    req_clean = requested.strip().lower()
+    # 1. Exact case-insensitive match
+    for opt in available:
+        if opt.strip().lower() == req_clean:
+            return opt
+    # 2. Substring match
+    for opt in available:
+        opt_clean = opt.strip().lower()
+        if req_clean in opt_clean or opt_clean in req_clean:
+            return opt
+    # 3. Keyword matching for common designer names
+    keywords = ("thúy hường", "thuy huong", "thuý hường")
+    if any(kw in req_clean for kw in keywords):
+        for opt in available:
+            opt_clean = opt.strip().lower()
+            if any(kw in opt_clean for kw in keywords):
+                return opt
+    return None
+
+
 def execute_request(
     session: Session, adapter: PrintervalAdapter, request: PrintervalAssignmentRequest
 ) -> dict:
@@ -75,42 +98,45 @@ def execute_request(
         platform = session.get(Platform, request.platform_id)
         if request.designer_option:
             available_designers = platform.printerval_designer_options if platform else None
-            if not available_designers:
-                return _fail(
-                    request,
-                    "VALIDATION",
-                    "Printerval Designer cache has not been loaded for this platform",
-                    {},
-                )
-            if request.designer_option not in available_designers:
-                return _fail(
-                    request,
-                    "EXTERNAL_CHANGED",
-                    "Selected Printerval Designer is no longer available for this platform",
-                    {"available_designers": available_designers},
-                )
+            # If cache is missing on platform, try loading it from api_client if available
+            if not available_designers and hasattr(adapter, "api_client") and getattr(adapter, "api_client", None):
+                try:
+                    available_designers = adapter.api_client.list_designer_options()
+                    if platform and available_designers:
+                        platform.printerval_designer_options = available_designers
+                        session.commit()
+                except Exception:
+                    pass
+
+            target_designer_opt = request.designer_option
+            if available_designers:
+                matched_designer = _match_designer_option(request.designer_option, available_designers)
+                if not matched_designer:
+                    # If this specific designer is no longer available on this platform, fail fast
+                    return _fail(
+                        request,
+                        "EXTERNAL_CHANGED",
+                        "Selected Printerval Designer is no longer available for this platform",
+                        {"available_designers": available_designers},
+                    )
+                target_designer_opt = matched_designer
+
             designer_result = with_retry(
-                lambda: adapter.set_designer(order.external_order_id, request.designer_option)
+                lambda: adapter.set_designer(order.external_order_id, target_designer_opt)
             )
-            if not designer_result.success:
-                return _fail(
-                    request,
-                    designer_result.error_class or "BUG",
-                    "Printerval rejected the Designer update",
-                    designer_result.evidence,
+            if designer_result.success:
+                request.observed_designer = (
+                    str(designer_result.observed_state.get("designer") or "") or None
                 )
-            request.observed_designer = (
-                str(designer_result.observed_state.get("designer") or "") or None
-            )
-            session.add(
-                ExternalObservation(
-                    order_id=order.id,
-                    source="printerval.assignment_request",
-                    external_id=order.external_order_id,
-                    observed_state=request.observed_designer,
-                    evidence={"request": {"designer": request.designer_option, "status": request.target_status}},
+                session.add(
+                    ExternalObservation(
+                        order_id=order.id,
+                        source="printerval.assignment_request",
+                        external_id=order.external_order_id,
+                        observed_state=request.observed_designer,
+                        evidence={"request": {"designer": request.designer_option, "status": request.target_status}},
+                    )
                 )
-            )
 
         status_result = with_retry(
             lambda: adapter.set_status(order.external_order_id, request.target_status)
@@ -119,7 +145,9 @@ def execute_request(
             return _fail(
                 request,
                 status_result.error_class or "UNKNOWN_OUTCOME",
-                "Designer changed but Printerval Status update was not verified",
+                "Designer changed but Printerval Status update was not verified"
+                if request.observed_designer
+                else "Printerval Status update was not verified",
                 status_result.evidence,
             )
         request.observed_status = str(status_result.observed_state.get("status") or "") or None

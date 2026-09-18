@@ -103,7 +103,7 @@ export function DesignerBoardPage() {
       return
     }
     setSyncingPrinterval(true)
-    window.dispatchEvent(new CustomEvent('sync-printerval-start'))
+    window.dispatchEvent(new CustomEvent('sync-platform-start'))
     try {
       const res = await apiFetch<{ synced_count: number; updated_count: number; message: string }>(
         '/orders/sync-printerval-status',
@@ -118,10 +118,10 @@ export function DesignerBoardPage() {
         // notification or silent update
       }
     } catch (err: any) {
-      alert(err.message || 'Lỗi khi đồng bộ trạng thái từ Print')
+      alert(err.message || 'Lỗi khi đồng bộ trạng thái từ Web mẹ')
     } finally {
       setSyncingPrinterval(false)
-      window.dispatchEvent(new CustomEvent('sync-printerval-end'))
+      window.dispatchEvent(new CustomEvent('sync-platform-end'))
     }
   }
 

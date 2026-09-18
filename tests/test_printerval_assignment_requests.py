@@ -131,3 +131,85 @@ def test_request_fails_before_writing_when_designer_is_no_longer_an_option(db_se
     assert result["error_class"] == "EXTERNAL_CHANGED"
     assert adapter._orders[order.external_order_id].designer is None
     assert adapter._orders[order.external_order_id].status == "Waiting"
+
+
+def test_request_matches_designer_case_insensitively_and_updates_status_to_doing(db_session):
+    platform = _platform()
+    designer = _designer()
+    db_session.add_all([platform, designer])
+    db_session.flush()
+    order = Order(
+        external_order_id="DJ0000003",
+        platform_id=platform.id,
+        state=OrderState.ASSIGNED.value,
+    )
+    db_session.add(order)
+    db_session.commit()
+    # Lowercase string without dash should fuzzy-match "Nguyễn Thị Thuý Hường - 2D Prin"
+    request = create_request(
+        db_session,
+        order=order,
+        internal_designer=designer,
+        platform_id=platform.id,
+        designer_option="nguyễn thị thúy hường 2d prin",
+        target_status="Doing",
+    )
+    adapter = FakePrintervalAdapter()
+    adapter.add_order(
+        external_order_id=order.external_order_id,
+        product_name="Mug",
+        designer=None,
+        status="Waiting",
+    )
+
+    result = execute_request(db_session, adapter, request)
+
+    assert result["lifecycle"] == "succeeded"
+    assert result["designer"] == "Nguyễn Thị Thuý Hường - 2D Prin"
+    assert result["status"] == "Doing"
+    assert order.printerval_designer == "Nguyễn Thị Thuý Hường - 2D Prin"
+    assert order.printerval_status == "doing"
+
+
+def test_request_auto_loads_designer_options_if_missing_on_platform(db_session):
+    platform = _platform()
+    platform.printerval_designer_options = None
+    designer = _designer()
+    db_session.add_all([platform, designer])
+    db_session.flush()
+    order = Order(
+        external_order_id="DJ0000004",
+        platform_id=platform.id,
+        state=OrderState.ASSIGNED.value,
+    )
+    db_session.add(order)
+    db_session.commit()
+
+    class _FakeApiClient:
+        def list_designer_options(self):
+            return ["Nguyễn Thị Thuý Hường - 2D Prin"]
+
+    adapter = FakePrintervalAdapter()
+    adapter.api_client = _FakeApiClient()
+    adapter.add_order(
+        external_order_id=order.external_order_id,
+        product_name="Mug",
+        designer=None,
+        status="Waiting",
+    )
+
+    request = create_request(
+        db_session,
+        order=order,
+        internal_designer=designer,
+        platform_id=platform.id,
+        designer_option="nguyễn thị thúy hường 2d prin",
+        target_status="Doing",
+    )
+
+    result = execute_request(db_session, adapter, request)
+
+    assert result["lifecycle"] == "succeeded"
+    assert result["status"] == "Doing"
+    assert platform.printerval_designer_options == ["Nguyễn Thị Thuý Hường - 2D Prin"]
+

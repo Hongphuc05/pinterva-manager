@@ -28,7 +28,7 @@ def _seed_task(db_session, *, state=OrderState.IN_PROGRESS.value):
     db_session.flush()
     order = Order(
         external_order_id=f"TASK-{uuid.uuid4()}", batch_id=batch.id, state=state,
-        product_name="A product", order_note="Make it blue",
+        product_name="A product",
     )
     db_session.add(order)
     db_session.flush()

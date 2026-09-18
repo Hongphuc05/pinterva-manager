@@ -89,32 +89,32 @@ export function getStatusInfo(state: string): StateInfo {
 export const PRINTERVAL_STATUS_MAP: Record<string, StateInfo> = {
   waiting: {
     label: 'Waiting',
-    description: 'Chưa có designer nhận trên Print.',
+    description: 'Chưa có designer nhận trên Web mẹ.',
     badgeClass: 'bg-slate-100 text-slate-700 border-slate-200',
   },
   doing: {
     label: 'Doing',
-    description: 'Đang được làm trên Print.',
+    description: 'Đang được làm trên Web mẹ.',
     badgeClass: 'bg-blue-100 text-blue-800 border-blue-200',
   },
   review: {
     label: 'Review',
-    description: 'Đã nộp, đang chờ xét duyệt trên Print.',
+    description: 'Đã nộp, đang chờ xét duyệt trên Web mẹ.',
     badgeClass: 'bg-indigo-100 text-indigo-800 border-indigo-200',
   },
   fix: {
     label: 'Fix',
-    description: 'Bị yêu cầu sửa lại (trừ điểm designer trên Print).',
+    description: 'Bị yêu cầu sửa lại.',
     badgeClass: 'bg-red-100 text-red-800 border-red-200',
   },
   confirm: {
     label: 'Confirm',
-    description: 'Đã xác nhận, chờ bước cuối trên Print.',
+    description: 'Đã xác nhận, chờ bước cuối trên Web mẹ.',
     badgeClass: 'bg-purple-100 text-purple-800 border-purple-200',
   },
   done: {
     label: 'Done',
-    description: 'Đã hoàn tất trên Print.',
+    description: 'Đã hoàn tất trên Web mẹ.',
     badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-200',
   },
 }
@@ -123,14 +123,14 @@ export function getPrintervalStatusInfo(status: string | null): StateInfo {
   if (!status) {
     return {
       label: 'Chưa đồng bộ',
-      description: 'Chưa đồng bộ được trạng thái thật từ Print cho đơn này.',
+      description: 'Chưa đồng bộ được trạng thái thật từ Web mẹ cho đơn này.',
       badgeClass: 'bg-slate-50 text-slate-400 border-slate-200',
     }
   }
   return (
     PRINTERVAL_STATUS_MAP[status] ?? {
       label: status,
-      description: 'Trạng thái thật trên Print',
+      description: 'Trạng thái thật trên Web mẹ',
       badgeClass: 'bg-slate-100 text-slate-700 border-slate-200',
     }
   )
