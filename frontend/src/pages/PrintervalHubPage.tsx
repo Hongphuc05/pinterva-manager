@@ -133,11 +133,11 @@ export function PrintervalHubPage() {
             <div className="p-4 rounded-lg bg-slate-50 border border-slate-200 space-y-2">
               <div className="flex items-center gap-2 text-slate-800 font-bold text-xs">
                 <span className="h-5 w-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs">4</span>
-                <Zap className="h-4 w-4 text-amber-500" />
+                <Zap className="h-4 w-4 text-blue-600" />
                 <span>Quét & Đồng Bộ Ảnh Tự Động</span>
               </div>
               <p className="text-xs text-slate-600 leading-relaxed">
-                Bấm nút <strong>[Mở Trang Quản Lý Printerval]</strong> ở trên $\rightarrow$ Sang trang Printerval, bấm nút <strong>⚡ Quét & Đồng Bộ Bộ Ảnh</strong> (ở góc dưới bên phải màn hình).
+                Bấm nút <strong>[Mở Trang Quản Lý Printerval]</strong> ở trên $\rightarrow$ Sang trang Printerval, bấm nút <strong>Quét & Đồng Bộ Bộ Ảnh</strong> (ở góc trên bên phải màn hình).
               </p>
               <p className="text-[11px] text-emerald-700 font-medium bg-emerald-50 px-2 py-1.5 rounded border border-emerald-200">
                 ✓ Toàn bộ ảnh sản phẩm sẽ được gửi thẳng về hệ thống Tacahu Ops tương ứng mà không cần thao tác từng đơn!

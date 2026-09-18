@@ -7,10 +7,62 @@
     let scanIntervalId = null;
     let isBatchRunning = false;
     let cachedSettings = {
-        apiBaseUrl: "http://localhost:8000",
+        apiBaseUrl: "https://tacahu.fun",
         autoScanOnLoad: false,
         maxConcurrency: 5,
     };
+
+    function getEnvBadgeHtml(apiUrl) {
+        const raw = (apiUrl || '').trim();
+        const isLocal = !raw || raw.includes('localhost') || raw.includes('127.0.0.1');
+        if (isLocal) {
+            return `<span id="tacahu-env-badge" style="
+                font-size: 11px;
+                font-weight: 700;
+                padding: 2px 7px;
+                border-radius: 6px;
+                background: rgba(56, 189, 248, 0.15);
+                color: #38bdf8;
+                border: 1px solid rgba(56, 189, 248, 0.35);
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+                white-space: nowrap;
+            " title="${raw || 'http://localhost:8000'}">💻 Local</span>`;
+        }
+        let host = 'tacahu.fun';
+        try {
+            const u = new URL(raw.startsWith('http') ? raw : 'https://' + raw);
+            host = u.host;
+        } catch (e) {
+            host = raw.replace(/^https?:\/\//, '').split('/')[0];
+        }
+        return `<span id="tacahu-env-badge" style="
+            font-size: 11px;
+            font-weight: 700;
+            padding: 2px 7px;
+            border-radius: 6px;
+            background: rgba(74, 222, 128, 0.15);
+            color: #4ade80;
+            border: 1px solid rgba(74, 222, 128, 0.35);
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            white-space: nowrap;
+        " title="${raw}">🌐 VPS: ${host}</span>`;
+    }
+
+    function updateEnvBadge() {
+        const badgeEl = document.getElementById('tacahu-env-badge');
+        if (badgeEl) {
+            const temp = document.createElement('div');
+            temp.innerHTML = getEnvBadgeHtml(cachedSettings.apiBaseUrl);
+            const newBadge = temp.firstElementChild;
+            if (newBadge) {
+                badgeEl.replaceWith(newBadge);
+            }
+        }
+    }
 
     // Load initial settings
     try {
@@ -18,6 +70,7 @@
             chrome.runtime.sendMessage({ action: "GET_SETTINGS" }, (res) => {
                 if (res && res.success && res.data) {
                     cachedSettings = { ...cachedSettings, ...res.data };
+                    updateEnvBadge();
                     if (cachedSettings.autoScanOnLoad) {
                         setTimeout(() => {
                             runBatchScan();
@@ -65,17 +118,17 @@
         bar.id = 'tacahu-control-bar';
         bar.style.cssText = `
             position: fixed;
-            bottom: 20px;
+            top: 16px;
             right: 20px;
             z-index: 999999;
             background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
             border: 1px solid #3b82f6;
             box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
             border-radius: 12px;
-            padding: 12px 16px;
+            padding: 10px 14px;
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 10px;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             color: #f8fafc;
             font-size: 13px;
@@ -86,6 +139,7 @@
             <div style="display: flex; align-items: center; gap: 8px;">
                 <div style="width: 10px; height: 10px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 8px #22c55e;" id="tacahu-status-dot"></div>
                 <span style="font-weight: 700; background: linear-gradient(90deg, #60a5fa, #a855f7); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Tacahu Sync</span>
+                ${getEnvBadgeHtml(cachedSettings.apiBaseUrl)}
             </div>
             <div style="height: 18px; width: 1px; background: #475569;"></div>
             <button id="tacahu-btn-batch-scan" style="
