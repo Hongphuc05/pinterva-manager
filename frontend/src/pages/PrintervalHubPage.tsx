@@ -137,7 +137,7 @@ export function PrintervalHubPage() {
                 <span>Quét & Đồng Bộ Ảnh Tự Động</span>
               </div>
               <p className="text-xs text-slate-600 leading-relaxed">
-                Bấm nút <strong>[Mở Trang Quản Lý Printerval]</strong> ở trên $\rightarrow$ Sang trang Printerval, bấm nút <strong>Quét & Đồng Bộ Bộ Ảnh</strong> (ở góc trên bên phải màn hình).
+                Bấm nút <strong>[Mở Trang Quản Lý Printerval]</strong> ở trên $\rightarrow$ Sang trang Printerval, bấm nút <strong>Quét & Đồng Bộ Bộ Ảnh</strong> (ở sát cạnh dưới chính giữa màn hình, có thể bấm dấu ✕ để thu gọn thành nút tròn).
               </p>
               <p className="text-[11px] text-emerald-700 font-medium bg-emerald-50 px-2 py-1.5 rounded border border-emerald-200">
                 ✓ Toàn bộ ảnh sản phẩm sẽ được gửi thẳng về hệ thống Tacahu Ops tương ứng mà không cần thao tác từng đơn!

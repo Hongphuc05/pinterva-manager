@@ -36,9 +36,9 @@ Tiện ích mở rộng Google Chrome (Manifest V3) chuyên dụng cho **Tacahu 
 
 ### Cách 1: Quét & Đồng Bộ Toàn Bộ Trang (Batch Sync)
 1. Truy cập trang quản lý đơn trên Printerval (ví dụ: Tab Waiting / Design Job).
-2. Ở góc trên bên phải màn hình sẽ có thanh công cụ **Tacahu Sync**:
-   - Nhấn nút **`Quét & Đồng Bộ Bộ Ảnh`**.
-   - Extension sẽ tự động quét tất cả đơn hàng trên trang với 5 luồng song song.
+2. Ở sát cạnh dưới chính giữa màn hình sẽ có thanh công cụ **Tacahu Sync**:
+   - Nhấn nút **`Quét & Đồng Bộ Bộ Ảnh`** để bắt đầu quét và đồng bộ.
+   - Có thể bấm nút **`✕`** để thu gọn thanh công cụ thành 1 nút tròn nhỏ gọn (click vào nút tròn để mở rộng lại).
    - Khi quét xong, toàn bộ ảnh sẽ được gửi 1 lần về Tacahu Ops qua API `POST /api/integrations/printerval-gallery/batch`.
    - Các đơn hàng trên Tacahu Ops sẽ tự động hiển thị đầy đủ bộ ảnh ngay lập tức!
 

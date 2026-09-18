@@ -107,8 +107,40 @@
         return !!(window.chrome && chrome.runtime && chrome.runtime.id);
     }
 
+    let isControlBarCollapsed = sessionStorage.getItem('tacahu_sync_collapsed') === '1';
+
+    function applyControlBarState(bar) {
+        if (!bar) return;
+        const fullContent = bar.querySelector('#tacahu-bar-full');
+        const miniContent = bar.querySelector('#tacahu-bar-mini');
+
+        if (isControlBarCollapsed) {
+            bar.style.width = '42px';
+            bar.style.height = '42px';
+            bar.style.padding = '0';
+            bar.style.borderRadius = '50%';
+            bar.style.cursor = 'pointer';
+            bar.style.border = '2px solid #3b82f6';
+            bar.style.boxShadow = '0 6px 20px rgba(0, 0, 0, 0.5), 0 0 12px rgba(59, 130, 246, 0.6)';
+            bar.title = 'Tacahu Sync - Click để mở rộng';
+            if (fullContent) fullContent.style.display = 'none';
+            if (miniContent) miniContent.style.display = 'flex';
+        } else {
+            bar.style.width = 'auto';
+            bar.style.height = 'auto';
+            bar.style.padding = '6px 12px';
+            bar.style.borderRadius = '30px';
+            bar.style.cursor = 'default';
+            bar.style.border = '1px solid #3b82f6';
+            bar.style.boxShadow = '0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5)';
+            bar.title = '';
+            if (fullContent) fullContent.style.display = 'flex';
+            if (miniContent) miniContent.style.display = 'none';
+        }
+    }
+
     // ---------------------------------------------------------
-    // Top Control Bar Injection
+    // Bottom Center Control Bar Injection
     // ---------------------------------------------------------
     function injectControlBar() {
         if (!isExtensionAlive()) return;
@@ -118,58 +150,132 @@
         bar.id = 'tacahu-control-bar';
         bar.style.cssText = `
             position: fixed;
-            top: 16px;
-            right: 20px;
+            bottom: 12px;
+            left: 50%;
+            transform: translateX(-50%);
             z-index: 999999;
             background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
             border: 1px solid #3b82f6;
             box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
-            border-radius: 12px;
-            padding: 10px 14px;
+            border-radius: 30px;
+            padding: 6px 12px;
             display: flex;
             align-items: center;
-            gap: 10px;
+            justify-content: center;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             color: #f8fafc;
             font-size: 13px;
-            transition: all 0.3s ease;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            user-select: none;
         `;
 
         bar.innerHTML = `
-            <div style="display: flex; align-items: center; gap: 8px;">
-                <div style="width: 10px; height: 10px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 8px #22c55e;" id="tacahu-status-dot"></div>
-                <span style="font-weight: 700; background: linear-gradient(90deg, #60a5fa, #a855f7); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Tacahu Sync</span>
-                ${getEnvBadgeHtml(cachedSettings.apiBaseUrl)}
+            <!-- Expanded Full Bar -->
+            <div id="tacahu-bar-full" style="display: flex; align-items: center; gap: 8px;">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                    <div style="width: 9px; height: 9px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 8px #22c55e;" id="tacahu-status-dot"></div>
+                    <span style="font-weight: 700; font-size: 12px; background: linear-gradient(90deg, #60a5fa, #a855f7); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Tacahu Sync</span>
+                    ${getEnvBadgeHtml(cachedSettings.apiBaseUrl)}
+                </div>
+                <div style="height: 16px; width: 1px; background: #334155;"></div>
+                <button id="tacahu-btn-batch-scan" style="
+                    background: #2563eb;
+                    color: #ffffff;
+                    border: none;
+                    padding: 5px 12px;
+                    border-radius: 6px;
+                    font-weight: 600;
+                    font-size: 12px;
+                    cursor: pointer;
+                    display: flex;
+                    align-items: center;
+                    gap: 5px;
+                    transition: transform 0.1s, background 0.2s;
+                ">
+                    <span id="tacahu-batch-text">Quét & Đồng Bộ Bộ Ảnh</span>
+                </button>
+                <span id="tacahu-scan-counter" style="color: #4ade80; font-size: 11.5px; font-weight: 600; display: none;"></span>
+                <button id="tacahu-btn-collapse" title="Thu gọn thành nút tròn" style="
+                    background: rgba(255, 255, 255, 0.08);
+                    border: 1px solid rgba(255, 255, 255, 0.15);
+                    color: #94a3b8;
+                    width: 20px;
+                    height: 20px;
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-size: 11px;
+                    cursor: pointer;
+                    padding: 0;
+                    line-height: 1;
+                    transition: all 0.2s;
+                    margin-left: 2px;
+                ">✕</button>
             </div>
-            <div style="height: 18px; width: 1px; background: #475569;"></div>
-            <button id="tacahu-btn-batch-scan" style="
-                background: #2563eb;
-                color: #ffffff;
-                border: none;
-                padding: 6px 14px;
-                border-radius: 6px;
-                font-weight: 600;
-                font-size: 12px;
-                cursor: pointer;
-                display: flex;
-                align-items: center;
-                gap: 6px;
-                transition: transform 0.1s, background 0.2s;
-            ">
-                <span id="tacahu-batch-text">Quét & Đồng Bộ Bộ Ảnh (v16)</span>
-            </button>
-            <span id="tacahu-scan-counter" style="color: #94a3b8; font-size: 11px; display: none;"></span>
+
+            <!-- Collapsed Mini Round Circle -->
+            <div id="tacahu-bar-mini" style="display: none; width: 100%; height: 100%; align-items: center; justify-content: center; position: relative;">
+                <div style="width: 12px; height: 12px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 10px #22c55e;"></div>
+                <span style="position: absolute; top: -1px; right: -1px; font-size: 8px;">⚡</span>
+            </div>
         `;
 
         document.body.appendChild(bar);
+        applyControlBarState(bar);
 
         const batchBtn = bar.querySelector('#tacahu-btn-batch-scan');
-        batchBtn.addEventListener('click', (e) => {
-            e.preventDefault();
-            runBatchScan();
+        if (batchBtn) {
+            batchBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                runBatchScan();
+            });
+            batchBtn.addEventListener('mouseover', () => { batchBtn.style.transform = 'scale(1.02)'; });
+            batchBtn.addEventListener('mouseout', () => { batchBtn.style.transform = 'scale(1)'; });
+        }
+
+        const collapseBtn = bar.querySelector('#tacahu-btn-collapse');
+        if (collapseBtn) {
+            collapseBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                isControlBarCollapsed = true;
+                sessionStorage.setItem('tacahu_sync_collapsed', '1');
+                applyControlBarState(bar);
+            });
+            collapseBtn.addEventListener('mouseover', () => {
+                collapseBtn.style.background = 'rgba(239, 68, 68, 0.2)';
+                collapseBtn.style.color = '#f87171';
+                collapseBtn.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+            });
+            collapseBtn.addEventListener('mouseout', () => {
+                collapseBtn.style.background = 'rgba(255, 255, 255, 0.08)';
+                collapseBtn.style.color = '#94a3b8';
+                collapseBtn.style.borderColor = 'rgba(255, 255, 255, 0.15)';
+            });
+        }
+
+        // Click on circular button to expand
+        bar.addEventListener('click', () => {
+            if (isControlBarCollapsed) {
+                isControlBarCollapsed = false;
+                sessionStorage.setItem('tacahu_sync_collapsed', '0');
+                applyControlBarState(bar);
+            }
         });
-        batchBtn.addEventListener('mouseover', () => { batchBtn.style.transform = 'scale(1.02)'; });
-        batchBtn.addEventListener('mouseout', () => { batchBtn.style.transform = 'scale(1)'; });
+
+        bar.addEventListener('mouseover', () => {
+            if (isControlBarCollapsed) {
+                bar.style.transform = 'translateX(-50%) scale(1.08)';
+            }
+        });
+
+        bar.addEventListener('mouseout', () => {
+            if (isControlBarCollapsed) {
+                bar.style.transform = 'translateX(-50%) scale(1)';
+            }
+        });
     }
 
     // ---------------------------------------------------------
@@ -707,7 +813,7 @@
             }, (res) => {
                 isBatchRunning = false;
                 if (batchBtn) batchBtn.style.opacity = '1';
-                if (batchText) batchText.innerText = 'Quét & Đồng Bộ Bộ Ảnh (v15)';
+                if (batchText) batchText.innerText = 'Quét & Đồng Bộ Bộ Ảnh';
 
                 if (res && res.success) {
                     const syncedCount = typeof res.data?.synced_orders_count === 'number' ? res.data.synced_orders_count : batchPayloadItems.length;
