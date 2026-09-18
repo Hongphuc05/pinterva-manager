@@ -70,7 +70,7 @@ def get_current_platform(
     if platform is None or not platform.is_active:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Platform not found")
     out = PlatformOut.model_validate(platform)
-    if user.role not in (ROLE_ADMIN, ROLE_SUPPORT):
+    if user.role != ROLE_ADMIN:
         out = sanitize_platform_for_designer(out)
     return out
 

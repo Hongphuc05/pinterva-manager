@@ -820,7 +820,7 @@ def api_orders_list(
     for request in requests:
         request_map.setdefault(request.order_id, request)
 
-    is_admin_or_support = user.role in (ROLE_ADMIN, ROLE_SUPPORT)
+    is_admin = user.role == ROLE_ADMIN
     out_list = []
     for o in orders:
         item = OrderSummaryOut.model_validate(o)
@@ -840,7 +840,7 @@ def api_orders_list(
                 if latest_request.error_message
                 else latest_request.error_class
             )
-        if not is_admin_or_support:
+        if not is_admin:
             item = sanitize_order_summary_for_designer(item)
         out_list.append(item)
 
@@ -1390,8 +1390,8 @@ def api_order_detail(
             )
         )
 
-    is_admin_or_support = user.role in (ROLE_ADMIN, ROLE_SUPPORT)
-    if not is_admin_or_support:
+    is_admin = user.role == ROLE_ADMIN
+    if not is_admin:
         order_out = sanitize_order_detail_for_designer(order_out)
         history_out = [sanitize_workflow_event_for_designer(ev) for ev in history_out]
 
@@ -2576,8 +2576,8 @@ def api_get_single_order_history(
             )
         )
 
-    is_admin_or_support = user.role in (ROLE_ADMIN, ROLE_SUPPORT)
-    if not is_admin_or_support:
+    is_admin = user.role == ROLE_ADMIN
+    if not is_admin:
         history_out = [sanitize_workflow_event_for_designer(ev) for ev in history_out]
 
     return history_out

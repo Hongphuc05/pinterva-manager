@@ -583,7 +583,7 @@ def get_finance_stats(
     paginated_items = tasks_to_render[offset : offset + page_size]
     total_pages = max(1, math.ceil(total_tasks_count / page_size))
 
-    if user.role not in (ROLE_ADMIN, ROLE_SUPPORT):
+    if user.role != ROLE_ADMIN:
         sanitized_items = []
         for item in paginated_items:
             c = dict(item)

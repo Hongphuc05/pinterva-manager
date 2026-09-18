@@ -240,3 +240,63 @@ def test_admin_access_preserves_printerval_metadata(client: TestClient, db_sessi
     )
     assert resp_plat.status_code == 200
     assert resp_plat.json()["account_username"] == "seller_admin@printerval.com"
+
+
+def test_support_role_is_also_sanitized(client: TestClient, db_session):
+    platform = Platform(
+        name="Acc Mẹ Printerval 3",
+        account_username="seller_support@printerval.com",
+        is_active=True,
+    )
+    db_session.add(platform)
+    db_session.flush()
+
+    support_user = User(
+        username="nhim_support",
+        full_name="Nhim Support",
+        role="support",
+        password_hash=hash_password("password"),
+        platform_id=platform.id,
+        active=True,
+    )
+    db_session.add(support_user)
+    db_session.flush()
+
+    order = Order(
+        external_order_id="PRIN-99903",
+        state="IN_PROGRESS",
+        product_name="T-Shirt 2D Custom Printerval",
+        thumbnail_url="https://assets.printerval.com/mockups/thumb3.png",
+        external_order_url="https://printerval.com/admin/orders?id=99903",
+        printerval_designer="nguyen van designer prin",
+        printerval_status="doing",
+        platform_id=platform.id,
+    )
+    db_session.add(order)
+    db_session.commit()
+
+    token_sup = create_session_token(str(support_user.id), support_user.role)
+
+    # 1. Orders list as Support
+    resp_sup = client.get(
+        "/api/orders",
+        headers={"Authorization": f"Bearer {token_sup}", "X-Platform-Id": str(platform.id)},
+    )
+    assert resp_sup.status_code == 200
+    json_sup_str = json.dumps(resp_sup.json()).lower()
+    assert "printerval" not in json_sup_str, f"Found printerval in support response: {json_sup_str}"
+    sup_orders = resp_sup.json()["orders"]
+    assert len(sup_orders) == 1
+    assert sup_orders[0]["thumbnail_url"].startswith("/api/assets/proxy?u=")
+    assert "external_order_url" not in sup_orders[0]
+    assert "printerval_status" not in sup_orders[0]
+
+    # 2. Platform as Support
+    resp_plat = client.get(
+        "/api/platforms/current",
+        headers={"Authorization": f"Bearer {token_sup}", "X-Platform-Id": str(platform.id)},
+    )
+    assert resp_plat.status_code == 200
+    json_plat_str = json.dumps(resp_plat.json()).lower()
+    assert "printerval" not in json_plat_str
+    assert "@gmail.com" in resp_plat.json()["account_username"]
