@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { X, Eye, Loader2, Images, FileText, Package } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { X, Eye, Loader2, Images, FileText, Package, ChevronLeft, ChevronRight } from 'lucide-react'
 import { apiFetch, resolveAssetUrl } from '../api/client'
 import { CustomConfigurationSection } from './CustomConfigurationSection'
 import { deduplicateGalleryUrls } from '../utils/galleryHelper'
@@ -49,6 +49,26 @@ export function ProductQuickViewModal({ orderId, onClose }: Props) {
   const [order, setOrder] = useState<QuickViewOrder | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const galleryViewportRef = useRef<HTMLDivElement | null>(null)
+  const [canScrollGalleryLeft, setCanScrollGalleryLeft] = useState(false)
+  const [canScrollGalleryRight, setCanScrollGalleryRight] = useState(false)
+
+  useEffect(() => {
+    const html = document.documentElement
+    const body = document.body
+    const previousHtmlOverflow = html.style.overflow
+    const previousBodyOverflow = body.style.overflow
+    const previousBodyOverscroll = body.style.overscrollBehavior
+    html.style.overflow = 'hidden'
+    body.style.overflow = 'hidden'
+    body.style.overscrollBehavior = 'none'
+
+    return () => {
+      html.style.overflow = previousHtmlOverflow
+      body.style.overflow = previousBodyOverflow
+      body.style.overscrollBehavior = previousBodyOverscroll
+    }
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -84,9 +104,29 @@ export function ProductQuickViewModal({ orderId, onClose }: Props) {
   const size = variants.filter((variant) => variant.name.toLowerCase() === 'size').map((variant) => variant.value).join(', ') || '—'
   const type = variants.filter((variant) => variant.name.toLowerCase() === 'type').map((variant) => variant.value).join(', ') || '—'
 
+  function updateGalleryScrollState() {
+    const viewport = galleryViewportRef.current
+    if (!viewport) return
+    setCanScrollGalleryLeft(viewport.scrollLeft > 4)
+    setCanScrollGalleryRight(viewport.scrollLeft + viewport.clientWidth < viewport.scrollWidth - 4)
+  }
+
+  function scrollGallery(direction: -1 | 1) {
+    const viewport = galleryViewportRef.current
+    if (!viewport) return
+    viewport.scrollBy({ left: direction * Math.max(220, viewport.clientWidth / 2), behavior: 'smooth' })
+  }
+
+  useEffect(() => {
+    const viewport = galleryViewportRef.current
+    if (!viewport) return
+    viewport.scrollLeft = 0
+    updateGalleryScrollState()
+  }, [gallery.length])
+
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 p-3 backdrop-blur-xs sm:p-6" onClick={onClose}>
-      <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+    <div className="fixed inset-0 z-[60] flex h-[100dvh] w-screen items-center justify-center overflow-hidden bg-slate-950/70 p-3 backdrop-blur-xs sm:p-6" onClick={onClose}>
+      <div className="flex max-h-[calc(100dvh-1.5rem)] min-h-0 w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl sm:max-h-[calc(100dvh-3rem)]" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-5 py-4">
           <div className="flex min-w-0 items-center gap-3">
             <div className="rounded-xl bg-blue-100 p-2 text-[#0052CC]"><Eye className="h-5 w-5" /></div>
@@ -98,21 +138,25 @@ export function ProductQuickViewModal({ orderId, onClose }: Props) {
           <button type="button" onClick={onClose} className="rounded-lg p-2 text-slate-500 hover:bg-slate-200 hover:text-slate-800" aria-label="Đóng"><X className="h-5 w-5" /></button>
         </div>
 
-        <div className="overflow-y-auto p-5">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5" onWheel={(event) => event.stopPropagation()}>
           {loading && <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500"><Loader2 className="h-5 w-5 animate-spin" /> Đang tải thông tin chi tiết...</div>}
           {error && <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{error}</div>}
           {order && !loading && (
             <div className="space-y-5">
-              <div className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4 sm:grid-cols-2 lg:grid-cols-5">
-                <Info label="Tên sản phẩm" value={order.product_name || '—'} wide />
+              <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+                <Info label="Tên sản phẩm" value={order.product_name || '—'} />
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                  <Info label="Category" value={order.product_category || '—'} />
+                  <Info label="Type" value={type} />
+                  <Info label="Size" value={size} />
+                </div>
                 <Info label="Order at" value={orderAt} />
-                <Info label="Category" value={order.product_category || '—'} />
-                <Info label="Type" value={type} />
-                <Info label="Size" value={size} />
               </div>
 
-              {order.custom_config?.original?.length ? <CustomConfigurationSection entries={order.custom_config.original} /> : <EmptySection title="CUSTOM CONFIGURATION" />}
-              {order.custom_config?.translated_vn?.length ? <CustomConfigurationSection entries={order.custom_config.translated_vn} translated /> : <EmptySection title="BẢN DỊCH TIẾNG VIỆT" />}
+              <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:items-start">
+                {order.custom_config?.original?.length ? <CustomConfigurationSection entries={order.custom_config.original} /> : <EmptySection title="CUSTOM CONFIGURATION" />}
+                {order.custom_config?.translated_vn?.length ? <CustomConfigurationSection entries={order.custom_config.translated_vn} translated /> : <EmptySection title="BẢN DỊCH TIẾNG VIỆT" />}
+              </div>
 
               <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs">
                 <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-5 py-3"><FileText className="h-4 w-4 text-[#0052CC]" /><h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">SOURCE</h3></div>
@@ -121,7 +165,19 @@ export function ProductQuickViewModal({ orderId, onClose }: Props) {
 
               <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs">
                 <div className="mb-3 flex items-center gap-2"><Images className="h-4 w-4 text-orange-600" /><h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">GALLERY</h3><span className="rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-bold text-orange-800">{gallery.length} ảnh</span></div>
-                {gallery.length ? <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">{gallery.map((image, index) => <a key={`${image}-${index}`} href={resolveAssetUrl(image)} target="_blank" rel="noreferrer" className="group aspect-square overflow-hidden rounded-xl border border-slate-200 bg-slate-100"><img src={resolveAssetUrl(image)} alt={`Gallery ${index + 1}`} className="h-full w-full object-cover transition-transform group-hover:scale-105" /></a>)}</div> : <div className="flex items-center gap-2 py-5 text-xs text-slate-400"><Package className="h-4 w-4" /> Không có ảnh gallery.</div>}
+                {gallery.length ? (
+                  <div className="relative">
+                    <button type="button" onClick={() => scrollGallery(-1)} disabled={!canScrollGalleryLeft} className="absolute left-0 top-1/2 z-10 -translate-y-1/2 rounded-full border border-slate-200 bg-white/95 p-1.5 text-slate-600 shadow-md transition hover:bg-blue-50 hover:text-[#0052CC] disabled:pointer-events-none disabled:opacity-0" aria-label="Ảnh trước"><ChevronLeft className="h-4 w-4" /></button>
+                    <div ref={galleryViewportRef} onScroll={updateGalleryScrollState} className="-mx-1 flex snap-x snap-mandatory gap-3 overflow-x-hidden px-8 py-1">
+                      {gallery.map((image, index) => (
+                        <a key={`${image}-${index}`} href={resolveAssetUrl(image)} target="_blank" rel="noreferrer" style={{ flex: '0 0 calc((100% - 60px) / 6.5)' }} className="group aspect-square min-w-0 snap-start overflow-hidden rounded-xl border border-slate-200 bg-slate-100">
+                          <img src={resolveAssetUrl(image)} alt={`Gallery ${index + 1}`} className="h-full w-full object-cover transition-transform group-hover:scale-105" />
+                        </a>
+                      ))}
+                    </div>
+                    <button type="button" onClick={() => scrollGallery(1)} disabled={!canScrollGalleryRight} className="absolute right-0 top-1/2 z-10 -translate-y-1/2 rounded-full border border-slate-200 bg-white/95 p-1.5 text-slate-600 shadow-md transition hover:bg-blue-50 hover:text-[#0052CC] disabled:pointer-events-none disabled:opacity-0" aria-label="Ảnh tiếp theo"><ChevronRight className="h-4 w-4" /></button>
+                  </div>
+                ) : <div className="flex items-center gap-2 py-5 text-xs text-slate-400"><Package className="h-4 w-4" /> Không có ảnh gallery.</div>}
               </section>
             </div>
           )}
