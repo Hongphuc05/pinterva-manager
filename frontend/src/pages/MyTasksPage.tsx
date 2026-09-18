@@ -7,6 +7,7 @@ import { ImageModal } from '../components/ImageModal'
 import { Pagination, paginate } from '../components/Pagination'
 import { CopyableProductName } from '../components/CopyableProductName'
 import { getStatusInfo } from '../utils/statusTranslation'
+import { ProductQuickViewButton, ProductQuickViewModal } from '../components/ProductQuickViewModal'
 import { 
   CheckSquare, 
   Clock, 
@@ -64,6 +65,7 @@ export function MyTasksPage() {
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
   const [flaggingAssignmentId, setFlaggingAssignmentId] = useState<string | null>(null)
+  const [quickViewOrderId, setQuickViewOrderId] = useState<string | null>(null)
 
   const pendingTemplateTasks = tasks.filter((task) => task.order.template_missing)
   const activeTasks = tasks.filter((task) => !task.order.template_missing)
@@ -118,6 +120,12 @@ export function MyTasksPage() {
 
   return (
     <DashboardLayout>
+      {quickViewOrderId && (
+        <ProductQuickViewModal
+          orderId={quickViewOrderId}
+          onClose={() => setQuickViewOrderId(null)}
+        />
+      )}
       {/* Image Zoom Modal */}
       <ImageModal
         isOpen={!!selectedImage}
@@ -218,6 +226,7 @@ export function MyTasksPage() {
                         name={task.order.product_name || task.order.external_order_id}
                         textSize="text-sm font-bold"
                       />
+                      <ProductQuickViewButton onClick={() => setQuickViewOrderId(task.order.id)} />
                       <Link
                         to={`/orders/${task.order.id}`}
                         className="text-xs font-semibold text-[#0052CC] hover:underline"

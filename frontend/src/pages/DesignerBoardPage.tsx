@@ -22,6 +22,7 @@ import {
 } from 'lucide-react'
 import { OrderHistoryTimelineModal } from '../components/OrderHistoryTimelineModal'
 import { AdminFixActionModal } from '../components/AdminFixActionModal'
+import { ProductQuickViewButton, ProductQuickViewModal } from '../components/ProductQuickViewModal'
 
 type DesignerOrder = {
   id: string
@@ -75,6 +76,7 @@ export function DesignerBoardPage() {
     external_order_id: string
     product_name?: string | null
   } | null>(null)
+  const [quickViewOrderId, setQuickViewOrderId] = useState<string | null>(null)
 
   useEffect(() => {
     loadWorkload()
@@ -192,6 +194,12 @@ export function DesignerBoardPage() {
   return (
     <DashboardLayout>
       <div className="space-y-6">
+        {quickViewOrderId && (
+          <ProductQuickViewModal
+            orderId={quickViewOrderId}
+            onClose={() => setQuickViewOrderId(null)}
+          />
+        )}
         {/* Top Summary Banner */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
@@ -536,12 +544,15 @@ export function DesignerBoardPage() {
                                           )}
                                         </div>
                                       )}
-                                      <Link
-                                        to={`/orders/${o.id}`}
-                                        className="text-xs font-bold text-slate-800 hover:text-[#0052CC] hover:underline truncate block mt-0.5"
-                                      >
-                                        {o.product_name || 'Đơn 2D Custom'}
-                                      </Link>
+                                      <div className="mt-0.5 flex items-center gap-1.5">
+                                        <Link
+                                          to={`/orders/${o.id}`}
+                                          className="min-w-0 truncate text-xs font-bold text-slate-800 hover:text-[#0052CC] hover:underline"
+                                        >
+                                          {o.product_name || 'Đơn 2D Custom'}
+                                        </Link>
+                                        <ProductQuickViewButton onClick={() => setQuickViewOrderId(o.id)} />
+                                      </div>
                                       {o.deadline_at_ext && (
                                         <p className="text-[10px] text-slate-400 font-mono mt-0.5 flex items-center gap-1">
                                           <Clock className="h-2.5 w-2.5" />
@@ -646,12 +657,15 @@ export function DesignerBoardPage() {
                                           )}
                                         </div>
                                       )}
-                                      <Link
-                                        to={`/orders/${o.id}`}
-                                        className="text-xs font-bold text-slate-800 hover:text-[#0052CC] hover:underline truncate block mt-0.5"
-                                      >
-                                        {o.product_name || 'Đơn 2D Custom'}
-                                      </Link>
+                                      <div className="mt-0.5 flex items-center gap-1.5">
+                                        <Link
+                                          to={`/orders/${o.id}`}
+                                          className="min-w-0 truncate text-xs font-bold text-slate-800 hover:text-[#0052CC] hover:underline"
+                                        >
+                                          {o.product_name || 'Đơn 2D Custom'}
+                                        </Link>
+                                        <ProductQuickViewButton onClick={() => setQuickViewOrderId(o.id)} />
+                                      </div>
                                       {o.deadline_at_ext && (
                                         <p className="text-[10px] text-slate-400 font-mono mt-0.5 flex items-center gap-1">
                                           <Clock className="h-2.5 w-2.5" />
@@ -754,12 +768,15 @@ export function DesignerBoardPage() {
                                         {isAdmin ? (
                                           <CopyableOrderCode code={o.external_order_id} />
                                         ) : (
-                                          <Link
-                                            to={`/orders/${o.id}`}
-                                            className="text-xs font-bold text-slate-800 hover:text-[#0052CC] hover:underline truncate block"
-                                          >
-                                            {o.product_name || 'Đơn 2D Custom'}
-                                          </Link>
+                                          <div className="flex min-w-0 items-center gap-1.5">
+                                            <Link
+                                              to={`/orders/${o.id}`}
+                                              className="min-w-0 truncate text-xs font-bold text-slate-800 hover:text-[#0052CC] hover:underline"
+                                            >
+                                              {o.product_name || 'Đơn 2D Custom'}
+                                            </Link>
+                                            <ProductQuickViewButton onClick={() => setQuickViewOrderId(o.id)} />
+                                          </div>
                                         )}
                                         {o.fix_approved_by_admin ? (
                                           <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-emerald-100 text-emerald-800 shrink-0">
@@ -772,9 +789,12 @@ export function DesignerBoardPage() {
                                         )}
                                       </div>
                                       {isAdmin && (
-                                        <p className="text-[10px] text-slate-500 truncate mt-0.5">
-                                          {o.product_name || 'Đơn 2D Custom'}
-                                        </p>
+                                        <div className="mt-0.5 flex items-center gap-1.5">
+                                          <p className="min-w-0 truncate text-[10px] text-slate-500">
+                                            {o.product_name || 'Đơn 2D Custom'}
+                                          </p>
+                                          <ProductQuickViewButton onClick={() => setQuickViewOrderId(o.id)} />
+                                        </div>
                                       )}
                                       {o.deadline_at_ext && (
                                         <p className="text-[10px] text-slate-400 font-mono mt-0.5 flex items-center gap-1">
@@ -908,12 +928,15 @@ export function DesignerBoardPage() {
                                             <CopyableOrderCode code={o.external_order_id} />
                                           </div>
                                         )}
-                                        <Link
-                                          to={`/orders/${o.id}`}
-                                          className="text-xs font-bold text-emerald-800 hover:underline truncate block mt-0.5"
-                                        >
-                                          {o.product_name || 'Đơn 2D Custom'}
-                                        </Link>
+                                        <div className="mt-0.5 flex items-center gap-1.5">
+                                          <Link
+                                            to={`/orders/${o.id}`}
+                                            className="min-w-0 truncate text-xs font-bold text-emerald-800 hover:underline"
+                                          >
+                                            {o.product_name || 'Đơn 2D Custom'}
+                                          </Link>
+                                          <ProductQuickViewButton onClick={() => setQuickViewOrderId(o.id)} />
+                                        </div>
                                       </div>
                                     </div>
                                     <div className="pt-1 flex items-center justify-between">
