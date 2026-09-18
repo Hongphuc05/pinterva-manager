@@ -70,8 +70,10 @@ def get_current_platform_id(
 ) -> uuid.UUID:
     from app.adapters.db.models import Platform
 
+    # The browser controls this header, so only an administrator may select a
+    # workspace with it. Operational accounts are always scoped by their row.
     header_platform_id = request.headers.get("X-Platform-Id")
-    if header_platform_id and user.role in ("admin", "support"):
+    if header_platform_id and user.role == "admin":
         try:
             parsed_id = uuid.UUID(header_platform_id)
             target_plat = db.get(Platform, parsed_id)
@@ -83,7 +85,16 @@ def get_current_platform_id(
     if user.platform_id:
         return user.platform_id
 
-    # Fallback to default active platform (prioritize real platforms over placeholder DEFAULT_PLATFORM_ID)
+    # Do not silently place an unassigned operational account into the default
+    # mother account. That would expose the wrong order workspace.
+    if user.role != "admin":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Tài khoản chưa được gán vào Acc Mẹ Printerval. Hãy liên hệ admin để gán platform.",
+        )
+
+    # An administrator may operate across workspaces; retain the deterministic
+    # fallback for a first-time admin session with no selected platform.
     default_platform = (
         db.query(Platform)
         .filter(Platform.is_active == True, Platform.id != DEFAULT_PLATFORM_ID)  # noqa: E712

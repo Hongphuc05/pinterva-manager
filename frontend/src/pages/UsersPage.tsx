@@ -14,6 +14,7 @@ import {
   Eye,
   KeyRound
 } from 'lucide-react'
+import { usePlatform } from '../auth/PlatformContext'
 
 type UserItem = {
   id: string
@@ -26,6 +27,7 @@ type UserItem = {
 
 export function UsersPage() {
   const [users, setUsers] = useState<UserItem[]>([])
+  const [unassignedUsers, setUnassignedUsers] = useState<UserItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -49,6 +51,8 @@ export function UsersPage() {
   const [changingPasswordUser, setChangingPasswordUser] = useState<UserItem | null>(null)
   const [newPassword, setNewPassword] = useState('')
   const [savingPassword, setSavingPassword] = useState(false)
+  const [assigningUserId, setAssigningUserId] = useState<string | null>(null)
+  const { activePlatform } = usePlatform()
 
   useEffect(() => {
     loadUsers()
@@ -58,8 +62,12 @@ export function UsersPage() {
     setLoading(true)
     setError('')
     try {
-      const data = await apiFetch<UserItem[]>('/users')
+      const [data, unassigned] = await Promise.all([
+        apiFetch<UserItem[]>('/users'),
+        apiFetch<UserItem[]>('/users/unassigned'),
+      ])
       setUsers(data)
+      setUnassignedUsers(unassigned)
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message)
@@ -68,6 +76,19 @@ export function UsersPage() {
       }
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function assignLegacyUser(user: UserItem) {
+    setAssigningUserId(user.id)
+    setError('')
+    try {
+      await apiFetch<UserItem>(`/users/${user.id}/platform`, { method: 'PATCH' })
+      await loadUsers()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Không thể gán Acc Mẹ cho tài khoản.')
+    } finally {
+      setAssigningUserId(null)
     }
   }
 
@@ -167,7 +188,7 @@ export function UsersPage() {
               <span>Quản Lý Tài Khoản</span>
             </h1>
             <p className="text-xs text-slate-500 mt-1">
-              Tạo mới, phân quyền Admin, Designer và Designer Trello trong hệ thống
+              Mọi tài khoản tạo tại đây sẽ thuộc Acc Mẹ đang chọn; chỉ Admin được đổi giữa nhiều Acc Mẹ.
             </p>
           </div>
 
@@ -184,6 +205,29 @@ export function UsersPage() {
           <div className="p-4 text-xs font-semibold text-red-700 bg-red-50 rounded-xl border border-red-200 flex items-center gap-2">
             <AlertCircle className="h-4 w-4 shrink-0" />
             <span>{error}</span>
+          </div>
+        )}
+
+        {unassignedUsers.length > 0 && (
+          <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-900 space-y-3">
+            <div>
+              <p className="font-bold">Tài khoản cũ chưa gán Acc Mẹ</p>
+              <p className="mt-1 text-amber-800">Chỉ các tài khoản tạo trước khi có phân tách platform mới xuất hiện ở đây. Gán chúng vào Acc Mẹ đang chọn: <strong>{activePlatform?.account_username || 'chưa chọn'}</strong>.</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {unassignedUsers.map((user) => (
+                <button
+                  key={user.id}
+                  type="button"
+                  onClick={() => assignLegacyUser(user)}
+                  disabled={!activePlatform || assigningUserId === user.id}
+                  className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-bold"
+                >
+                  {assigningUserId === user.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  Gán {user.username} vào Acc Mẹ hiện tại
+                </button>
+              ))}
+            </div>
           </div>
         )}
 

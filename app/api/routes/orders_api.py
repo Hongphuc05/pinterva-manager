@@ -78,6 +78,7 @@ class OrderSummaryOut(BaseModel):
     sku: str | None = None
     thumbnail_url: str | None = None
     assigned_designer_name: str | None = None
+    assigned_designer_id: uuid.UUID | None = None
     assignment_id: uuid.UUID | None = None
     product_skus: list[dict] | None = None
     order_created_at_ext: datetime | None = None
@@ -256,6 +257,7 @@ def download_extension_zip():
     """Package the CopyImage Chrome extension directory into a zip archive and stream it."""
     import io
     import zipfile
+
     from fastapi.responses import StreamingResponse
 
     # Possible CopyImage directory locations
@@ -770,6 +772,7 @@ def api_orders_list(
         else []
     )
     designer_map = {a.order_id: u.full_name or u.username for a, u in assignments}
+    designer_id_map = {a.order_id: u.id for a, u in assignments}
     assignment_id_map = {a.order_id: a.id for a, _ in assignments}
     requests = (
         db.query(PrintervalAssignmentRequest)
@@ -787,6 +790,7 @@ def api_orders_list(
     for o in orders:
         item = OrderSummaryOut.model_validate(o)
         item.assigned_designer_name = designer_map.get(o.id)
+        item.assigned_designer_id = designer_id_map.get(o.id)
         item.assignment_id = assignment_id_map.get(o.id)
         latest_request = request_map.get(o.id)
         item.printerval_assignment_lifecycle = latest_request.lifecycle if latest_request else None

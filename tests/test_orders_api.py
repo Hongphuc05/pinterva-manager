@@ -21,10 +21,17 @@ def client(db_session):
     app.dependency_overrides.clear()
 
 
-def _login(client, db_session, role, username="user1"):
+def _login(client, db_session, role, username="user1", platform_id=None):
+    if role != "admin" and platform_id is None:
+        plat = db_session.query(Platform).first()
+        if not plat:
+            plat = _seed_platform(db_session)
+        platform_id = plat.id
+
     user = User(
         username=username, full_name=username, role=role,
         password_hash=hash_password("s3cret!"),
+        platform_id=platform_id if role != "admin" else None,
     )
     db_session.add(user)
     db_session.commit()

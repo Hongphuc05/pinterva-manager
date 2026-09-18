@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import User
-from app.api.deps import get_current_platform_id, get_db, require_any_role, require_role
+from app.api.deps import get_current_platform_id, get_db, require_role
 from app.application.auth import hash_password
 from app.application.password_vault import decrypt_password, encrypt_password
 from app.domain.access import ROLE_ADMIN, ROLE_DESIGNER, ROLE_DESIGNER_TRELLO, ROLE_SUPPORT
@@ -65,16 +65,21 @@ def _target_user(db: Session, user_id: str) -> User:
     return target_user
 
 
+def _current_platform_user(db: Session, user_id: str, platform_id: uuid.UUID) -> User:
+    target_user = _target_user(db, user_id)
+    if target_user.platform_id != platform_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy người dùng trong Acc Mẹ đang chọn.")
+    return target_user
+
+
 @router.get("/users", response_model=list[UserOut])
 def list_users(
-    user: User = Depends(require_any_role("admin", "support")),
+    user: User = Depends(require_role("admin")),
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
-    # Admins see all admin/support users + designers assigned to the current active platform (or unassigned designers)
-    query = db.query(User).filter(
-        (User.role.in_([ROLE_ADMIN, ROLE_SUPPORT])) | (User.platform_id == platform_id) | (User.platform_id.is_(None))
-    )
+    # A manager sees every account created in the currently selected mother account.
+    query = db.query(User).filter(User.platform_id == platform_id)
     users = query.order_by(User.created_at.desc()).all()
     return [_user_out(u) for u in users]
 
@@ -119,7 +124,10 @@ def create_user(
         role=role,
         password_hash=hash_password(clean_password),
         password_ciphertext=encrypt_password(clean_password),
-        platform_id=platform_id if role in (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO) else None,
+        # Every account keeps the mother account where it was created. Admin
+        # role still uniquely grants the ability to switch and operate across
+        # all platforms.
+        platform_id=platform_id,
         active=True,
     )
     db.add(new_user)
@@ -129,13 +137,46 @@ def create_user(
     return _user_out(new_user)
 
 
+@router.get("/users/unassigned", response_model=list[UserOut])
+def list_unassigned_users(
+    current_admin: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    """Temporary migration queue for accounts created before platform scoping."""
+    users = (
+        db.query(User)
+        .filter(User.platform_id.is_(None))
+        .order_by(User.created_at.asc())
+        .all()
+    )
+    return [_user_out(user) for user in users]
+
+
+@router.patch("/users/{user_id}/platform", response_model=UserOut)
+def assign_legacy_user_to_current_platform(
+    user_id: str,
+    current_admin: User = Depends(require_role("admin")),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    """Bind one legacy unassigned account to the selected platform."""
+    target_user = _target_user(db, user_id)
+    if target_user.platform_id is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Tài khoản này đã được gán Acc Mẹ.")
+    target_user.platform_id = platform_id
+    db.commit()
+    db.refresh(target_user)
+    return _user_out(target_user)
+
+
 @router.get("/users/{user_id}/password", response_model=UserPasswordOut)
 def get_user_password(
     user_id: str,
     current_admin: User = Depends(require_role("admin")),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
-    target_user = _target_user(db, user_id)
+    target_user = _current_platform_user(db, user_id, platform_id)
     password = decrypt_password(target_user.password_ciphertext)
     return UserPasswordOut(password=password, recoverable=password is not None)
 
@@ -145,12 +186,13 @@ def update_user_password(
     user_id: str,
     payload: UpdateUserPasswordRequest,
     current_admin: User = Depends(require_role("admin")),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
     clean_password = payload.password.strip()
     if len(clean_password) < 4:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mật khẩu phải có ít nhất 4 ký tự.")
-    target_user = _target_user(db, user_id)
+    target_user = _current_platform_user(db, user_id, platform_id)
     target_user.password_hash = hash_password(clean_password)
     target_user.password_ciphertext = encrypt_password(clean_password)
     db.commit()
@@ -162,6 +204,7 @@ def update_user_password(
 def delete_user(
     user_id: str,
     current_admin: User = Depends(require_role("admin")),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
     try:
@@ -174,7 +217,7 @@ def delete_user(
             status.HTTP_400_BAD_REQUEST, "Không thể tự xóa tài khoản của chính mình."
         )
 
-    target_user = _target_user(db, user_id)
+    target_user = _current_platform_user(db, user_id, platform_id)
 
     db.delete(target_user)
     db.commit()

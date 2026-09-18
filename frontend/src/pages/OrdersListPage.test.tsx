@@ -645,4 +645,102 @@ describe('OrdersListPage', () => {
     expect(revokeBtn).toBeInTheDocument()
     fireEvent.click(revokeBtn)
   })
+
+  it('pre-selects assigned designer in modal and supports Hủy phân công', async () => {
+    let revokeCalledWith: any = null
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, opts?: any) => {
+        if (url.includes('/api/me')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ id: 'admin1', role: 'admin', full_name: 'Admin User' }),
+          })
+        }
+        if (url.includes('/api/platforms')) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ platforms: [] }) })
+        }
+        if (url.includes('/api/users')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => [
+              { id: 'des-1', username: 'des1', full_name: 'Designer One', role: 'designer' },
+              { id: 'des-2', username: 'des2', full_name: 'Designer Two', role: 'designer' },
+            ],
+          })
+        }
+        if (url.includes('/api/assignments/revoke')) {
+          revokeCalledWith = JSON.parse(opts.body)
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ message: 'Đã hủy phân công cho đơn DJ4020336.', revoked_count: 1 }),
+          })
+        }
+        if (url.includes('/api/orders')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              orders: [
+                {
+                  id: 'o-waiting-1',
+                  external_order_id: 'DJ4020336',
+                  product_name: 'Bowling Hawaiian Shirt',
+                  state: 'WAITING',
+                  work_domain: 'standard',
+                  duplicate_check_status: 'uncheck',
+                  assigned_designer_name: 'des1',
+                  assigned_designer_id: 'des-1',
+                  created_at: '2026-09-18T00:00:00Z',
+                },
+              ],
+            }),
+          })
+        }
+        return Promise.reject(new Error(`unexpected fetch: ${url}`))
+      })
+    )
+
+    window.history.pushState({}, '', '/orders?tab=waiting')
+
+    render(
+      <BrowserRouter>
+        <AuthProvider>
+          <PlatformProvider>
+            <ToastProvider>
+              <GallerySyncProvider>
+                <OrdersListPage />
+              </GallerySyncProvider>
+            </ToastProvider>
+          </PlatformProvider>
+        </AuthProvider>
+      </BrowserRouter>
+    )
+
+    await waitFor(() => expect(screen.getByText('DJ4020336')).toBeInTheDocument())
+
+    // Click on designer badge "des1"
+    const desBadge = screen.getByText('des1')
+    expect(desBadge).toBeInTheDocument()
+    fireEvent.click(desBadge)
+
+    // Modal popup should open
+    await waitFor(() => expect(screen.getByRole('heading', { name: /Phân Công Designer/i })).toBeInTheDocument())
+    expect(screen.getByText(/Hiện đang phân công:/i)).toBeInTheDocument()
+
+    // First select dropdown should pre-select des-1
+    const designerSelect = screen.getByRole('combobox', { name: /Chọn Designer Tacahu/i }) as HTMLSelectElement
+    expect(designerSelect.value).toBe('des-1')
+
+    // "Hủy phân công" button should be present
+    const unassignBtn = screen.getByRole('button', { name: /Hủy phân công/i })
+    expect(unassignBtn).toBeInTheDocument()
+
+    // Click "Hủy phân công"
+    fireEvent.click(unassignBtn)
+    await waitFor(() => expect(revokeCalledWith).toEqual({ order_ids: ['o-waiting-1'] }))
+  })
 })

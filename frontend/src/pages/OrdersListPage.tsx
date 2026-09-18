@@ -48,6 +48,7 @@ export type OrderSummary = {
   sku: string | null
   thumbnail_url: string | null
   assigned_designer_name: string | null
+  assigned_designer_id?: string | null
   assignment_id: string | null
   product_skus: { sku?: string | null }[] | null
   order_created_at_ext: string | null
@@ -292,9 +293,17 @@ export function OrdersListPage() {
   // Load Printerval options when assigning single order
   useEffect(() => {
     if (!assigningOrder) return
-    setSelectedUserId('')
-    setSelectedPrintervalDesigner(DEFAULT_PRINTERVAL_DES)
-    setSelectedPrintervalStatus('Doing')
+    const matchingUser = usersList.find((u) => {
+      if (assigningOrder.assigned_designer_id && u.id === assigningOrder.assigned_designer_id) return true
+      if (assigningOrder.assigned_designer_name) {
+        const name = assigningOrder.assigned_designer_name.trim().toLowerCase()
+        return u.username.toLowerCase() === name || (u.full_name && u.full_name.toLowerCase() === name)
+      }
+      return false
+    })
+    setSelectedUserId(matchingUser ? matchingUser.id : '')
+    setSelectedPrintervalDesigner(assigningOrder.printerval_designer || DEFAULT_PRINTERVAL_DES)
+    setSelectedPrintervalStatus(assigningOrder.printerval_status || 'Doing')
     setLoadingPrintervalOptions(true)
     apiFetch<{ designers: string[]; statuses: string[] }>(
       `/orders/${assigningOrder.id}/printerval-options`
@@ -302,7 +311,9 @@ export function OrdersListPage() {
       .then((result) => {
         setPrintervalDesigners(result.designers)
         setPrintervalStatuses(result.statuses)
-        if (result.designers.includes(DEFAULT_PRINTERVAL_DES)) {
+        if (assigningOrder.printerval_designer && result.designers.includes(assigningOrder.printerval_designer)) {
+          setSelectedPrintervalDesigner(assigningOrder.printerval_designer)
+        } else if (result.designers.includes(DEFAULT_PRINTERVAL_DES)) {
           setSelectedPrintervalDesigner(DEFAULT_PRINTERVAL_DES)
         } else if (result.designers.length > 0) {
           setSelectedPrintervalDesigner(result.designers[0])
@@ -311,11 +322,11 @@ export function OrdersListPage() {
       .catch((err) => {
         setPrintervalDesigners([DEFAULT_PRINTERVAL_DES])
         setPrintervalStatuses(['Doing', 'Review', 'Fix', 'Done', 'Waiting'])
-        setSelectedPrintervalDesigner(DEFAULT_PRINTERVAL_DES)
+        setSelectedPrintervalDesigner(assigningOrder.printerval_designer || DEFAULT_PRINTERVAL_DES)
         setError(err instanceof ApiError ? err.message : 'Không tải được danh sách Designer Printerval.')
       })
       .finally(() => setLoadingPrintervalOptions(false))
-  }, [assigningOrder])
+  }, [assigningOrder, usersList])
 
   // Load Printerval options for bulk assign
   useEffect(() => {
@@ -491,6 +502,30 @@ export function OrdersListPage() {
       alert(`Lỗi khi xóa đơn hàng: ${err.message || err}`)
     } finally {
       setIsBulkDeleting(false)
+    }
+  }
+
+  function openAssignModal(order: OrderSummary) {
+    setAssigningOrder(order)
+  }
+
+  async function handleUnassignCurrentOrder() {
+    if (!assigningOrder) return
+    const orderId = assigningOrder.id
+    const orderCode = assigningOrder.external_order_id
+    setAssigning(true)
+    try {
+      const res = await apiFetch<{ message: string; revoked_count: number }>('/assignments/revoke', {
+        method: 'POST',
+        body: JSON.stringify({ order_ids: [orderId] }),
+      })
+      showToast(res.message || `Đã hủy phân công cho đơn ${orderCode}.`, 'success')
+      setAssigningOrder(null)
+      await loadOrders()
+    } catch (err: any) {
+      showToast(err?.message || 'Không thể hủy phân công đơn hàng.', 'error')
+    } finally {
+      setAssigning(false)
     }
   }
 
@@ -2627,7 +2662,7 @@ export function OrdersListPage() {
                           <td className="py-2.5 px-4 font-medium text-slate-700" onClick={(e) => e.stopPropagation()}>
                             {o.assigned_designer_name ? (
                               <span
-                                onClick={() => isAdmin && setAssigningOrder(o)}
+                                onClick={() => isAdmin && openAssignModal(o)}
                                 className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-blue-50 text-[#0052CC] font-semibold text-xs ${
                                   isAdmin ? 'cursor-pointer hover:bg-blue-100 hover:scale-105 transition-all' : ''
                                 }`}
@@ -2638,7 +2673,7 @@ export function OrdersListPage() {
                               </span>
                             ) : (
                               <span
-                                onClick={() => isAdmin && setAssigningOrder(o)}
+                                onClick={() => isAdmin && openAssignModal(o)}
                                 className={`text-slate-400 font-normal text-xs ${
                                   isAdmin ? 'cursor-pointer hover:text-[#0052CC] hover:underline font-semibold' : ''
                                 }`}
@@ -2926,20 +2961,27 @@ export function OrdersListPage() {
             </div>
 
             <form onSubmit={handleAssignOrder} className="p-6 space-y-4">
-              <div className="text-xs space-y-1">
+              <div className="text-xs space-y-1.5">
                 <p className="text-slate-500 font-medium">
                   Đơn hàng: <strong className="text-slate-800 font-mono text-sm">{assigningOrder.external_order_id}</strong>
                 </p>
                 {assigningOrder.product_name && (
                   <p className="text-slate-600 line-clamp-1 font-semibold">{assigningOrder.product_name}</p>
                 )}
+                {assigningOrder.assigned_designer_name && (
+                  <div className="flex items-center gap-1.5 text-[11px] text-blue-700 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200">
+                    <User className="h-3.5 w-3.5" />
+                    <span>Hiện đang phân công: <strong>{assigningOrder.assigned_designer_name}</strong></span>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700 block">
+                <label htmlFor="tacahu-designer-select" className="text-xs font-bold text-slate-700 block">
                   Chọn Designer Tacahu <span className="text-red-500">*</span>
                 </label>
                 <select
+                  id="tacahu-designer-select"
                   required
                   value={selectedUserId}
                   onChange={(e) => setSelectedUserId(e.target.value)}
@@ -2999,22 +3041,37 @@ export function OrdersListPage() {
                 </select>
               </div>
 
-              <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setAssigningOrder(null)}
-                  className="px-4 py-2 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
-                >
-                  Hủy
-                </button>
-                <button
-                  type="submit"
-                  disabled={assigning || loadingPrintervalOptions || !selectedUserId}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-[#0052CC] hover:bg-[#0041A3] rounded-xl transition-colors shadow-2xs disabled:opacity-50 cursor-pointer"
-                >
-                  {assigning && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                  <span>{assigning ? 'Đang phân công...' : 'Xác Nhận (Sang Doing)'}</span>
-                </button>
+              <div className="pt-3 flex items-center justify-between gap-2 border-t border-slate-100">
+                {assigningOrder.assigned_designer_name ? (
+                  <button
+                    type="button"
+                    onClick={handleUnassignCurrentOrder}
+                    disabled={assigning}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    <UserX className="h-3.5 w-3.5" />
+                    <span>Hủy phân công</span>
+                  </button>
+                ) : (
+                  <div />
+                )}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAssigningOrder(null)}
+                    className="px-4 py-2 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
+                  >
+                    Hủy
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={assigning || loadingPrintervalOptions || !selectedUserId}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-[#0052CC] hover:bg-[#0041A3] rounded-xl transition-colors shadow-2xs disabled:opacity-50 cursor-pointer"
+                  >
+                    {assigning && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    <span>{assigning ? 'Đang phân công...' : 'Xác Nhận (Sang Doing)'}</span>
+                  </button>
+                </div>
               </div>
             </form>
           </div>

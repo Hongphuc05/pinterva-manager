@@ -36,22 +36,31 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }
 
   const refreshPlatforms = async () => {
-    if (!user || (!isAdmin && user?.role !== 'support')) return
+    if (!user) return
     setIsLoading(true)
     try {
-      const list = await apiFetch<Platform[]>('/platforms')
-      if (Array.isArray(list)) {
-        setPlatforms(list)
+      if (isAdmin) {
+        const list = await apiFetch<Platform[]>('/platforms')
+        if (Array.isArray(list)) {
+          setPlatforms(list)
 
-        const savedId = localStorage.getItem('activePlatformId')
-        let matched = list.find((p) => p.id === savedId)
-        if (!matched && list.length > 0) {
-          matched = list[0]
+          const savedId = localStorage.getItem('activePlatformId')
+          let matched = list.find((p) => p.id === savedId)
+          if (!matched && list.length > 0) {
+            matched = list[0]
+          }
+          if (matched) {
+            setActivePlatformState(matched)
+            localStorage.setItem('activePlatformId', matched.id)
+          }
         }
-        if (matched) {
-          setActivePlatformState(matched)
-          localStorage.setItem('activePlatformId', matched.id)
-        }
+      } else {
+        // A non-admin never chooses a workspace. Remove a stale selection left
+        // by an earlier admin browser session and show only its assigned account.
+        localStorage.removeItem('activePlatformId')
+        const platform = await apiFetch<Platform>('/platforms/current')
+        setPlatforms([platform])
+        setActivePlatformState(platform)
       }
     } catch (err) {
       console.error('Failed to fetch platforms:', err)
@@ -71,7 +80,7 @@ export const PlatformProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }
 
   useEffect(() => {
-    if (user && (isAdmin || user.role === 'support')) {
+    if (user) {
       refreshPlatforms()
     }
   }, [user, isAdmin])
