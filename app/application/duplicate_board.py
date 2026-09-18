@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import UTC, datetime
 
@@ -25,6 +26,7 @@ from app.application.printerval_assignment_requests import create_request
 from app.application.sanitization import encode_proxy_url, sanitize_text
 
 DONE_STATES = ("DONE", "CLAIMED_IMPORTED", "COMPLETED", "SKIPPED")
+logger = logging.getLogger(__name__)
 
 
 class DuplicateBoardError(ValueError):
@@ -75,6 +77,47 @@ def _cancel_assignments(
         session.add(assignment)
 
 
+def _create_duplicate_board_doing_request(
+    session: Session,
+    *,
+    order: Order,
+    actor: User,
+    platform_id: uuid.UUID,
+) -> uuid.UUID:
+    """Record the status-only external update required when an order enters this board.
+
+    The internal board deliberately starts the card at WAITING.  Its source
+    order, however, must be moved to Doing.  Keep that write in the existing
+    auditable request lifecycle and leave the source-side designer untouched.
+    """
+    request = create_request(
+        session,
+        order=order,
+        internal_designer=actor,
+        platform_id=platform_id,
+        designer_option=None,
+        target_status="Doing",
+        commit=False,
+    )
+    return request.id
+
+
+def _dispatch_printerval_requests(request_ids: list[uuid.UUID]) -> None:
+    """Queue committed sync intents without making the board mutation depend on Celery."""
+    if not request_ids:
+        return
+    from app.workers.assignment_sync_tasks import sync_printerval_assignment_request
+
+    for request_id in request_ids:
+        try:
+            sync_printerval_assignment_request.delay(str(request_id))
+        except Exception:
+            # The intent is already committed and remains visible/retriable in
+            # its request lifecycle.  Do not report the board move as failed.
+            # This matches the existing duplicate-board dispatch semantics.
+            logger.exception("Failed to queue Printerval status sync request %s", request_id)
+
+
 def set_orders_work_domain(
     session: Session,
     *,
@@ -102,6 +145,7 @@ def set_orders_work_domain(
     if len(orders) != len(order_ids) or any(order.platform_id != platform_id for order in orders):
         raise DuplicateBoardError("Mỗi đơn phải thuộc platform đang chọn")
 
+    request_ids: list[uuid.UUID] = []
     for order in orders:
         if order.work_domain == work_domain:
             continue
@@ -122,6 +166,14 @@ def set_orders_work_domain(
             order.duplicate_check_status = DUPLICATE_CHECK_DUPLICATE
             order.template_missing = False
             order.fix_approved_by_admin = False
+            request_ids.append(
+                _create_duplicate_board_doing_request(
+                    session,
+                    order=order,
+                    actor=actor,
+                    platform_id=platform_id,
+                )
+            )
         else:
             order.state = OrderState.WAITING.value
             order.duplicate_check_status = DUPLICATE_CHECK_NON_DUPLICATE
@@ -139,6 +191,7 @@ def set_orders_work_domain(
             cancelled_assignment_ids=[str(item.id) for item in active_assignments],
         )
     session.commit()
+    _dispatch_printerval_requests(request_ids)
     return len(orders)
 
 
@@ -169,6 +222,7 @@ def set_orders_duplicate_status(
     if len(orders) != len(order_ids) or any(order.platform_id != platform_id for order in orders):
         raise DuplicateBoardError("Mỗi đơn phải thuộc platform đang chọn")
 
+    request_ids: list[uuid.UUID] = []
     for order in orders:
         prev_domain = order.work_domain
         prev_state = order.state
@@ -190,6 +244,15 @@ def set_orders_duplicate_status(
                 reason="moved_to_duplicate_domain",
             )
             cancelled_ids = [str(item.id) for item in active_assignments]
+            if prev_domain != WORK_DOMAIN_DUPLICATE:
+                request_ids.append(
+                    _create_duplicate_board_doing_request(
+                        session,
+                        order=order,
+                        actor=actor,
+                        platform_id=platform_id,
+                    )
+                )
         else:
             target_domain = WORK_DOMAIN_STANDARD
             order.work_domain = target_domain
@@ -214,6 +277,7 @@ def set_orders_duplicate_status(
         )
 
     session.commit()
+    _dispatch_printerval_requests(request_ids)
     return len(orders)
 
 

@@ -48,8 +48,14 @@ def create_request(
     platform_id,
     designer_option: str | None,
     target_status: str,
+    commit: bool = True,
 ) -> PrintervalAssignmentRequest:
-    """Persist an intent after the internal assignment transaction has succeeded."""
+    """Persist an auditable external-sync intent.
+
+    Most callers own a single request and keep the historical immediate-commit
+    behavior.  A larger business transaction can pass ``commit=False`` so its
+    internal state change and the durable external-sync intent commit atomically.
+    """
     if order.platform_id != platform_id:
         raise PrintervalAssignmentValidationError("Order does not belong to the active platform")
     # A request can update both the external Designer and status, or only the
@@ -65,7 +71,12 @@ def create_request(
         target_status=target_status,
     )
     session.add(request)
-    session.commit()
+    if commit:
+        session.commit()
+    else:
+        # Allocate the request id before the caller commits its enclosing
+        # transaction, so it can dispatch the worker only after that commit.
+        session.flush()
     return request
 
 

@@ -56,7 +56,7 @@ def _platform(db_session, name: str = "Duplicate board platform") -> Platform:
 
 
 def test_admin_can_put_orders_in_duplicate_domain_and_board_shows_missing_form(
-    client, db_session
+    client, db_session, monkeypatch
 ):
     platform = _platform(db_session)
     admin, headers = _login(client, db_session, "admin", "duplicate-domain-admin", platform.id)
@@ -81,6 +81,14 @@ def test_admin_can_put_orders_in_duplicate_domain_and_board_shows_missing_form(
     db_session.add(active_assignment)
     db_session.commit()
     client.app.dependency_overrides[get_current_platform_id] = lambda: platform.id
+    delayed_requests: list[str] = []
+    from app.workers import assignment_sync_tasks
+
+    monkeypatch.setattr(
+        assignment_sync_tasks.sync_printerval_assignment_request,
+        "delay",
+        lambda request_id: delayed_requests.append(request_id),
+    )
 
     try:
         response = client.post(
@@ -92,12 +100,18 @@ def test_admin_can_put_orders_in_duplicate_domain_and_board_shows_missing_form(
     finally:
         del client.app.dependency_overrides[get_current_platform_id]
 
+
     assert response.status_code == 200
     assert response.json() == {"changed_count": 1, "work_domain": "duplicate"}
     db_session.refresh(order)
     db_session.refresh(active_assignment)
     assert order.work_domain == "duplicate"
     assert order.state == "WAITING"
+    request = db_session.query(PrintervalAssignmentRequest).filter_by(order_id=order.id).one()
+    assert request.target_status == "Doing"
+    assert request.designer_option == ""
+    assert request.internal_designer_id == admin.id
+    assert delayed_requests == [str(request.id)]
     assert active_assignment.status == "cancelled"
     assert db_session.query(WorkflowEvent).filter_by(order_id=order.id).count() == 1
     assert board.status_code == 200
@@ -316,7 +330,7 @@ def test_regular_designer_cannot_see_duplicate_order_via_legacy_printerval_match
     assert response.json()["orders"] == []
 
 
-def test_support_can_set_duplicate_check_status_and_reversible(client, db_session):
+def test_support_can_set_duplicate_check_status_and_reversible(client, db_session, monkeypatch):
     platform = _platform(db_session)
     support, headers = _login(client, db_session, "support", "support-duplicate-check-user", platform.id)
 
@@ -330,6 +344,14 @@ def test_support_can_set_duplicate_check_status_and_reversible(client, db_sessio
     db_session.add(order)
     db_session.commit()
     client.app.dependency_overrides[get_current_platform_id] = lambda: platform.id
+    delayed_requests: list[str] = []
+    from app.workers import assignment_sync_tasks
+
+    monkeypatch.setattr(
+        assignment_sync_tasks.sync_printerval_assignment_request,
+        "delay",
+        lambda request_id: delayed_requests.append(request_id),
+    )
 
     try:
         # 1. Support marks order as duplicate
@@ -344,6 +366,11 @@ def test_support_can_set_duplicate_check_status_and_reversible(client, db_sessio
         assert order.work_domain == "duplicate"
         assert order.duplicate_check_status == "duplicate"
         assert order.state == "WAITING"
+        request = db_session.query(PrintervalAssignmentRequest).filter_by(order_id=order.id).one()
+        assert request.target_status == "Doing"
+        assert request.designer_option == ""
+        assert request.internal_designer_id == support.id
+        assert delayed_requests == [str(request.id)]
 
         # 2. Support marks order as non_duplicate (reversible flow)
         res2 = client.post(
@@ -368,6 +395,26 @@ def test_support_can_set_duplicate_check_status_and_reversible(client, db_sessio
         db_session.refresh(order)
         assert order.duplicate_check_status == "uncheck"
         assert order.work_domain == "standard"
+
+        # Entering the duplicate board again after a reversible move queues one
+        # more source-status update.
+        res4 = client.post(
+            "/api/orders/duplicate-check-status",
+            json={"order_ids": [str(order.id)], "status": "duplicate"},
+            headers=headers,
+        )
+        assert res4.status_code == 200
+        assert len(delayed_requests) == 2
+
+        # Repeating the same duplicate action while it is already on the board
+        # must not emit another external write.
+        res5 = client.post(
+            "/api/orders/duplicate-check-status",
+            json={"order_ids": [str(order.id)], "status": "duplicate"},
+            headers=headers,
+        )
+        assert res5.status_code == 200
+        assert len(delayed_requests) == 2
 
     finally:
         del client.app.dependency_overrides[get_current_platform_id]
@@ -494,4 +541,3 @@ def test_move_card_to_designer_enqueues_printerval_doing_sync(client, db_session
         assert delayed_requests[0] == str(req.id)
     finally:
         del client.app.dependency_overrides[get_current_platform_id]
-
