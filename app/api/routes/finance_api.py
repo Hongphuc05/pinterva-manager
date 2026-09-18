@@ -14,13 +14,22 @@ from app.adapters.db.models import (
     Assignment,
     FinanceNote,
     Order,
+    Platform,
     ResultVersion,
     User,
     WorkflowEvent,
 )
-from app.api.deps import DEFAULT_PLATFORM_ID, get_current_user, get_db
+from app.api.deps import DEFAULT_PLATFORM_ID, get_current_platform_id, get_current_user, get_db
 from app.application.sanitization import encode_proxy_url, sanitize_text
-from app.domain.access import ROLE_ADMIN, ROLE_SUPPORT
+from app.domain.access import (
+    ROLE_ADMIN,
+    ROLE_DESIGNER,
+    ROLE_DESIGNER_TRELLO,
+    ROLE_SUPPORT,
+    WORK_DOMAIN_DUPLICATE,
+    WORK_DOMAIN_STANDARD,
+)
+from app.domain.models import OrderState
 
 router = APIRouter(tags=["finance"])
 
@@ -38,6 +47,9 @@ class DesignerSummaryOut(BaseModel):
     first_submission_at: datetime | None
     latest_submission_at: datetime | None
     notes_count: int = 0
+    total_amount: int = 0
+    unpaid_amount: int = 0
+    paid_amount: int = 0
 
 
 class CreditedTaskOut(BaseModel):
@@ -61,6 +73,9 @@ class CreditedTaskOut(BaseModel):
     is_paid: bool = False
     paid_at: datetime | None = None
     paid_by_id: str | None = None
+    work_domain: str = "standard"
+    custom_rate: int | None = None
+    rate: int = 40000
 
 
 class FinanceStatsResponse(BaseModel):
@@ -71,12 +86,27 @@ class FinanceStatsResponse(BaseModel):
     total_done_tasks: int
     total_in_review_tasks: int
     total_in_fix_tasks: int
+    standard_rate: int = 40000
+    duplicate_rate: int = 40000
+    total_amount_unpaid: int = 0
+    total_amount_paid: int = 0
+    total_amount_credited: int = 0
     designers_summary: list[DesignerSummaryOut]
     tasks: list[CreditedTaskOut]
     total_tasks_count: int
     page: int
     page_size: int
     total_pages: int
+
+
+class OrderRatesUpdate(BaseModel):
+    standard_rate: int
+    duplicate_rate: int
+
+
+class OrderRatesOut(BaseModel):
+    standard_rate: int
+    duplicate_rate: int
 
 
 class FinanceNoteCreate(BaseModel):
@@ -118,6 +148,53 @@ class MarkPaidPayload(BaseModel):
     order_ids: list[str]
 
 
+@router.get("/finance/rates", response_model=OrderRatesOut)
+def get_order_rates(
+    user: User = Depends(get_current_user),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    platform = db.get(Platform, platform_id)
+    if platform is None or not platform.is_active:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Platform not found")
+    return OrderRatesOut(
+        standard_rate=platform.standard_order_rate,
+        duplicate_rate=platform.duplicate_order_rate,
+    )
+
+
+@router.put("/finance/rates", response_model=OrderRatesOut)
+def update_order_rates(
+    payload: OrderRatesUpdate,
+    user: User = Depends(get_current_user),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    if user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Chỉ Admin mới có quyền cập nhật đơn giá.",
+        )
+
+    if payload.standard_rate < 0 or payload.duplicate_rate < 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Đơn giá không được nhỏ hơn 0.",
+        )
+
+    platform = db.get(Platform, platform_id)
+    if platform is None or not platform.is_active:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Platform not found")
+    platform.standard_order_rate = payload.standard_rate
+    platform.duplicate_order_rate = payload.duplicate_rate
+
+    db.commit()
+    return OrderRatesOut(
+        standard_rate=payload.standard_rate,
+        duplicate_rate=payload.duplicate_rate,
+    )
+
+
 @router.get("/finance/stats", response_model=FinanceStatsResponse)
 def get_finance_stats(
     request: Request,
@@ -141,6 +218,15 @@ def get_finance_stats(
                 p_uuid = None
         except ValueError:
             pass
+
+    # Platform rates
+    target_platform = None
+    if p_uuid:
+        target_platform = db.get(Platform, p_uuid)
+    if not target_platform:
+        target_platform = db.query(Platform).first()
+    standard_rate = target_platform.standard_order_rate if target_platform else 40000
+    duplicate_rate = target_platform.duplicate_order_rate if target_platform else 40000
 
     # 1. Fetch all users for designer name mapping
     all_users = db.query(User).all()
@@ -170,6 +256,11 @@ def get_finance_stats(
             total_done_tasks=0,
             total_in_review_tasks=0,
             total_in_fix_tasks=0,
+            standard_rate=standard_rate,
+            duplicate_rate=duplicate_rate,
+            total_amount_unpaid=0,
+            total_amount_paid=0,
+            total_amount_credited=0,
             designers_summary=[],
             tasks=[],
             total_tasks_count=0,
@@ -247,7 +338,7 @@ def get_finance_stats(
         des_user: User | None = None
         if ev.actor_id and ev.actor_id in user_map_by_id:
             u_act = user_map_by_id[ev.actor_id]
-            if u_act.role == "designer":
+            if u_act.role in (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO):
                 des_user = u_act
 
         if not des_user and ev_evidence.get("designer_name"):
@@ -275,6 +366,11 @@ def get_finance_stats(
         time_anchor = order.status_changed_at or ev.created_at
         review_sub_time = order.review_submitted_at or order.status_changed_at or ev.created_at
 
+        task_domain = order.work_domain or "standard"
+        task_rate = order.custom_rate if order.custom_rate is not None else (
+            duplicate_rate if task_domain == WORK_DOMAIN_DUPLICATE else standard_rate
+        )
+
         if key not in submissions_by_key:
             submissions_by_key[key] = {
                 "order_id": str(order.id),
@@ -299,6 +395,9 @@ def get_finance_stats(
                 "is_paid": bool(order.is_paid),
                 "paid_at": order.paid_at,
                 "paid_by_id": str(order.paid_by_id) if order.paid_by_id else None,
+                "work_domain": task_domain,
+                "custom_rate": order.custom_rate,
+                "rate": task_rate,
             }
         else:
             rec = submissions_by_key[key]
@@ -333,6 +432,11 @@ def get_finance_stats(
         time_anchor = order.status_changed_at or sub_time
         review_sub_time = order.review_submitted_at or order.status_changed_at or sub_time
 
+        task_domain = order.work_domain or "standard"
+        task_rate = order.custom_rate if order.custom_rate is not None else (
+            duplicate_rate if task_domain == WORK_DOMAIN_DUPLICATE else standard_rate
+        )
+
         if key not in submissions_by_key:
             submissions_by_key[key] = {
                 "order_id": str(order.id),
@@ -357,6 +461,9 @@ def get_finance_stats(
                 "is_paid": bool(order.is_paid),
                 "paid_at": order.paid_at,
                 "paid_by_id": str(order.paid_by_id) if order.paid_by_id else None,
+                "work_domain": task_domain,
+                "custom_rate": order.custom_rate,
+                "rate": task_rate,
             }
         else:
             rec = submissions_by_key[key]
@@ -393,6 +500,11 @@ def get_finance_stats(
                 time_anchor = order.status_changed_at or order.updated_at or order.created_at
                 review_sub_time = order.review_submitted_at or order.status_changed_at or time_anchor
 
+                task_domain = order.work_domain or "standard"
+                task_rate = order.custom_rate if order.custom_rate is not None else (
+                    duplicate_rate if task_domain == WORK_DOMAIN_DUPLICATE else standard_rate
+                )
+
                 if key not in submissions_by_key:
                     submissions_by_key[key] = {
                         "order_id": str(order.id),
@@ -417,6 +529,9 @@ def get_finance_stats(
                         "is_paid": bool(order.is_paid),
                         "paid_at": order.paid_at,
                         "paid_by_id": str(order.paid_by_id) if order.paid_by_id else None,
+                        "work_domain": task_domain,
+                        "custom_rate": order.custom_rate,
+                        "rate": task_rate,
                     }
                 else:
                     # Update status_changed_at if available
@@ -429,7 +544,7 @@ def get_finance_stats(
     all_tasks = list(submissions_by_key.values())
 
     # If role is designer, restrict to own tasks only
-    if user.role == "designer":
+    if user.role in (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO):
         cur_user_name = (user.full_name or user.username).lower().strip()
         cur_user_opt = (user.printerval_designer_option or "").lower().strip()
         all_tasks = [
@@ -487,14 +602,21 @@ def get_finance_stats(
                 "first_submission_at": task["first_submitted_at"],
                 "latest_submission_at": task["latest_submitted_at"],
                 "notes_count": d_notes,
+                "total_amount": 0,
+                "unpaid_amount": 0,
+                "paid_amount": 0,
             }
         d_rec = designers_map[d_key]
         if task.get("placeholder_filled"):
             d_rec["total_tasks"] += 1
+            t_rate = task.get("rate", standard_rate)
+            d_rec["total_amount"] += t_rate
             if task.get("is_paid"):
                 d_rec["paid_tasks"] += 1
+                d_rec["paid_amount"] += t_rate
             else:
                 d_rec["unpaid_tasks"] += 1
+                d_rec["unpaid_amount"] += t_rate
 
             st = (task["current_state"] or "").upper()
             if st in ("QC_PENDING", "REVIEW", "RESULT_SUBMITTED"):
@@ -519,6 +641,10 @@ def get_finance_stats(
     total_credited = len(credited_tasks)
     total_unpaid = sum(1 for t in credited_tasks if not t.get("is_paid"))
     total_paid = sum(1 for t in credited_tasks if t.get("is_paid"))
+    total_amount_credited = sum(t.get("rate", standard_rate) for t in credited_tasks)
+    total_amount_unpaid = sum(t.get("rate", standard_rate) for t in credited_tasks if not t.get("is_paid"))
+    total_amount_paid = sum(t.get("rate", standard_rate) for t in credited_tasks if t.get("is_paid"))
+
     total_done = sum(
         1 for t in credited_tasks if (t["current_state"] or "").upper() in ("DONE", "CLAIMED_IMPORTED", "COMPLETED")
     )
@@ -603,6 +729,11 @@ def get_finance_stats(
         total_done_tasks=total_done,
         total_in_review_tasks=total_review,
         total_in_fix_tasks=total_fix,
+        standard_rate=standard_rate,
+        duplicate_rate=duplicate_rate,
+        total_amount_unpaid=total_amount_unpaid,
+        total_amount_paid=total_amount_paid,
+        total_amount_credited=total_amount_credited,
         designers_summary=designers_summary,
         tasks=task_outs,
         total_tasks_count=total_tasks_count,
@@ -616,6 +747,7 @@ def get_finance_stats(
 def mark_orders_paid(
     payload: MarkPaidPayload,
     user: User = Depends(get_current_user),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
     if user.role != "admin":
@@ -635,11 +767,30 @@ def mark_orders_paid(
         return {"ok": True, "updated_count": 0}
 
     now_utc = datetime.now(UTC)
-    orders = db.query(Order).filter(Order.id.in_(parsed_ids)).all()
+    orders = (
+        db.query(Order)
+        .filter(Order.id.in_(parsed_ids), Order.platform_id == platform_id)
+        .with_for_update()
+        .all()
+    )
     for o in orders:
         o.is_paid = True
         o.paid_at = now_utc
         o.paid_by_id = user.id
+        norm_st = (o.state or "").upper()
+        if norm_st not in ("DONE", "CLAIMED_IMPORTED", "COMPLETED"):
+            previous_state = o.state
+            o.state = OrderState.DONE.value
+            o.status_changed_at = now_utc
+            db.add(
+                WorkflowEvent(
+                    order_id=o.id,
+                    from_state=previous_state,
+                    to_state=OrderState.DONE.value,
+                    actor_id=user.id,
+                    evidence={"source": "finance", "action": "mark_paid"},
+                )
+            )
     db.commit()
     return {"ok": True, "updated_count": len(orders)}
 
@@ -708,6 +859,8 @@ def export_finance_excel(
     writer = csv.writer(output)
     writer.writerow([
         "Mã Đơn",
+        "Loại Đơn",
+        "Đơn Giá (VNĐ)",
         "Link Sản Phẩm (Bài Nộp)",
         "Tên Designer",
         "Thời Gian Nộp Review",
@@ -720,9 +873,12 @@ def export_finance_excel(
         sub_str = sub_time.strftime("%d/%m/%Y %H:%M:%S") if sub_time else ""
         paid_str = t.paid_at.strftime("%d/%m/%Y %H:%M:%S") if t.paid_at else ""
         paid_status = "Đã thanh toán" if t.is_paid else "Chưa thanh toán"
+        domain_str = "Đơn trùng" if t.work_domain == "duplicate" else "Đơn thường"
 
         writer.writerow([
             t.external_order_id,
+            domain_str,
+            t.rate,
             t.drive_link or "",
             t.designer_name,
             sub_str,

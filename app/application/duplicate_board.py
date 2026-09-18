@@ -430,7 +430,7 @@ def _column_metrics(cards: list[dict]) -> dict[str, int]:
         "doing": sum(card["state"] == OrderState.IN_PROGRESS.value for card in cards),
         "review": sum(card["state"] == OrderState.QC_PENDING.value for card in cards),
         "fix": sum(card["state"] == OrderState.REVISION.value for card in cards),
-        "done": sum(card["state"] in DONE_STATES for card in cards),
+        "done": sum((card["state"] in DONE_STATES or card.get("is_paid", False)) for card in cards),
     }
 
 
@@ -491,7 +491,7 @@ def list_duplicate_board(session: Session, *, platform_id: uuid.UUID) -> dict:
         card_data = _card(order, assignee)
         norm_st = (order.state or "").upper()
 
-        if norm_st in DONE_STATES:
+        if norm_st in DONE_STATES or order.is_paid:
             col_done["cards"].append(card_data)
         elif assignee and str(assignee.id) in column_by_designer:
             column_by_designer[str(assignee.id)]["cards"].append(card_data)

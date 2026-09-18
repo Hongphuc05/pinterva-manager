@@ -25,6 +25,21 @@ class PrintervalAssignmentValidationError(ValueError):
     pass
 
 
+def normalize_printerval_status(status: str | None) -> str:
+    """Return the canonical external status while accepting stored UI values.
+
+    Older crawls store lowercase statuses (for example ``waiting``), while the
+    assignment command uses title-cased values.  The external integration only
+    accepts the latter, so normalize at the application boundary rather than
+    making every caller know the exact casing.
+    """
+    candidate = (status or "").strip()
+    for allowed in PRINTERVAL_STATUSES:
+        if allowed.lower() == candidate.lower():
+            return allowed
+    raise PrintervalAssignmentValidationError("Invalid Printerval status")
+
+
 def create_request(
     session: Session,
     *,
@@ -41,8 +56,7 @@ def create_request(
     # status. Keep the latter in the same durable request lifecycle so the UI can
     # show a verified outcome instead of treating a queued Celery task as success.
     designer_option = (designer_option or "").strip()
-    if target_status not in PRINTERVAL_STATUSES:
-        raise PrintervalAssignmentValidationError("Invalid Printerval status")
+    target_status = normalize_printerval_status(target_status)
     request = PrintervalAssignmentRequest(
         order_id=order.id,
         platform_id=platform_id,

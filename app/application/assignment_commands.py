@@ -14,9 +14,9 @@ from app.adapters.db.models import (
     WorkflowEvent,
 )
 from app.application.printerval_assignment_requests import (
-    PRINTERVAL_STATUSES,
     PrintervalAssignmentValidationError,
     create_request,
+    normalize_printerval_status,
 )
 from app.domain.models import OrderState
 
@@ -44,8 +44,10 @@ def queue_assignment_command(
         raise AssignmentCommandError("Danh sách đơn hàng không được để trống")
     if len(set(order_ids)) != len(order_ids):
         raise AssignmentCommandError("Danh sách đơn hàng bị trùng")
-    if printerval_status not in PRINTERVAL_STATUSES:
-        raise AssignmentCommandError("Invalid Printerval status")
+    try:
+        printerval_status = normalize_printerval_status(printerval_status)
+    except PrintervalAssignmentValidationError as exc:
+        raise AssignmentCommandError(str(exc)) from exc
 
     designer: User | None = None
     if designer_id is not None:

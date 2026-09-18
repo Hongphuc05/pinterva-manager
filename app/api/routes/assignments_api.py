@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import User
@@ -20,8 +20,16 @@ router = APIRouter(prefix="/assignments", tags=["assignments"])
 class CreateAssignmentRequest(BaseModel):
     order_ids: list[uuid.UUID] = Field(min_length=1, max_length=100)
     designer_id: uuid.UUID | None = None
-    printerval_designer: str | None = None
-    printerval_status: str = "Doing"
+    # Accept the temporary frontend names introduced when the UI label changed
+    # from Printerval to Print.  The command layer remains the single contract.
+    printerval_designer: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("printerval_designer", "platform_designer"),
+    )
+    printerval_status: str = Field(
+        default="Doing",
+        validation_alias=AliasChoices("printerval_status", "platform_status"),
+    )
 
 
 class CreateAssignmentResponse(BaseModel):

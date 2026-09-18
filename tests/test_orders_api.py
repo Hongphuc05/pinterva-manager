@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from app.adapters.db.models import Assignment, Order, Platform, PrintervalAssignmentRequest, User
+from app.adapters.db.models import Assignment, Order, Platform, PrintervalAssignmentRequest, User, WorkflowEvent
 from app.api.deps import DEFAULT_PLATFORM_ID, get_current_platform_id, get_db
 from app.api.main import create_app
 from app.application.auth import hash_password
@@ -331,6 +331,120 @@ def test_api_assignments_queues_status_only_requests(client, db_session, monkeyp
     assert {request.designer_option for request in requests} == {""}
     assert {request.target_status for request in requests} == {"Review"}
     assert {call[0] for call in calls} == {str(request.id) for request in requests}
+
+
+def test_api_assignments_accepts_lowercase_status_and_legacy_platform_fields(
+    client, db_session, monkeypatch
+):
+    from app.workers import assignment_sync_tasks
+
+    monkeypatch.setattr(assignment_sync_tasks.sync_printerval_assignment_request, "delay", lambda *_: None)
+    platform = Platform(name="P1 normalized status", account_username="normalized@example.com")
+    designer = User(
+        username="normalized-designer",
+        full_name="Normalized Designer",
+        role="designer",
+        password_hash="hash",
+    )
+    db_session.add_all([platform, designer])
+    db_session.flush()
+    order = Order(external_order_id="NORMALIZED1", platform_id=platform.id)
+    db_session.add(order)
+    db_session.commit()
+    client.app.dependency_overrides[get_current_platform_id] = lambda: platform.id
+    _login(client, db_session, "admin", "normalized_status_admin")
+
+    try:
+        response = client.post(
+            "/api/assignments",
+            json={
+                "order_ids": [str(order.id)],
+                "designer_id": str(designer.id),
+                "platform_designer": "Nguyễn Thị Thuý Hường - 2D Prin",
+                "platform_status": " waiting ",
+            },
+        )
+    finally:
+        del client.app.dependency_overrides[get_current_platform_id]
+
+    assert response.status_code == 202
+    request = (
+        db_session.query(PrintervalAssignmentRequest)
+        .filter(PrintervalAssignmentRequest.order_id == order.id)
+        .one()
+    )
+    assert request.target_status == "Waiting"
+
+
+def test_finance_rates_payment_and_workload_include_duplicate_trello_orders(client, db_session):
+    platform = Platform(name="Finance platform", account_username="finance@example.com")
+    trello_designer = User(
+        username="finance-trello",
+        full_name="Finance Trello",
+        role="designer-trello",
+        password_hash=hash_password("s3cret!"),
+        platform_id=None,
+    )
+    db_session.add(platform)
+    db_session.flush()
+    duplicate_order = Order(
+        external_order_id="DUP-FINANCE-1",
+        platform_id=platform.id,
+        state=OrderState.IN_PROGRESS.value,
+        work_domain="duplicate",
+    )
+    db_session.add_all([trello_designer, duplicate_order])
+    db_session.flush()
+    db_session.add(
+        Assignment(
+            order_id=duplicate_order.id,
+            designer_id=trello_designer.id,
+            status="approved",
+        )
+    )
+    db_session.commit()
+    _login(client, db_session, "admin", "finance-rates-admin")
+    headers = {"X-Platform-Id": str(platform.id)}
+
+    rates = client.get("/api/finance/rates", headers=headers)
+    assert rates.status_code == 200
+    assert rates.json() == {"standard_rate": 40000, "duplicate_rate": 40000}
+
+    updated = client.put(
+        "/api/finance/rates",
+        headers=headers,
+        json={"standard_rate": 50000, "duplicate_rate": 45000},
+    )
+    assert updated.status_code == 200
+    assert updated.json() == {"standard_rate": 50000, "duplicate_rate": 45000}
+    db_session.refresh(platform)
+    assert platform.standard_order_rate == 50000
+    assert platform.duplicate_order_rate == 45000
+
+    workload = client.get("/api/designers/workload", headers=headers)
+    assert workload.status_code == 200
+    designer_workload = next(item for item in workload.json() if item["id"] == str(trello_designer.id))
+    assert designer_workload["total_orders"] == 1
+    assert designer_workload["orders"][0]["work_domain"] == "duplicate"
+
+    paid = client.post(
+        "/api/finance/mark-paid",
+        json={"order_ids": [str(duplicate_order.id)]},
+    )
+    assert paid.status_code == 200
+    db_session.refresh(duplicate_order)
+    assert duplicate_order.is_paid is True
+    assert duplicate_order.state == OrderState.DONE.value
+    assert duplicate_order.status_changed_at is not None
+    event = db_session.query(WorkflowEvent).filter(WorkflowEvent.order_id == duplicate_order.id).one()
+    assert event.from_state == OrderState.IN_PROGRESS.value
+    assert event.to_state == OrderState.DONE.value
+
+    board = client.get("/api/duplicate-board", headers=headers)
+    assert board.status_code == 200
+    done_column = next(column for column in board.json()["columns"] if column["id"] == "done")
+    done_cards = done_column["cards"]
+    assert any(card["id"] == str(duplicate_order.id) and card["is_paid"] for card in done_cards)
 
 
 def test_api_sync_status_defaults_to_not_running_when_never_synced(client, db_session):

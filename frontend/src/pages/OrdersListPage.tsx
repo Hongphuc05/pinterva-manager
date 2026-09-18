@@ -421,8 +421,8 @@ export function OrdersListPage() {
         body: JSON.stringify({
           order_ids: selectedOrderIds,
           designer_id: bulkDesignerId,
-          platform_designer: platformDes,
-          platform_status: bulkPlatformStatus || 'Doing',
+          printerval_designer: platformDes,
+          printerval_status: bulkPlatformStatus || 'Doing',
         }),
       })
       setFlash(`Đã phân công ${res.queued_count} đơn sang Doing và xếp đồng bộ Print.`)
@@ -550,8 +550,8 @@ export function OrdersListPage() {
           body: JSON.stringify({
             order_ids: [assigningOrder.id],
             designer_id: selectedUserId,
-            platform_designer: selectedPlatformDesigner || DEFAULT_PLATFORM_DES,
-            platform_status: selectedPlatformStatus || 'Doing',
+            printerval_designer: selectedPlatformDesigner || DEFAULT_PLATFORM_DES,
+            printerval_status: selectedPlatformStatus || 'Doing',
           }),
         }
       )
@@ -2227,7 +2227,7 @@ export function OrdersListPage() {
                       className="rounded border-slate-300 text-[#0052CC] focus:ring-[#0052CC] h-3.5 w-3.5 cursor-pointer"
                     />
                   </th>
-                  <th className="py-3 px-3 w-14 text-center">Ảnh</th>
+                  <th className="py-3 px-3 w-20 text-center">Ảnh</th>
                   <th className="py-3 px-4">Mã Đơn</th>
                   <th className="py-3 px-4">Trạng Thái</th>
                   <th className="py-3 px-4">Des Đảm Nhận</th>

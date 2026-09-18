@@ -68,6 +68,9 @@ export type DesignerSummary = {
   first_submission_at: string | null
   latest_submission_at: string | null
   notes_count?: number
+  total_amount?: number
+  unpaid_amount?: number
+  paid_amount?: number
 }
 
 export type CreditedTask = {
@@ -91,6 +94,9 @@ export type CreditedTask = {
   is_paid?: boolean
   paid_at?: string | null
   paid_by_id?: string | null
+  work_domain?: string
+  custom_rate?: number | null
+  rate?: number
 }
 
 export type FinanceStatsResponse = {
@@ -101,6 +107,11 @@ export type FinanceStatsResponse = {
   total_done_tasks: number
   total_in_review_tasks: number
   total_in_fix_tasks: number
+  standard_rate?: number
+  duplicate_rate?: number
+  total_amount_unpaid?: number
+  total_amount_paid?: number
+  total_amount_credited?: number
   designers_summary: DesignerSummary[]
   tasks: CreditedTask[]
   total_tasks_count: number
@@ -207,6 +218,12 @@ export function FinancePage() {
   const [modalLastSelectedIndex, setModalLastSelectedIndex] = useState<number | null>(null)
   const [orderRates, setOrderRates] = useState<Record<string, number>>({})
 
+  // Rate configuration state (Admin)
+  const [standardRate, setStandardRate] = useState<number>(40000)
+  const [duplicateRate, setDuplicateRate] = useState<number>(40000)
+  const [rateSettingsOpen, setRateSettingsOpen] = useState(false)
+  const [savingRates, setSavingRates] = useState(false)
+
   // Quick date presets
   function applyDatePreset(preset: 'today' | 'yesterday' | '7days' | 'this_month' | 'all') {
     setDatePreset(preset)
@@ -260,11 +277,41 @@ export function FinancePage() {
 
       const res = await apiFetch<FinanceStatsResponse>(`/finance/stats?${params.toString()}`)
       setData(res)
+      if (res.standard_rate !== undefined) setStandardRate(res.standard_rate)
+      if (res.duplicate_rate !== undefined) setDuplicateRate(res.duplicate_rate)
       setError(null)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Không tải được dữ liệu tài chính.')
     } finally {
       setLoading(false)
+    }
+  }
+
+  // Save Order Rates (Admin)
+  async function handleSaveRates() {
+    if (standardRate < 0 || duplicateRate < 0) {
+      showToast('Đơn giá không được nhỏ hơn 0 đ', 'warning')
+      return
+    }
+    setSavingRates(true)
+    try {
+      await apiFetch<{ standard_rate: number; duplicate_rate: number }>('/finance/rates', {
+        method: 'PUT',
+        body: JSON.stringify({
+          standard_rate: standardRate,
+          duplicate_rate: duplicateRate,
+        }),
+      })
+      showToast('Đã lưu và cập nhật đơn giá thành công! Các đơn chưa thanh toán đã được áp dụng đơn giá mới.', 'success')
+      setRateSettingsOpen(false)
+      loadData()
+      if (selectedDesignerForModal) {
+        loadModalTasks()
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Không thể cập nhật đơn giá.', 'error')
+    } finally {
+      setSavingRates(false)
     }
   }
 
@@ -433,7 +480,9 @@ export function FinancePage() {
 
   function handleRateChange(orderId: string, delta: number) {
     setOrderRates((prev) => {
-      const current = prev[orderId] ?? 40000
+      const task = modalTasks.find((item) => item.order_id === orderId)
+      const baseRate = task?.rate ?? (task?.work_domain === 'duplicate' ? duplicateRate : standardRate)
+      const current = prev[orderId] ?? baseRate
       const next = Math.max(0, current + delta)
       return { ...prev, [orderId]: next }
     })
@@ -682,10 +731,23 @@ export function FinancePage() {
           </div>
         </div>
 
-        {/* Top Actions: Export Excel & Sub-Tabs */}
+        {/* Top Actions: Rate Settings, Export Excel & Sub-Tabs */}
         <div className="flex items-center gap-2.5 flex-wrap">
           {isAdmin && (
             <>
+              <button
+                type="button"
+                onClick={() => setRateSettingsOpen(!rateSettingsOpen)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl transition-all cursor-pointer shadow-2xs"
+                title="Cài đặt đơn giá mặc định cho Đơn thường và Đơn trùng lặp"
+              >
+                <Coins className="h-4 w-4 text-amber-600" />
+                <span>Cài Đặt Đơn Giá</span>
+                <span className="text-[10px] font-mono bg-white text-amber-900 px-1.5 py-0.5 rounded border border-amber-300 font-bold">
+                  {standardRate.toLocaleString('vi-VN')} đ / {duplicateRate.toLocaleString('vi-VN')} đ
+                </span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => setExportModalOpen(true)}
@@ -731,6 +793,83 @@ export function FinancePage() {
         </div>
       </div>
 
+      {/* Admin Rate Configuration Panel */}
+      {isAdmin && rateSettingsOpen && (
+        <div className="rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50/80 via-orange-50/50 to-yellow-50/40 p-5 shadow-xs transition-all animate-fadeIn">
+          <div className="flex items-center justify-between pb-3 border-b border-amber-200/60 flex-wrap gap-2">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 bg-amber-100 text-amber-800 rounded-xl border border-amber-200">
+                <Coins className="h-5 w-5" />
+              </div>
+              <div>
+                <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Cấu Hình Đơn Giá Mặc Định Cho Admin</h4>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Thay đổi đơn giá cho Đơn thường và Đơn trùng lặp. Đơn giá mới sẽ tự động áp dụng ngay cho toàn bộ các đơn chưa thanh toán.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setRateSettingsOpen(false)}
+              className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg cursor-pointer hover:bg-amber-100/50"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 items-end">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                Giá Đơn Thường (VNĐ / đơn)
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  min="0"
+                  step="1000"
+                  value={standardRate}
+                  onChange={(e) => setStandardRate(Math.max(0, parseInt(e.target.value) || 0))}
+                  className="w-full text-xs font-mono font-bold bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#0052CC]"
+                  placeholder="40000"
+                />
+                <span className="absolute right-3.5 top-2.5 text-xs font-mono text-slate-400 font-semibold">VNĐ</span>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                <span>Giá Đơn Trùng Lặp (VNĐ / đơn)</span>
+                <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.2 rounded font-semibold border border-purple-200">Trello</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  min="0"
+                  step="1000"
+                  value={duplicateRate}
+                  onChange={(e) => setDuplicateRate(Math.max(0, parseInt(e.target.value) || 0))}
+                  className="w-full text-xs font-mono font-bold bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-600"
+                  placeholder="40000"
+                />
+                <span className="absolute right-3.5 top-2.5 text-xs font-mono text-slate-400 font-semibold">VNĐ</span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={savingRates}
+                onClick={handleSaveRates}
+                className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold text-white bg-[#0052CC] hover:bg-[#0040A8] active:scale-98 rounded-xl shadow-sm transition-all disabled:opacity-50 cursor-pointer"
+              >
+                {savingRates ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                <span>Lưu & Cập Nhật Giá Mới</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {error && (
         <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs font-medium flex items-center gap-2">
           <AlertTriangle className="h-4 w-4 text-red-600 shrink-0" />
@@ -748,9 +887,14 @@ export function FinancePage() {
             <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs flex items-center justify-between">
               <div>
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Tổng Đơn Tính Công</p>
-                <h3 className="text-2xl font-bold font-mono text-[#0052CC] mt-1">
-                  {data?.total_credited_tasks ?? 0}
-                </h3>
+                <div className="flex items-baseline gap-2 mt-1">
+                  <h3 className="text-2xl font-bold font-mono text-[#0052CC]">
+                    {data?.total_credited_tasks ?? 0}
+                  </h3>
+                  <span className="text-xs font-mono font-bold text-slate-500">
+                    ({((data?.total_amount_credited ?? ((data?.total_credited_tasks ?? 0) * standardRate))).toLocaleString('vi-VN')} đ)
+                  </span>
+                </div>
                 <p className="text-[11px] text-slate-400 mt-0.5">Vào Review + Có link bài</p>
               </div>
               <div className="p-3 bg-blue-50 text-[#0052CC] rounded-xl border border-blue-100">
@@ -761,9 +905,14 @@ export function FinancePage() {
             <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs flex items-center justify-between">
               <div>
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Chưa Thanh Toán</p>
-                <h3 className="text-2xl font-bold font-mono text-amber-600 mt-1">
-                  {data?.total_unpaid_tasks ?? 0}
-                </h3>
+                <div className="flex items-baseline gap-2 mt-1">
+                  <h3 className="text-2xl font-bold font-mono text-amber-600">
+                    {data?.total_unpaid_tasks ?? 0}
+                  </h3>
+                  <span className="text-xs font-mono font-bold text-amber-700">
+                    ({((data?.total_amount_unpaid ?? ((data?.total_unpaid_tasks ?? 0) * standardRate))).toLocaleString('vi-VN')} đ)
+                  </span>
+                </div>
                 <p className="text-[11px] text-slate-400 mt-0.5">Chờ thanh toán công</p>
               </div>
               <div className="p-3 bg-amber-50 text-amber-600 rounded-xl border border-amber-100">
@@ -774,9 +923,14 @@ export function FinancePage() {
             <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs flex items-center justify-between">
               <div>
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Đã Thanh Toán</p>
-                <h3 className="text-2xl font-bold font-mono text-emerald-600 mt-1">
-                  {data?.total_paid_tasks ?? 0}
-                </h3>
+                <div className="flex items-baseline gap-2 mt-1">
+                  <h3 className="text-2xl font-bold font-mono text-emerald-600">
+                    {data?.total_paid_tasks ?? 0}
+                  </h3>
+                  <span className="text-xs font-mono font-bold text-emerald-700">
+                    ({((data?.total_amount_paid ?? ((data?.total_paid_tasks ?? 0) * standardRate))).toLocaleString('vi-VN')} đ)
+                  </span>
+                </div>
                 <p className="text-[11px] text-slate-400 mt-0.5">Admin đã xác nhận</p>
               </div>
               <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl border border-emerald-100">
@@ -844,6 +998,10 @@ export function FinancePage() {
                       const firstSplit = formatUtc7Split(des.first_submission_at)
                       const latestSplit = formatUtc7Split(des.latest_submission_at)
 
+                      const desUnpaidAmt = des.unpaid_amount ?? (des.unpaid_tasks * standardRate)
+                      const desPaidAmt = des.paid_amount ?? (des.paid_tasks * standardRate)
+                      const desTotalAmt = des.total_amount ?? (des.total_tasks * standardRate)
+
                       return (
                         <tr
                           key={des.designer_name}
@@ -872,19 +1030,34 @@ export function FinancePage() {
                             </button>
                           </td>
                           <td className="py-3 px-4 text-center">
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-amber-50 text-amber-700 border border-amber-200">
-                              {des.unpaid_tasks ?? 0} đơn
-                            </span>
+                            <div className="flex flex-col items-center">
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                                {des.unpaid_tasks ?? 0} đơn
+                              </span>
+                              <span className="font-mono text-[10px] text-amber-700 font-bold mt-0.5">
+                                {desUnpaidAmt.toLocaleString('vi-VN')} đ
+                              </span>
+                            </div>
                           </td>
                           <td className="py-3 px-4 text-center">
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                              {des.paid_tasks ?? 0} đơn
-                            </span>
+                            <div className="flex flex-col items-center">
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                {des.paid_tasks ?? 0} đơn
+                              </span>
+                              <span className="font-mono text-[10px] text-emerald-700 font-bold mt-0.5">
+                                {desPaidAmt.toLocaleString('vi-VN')} đ
+                              </span>
+                            </div>
                           </td>
                           <td className="py-3 px-4 text-center">
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-blue-50 text-[#0052CC] border border-blue-200">
-                              {des.total_tasks} công
-                            </span>
+                            <div className="flex flex-col items-center">
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-blue-50 text-[#0052CC] border border-blue-200">
+                                {des.total_tasks} công
+                              </span>
+                              <span className="font-mono text-[10px] text-[#0052CC] font-bold mt-0.5">
+                                {desTotalAmt.toLocaleString('vi-VN')} đ
+                              </span>
+                            </div>
                           </td>
                           <td className="py-3 px-4 text-center">
                             <span className="font-mono font-semibold text-purple-700">
@@ -1237,7 +1410,7 @@ export function FinancePage() {
                           />
                         </th>
                       )}
-                      <th className="py-3 px-3 w-14 text-center">Ảnh</th>
+                      <th className="py-3 px-3 w-20 text-center">Ảnh</th>
                       <th className="py-3 px-4">{isAdmin ? 'Mã Đơn / Tên Sản Phẩm' : 'Tên Sản Phẩm'}</th>
                       {isAdmin && <th className="py-3 px-4">Designer</th>}
                       <th className="py-3 px-4">Trạng Thái</th>
@@ -1247,20 +1420,21 @@ export function FinancePage() {
                       )}
                       <th className="py-3 px-4">Link Bài Nộp</th>
                       <th className="py-3 px-4 text-center">Số Lần Nộp</th>
+                      <th className="py-3 px-4 text-center whitespace-nowrap">Đơn Giá (VNĐ)</th>
                       <th className="py-3 px-4 text-right">Thao Tác</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {loading ? (
                       <tr>
-                        <td colSpan={isAdmin ? (paymentSubTab === 'paid' ? 10 : 9) : (paymentSubTab === 'paid' ? 8 : 7)} className="py-12 text-center text-slate-400">
+                        <td colSpan={isAdmin ? (paymentSubTab === 'paid' ? 11 : 10) : (paymentSubTab === 'paid' ? 9 : 8)} className="py-12 text-center text-slate-400">
                           <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin opacity-50 text-[#0052CC]" />
                           <p className="font-medium text-sm text-slate-500">Đang tải danh sách đơn...</p>
                         </td>
                       </tr>
                     ) : !data?.tasks || data.tasks.length === 0 ? (
                       <tr>
-                        <td colSpan={isAdmin ? (paymentSubTab === 'paid' ? 10 : 9) : (paymentSubTab === 'paid' ? 8 : 7)} className="py-12 text-center text-slate-400">
+                        <td colSpan={isAdmin ? (paymentSubTab === 'paid' ? 11 : 10) : (paymentSubTab === 'paid' ? 9 : 8)} className="py-12 text-center text-slate-400">
                           <Package className="h-10 w-10 mx-auto mb-2 opacity-30" />
                           <p className="font-medium text-sm text-slate-500">
                             {paymentSubTab === 'unpaid' ? 'Không có đơn nào chưa thanh toán' : 'Chưa có đơn nào đã thanh toán'}
@@ -1278,6 +1452,7 @@ export function FinancePage() {
                         const statusInfo = getStatusInfo(task.current_state)
                         const submitTimeSplit = formatUtc7Split(task.review_submitted_at || task.status_changed_at || task.first_submitted_at)
                         const paidTimeSplit = formatUtc7Split(task.paid_at)
+                        const taskPrice = task.rate ?? (task.work_domain === 'duplicate' ? duplicateRate : standardRate)
 
                         return (
                           <tr
@@ -1305,11 +1480,11 @@ export function FinancePage() {
                                   alt={isAdmin ? task.external_order_id : (task.product_name || 'Ảnh sản phẩm')}
                                   title="Click để phóng to"
                                   onClick={() => setSelectedImage(resolveAssetUrl(task.thumbnail_url) ?? null)}
-                                  className="h-10 w-10 rounded-lg object-cover border border-slate-200 mx-auto shadow-2xs cursor-pointer hover:scale-105 transition-transform"
+                                  className="h-16 w-16 rounded-xl object-cover border border-slate-200 mx-auto shadow-xs cursor-pointer hover:scale-105 transition-transform hover:ring-2 hover:ring-[#0052CC]"
                                 />
                               ) : (
-                                <div className="h-10 w-10 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center mx-auto text-slate-400">
-                                  <Package className="h-5 w-5" />
+                                <div className="h-16 w-16 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center mx-auto text-slate-400">
+                                  <Package className="h-6 w-6" />
                                 </div>
                               )}
                             </td>
@@ -1320,6 +1495,11 @@ export function FinancePage() {
                                 <>
                                   <div className="flex items-center gap-1.5 flex-wrap">
                                     <CopyableOrderCode code={task.external_order_id} />
+                                    {task.work_domain === 'duplicate' && (
+                                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
+                                        Đơn trùng
+                                      </span>
+                                    )}
                                     {task.notes_count && task.notes_count > 0 ? (
                                       <span
                                         onClick={() => {
@@ -1342,13 +1522,22 @@ export function FinancePage() {
                                   )}
                                 </>
                               ) : (
-                                <Link
-                                  to={`/orders/${task.order_id}`}
-                                  className="text-xs font-bold text-[#0052CC] hover:underline line-clamp-2 block"
-                                  title={task.product_name || 'Đơn thiết kế'}
-                                >
-                                  {task.product_name || 'Đơn thiết kế'}
-                                </Link>
+                                <div>
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <Link
+                                      to={`/orders/${task.order_id}`}
+                                      className="text-xs font-bold text-[#0052CC] hover:underline line-clamp-2 block"
+                                      title={task.product_name || 'Đơn thiết kế'}
+                                    >
+                                      {task.product_name || 'Đơn thiết kế'}
+                                    </Link>
+                                    {task.work_domain === 'duplicate' && (
+                                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
+                                        Đơn trùng
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
                               )}
                             </td>
 
@@ -1432,6 +1621,13 @@ export function FinancePage() {
                             <td className="py-2.5 px-4 text-center">
                               <span className="font-mono font-semibold px-2 py-0.5 rounded bg-slate-100 text-slate-700">
                                 {task.submission_count} lần
+                              </span>
+                            </td>
+
+                            {/* Price / Rate (VNĐ) */}
+                            <td className="py-2.5 px-4 text-center whitespace-nowrap">
+                              <span className="font-mono font-bold text-slate-800 bg-slate-50 px-2 py-1 rounded-lg border border-slate-200 text-xs">
+                                {taskPrice.toLocaleString('vi-VN')} đ
                               </span>
                             </td>
 
@@ -2208,7 +2404,7 @@ export function FinancePage() {
                       <span className="font-mono text-sm font-extrabold text-[#0052CC] bg-white px-2.5 py-1 rounded-lg border border-blue-200 shadow-2xs">
                         {modalTasks
                           .filter((t) => modalSelectedOrderIds.includes(t.order_id))
-                          .reduce((sum, t) => sum + (orderRates[t.order_id] ?? 40000), 0)
+                          .reduce((sum, t) => sum + (orderRates[t.order_id] ?? t.rate ?? (t.work_domain === 'duplicate' ? duplicateRate : standardRate)), 0)
                           .toLocaleString('vi-VN')} đ
                       </span>
                     </div>
@@ -2219,7 +2415,7 @@ export function FinancePage() {
                     </span>
                     <span className="font-mono text-base font-extrabold text-emerald-700 bg-white px-3 py-1 rounded-lg border border-emerald-300 shadow-2xs">
                       {modalTasks
-                        .reduce((sum, t) => sum + (orderRates[t.order_id] ?? 40000), 0)
+                        .reduce((sum, t) => sum + (orderRates[t.order_id] ?? t.rate ?? (t.work_domain === 'duplicate' ? duplicateRate : standardRate)), 0)
                         .toLocaleString('vi-VN')} đ
                     </span>
                   </div>
@@ -2274,7 +2470,7 @@ export function FinancePage() {
                             title="Chọn tất cả đơn trên trang này"
                           />
                         </th>
-                        <th className="py-3 px-3 w-12 text-center">Ảnh</th>
+                        <th className="py-3 px-3 w-20 text-center">Ảnh</th>
                         <th className="py-3 px-4">Mã Đơn / Tên Sản Phẩm</th>
                         <th className="py-3 px-4">Trạng Thái</th>
                         <th className="py-3 px-4 whitespace-nowrap">Thời Gian Nộp</th>
@@ -2310,7 +2506,7 @@ export function FinancePage() {
                           const statusInfo = getStatusInfo(task.current_state)
                           const submitTimeSplit = formatUtc7Split(task.review_submitted_at || task.status_changed_at || task.first_submitted_at)
                           const paidTimeSplit = formatUtc7Split(task.paid_at)
-                          const currentRate = orderRates[task.order_id] ?? 40000
+                          const currentRate = orderRates[task.order_id] ?? task.rate ?? (task.work_domain === 'duplicate' ? duplicateRate : standardRate)
 
                           return (
                             <tr
@@ -2333,17 +2529,22 @@ export function FinancePage() {
                                     alt={task.external_order_id}
                                     title="Click để phóng to"
                                     onClick={() => setSelectedImage(resolveAssetUrl(task.thumbnail_url) ?? null)}
-                                    className="h-9 w-9 rounded-lg object-cover border border-slate-200 mx-auto shadow-2xs cursor-pointer hover:scale-105 transition-transform"
+                                    className="h-16 w-16 rounded-xl object-cover border border-slate-200 mx-auto shadow-xs cursor-pointer hover:scale-105 transition-transform hover:ring-2 hover:ring-[#0052CC]"
                                   />
                                 ) : (
-                                  <div className="h-9 w-9 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center mx-auto text-slate-400">
-                                    <Package className="h-4 w-4" />
+                                  <div className="h-16 w-16 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center mx-auto text-slate-400">
+                                    <Package className="h-6 w-6" />
                                   </div>
                                 )}
                               </td>
                               <td className="py-2.5 px-4">
                                 <div className="flex items-center gap-1.5 flex-wrap">
                                   <CopyableOrderCode code={task.external_order_id} />
+                                  {task.work_domain === 'duplicate' && (
+                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
+                                      Đơn trùng
+                                    </span>
+                                  )}
                                   {task.notes_count && task.notes_count > 0 ? (
                                     <span
                                       onClick={() => {

@@ -34,6 +34,7 @@ type DesignerOrder = {
   note_outsource?: string | null
   previous_note_outsource?: string | null
   fix_approved_by_admin?: boolean
+  work_domain?: string
 }
 
 type DesignerWorkload = {
@@ -526,8 +527,13 @@ export function DesignerBoardPage() {
                                     )}
                                     <div className="flex-1 min-w-0">
                                       {isAdmin && (
-                                        <div>
+                                        <div className="flex items-center gap-1.5 flex-wrap">
                                           <CopyableOrderCode code={o.external_order_id} />
+                                          {o.work_domain === 'duplicate' && (
+                                            <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
+                                              Đơn trùng
+                                            </span>
+                                          )}
                                         </div>
                                       )}
                                       <Link
@@ -631,8 +637,13 @@ export function DesignerBoardPage() {
                                     )}
                                     <div className="flex-1 min-w-0">
                                       {isAdmin && (
-                                        <div>
+                                        <div className="flex items-center gap-1.5 flex-wrap">
                                           <CopyableOrderCode code={o.external_order_id} />
+                                          {o.work_domain === 'duplicate' && (
+                                            <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
+                                              Đơn trùng
+                                            </span>
+                                          )}
                                         </div>
                                       )}
                                       <Link

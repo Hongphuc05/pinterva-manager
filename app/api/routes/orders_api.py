@@ -66,6 +66,8 @@ from app.application.sanitization import (
 from app.config import get_settings
 from app.domain.access import (
     ROLE_ADMIN,
+    ROLE_DESIGNER,
+    ROLE_DESIGNER_TRELLO,
     ROLE_SUPPORT,
 )
 from app.domain.models import OrderState
@@ -2269,6 +2271,7 @@ class DesignerWorkloadOrderOut(BaseModel):
     thumbnail_url: str | None = None
     deadline_at_ext: str | None = None
     product_name: str | None = None
+    work_domain: str = "standard"
     printerval_designer: str | None = None
     platform_designer: str | None = None
     note_outsource: str = ""
@@ -2300,7 +2303,7 @@ def api_designers_workload(
     designers = (
         db.query(User)
         .filter(
-            User.role == "designer",
+            User.role.in_([ROLE_DESIGNER, ROLE_DESIGNER_TRELLO]),
             User.active.is_(True),
             (User.platform_id == platform_id) | (User.platform_id.is_(None)),
         )
@@ -2317,7 +2320,8 @@ def api_designers_workload(
 
     assignments = (
         db.query(Assignment)
-        .filter(Assignment.status == "approved")
+        .filter(Assignment.status.in_(["approved", "draft"]))
+        .order_by(Assignment.created_at.asc())
         .all()
     )
     order_designer_assignment = {a.order_id: a.designer_id for a in assignments}
@@ -2375,6 +2379,7 @@ def api_designers_workload(
                         thumbnail_url=o.thumbnail_url,
                         deadline_at_ext=str(o.deadline_at_ext) if o.deadline_at_ext else None,
                         product_name=o.product_name,
+                        work_domain=o.work_domain or "standard",
                         printerval_designer=o.printerval_designer,
                         platform_designer=o.printerval_designer,
                         note_outsource=o.note_outsource or "",
