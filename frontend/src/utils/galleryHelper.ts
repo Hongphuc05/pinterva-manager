@@ -13,6 +13,25 @@ export function canonicalizeGalleryUrl(rawUrl: string): { key: string; standardU
   const url = rawUrl.trim()
   if (!url) return { key: '', standardUrl: '' }
 
+  // Designer responses route source-hosted assets through this local proxy. The
+  // encoded `u` parameter identifies the original asset, so it must stay part
+  // of the deduplication key. Treating every proxy URL as just
+  // `/api/assets/proxy` collapses an entire gallery to its first image.
+  try {
+    const proxyUrl = new URL(url, 'http://local')
+    if (proxyUrl.pathname === '/api/assets/proxy') {
+      const encodedSource = proxyUrl.searchParams.get('u')
+      if (encodedSource) {
+        return {
+          key: `proxy:${encodedSource}`,
+          standardUrl: url,
+        }
+      }
+    }
+  } catch {
+    // Continue with the normal URL canonicalization below.
+  }
+
   // 1. Platform asset
   const prinMatch = url.match(PLATFORM_ASSET_REGEX)
   if (prinMatch) {

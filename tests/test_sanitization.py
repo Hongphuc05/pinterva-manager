@@ -101,7 +101,10 @@ def test_designer_api_orders_list_contains_zero_printerval(client: TestClient, d
         product_name="T-Shirt 2D Custom Printerval",
         thumbnail_url="https://assets.printerval.com/mockups/thumb1.png",
         sku_image_url="https://assets.printerval.com/sku/sku1.png",
-        product_image_urls=["https://assets.printerval.com/gallery/img1.png"],
+        product_image_urls=[
+            "https://assets.printerval.com/gallery/img1.png",
+            "https://assets.printerval.com/gallery/img2.png",
+        ],
         external_order_url="https://printerval.com/admin/orders?id=99901",
         printerval_designer="nguyen van designer prin",
         printerval_status="doing",
@@ -155,6 +158,8 @@ def test_designer_api_orders_list_contains_zero_printerval(client: TestClient, d
     assert "external_order_url" not in detail_data
     assert "printerval_status" not in detail_data
     assert detail_data["thumbnail_url"].startswith("/api/assets/proxy?u=")
+    assert len(detail_data["product_image_urls"]) == 2
+    assert all(url.startswith("/api/assets/proxy?u=") for url in detail_data["product_image_urls"])
 
     # 3. Fetch current platform as Designer
     resp_plat = client.get(
