@@ -106,6 +106,20 @@ export function ProductGalleryCard({
     setSaveSuccess(false)
   }
 
+  function handleImageLoadError(failedUrl: string) {
+    // Gallery imports can contain a URL that passes format validation but is no
+    // longer available upstream. Do not leave a broken tile in the designer or
+    // admin view; admin can persist this cleaned list with the existing update
+    // action if the source image is permanently unavailable.
+    setGalleryList((prev) => prev.filter((url) => url !== failedUrl))
+    setSaveSuccess(false)
+    setErrorMessage(
+      isAdmin
+        ? 'Đã ẩn một ảnh không thể tải. Bấm “Cập nhật” để lưu danh sách ảnh hợp lệ.'
+        : 'Đã ẩn một ảnh không thể tải.',
+    )
+  }
+
   // Save changes to backend
   async function handleSaveGallery() {
     if (!orderId) return
@@ -274,6 +288,7 @@ export function ProductGalleryCard({
                     alt={`Product view ${index + 1}`}
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                     loading="lazy"
+                    onError={() => handleImageLoadError(imgUrl)}
                   />
                 </div>
 
