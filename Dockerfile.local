@@ -18,6 +18,7 @@ COPY --chown=app:app pyproject.toml /app/pyproject.toml
 COPY --chown=app:app alembic.ini /app/alembic.ini
 COPY --chown=app:app migrations /app/migrations
 COPY --chown=app:app app /app/app
+COPY --chown=app:app CopyImage /app/CopyImage
 COPY --chown=app:app --from=frontend-build /frontend/dist /app/frontend/dist
 RUN pip install --no-deps -e /app
 

@@ -2,7 +2,7 @@
 // Service Worker (Manifest V3)
 
 const DEFAULT_SETTINGS = {
-    apiBaseUrl: "http://localhost:8000",
+    apiBaseUrl: "https://tacahu.fun",
     autoScanOnLoad: false,
     maxConcurrency: 5,
 };

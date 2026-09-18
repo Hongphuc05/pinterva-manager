@@ -139,3 +139,22 @@ def test_import_batch_printerval_gallery_empty_items(client, db_session):
     data = resp.json()
     assert data["ok"] is True
     assert data["synced_orders_count"] == 0
+
+
+def test_download_extension_zip(client):
+    import io
+    import zipfile
+
+    resp = client.get("/api/integrations/extension/download")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/zip"
+    assert "tacahu-copyimage-extension.zip" in resp.headers.get("content-disposition", "")
+
+    zip_buf = io.BytesIO(resp.content)
+    with zipfile.ZipFile(zip_buf, "r") as zf:
+        namelist = zf.namelist()
+        assert "manifest.json" in namelist
+        assert "background.js" in namelist
+        assert "content.js" in namelist
+        assert "options.html" in namelist
+

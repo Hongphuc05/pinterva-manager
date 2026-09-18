@@ -9,6 +9,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const testStatus = document.getElementById('testStatus');
     const saveStatus = document.getElementById('saveStatus');
 
+    const btnPresetProd = document.getElementById('btnPresetProd');
+    const btnPresetLocal = document.getElementById('btnPresetLocal');
+
+    if (btnPresetProd) {
+        btnPresetProd.addEventListener('click', () => {
+            apiBaseUrlInput.value = 'https://tacahu.fun';
+        });
+    }
+
+    if (btnPresetLocal) {
+        btnPresetLocal.addEventListener('click', () => {
+            apiBaseUrlInput.value = 'http://localhost:8000';
+        });
+    }
+
     // Load stored settings
     chrome.runtime.sendMessage({ action: 'GET_SETTINGS' }, (res) => {
         if (res && res.success && res.data) {

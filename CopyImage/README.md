@@ -22,12 +22,13 @@ Tiện ích mở rộng Google Chrome (Manifest V3) chuyên dụng cho **Tacahu 
 
 ## ⚙️ Cấu Hình (Tùy chọn)
 
-1. Nhấp chuột phải vào biểu tượng tiện ích trên Chrome $\rightarrow$ Chọn **Tùy chọn (Options)** (hoặc click icon tiện ích).
+1. Nhấp chuột phải vào biểu tượng tiện ích trên Chrome $\rightarrow$ Chọn **Tùy chọn (Options)**.
 2. Điền địa chỉ API của Tacahu Ops:
-   - Mặc định chạy local: `http://localhost:8000`
-   - Chạy trên server staging/production: `https://your-domain.com`
-3. Nhấn **Kiểm tra (Test Connection)** để đảm bảo kết nối thành công.
-4. Chọn số luồng quét đồng thời (khuyến nghị 5 luồng) và nhấn **Lưu Cấu Hình**.
+   - **Chạy trên VPS Production**: `https://tacahu.fun` (bấm nút preset `🌐 VPS: https://tacahu.fun`)
+   - **Chạy trên máy Local**: `http://localhost:8000` (bấm nút preset `💻 Local: http://localhost:8000`)
+3. Nhấn **Kiểm tra (Test Connection)** để đảm bảo hiện thông báo xanh *"✓ Kết nối thành công tới Tacahu Ops!"*.
+4. Bật tùy chọn *"Tự động quét bộ ảnh ngay khi mở trang Design Job"* nếu muốn đồng bộ tự động.
+5. Nhấn **Lưu Cấu Hình**.
 
 ---
 

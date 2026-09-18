@@ -28,6 +28,7 @@ RUN python -c "import tomllib; f = open('pyproject.toml', 'rb'); data = tomllib.
 COPY alembic.ini ./
 COPY migrations ./migrations
 COPY app ./app
+COPY CopyImage ./CopyImage
 
 # 4. Install the package itself without re-resolving dependencies
 RUN pip install --no-deps -e . && chown -R app:app /app

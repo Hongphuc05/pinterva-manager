@@ -251,6 +251,48 @@ def import_batch_printerval_gallery(
     )
 
 
+@router.get("/integrations/extension/download")
+def download_extension_zip():
+    """Package the CopyImage Chrome extension directory into a zip archive and stream it."""
+    import io
+    import zipfile
+    from fastapi.responses import StreamingResponse
+
+    # Possible CopyImage directory locations
+    candidates = [
+        Path(__file__).resolve().parent.parent.parent.parent / "CopyImage",
+        Path(__file__).resolve().parent.parent.parent / "CopyImage",
+        Path.cwd() / "CopyImage",
+        Path("/app/CopyImage"),
+    ]
+    copy_image_dir = next((p for p in candidates if p.exists() and p.is_dir()), None)
+    if not copy_image_dir:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "Không tìm thấy thư mục extension CopyImage trên máy chủ",
+        )
+
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        for file_path in sorted(copy_image_dir.rglob("*")):
+            if file_path.is_file() and not file_path.name.startswith("."):
+                arcname = file_path.relative_to(copy_image_dir)
+                zip_file.write(file_path, arcname)
+
+    zip_buffer.seek(0)
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": 'attachment; filename="tacahu-copyimage-extension.zip"',
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
+
 class PendingGalleryOrder(BaseModel):
     id: uuid.UUID
     external_order_id: str

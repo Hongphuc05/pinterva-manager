@@ -209,10 +209,14 @@
         <div class="form-group">
             <label for="apiBaseUrl">Tacahu Ops API URL</label>
             <div class="input-row">
-                <input type="text" id="apiBaseUrl" placeholder="http://localhost:8000" />
+                <input type="text" id="apiBaseUrl" placeholder="https://tacahu.fun hoặc http://localhost:8000" />
                 <button type="button" id="btnTest" class="btn btn-secondary">Kiểm tra</button>
             </div>
-            <p class="hint">Địa chỉ Backend Tacahu Ops đang chạy (vd: http://localhost:8000 hoặc domain server)</p>
+            <div style="display: flex; gap: 6px; margin-top: 8px;">
+                <button type="button" id="btnPresetProd" class="btn btn-secondary" style="font-size: 11px; padding: 4px 8px;">🌐 VPS: https://tacahu.fun</button>
+                <button type="button" id="btnPresetLocal" class="btn btn-secondary" style="font-size: 11px; padding: 4px 8px;">💻 Local: http://localhost:8000</button>
+            </div>
+            <p class="hint">Địa chỉ Web/API Tacahu Ops. Khi dùng trên VPS thì chọn <strong>https://tacahu.fun</strong> (hoặc domain VPS của bạn).</p>
             <div id="testStatus" class="status-badge"></div>
         </div>
 

@@ -34,6 +34,7 @@ RUN python -c "import tomllib; f = open('pyproject.toml', 'rb'); data = tomllib.
 COPY --chown=app:app alembic.ini ./
 COPY --chown=app:app migrations ./migrations
 COPY --chown=app:app app ./app
+COPY --chown=app:app CopyImage ./CopyImage
 COPY --chown=app:app --from=frontend-build /frontend/dist ./frontend/dist
 RUN pip install --no-deps .
 
