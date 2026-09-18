@@ -4,7 +4,7 @@ import { apiFetch, ApiError } from '../api/client'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { Globe, CheckCircle2, AlertCircle, ArrowRight } from 'lucide-react'
 
-export function PrintervalLoginPage() {
+export function PlatformLoginPage() {
   const [sessionOpen, setSessionOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -12,7 +12,7 @@ export function PrintervalLoginPage() {
   const navigate = useNavigate()
 
   useEffect(() => {
-    apiFetch<{ session_open: boolean }>('/printerval-login/status')
+    apiFetch<{ session_open: boolean }>('/platform-login/status')
       .then((r) => setSessionOpen(r.session_open))
       .catch((e) => setError(e instanceof ApiError ? e.message : 'Không tải được trạng thái phiên Chrome.'))
       .finally(() => setLoading(false))
@@ -22,7 +22,7 @@ export function PrintervalLoginPage() {
     setError(null)
     setBusy(true)
     try {
-      const r = await apiFetch<{ session_open: boolean }>('/printerval-login/start', {
+      const r = await apiFetch<{ session_open: boolean }>('/platform-login/start', {
         method: 'POST',
       })
       setSessionOpen(r.session_open)
@@ -37,7 +37,7 @@ export function PrintervalLoginPage() {
     setError(null)
     setBusy(true)
     try {
-      await apiFetch('/printerval-login/done', { method: 'POST' })
+      await apiFetch('/platform-login/done', { method: 'POST' })
       navigate('/orders')
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Không đóng được phiên đăng nhập.')
@@ -56,7 +56,7 @@ export function PrintervalLoginPage() {
               <Globe className="h-6 w-6" />
             </div>
             <div>
-              <h1 className="text-lg font-bold text-slate-800">Đăng Nhập Tài Khoản Print Công Ty</h1>
+              <h1 className="text-lg font-bold text-slate-800">Đăng Nhập Tài Khoản Hệ Thống Mẹ</h1>
               <p className="text-xs text-slate-500">Kết nối trình duyệt Chrome thật để lưu cookie phiên làm việc dùng cho việc crawl đơn tự động</p>
             </div>
           </div>
@@ -82,7 +82,7 @@ export function PrintervalLoginPage() {
             <p className="text-xs text-slate-500">
               {sessionOpen
                 ? 'Đăng nhập vào tài khoản công ty trên cửa sổ Chrome vừa bật, sau đó nhấn "Hoàn Tất & Lưu Session" bên dưới để đóng cửa sổ.'
-                : 'Bấm nút bên dưới để hệ thống mở cửa sổ Chrome tương tác. Sau khi mở, hãy thực hiện đăng nhập tài khoản Print admin.'}
+                : 'Bấm nút bên dưới để hệ thống mở cửa sổ Chrome tương tác. Sau khi mở, hãy thực hiện đăng nhập tài khoản mẹ.'}
             </p>
           </div>
 

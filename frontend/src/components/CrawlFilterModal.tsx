@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { X, Search, RotateCcw } from 'lucide-react'
 
-// Status and designer use the same values as the Printerval filter. Selecting
+// Status and designer use the same values as the platform filter. Selecting
 // "All status" sends an empty status filter, which the confirmed HTTP API treats as
 // no status restriction. A specific job type still uses the slower DOM-verified path.
 const JOB_TYPES = ['Tất cả 2D & 3D', '2D', '3D', 'ART', 'WOOD', 'CALENDAR', 'EMBROIDERY', 'AI']
@@ -51,7 +51,7 @@ export function CrawlFilterModal({ isOpen, onClose, onSearch, loading, designers
 
         <div className="p-6 space-y-4">
           <p className="text-xs text-slate-500">
-            Giống bộ lọc bên Print — chỉ quét thêm đơn khớp bộ lọc vào CSDL, không đụng tới đơn cũ đã có sẵn.
+            Giống bộ lọc hệ thống mẹ — chỉ quét thêm đơn khớp bộ lọc vào CSDL, không đụng tới đơn cũ đã có sẵn.
           </p>
 
           <div className="grid grid-cols-2 gap-3">
@@ -84,7 +84,7 @@ export function CrawlFilterModal({ isOpen, onClose, onSearch, loading, designers
               ))}
             </select>
             <p className="text-[10px] text-slate-400">
-              "Tất cả 2D & 3D" dùng đường quét nhanh (API). Chọn 1 loại cụ thể sẽ chậm hơn (đi qua trình duyệt để lọc đúng như bên Print).
+              "Tất cả 2D & 3D" dùng đường quét nhanh (API). Chọn 1 loại cụ thể sẽ chậm hơn (đi qua trình duyệt để lọc đúng như bên hệ thống mẹ).
             </p>
           </div>
 

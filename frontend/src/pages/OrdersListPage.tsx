@@ -58,9 +58,9 @@ export type OrderSummary = {
   source_files: { name: string; url: string }[] | null
   source_download_all_url: string | null
   product_image_urls?: string[] | null
-  printerval_designer: string | null
-  printerval_status: string | null
-  printerval_assignment_lifecycle: string | null
+  platform_designer?: string | null
+  platform_status?: string | null
+  platform_assignment_lifecycle?: string | null
   created_at: string
   status_changed_at?: string | null
   note_outsource?: string | null
@@ -80,17 +80,17 @@ export type UserOption = {
   username: string
   full_name: string
   role: string
-  printerval_designer_option?: string | null
+  platform_designer_option?: string | null
 }
 
-export type PrintervalStatusTarget = {
+export type PlatformStatusTarget = {
   orderIds: string[]
   title: string
   currentStatus?: string | null
 }
 
-const PRINTERVAL_STATUS_OPTIONS = ['Waiting', 'Doing', 'Review', 'Fix', 'Confirm', 'Done'] as const
-const DEFAULT_PRINTERVAL_DES = 'nguyễn thị thúy hường 2d prin'
+const PLATFORM_STATUS_OPTIONS = ['Waiting', 'Doing', 'Review', 'Fix', 'Confirm', 'Done'] as const
+const DEFAULT_PLATFORM_DES = 'nguyễn thị thúy hường 2d'
 const ORDERS_CACHE_PREFIX = 'tacahu-orders-cache'
 
 function getUtc7DateStr(dateInput: string | null | undefined): string | null {
@@ -192,7 +192,7 @@ export function OrdersListPage() {
   const { showToast } = useToast()
   const { syncStatusMap } = useGallerySync()
   const [statusFilter, setStatusFilter] = useState('')
-  const [printervalStatusFilter, setPrintervalStatusFilter] = useState('')
+  const [platformStatusFilter, setPlatformStatusFilter] = useState('')
   const [designerFilter, setDesignerFilter] = useState('')
   const [batchFilter, setBatchFilter] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
@@ -219,7 +219,7 @@ export function OrdersListPage() {
   // Highlight state for newly crawled jobs and recently tab-moved jobs
   const [newlyCrawledOrderIds, setNewlyCrawledOrderIds] = useState<string[]>([])
   const [recentTabMovedOrderIds, setRecentTabMovedOrderIds] = useState<string[]>([])
-  const [recentPrintervalChanges, setRecentPrintervalChanges] = useState<
+  const [recentPlatformChanges, setRecentPlatformChanges] = useState<
     Record<string, { statusChanged?: boolean; designerChanged?: boolean; timestamp: number }>
   >({})
 
@@ -230,11 +230,11 @@ export function OrdersListPage() {
   const [assigningOrder, setAssigningOrder] = useState<OrderSummary | null>(null)
   const [usersList, setUsersList] = useState<UserOption[]>([])
   const [selectedUserId, setSelectedUserId] = useState('')
-  const [printervalDesigners, setPrintervalDesigners] = useState<string[]>([])
-  const [printervalStatuses, setPrintervalStatuses] = useState<string[]>([])
-  const [selectedPrintervalDesigner, setSelectedPrintervalDesigner] = useState(DEFAULT_PRINTERVAL_DES)
-  const [selectedPrintervalStatus, setSelectedPrintervalStatus] = useState('Doing')
-  const [loadingPrintervalOptions, setLoadingPrintervalOptions] = useState(false)
+  const [platformDesigners, setPlatformDesigners] = useState<string[]>([])
+  const [platformStatuses, setPlatformStatuses] = useState<string[]>([])
+  const [selectedPlatformDesigner, setSelectedPlatformDesigner] = useState(DEFAULT_PLATFORM_DES)
+  const [selectedPlatformStatus, setSelectedPlatformStatus] = useState('Doing')
+  const [loadingPlatformOptions, setLoadingPlatformOptions] = useState(false)
   const [assigning, setAssigning] = useState(false)
 
   // Accept Fix Modal state
@@ -249,18 +249,18 @@ export function OrdersListPage() {
   const [rejectFixOutsourceNote, setRejectFixOutsourceNote] = useState('')
   const [rejectFixSubmitting, setRejectFixSubmitting] = useState(false)
 
-  // Status-only Printerval update modal
-  const [printervalStatusTarget, setPrintervalStatusTarget] = useState<PrintervalStatusTarget | null>(null)
-  const [printervalStatusValue, setPrintervalStatusValue] = useState<string>('Doing')
-  const [updatingPrintervalStatus, setUpdatingPrintervalStatus] = useState(false)
+  // Status-only Web mẹ update modal
+  const [platformStatusTarget, setPlatformStatusTarget] = useState<PlatformStatusTarget | null>(null)
+  const [platformStatusValue, setPlatformStatusValue] = useState<string>('Doing')
+  const [updatingPlatformStatus, setUpdatingPlatformStatus] = useState(false)
   const [flaggingMissingOrderId, setFlaggingMissingOrderId] = useState<string | null>(null)
 
   // Bulk Selection State & Range Selection
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([])
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null)
   const [bulkDesignerId, setBulkDesignerId] = useState<string>('')
-  const [bulkPrintervalDesigner, setBulkPrintervalDesigner] = useState(DEFAULT_PRINTERVAL_DES)
-  const [bulkPrintervalStatus, setBulkPrintervalStatus] = useState('Doing')
+  const [bulkPlatformDesigner, setBulkPlatformDesigner] = useState(DEFAULT_PLATFORM_DES)
+  const [bulkPlatformStatus, setBulkPlatformStatus] = useState('Doing')
   const [bulkAssigning, setBulkAssigning] = useState<boolean>(false)
   const [movingToDuplicateDomain, setMovingToDuplicateDomain] = useState(false)
   const [deleteConfirmModalOpen, setDeleteConfirmModalOpen] = useState(false)
@@ -290,7 +290,7 @@ export function OrdersListPage() {
     }
   }, [isAdmin])
 
-  // Load Printerval options when assigning single order
+  // Load Web mẹ options when assigning single order
   useEffect(() => {
     if (!assigningOrder) return
     const matchingUser = usersList.find((u) => {
@@ -302,80 +302,80 @@ export function OrdersListPage() {
       return false
     })
     setSelectedUserId(matchingUser ? matchingUser.id : '')
-    setSelectedPrintervalDesigner(assigningOrder.printerval_designer || DEFAULT_PRINTERVAL_DES)
-    setSelectedPrintervalStatus(assigningOrder.printerval_status || 'Doing')
-    setLoadingPrintervalOptions(true)
+    setSelectedPlatformDesigner(assigningOrder.platform_designer || DEFAULT_PLATFORM_DES)
+    setSelectedPlatformStatus(assigningOrder.platform_status || 'Doing')
+    setLoadingPlatformOptions(true)
     apiFetch<{ designers: string[]; statuses: string[] }>(
-      `/orders/${assigningOrder.id}/printerval-options`
+      `/orders/${assigningOrder.id}/platform-options`
     )
       .then((result) => {
-        setPrintervalDesigners(result.designers)
-        setPrintervalStatuses(result.statuses)
-        if (assigningOrder.printerval_designer && result.designers.includes(assigningOrder.printerval_designer)) {
-          setSelectedPrintervalDesigner(assigningOrder.printerval_designer)
-        } else if (result.designers.includes(DEFAULT_PRINTERVAL_DES)) {
-          setSelectedPrintervalDesigner(DEFAULT_PRINTERVAL_DES)
+        setPlatformDesigners(result.designers)
+        setPlatformStatuses(result.statuses)
+        if (assigningOrder.platform_designer && result.designers.includes(assigningOrder.platform_designer)) {
+          setSelectedPlatformDesigner(assigningOrder.platform_designer)
+        } else if (result.designers.includes(DEFAULT_PLATFORM_DES)) {
+          setSelectedPlatformDesigner(DEFAULT_PLATFORM_DES)
         } else if (result.designers.length > 0) {
-          setSelectedPrintervalDesigner(result.designers[0])
+          setSelectedPlatformDesigner(result.designers[0])
         }
       })
       .catch((err) => {
-        setPrintervalDesigners([DEFAULT_PRINTERVAL_DES])
-        setPrintervalStatuses(['Doing', 'Review', 'Fix', 'Done', 'Waiting'])
-        setSelectedPrintervalDesigner(assigningOrder.printerval_designer || DEFAULT_PRINTERVAL_DES)
+        setPlatformDesigners([DEFAULT_PLATFORM_DES])
+        setPlatformStatuses(['Doing', 'Review', 'Fix', 'Done', 'Waiting'])
+        setSelectedPlatformDesigner(assigningOrder.platform_designer || DEFAULT_PLATFORM_DES)
         setError(err instanceof ApiError ? err.message : 'Không tải được danh sách Designer Print.')
       })
-      .finally(() => setLoadingPrintervalOptions(false))
+      .finally(() => setLoadingPlatformOptions(false))
   }, [assigningOrder, usersList])
 
-  // Load Printerval options for bulk assign
+  // Load Web mẹ options for bulk assign
   useEffect(() => {
     const firstOrderId = selectedOrderIds[0]
     if (!firstOrderId) {
-      setBulkPrintervalDesigner(DEFAULT_PRINTERVAL_DES)
+      setBulkPlatformDesigner(DEFAULT_PLATFORM_DES)
       return
     }
-    setLoadingPrintervalOptions(true)
+    setLoadingPlatformOptions(true)
     apiFetch<{ designers: string[]; statuses: string[] }>(
-      `/orders/${firstOrderId}/printerval-options`
+      `/orders/${firstOrderId}/platform-options`
     )
       .then((result) => {
-        setPrintervalDesigners(result.designers)
-        setPrintervalStatuses(result.statuses)
-        if (result.designers.includes(DEFAULT_PRINTERVAL_DES)) {
-          setBulkPrintervalDesigner(DEFAULT_PRINTERVAL_DES)
+        setPlatformDesigners(result.designers)
+        setPlatformStatuses(result.statuses)
+        if (result.designers.includes(DEFAULT_PLATFORM_DES)) {
+          setBulkPlatformDesigner(DEFAULT_PLATFORM_DES)
         } else if (result.designers.length > 0) {
-          setBulkPrintervalDesigner(result.designers[0])
+          setBulkPlatformDesigner(result.designers[0])
         }
       })
       .catch(() => {
-        setPrintervalDesigners([DEFAULT_PRINTERVAL_DES])
-        setPrintervalStatuses(['Doing', 'Review', 'Fix', 'Done', 'Waiting'])
-        setBulkPrintervalDesigner(DEFAULT_PRINTERVAL_DES)
+        setPlatformDesigners([DEFAULT_PLATFORM_DES])
+        setPlatformStatuses(['Doing', 'Review', 'Fix', 'Done', 'Waiting'])
+        setBulkPlatformDesigner(DEFAULT_PLATFORM_DES)
       })
-      .finally(() => setLoadingPrintervalOptions(false))
+      .finally(() => setLoadingPlatformOptions(false))
   }, [selectedOrderIds])
 
-  async function refreshPrintervalDesignerOptions() {
-    setLoadingPrintervalOptions(true)
+  async function refreshPlatformDesignerOptions() {
+    setLoadingPlatformOptions(true)
     try {
       const result = await apiFetch<{ designers: string[]; statuses: string[] }>(
-        '/platforms/printerval-options/refresh',
+        '/platforms/platform-options/refresh',
         { method: 'POST' }
       )
-      setPrintervalDesigners(result.designers)
-      setPrintervalStatuses(result.statuses)
+      setPlatformDesigners(result.designers)
+      setPlatformStatuses(result.statuses)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Không cập nhật được Designer Print.')
     } finally {
-      setLoadingPrintervalOptions(false)
+      setLoadingPlatformOptions(false)
     }
   }
 
   function dismissHighlight(orderId: string) {
     setNewlyCrawledOrderIds((prev) => prev.filter((id) => id !== orderId))
     setRecentTabMovedOrderIds((prev) => prev.filter((id) => id !== orderId))
-    setRecentPrintervalChanges((prev) => {
+    setRecentPlatformChanges((prev) => {
       if (!prev[orderId]) return prev
       const next = { ...prev }
       delete next[orderId]
@@ -408,21 +408,21 @@ export function OrdersListPage() {
     setBulkAssigning(true)
     try {
       const desUser = usersList.find((u) => u.id === bulkDesignerId)
-      const printervalDes = bulkPrintervalDesigner || desUser?.printerval_designer_option || DEFAULT_PRINTERVAL_DES
+      const platformDes = bulkPlatformDesigner || desUser?.platform_designer_option || DEFAULT_PLATFORM_DES
       const res = await apiFetch<{ queued_count: number }>('/assignments', {
         method: 'POST',
         body: JSON.stringify({
           order_ids: selectedOrderIds,
           designer_id: bulkDesignerId,
-          printerval_designer: printervalDes,
-          printerval_status: bulkPrintervalStatus || 'Doing',
+          platform_designer: platformDes,
+          platform_status: bulkPlatformStatus || 'Doing',
         }),
       })
       setFlash(`Đã phân công ${res.queued_count} đơn sang Doing và xếp đồng bộ Print.`)
       markTabMoved(selectedOrderIds)
       setSelectedOrderIds([])
       setBulkDesignerId('')
-      setBulkPrintervalDesigner(DEFAULT_PRINTERVAL_DES)
+      setBulkPlatformDesigner(DEFAULT_PLATFORM_DES)
       await loadOrders()
     } catch (err) {
       if (err instanceof ApiError) {
@@ -533,7 +533,7 @@ export function OrdersListPage() {
 
   async function handleAssignOrder(e: React.FormEvent) {
     e.preventDefault()
-    if (!assigningOrder || !selectedUserId || !selectedPrintervalDesigner) return
+    if (!assigningOrder || !selectedUserId || !selectedPlatformDesigner) return
     setAssigning(true)
     try {
       await apiFetch<{ request_ids: string[]; queued_count: number }>(
@@ -543,8 +543,8 @@ export function OrdersListPage() {
           body: JSON.stringify({
             order_ids: [assigningOrder.id],
             designer_id: selectedUserId,
-            printerval_designer: selectedPrintervalDesigner || DEFAULT_PRINTERVAL_DES,
-            printerval_status: selectedPrintervalStatus || 'Doing',
+            platform_designer: selectedPlatformDesigner || DEFAULT_PLATFORM_DES,
+            platform_status: selectedPlatformStatus || 'Doing',
           }),
         }
       )
@@ -561,41 +561,41 @@ export function OrdersListPage() {
     }
   }
 
-  function openPrintervalStatusModal(
+  function openPlatformStatusModal(
     orderIds: string[],
     title: string,
     currentStatus?: string | null,
   ) {
-    const matchingStatus = PRINTERVAL_STATUS_OPTIONS.find(
+    const matchingStatus = PLATFORM_STATUS_OPTIONS.find(
       (status) => status.toLowerCase() === currentStatus?.toLowerCase(),
     )
-    setPrintervalStatusValue(matchingStatus || 'Doing')
-    setPrintervalStatusTarget({ orderIds, title, currentStatus })
+    setPlatformStatusValue(matchingStatus || 'Doing')
+    setPlatformStatusTarget({ orderIds, title, currentStatus })
   }
 
-  async function handleUpdatePrintervalStatus(e: React.FormEvent) {
+  async function handleUpdatePlatformStatus(e: React.FormEvent) {
     e.preventDefault()
-    if (!printervalStatusTarget || printervalStatusTarget.orderIds.length === 0) return
-    setUpdatingPrintervalStatus(true)
+    if (!platformStatusTarget || platformStatusTarget.orderIds.length === 0) return
+    setUpdatingPlatformStatus(true)
     try {
       const result = await apiFetch<{ queued_count: number }>('/assignments', {
         method: 'POST',
         body: JSON.stringify({
-          order_ids: printervalStatusTarget.orderIds,
-          printerval_status: printervalStatusValue,
+          order_ids: platformStatusTarget.orderIds,
+          platform_status: platformStatusValue,
         }),
       })
       setFlash(
-        `Đã xếp cập nhật trạng thái ${printervalStatusValue} trên Print cho ${result.queued_count} đơn.`,
+        `Đã xếp cập nhật trạng thái ${platformStatusValue} trên Web mẹ cho ${result.queued_count} đơn.`,
       )
-      markTabMoved(printervalStatusTarget.orderIds)
+      markTabMoved(platformStatusTarget.orderIds)
       setSelectedOrderIds([])
-      setPrintervalStatusTarget(null)
+      setPlatformStatusTarget(null)
       await loadOrders()
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Không thể xếp cập nhật trạng thái trên Print.')
+      setError(err instanceof ApiError ? err.message : 'Không thể xếp cập nhật trạng thái trên Web mẹ.')
     } finally {
-      setUpdatingPrintervalStatus(false)
+      setUpdatingPlatformStatus(false)
     }
   }
 
@@ -638,7 +638,7 @@ export function OrdersListPage() {
             }, 300000)
           }
 
-          // Check tab state changes & Printerval status/designer changes
+          // Check tab state changes & Web mẹ status/designer changes
           const movedIds: string[] = []
           const nowTs = Date.now()
           const newPrinChanges: Record<string, { statusChanged?: boolean; designerChanged?: boolean; timestamp: number }> = {}
@@ -649,8 +649,8 @@ export function OrdersListPage() {
               if (oldOrd.state !== newOrd.state) {
                 movedIds.push(newOrd.id)
               }
-              const stChanged = Boolean(oldOrd.printerval_status && newOrd.printerval_status && oldOrd.printerval_status !== newOrd.printerval_status)
-              const desChanged = Boolean(oldOrd.printerval_designer && newOrd.printerval_designer && oldOrd.printerval_designer !== newOrd.printerval_designer)
+              const stChanged = Boolean(oldOrd.platform_status && newOrd.platform_status && oldOrd.platform_status !== newOrd.platform_status)
+              const desChanged = Boolean(oldOrd.platform_designer && newOrd.platform_designer && oldOrd.platform_designer !== newOrd.platform_designer)
               if (stChanged || desChanged) {
                 newPrinChanges[newOrd.id] = {
                   statusChanged: stChanged,
@@ -669,7 +669,7 @@ export function OrdersListPage() {
           }
 
           if (Object.keys(newPrinChanges).length > 0) {
-            setRecentPrintervalChanges((prev) => ({ ...prev, ...newPrinChanges }))
+            setRecentPlatformChanges((prev) => ({ ...prev, ...newPrinChanges }))
           }
         }
         return data.orders
@@ -725,7 +725,7 @@ export function OrdersListPage() {
     }
   }
 
-  async function handleSyncPrintervalStatus(orderIds?: string[]) {
+  async function handleSyncPlatformStatus(orderIds?: string[]) {
     window.dispatchEvent(new CustomEvent('sync-platform-start'))
     try {
       await triggerRun(orderIds)
@@ -862,7 +862,7 @@ export function OrdersListPage() {
         if (prev <= 1) {
           const targetIds = reviewOrders.map((o) => o.id)
           if (targetIds.length > 0) {
-            handleSyncPrintervalStatus(targetIds)
+            handleSyncPlatformStatus(targetIds)
           }
           return 300
         }
@@ -969,7 +969,7 @@ export function OrdersListPage() {
           ? o.external_order_id.toLowerCase().includes(q) ||
             (o.product_name && o.product_name.toLowerCase().includes(q)) ||
             (o.assigned_designer_name && o.assigned_designer_name.toLowerCase().includes(q)) ||
-            (o.printerval_designer && o.printerval_designer.toLowerCase().includes(q))
+            (o.platform_designer && o.platform_designer.toLowerCase().includes(q))
           : (o.product_name && o.product_name.toLowerCase().includes(q))
         if (!matches) return false
       }
@@ -977,7 +977,7 @@ export function OrdersListPage() {
       if (statusFilter) {
         const sf = statusFilter.toUpperCase()
         const oState = (o.state || '').toUpperCase()
-        const pState = (o.printerval_status || '').toUpperCase()
+        const pState = (o.platform_status || '').toUpperCase()
         if (sf === 'WAITING' || sf === 'OPEN_FOR_ALLOCATION' || sf === 'DISCOVERED' || sf === 'PENDING' || sf === 'OPEN') {
           if (!['WAITING', 'OPEN_FOR_ALLOCATION', 'DISCOVERED', 'PENDING', 'OPEN'].includes(oState) && pState !== 'WAITING') {
             return false
@@ -1009,14 +1009,14 @@ export function OrdersListPage() {
 
       if (designerFilter) {
         if (designerFilter === 'unassigned') {
-          if (o.assigned_designer_name || o.printerval_designer) return false
+          if (o.assigned_designer_name || o.platform_designer) return false
         } else {
           const desUser = usersList.find((u) => u.id === designerFilter)
           if (desUser) {
             const name = (desUser.full_name || desUser.username || '').toLowerCase().trim()
-            const opt = (desUser.printerval_designer_option || '').toLowerCase().trim()
+            const opt = (desUser.platform_designer_option || '').toLowerCase().trim()
             const assigned = (o.assigned_designer_name || '').toLowerCase().trim()
-            const pDes = (o.printerval_designer || '').toLowerCase().trim()
+            const pDes = (o.platform_designer || '').toLowerCase().trim()
             const matches =
               (name && assigned === name) ||
               (name && pDes === name) ||
@@ -1027,9 +1027,9 @@ export function OrdersListPage() {
         }
       }
 
-      if (printervalStatusFilter) {
-        const psf = printervalStatusFilter.toLowerCase().trim()
-        const orderPStatus = (o.printerval_status || '').toLowerCase().trim()
+      if (platformStatusFilter) {
+        const psf = platformStatusFilter.toLowerCase().trim()
+        const orderPStatus = (o.platform_status || '').toLowerCase().trim()
         if (psf === 'unspecified') {
           if (orderPStatus) return false
         } else {
@@ -1072,7 +1072,7 @@ export function OrdersListPage() {
     const next = new URLSearchParams(searchParams)
     next.delete('page')
     setSearchParams(next, { replace: true })
-  }, [statusFilter, printervalStatusFilter, designerFilter, batchFilter, searchQuery, dateFilterType, dateFrom, dateTo, activeDesignerTab, adminTab, dateSort, syncedImagesFilter])
+  }, [statusFilter, platformStatusFilter, designerFilter, batchFilter, searchQuery, dateFilterType, dateFrom, dateTo, activeDesignerTab, adminTab, dateSort, syncedImagesFilter])
 
   function toggleDateSort(field: 'order_created_at_ext' | 'created_at' | 'status_changed_at') {
     setDateSort((current) => ({
@@ -1120,7 +1120,7 @@ export function OrdersListPage() {
 
   function handleResetFilters() {
     setStatusFilter('')
-    setPrintervalStatusFilter('')
+    setPlatformStatusFilter('')
     setDesignerFilter('')
     setBatchFilter('')
     setSearchQuery('')
@@ -1178,7 +1178,7 @@ export function OrdersListPage() {
           note_outsource: rejectFixOutsourceNote,
         }),
       })
-      showToast(`Đã từ chối Fix và gửi lại Review trên Print cho đơn ${rejectFixOrder.external_order_id}.`, 'success')
+      showToast(`Đã từ chối Fix và gửi lại Review trên Web mẹ cho đơn ${rejectFixOrder.external_order_id}.`, 'success')
       markTabMoved(rejectFixOrder.id)
       setRejectFixOrder(null)
       await loadOrders()
@@ -1226,7 +1226,7 @@ export function OrdersListPage() {
         : doneOrders
 
       const targetIds = targetOrders.map((o) => o.id)
-      handleSyncPrintervalStatus(targetIds.length > 0 ? targetIds : undefined)
+      handleSyncPlatformStatus(targetIds.length > 0 ? targetIds : undefined)
     }
     window.addEventListener('request-sync-current-tab', handleRequestSync)
     return () => window.removeEventListener('request-sync-current-tab', handleRequestSync)
@@ -1412,7 +1412,7 @@ export function OrdersListPage() {
                   {isAdmin && (
                     <button
                       type="button"
-                      onClick={() => handleSyncPrintervalStatus(doingOrders.map((o) => o.id))}
+                      onClick={() => handleSyncPlatformStatus(doingOrders.map((o) => o.id))}
                       disabled={isTriggering || !!syncStatus?.is_running || doingOrders.length === 0}
                       className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-bold text-white bg-[#0052CC] hover:bg-[#0041A3] rounded-xl shadow-2xs transition-all cursor-pointer disabled:opacity-50"
                       title="Đồng bộ trạng thái các đơn đang làm trong tab Doing"
@@ -1434,7 +1434,7 @@ export function OrdersListPage() {
                     type="button"
                     onClick={() => {
                       setReviewAutoSyncCountdown(300)
-                      handleSyncPrintervalStatus(reviewOrders.map((o) => o.id))
+                      handleSyncPlatformStatus(reviewOrders.map((o) => o.id))
                     }}
                     disabled={isTriggering || !!syncStatus?.is_running || reviewOrders.length === 0}
                     className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 rounded-xl shadow-2xs transition-all cursor-pointer disabled:opacity-50"
@@ -1518,7 +1518,7 @@ export function OrdersListPage() {
 
                   <button
                     type="button"
-                    onClick={() => handleSyncPrintervalStatus(fixOrders.map((o) => o.id))}
+                    onClick={() => handleSyncPlatformStatus(fixOrders.map((o) => o.id))}
                     disabled={isTriggering || !!syncStatus?.is_running || fixOrders.length === 0}
                     className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-2xs transition-all cursor-pointer disabled:opacity-50"
                     title="Đồng bộ trạng thái các đơn cần sửa trong tab Fix"
@@ -1752,14 +1752,14 @@ export function OrdersListPage() {
               </select>
             </div>
 
-            {/* Printerval Status Filter (Admin only) */}
+            {/* Web mẹ Status Filter (Admin only) */}
             {isAdmin && (
               <div className="flex items-center gap-1.5">
                 <select
                   className="text-xs border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 font-medium focus:outline-none focus:border-[#0052CC] text-slate-700"
-                  value={printervalStatusFilter}
-                  onChange={(e) => setPrintervalStatusFilter(e.target.value)}
-                  title="Lọc theo trạng thái trên Print"
+                  value={platformStatusFilter}
+                  onChange={(e) => setPlatformStatusFilter(e.target.value)}
+                  title="Lọc theo trạng thái trên Web mẹ"
                 >
                   <option value="">Tất cả trạng thái Print</option>
                   <option value="waiting">Prin: Waiting</option>
@@ -1917,7 +1917,7 @@ export function OrdersListPage() {
           </div>
 
           {/* Reset All Filters Button */}
-          {(statusFilter || printervalStatusFilter || designerFilter || batchFilter || searchQuery || dateFrom || dateTo || syncedImagesFilter) && (
+          {(statusFilter || platformStatusFilter || designerFilter || batchFilter || searchQuery || dateFrom || dateTo || syncedImagesFilter) && (
             <button
               type="button"
               onClick={handleResetFilters}
@@ -1953,7 +1953,7 @@ export function OrdersListPage() {
 
             <button
               type="button"
-              onClick={() => openPrintervalStatusModal(
+              onClick={() => openPlatformStatusModal(
                 selectedOrderIds,
                 `Cập nhật ${selectedOrderIds.length} đơn đã chọn`,
               )}
@@ -1970,8 +1970,8 @@ export function OrdersListPage() {
                 const desId = e.target.value
                 setBulkDesignerId(desId)
                 const desUser = usersList.find((u) => u.id === desId)
-                if (desUser?.printerval_designer_option) {
-                  setBulkPrintervalDesigner(desUser.printerval_designer_option)
+                if (desUser?.platform_designer_option) {
+                  setBulkPlatformDesigner(desUser.platform_designer_option)
                 }
               }}
               className="bg-white text-slate-800 text-xs font-semibold px-3 py-1.5 rounded-lg border border-white/30 focus:outline-none shadow-xs"
@@ -1984,34 +1984,34 @@ export function OrdersListPage() {
               ))}
             </select>
 
-            {/* Select Printerval Designer */}
+            {/* Select Web mẹ Designer */}
             <select
-              value={bulkPrintervalDesigner}
-              onChange={(e) => setBulkPrintervalDesigner(e.target.value)}
-              disabled={loadingPrintervalOptions}
+              value={bulkPlatformDesigner}
+              onChange={(e) => setBulkPlatformDesigner(e.target.value)}
+              disabled={loadingPlatformOptions}
               className="bg-white text-slate-800 text-xs font-semibold px-3 py-1.5 rounded-lg border border-white/30 focus:outline-none shadow-xs disabled:opacity-60"
             >
-              <option value={DEFAULT_PRINTERVAL_DES}>{DEFAULT_PRINTERVAL_DES} (Mặc định)</option>
-              {printervalDesigners.filter((d) => d !== DEFAULT_PRINTERVAL_DES).map((designer) => (
+              <option value={DEFAULT_PLATFORM_DES}>{DEFAULT_PLATFORM_DES} (Mặc định)</option>
+              {platformDesigners.filter((d) => d !== DEFAULT_PLATFORM_DES).map((designer) => (
                 <option key={designer} value={designer}>{designer}</option>
               ))}
             </select>
 
-            {/* Select Printerval Status */}
+            {/* Select Web mẹ Status */}
             <select
-              value={bulkPrintervalStatus}
-              onChange={(e) => setBulkPrintervalStatus(e.target.value)}
-              disabled={loadingPrintervalOptions}
+              value={bulkPlatformStatus}
+              onChange={(e) => setBulkPlatformStatus(e.target.value)}
+              disabled={loadingPlatformOptions}
               className="bg-white text-slate-800 text-xs font-semibold px-3 py-1.5 rounded-lg border border-white/30 focus:outline-none shadow-xs disabled:opacity-60"
             >
-              {(printervalStatuses.length ? printervalStatuses : ['Doing', 'Review', 'Fix', 'Done', 'Waiting']).map((status) => (
+              {(platformStatuses.length ? platformStatuses : ['Doing', 'Review', 'Fix', 'Done', 'Waiting']).map((status) => (
                 <option key={status} value={status}>{status}</option>
               ))}
             </select>
 
             <button
               onClick={handleBulkAssign}
-              disabled={!bulkDesignerId || bulkAssigning || loadingPrintervalOptions}
+              disabled={!bulkDesignerId || bulkAssigning || loadingPlatformOptions}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-lg shadow-sm transition-all disabled:opacity-50 cursor-pointer"
             >
               {bulkAssigning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
@@ -2128,7 +2128,7 @@ export function OrdersListPage() {
             <span className="text-xs text-slate-500 font-medium">task</span>
           </div>
 
-          {(searchQuery || statusFilter || printervalStatusFilter || designerFilter || batchFilter || dateFrom || dateTo || syncedImagesFilter) && (
+          {(searchQuery || statusFilter || platformStatusFilter || designerFilter || batchFilter || dateFrom || dateTo || syncedImagesFilter) && (
             <div className="inline-flex items-center gap-1.5 text-xs text-slate-500 bg-slate-100/80 px-2.5 py-1 rounded-md border border-slate-200/60">
               <span className="text-slate-400">Đang lọc từ:</span>
               <span className="font-mono font-bold text-slate-700">{baseOrders.length}</span>
@@ -2231,7 +2231,7 @@ export function OrdersListPage() {
                         <Package className="h-10 w-10 mx-auto mb-2 opacity-30 text-slate-400" />
                         <p className="font-medium text-sm text-slate-500">Không có đơn hàng nào trong tab này</p>
                         <p className="text-xs text-slate-400 mt-1">
-                          Đơn hàng sẽ xuất hiện khi có sự thay đổi trạng thái hoặc quét đơn từ Print
+                          Đơn hàng sẽ xuất hiện khi có sự thay đổi trạng thái hoặc quét đơn từ Web mẹ
                         </p>
                       </>
                     )}
@@ -2552,7 +2552,7 @@ export function OrdersListPage() {
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="text-[10px] font-bold text-[#0052CC] hover:underline inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-blue-50 border border-blue-100"
-                                  title="Mở đơn trên Print"
+                                  title="Mở đơn trên Web mẹ"
                                 >
                                   <span>Order</span>
                                   <ExternalLink className="h-2.5 w-2.5" />
@@ -2602,7 +2602,7 @@ export function OrdersListPage() {
                               <div className="mt-1.5 p-2 rounded-lg bg-orange-50 border border-orange-200 text-[11px] text-orange-950 font-normal">
                                 <div className="font-bold flex items-center gap-1 text-orange-900 mb-0.5">
                                   <AlertTriangle className="h-3 w-3 text-orange-600 shrink-0" />
-                                  <span>QC Print:</span>
+                                  <span>QC Acc Mẹ:</span>
                                 </div>
                                 <div className="whitespace-pre-wrap break-all leading-tight text-slate-800 line-clamp-2">
                                   {o.note_outsource}
@@ -2656,14 +2656,14 @@ export function OrdersListPage() {
                                 )}
                               </div>
                             )}
-                            {isAdmin && o.printerval_status && (
+                            {isAdmin && o.platform_status && (
                               <div className="mt-1 text-[10px] font-mono text-slate-400 flex items-center gap-1">
                                 <span>Prin:</span>
                                 <span className="font-semibold text-slate-600 inline-flex items-center gap-1">
-                                  {recentPrintervalChanges[o.id]?.statusChanged && (Date.now() - (recentPrintervalChanges[o.id]?.timestamp || 0) < 300000) && (
-                                    <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shadow-xs shrink-0" title="Trạng thái Print mới cập nhật (hiển thị 5 phút hoặc khi click)" />
+                                  {recentPlatformChanges[o.id]?.statusChanged && (Date.now() - (recentPlatformChanges[o.id]?.timestamp || 0) < 300000) && (
+                                    <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shadow-xs shrink-0" title="Trạng thái Web mẹ mới cập nhật (hiển thị 5 phút hoặc khi click)" />
                                   )}
-                                  <span>{o.printerval_status}</span>
+                                  <span>{o.platform_status}</span>
                                 </span>
                               </div>
                             )}
@@ -2693,16 +2693,16 @@ export function OrdersListPage() {
                                 {isAdmin ? '+ Phân công' : 'Chưa phân bổ'}
                               </span>
                             )}
-                            {isAdmin && (o.printerval_designer || o.printerval_assignment_lifecycle === 'pending') && (
-                              <div className="mt-0.5 text-[10px] font-medium text-slate-500 flex items-center gap-1 max-w-[160px] truncate" title={o.printerval_designer || ''}>
+                            {isAdmin && (o.platform_designer || o.platform_assignment_lifecycle === 'pending') && (
+                              <div className="mt-0.5 text-[10px] font-medium text-slate-500 flex items-center gap-1 max-w-[160px] truncate" title={o.platform_designer || ''}>
                                 <span>Prin:</span>
                                 <span className="inline-flex items-center gap-1 truncate">
-                                  {recentPrintervalChanges[o.id]?.designerChanged && (Date.now() - (recentPrintervalChanges[o.id]?.timestamp || 0) < 300000) && (
+                                  {recentPlatformChanges[o.id]?.designerChanged && (Date.now() - (recentPlatformChanges[o.id]?.timestamp || 0) < 300000) && (
                                     <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shadow-xs shrink-0" title="Designer Print mới cập nhật (hiển thị 5 phút hoặc khi click)" />
                                   )}
-                                  <span className="truncate">{o.printerval_designer || '—'}</span>
+                                  <span className="truncate">{o.platform_designer || '—'}</span>
                                 </span>
-                                {o.printerval_assignment_lifecycle === 'pending' && (
+                                {o.platform_assignment_lifecycle === 'pending' && (
                                   <Loader2 className="h-2.5 w-2.5 animate-spin inline-block ml-1 text-[#0052CC]" />
                                 )}
                               </div>
@@ -2723,7 +2723,7 @@ export function OrdersListPage() {
                             })()}
                           </td>
 
-                          {/* Printerval Order Created At (Order At) */}
+                          {/* Web mẹ Order Created At (Order At) */}
                           <td className="py-2.5 px-4 whitespace-nowrap">
                             {(() => {
                               const split = formatUtc7Split(o.order_created_at_ext)
@@ -2797,7 +2797,7 @@ export function OrdersListPage() {
                                     type="button"
                                     onClick={() => openRejectFixModal(o)}
                                     className="inline-flex items-center gap-1 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 px-2.5 py-1 rounded-lg transition-colors cursor-pointer shadow-2xs"
-                                    title="Từ chối Fix và gửi lại Review trên Print"
+                                    title="Từ chối Fix và gửi lại Review trên Web mẹ"
                                   >
                                     <Undo2 className="h-3 w-3" />
                                     <span>Từ chối Fix</span>
@@ -2881,11 +2881,11 @@ export function OrdersListPage() {
         />
       </div>
 
-      {/* Status-only Printerval update modal */}
-      {printervalStatusTarget && (
+      {/* Status-only Web mẹ update modal */}
+      {platformStatusTarget && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-200"
-          onClick={() => !updatingPrintervalStatus && setPrintervalStatusTarget(null)}
+          onClick={() => !updatingPlatformStatus && setPlatformStatusTarget(null)}
         >
           <div
             className="relative w-full max-w-sm overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
@@ -2898,28 +2898,28 @@ export function OrdersListPage() {
               </div>
               <button
                 type="button"
-                onClick={() => setPrintervalStatusTarget(null)}
-                disabled={updatingPrintervalStatus}
+                onClick={() => setPlatformStatusTarget(null)}
+                disabled={updatingPlatformStatus}
                 className="rounded-lg p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700 disabled:opacity-50"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <form onSubmit={handleUpdatePrintervalStatus} className="space-y-4 p-6">
+            <form onSubmit={handleUpdatePlatformStatus} className="space-y-4 p-6">
               <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-xs text-slate-700">
-                <p className="font-bold text-slate-800">{printervalStatusTarget.title}</p>
-                {printervalStatusTarget.currentStatus && (
-                  <p className="mt-1">Trạng thái Print đã lưu: <strong>{printervalStatusTarget.currentStatus}</strong></p>
+                <p className="font-bold text-slate-800">{platformStatusTarget.title}</p>
+                {platformStatusTarget.currentStatus && (
+                  <p className="mt-1">Trạng thái Web mẹ đã lưu: <strong>{platformStatusTarget.currentStatus}</strong></p>
                 )}
               </div>
               <div className="space-y-1">
-                <label className="block text-xs font-bold text-slate-700">Trạng thái mới trên Print</label>
+                <label className="block text-xs font-bold text-slate-700">Trạng thái mới trên Web mẹ</label>
                 <select
-                  value={printervalStatusValue}
-                  onChange={(e) => setPrintervalStatusValue(e.target.value)}
+                  value={platformStatusValue}
+                  onChange={(e) => setPlatformStatusValue(e.target.value)}
                   className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs focus:border-[#0052CC] focus:outline-none focus:ring-2 focus:ring-[#0052CC]/20"
                 >
-                  {PRINTERVAL_STATUS_OPTIONS.map((status) => (
+                  {PLATFORM_STATUS_OPTIONS.map((status) => (
                     <option key={status} value={status}>{status}</option>
                   ))}
                 </select>
@@ -2930,19 +2930,19 @@ export function OrdersListPage() {
               <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
                 <button
                   type="button"
-                  onClick={() => setPrintervalStatusTarget(null)}
-                  disabled={updatingPrintervalStatus}
+                  onClick={() => setPlatformStatusTarget(null)}
+                  disabled={updatingPlatformStatus}
                   className="rounded-xl bg-slate-100 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200 disabled:opacity-50"
                 >
                   Hủy
                 </button>
                 <button
                   type="submit"
-                  disabled={updatingPrintervalStatus}
+                  disabled={updatingPlatformStatus}
                   className="inline-flex items-center gap-1.5 rounded-xl bg-[#0052CC] px-4 py-2 text-xs font-bold text-white hover:bg-[#0041A3] disabled:opacity-50"
                 >
-                  {updatingPrintervalStatus && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                  {updatingPrintervalStatus ? 'Đang xếp hàng…' : `Cập nhật ${printervalStatusTarget.orderIds.length} đơn`}
+                  {updatingPlatformStatus && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  {updatingPlatformStatus ? 'Đang xếp hàng…' : `Cập nhật ${platformStatusTarget.orderIds.length} đơn`}
                 </button>
               </div>
             </form>
@@ -3011,27 +3011,27 @@ export function OrdersListPage() {
 
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-700 block">
-                  Designer trên Print <span className="text-red-500">*</span>
+                  Designer trên Web mẹ <span className="text-red-500">*</span>
                 </label>
                 <div className="flex items-center justify-between">
                   <button
                     type="button"
-                    onClick={refreshPrintervalDesignerOptions}
-                    disabled={loadingPrintervalOptions}
+                    onClick={refreshPlatformDesignerOptions}
+                    disabled={loadingPlatformOptions}
                     className="mb-1 text-[11px] font-semibold text-[#0052CC] hover:underline disabled:opacity-50"
                   >
-                    Cập nhật danh sách từ Print
+                    Cập nhật danh sách từ Web mẹ
                   </button>
                 </div>
                 <select
                   required
-                  value={selectedPrintervalDesigner}
-                  onChange={(e) => setSelectedPrintervalDesigner(e.target.value)}
-                  disabled={loadingPrintervalOptions}
+                  value={selectedPlatformDesigner}
+                  onChange={(e) => setSelectedPlatformDesigner(e.target.value)}
+                  disabled={loadingPlatformOptions}
                   className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-[#0052CC]/20 focus:border-[#0052CC] disabled:bg-slate-100"
                 >
-                  <option value={DEFAULT_PRINTERVAL_DES}>{DEFAULT_PRINTERVAL_DES} (Mặc định)</option>
-                  {printervalDesigners.filter((d) => d !== DEFAULT_PRINTERVAL_DES).map((designer) => (
+                  <option value={DEFAULT_PLATFORM_DES}>{DEFAULT_PLATFORM_DES} (Mặc định)</option>
+                  {platformDesigners.filter((d) => d !== DEFAULT_PLATFORM_DES).map((designer) => (
                     <option key={designer} value={designer}>{designer}</option>
                   ))}
                 </select>
@@ -3039,16 +3039,16 @@ export function OrdersListPage() {
 
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-700 block">
-                  Trạng thái trên Print <span className="text-red-500">*</span>
+                  Trạng thái trên Web mẹ <span className="text-red-500">*</span>
                 </label>
                 <select
                   required
-                  value={selectedPrintervalStatus}
-                  onChange={(e) => setSelectedPrintervalStatus(e.target.value)}
-                  disabled={loadingPrintervalOptions}
+                  value={selectedPlatformStatus}
+                  onChange={(e) => setSelectedPlatformStatus(e.target.value)}
+                  disabled={loadingPlatformOptions}
                   className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-[#0052CC]/20 focus:border-[#0052CC] disabled:bg-slate-100"
                 >
-                  {(printervalStatuses.length ? printervalStatuses : ['Doing', 'Review', 'Fix', 'Done', 'Waiting']).map((status) => (
+                  {(platformStatuses.length ? platformStatuses : ['Doing', 'Review', 'Fix', 'Done', 'Waiting']).map((status) => (
                     <option key={status} value={status}>{status}</option>
                   ))}
                 </select>
@@ -3078,7 +3078,7 @@ export function OrdersListPage() {
                   </button>
                   <button
                     type="submit"
-                    disabled={assigning || loadingPrintervalOptions || !selectedUserId}
+                    disabled={assigning || loadingPlatformOptions || !selectedUserId}
                     className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-[#0052CC] hover:bg-[#0041A3] rounded-xl transition-colors shadow-2xs disabled:opacity-50 cursor-pointer"
                   >
                     {assigning && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
@@ -3159,10 +3159,10 @@ export function OrdersListPage() {
                 />
               </div>
 
-              {/* Outsource Note from Printerval */}
+              {/* Outsource Note from Web mẹ */}
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-700 block flex items-center justify-between">
-                  <span>Ghi chú Outsource (Print QC)</span>
+                  <span>Ghi chú Outsource (QC)</span>
                   <span className="text-[10px] text-amber-700 font-normal">Từ Print</span>
                 </label>
                 <textarea
@@ -3197,7 +3197,7 @@ export function OrdersListPage() {
         </div>
       )}
 
-      {/* Reject Fix Modal (Admin từ chối Fix & gửi lại Review trên Print) */}
+      {/* Reject Fix Modal (Admin từ chối Fix & gửi lại Review trên Web mẹ) */}
       {rejectFixOrder && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-200"
@@ -3254,7 +3254,7 @@ export function OrdersListPage() {
                   <span>Cơ chế hoạt động:</span>
                 </p>
                 <span>
-                  Hệ thống sẽ cập nhật trạng thái đơn trên Print thành <strong>Review</strong> kèm ghi chú outsource trên, và chuyển đơn trong hệ thống quay về tab <strong>Review</strong> để bên Print xem xét lại.
+                  Hệ thống sẽ cập nhật trạng thái đơn trên Web mẹ thành <strong>Review</strong> kèm ghi chú outsource trên, và chuyển đơn trong hệ thống quay về tab <strong>Review</strong> để bên Print xem xét lại.
                 </span>
               </div>
 

@@ -12,8 +12,8 @@ import {
 } from 'lucide-react'
 import { DashboardLayout } from '../components/DashboardLayout'
 
-export function PrintervalHubPage() {
-  const printervalAdminUrl = 'https://printerval.com/central/outsource/pod/design-job/admin'
+export function PlatformHubPage() {
+  const platformAdminUrl = '#'
   const downloadExtensionUrl = '/api/integrations/extension/download'
 
   return (
@@ -25,23 +25,23 @@ export function PrintervalHubPage() {
             <div className="space-y-1.5">
               <h1 className="text-xl lg:text-2xl font-bold tracking-tight text-white flex items-center gap-2.5">
                 <Globe className="h-6 w-6 text-blue-200" />
-                <span>Mở Print & Đồng Bộ Bộ Ảnh</span>
+                <span>Mở Hệ Thống Mẹ & Đồng Bộ Bộ Ảnh</span>
               </h1>
               <p className="text-xs text-blue-100/90 max-w-2xl leading-relaxed">
-                Mở trang quản lý Print chỉ với 1 click. Tiện ích mở rộng <strong>Tacahu Sync (CopyImage)</strong> hỗ trợ trích xuất và đồng bộ hàng loạt toàn bộ ảnh sản phẩm về hệ thống Tacahu Ops (VPS hoặc Localhost).
+                Mở trang quản lý hệ thống mẹ chỉ với 1 click. Tiện ích mở rộng <strong>Tacahu Sync (CopyImage)</strong> hỗ trợ trích xuất và đồng bộ hàng loạt toàn bộ ảnh sản phẩm về hệ thống Tacahu Ops (VPS hoặc Localhost).
               </p>
             </div>
 
             {/* Main Action Buttons */}
             <div className="flex flex-wrap items-center gap-3 pt-1">
               <a
-                href={printervalAdminUrl}
+                href={platformAdminUrl}
                 target="_blank"
                 rel="noreferrer"
                 className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-white text-[#0052CC] hover:bg-blue-50 font-semibold text-xs shadow-sm transition-all"
               >
                 <Globe className="h-4 w-4 text-[#0052CC]" />
-                <span>Mở Trang Quản Lý Print</span>
+                <span>Mở Trang Quản Lý Hệ Thống Mẹ</span>
                 <ExternalLink className="h-3.5 w-3.5 opacity-70" />
               </a>
 
@@ -100,7 +100,7 @@ export function PrintervalHubPage() {
                 <span>Cài Đặt Vào Trình Duyệt (Chrome / Cốc Cốc)</span>
               </div>
               <p className="text-xs text-slate-600 leading-relaxed">
-                Mở tab mới truy cập <code className="bg-slate-200/80 px-1 py-0.5 rounded text-slate-800 font-mono text-[11px]">chrome://extensions/</code> $\rightarrow$ Bật công tắc <strong>Developer mode</strong> (góc trên bên phải) $\rightarrow$ Bấm <strong>Tải tiện ích đã giải nén (Load unpacked)</strong> và chọn thư mục vừa giải nén.
+                Mở tab mới truy cập <code className="bg-slate-200/80 px-1 py-0.5 rounded text-slate-800 font-mono text-[11px]">chrome://extensions/</code> &rarr; Bật công tắc <strong>Developer mode</strong> (góc trên bên phải) &rarr; Bấm <strong>Tải tiện ích đã giải nén (Load unpacked)</strong> và chọn thư mục vừa giải nén.
               </p>
             </div>
 
@@ -112,7 +112,7 @@ export function PrintervalHubPage() {
                 <span>Cấu Hình Địa Chỉ Web Tacahu Ops</span>
               </div>
               <p className="text-xs text-slate-600 leading-relaxed">
-                Chuột phải vào icon Extension $\rightarrow$ Chọn <strong>Tùy chọn (Options)</strong>. Tại ô <em>Tacahu Ops API URL</em>:
+                Chuột phải vào icon Extension &rarr; Chọn <strong>Tùy chọn (Options)</strong>. Tại ô <em>Tacahu Ops API URL</em>:
               </p>
               <div className="space-y-1.5 text-[11px] bg-white p-2.5 rounded border border-slate-200">
                 <div className="flex items-center gap-1.5 text-slate-700">
@@ -125,7 +125,7 @@ export function PrintervalHubPage() {
                 </div>
               </div>
               <p className="text-[11px] text-slate-500 leading-relaxed">
-                Bấm <strong>[Kiểm tra]</strong> (hiện thông báo xanh thành công) $\rightarrow$ Bấm <strong>[Lưu Cấu Hình]</strong>.
+                Bấm <strong>[Kiểm tra]</strong> (hiện thông báo xanh thành công) &rarr; Bấm <strong>[Lưu Cấu Hình]</strong>.
               </p>
             </div>
 
@@ -137,10 +137,10 @@ export function PrintervalHubPage() {
                 <span>Quét & Đồng Bộ Ảnh Tự Động</span>
               </div>
               <p className="text-xs text-slate-600 leading-relaxed">
-                Bấm nút <strong>[Mở Trang Quản Lý Print]</strong> ở trên $\rightarrow$ Sang trang Print, bấm nút <strong>Quét & Đồng Bộ Bộ Ảnh</strong> (ở sát cạnh dưới chính giữa màn hình, có thể bấm dấu ✕ để thu gọn thành nút tròn).
+                Bấm nút <strong>[Mở Trang Quản Lý Hệ Thống Mẹ]</strong> ở trên &rarr; Sang trang hệ thống mẹ, bấm nút <strong>Quét & Đồng Bộ Bộ Ảnh</strong> (ở sát cạnh dưới chính giữa màn hình, có thể bấm dấu &#x2715; để thu gọn thành nút tròn).
               </p>
               <p className="text-[11px] text-emerald-700 font-medium bg-emerald-50 px-2 py-1.5 rounded border border-emerald-200">
-                ✓ Toàn bộ ảnh sản phẩm sẽ được gửi thẳng về hệ thống Tacahu Ops tương ứng mà không cần thao tác từng đơn!
+                &#10003; Toàn bộ ảnh sản phẩm sẽ được gửi thẳng về hệ thống Tacahu Ops tương ứng mà không cần thao tác từng đơn!
               </p>
             </div>
           </div>
@@ -159,13 +159,13 @@ export function PrintervalHubPage() {
           <div className="space-y-3 text-xs text-slate-600 leading-relaxed">
             <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200 space-y-2">
               <p>
-                • <strong>Quét đúng các đơn đang hiển thị trên màn hình:</strong> Extension hoạt động trực tiếp trên giao diện trình duyệt hiện tại. Bạn đang lọc Tab nào (ví dụ Tab <em>Waiting</em>), lọc theo ngày hay lọc theo Designer nào trên Print thì Extension sẽ quét chính xác tất cả các đơn đang hiển thị trên trang đó.
+                • <strong>Quét đúng các đơn đang hiển thị trên màn hình:</strong> Extension hoạt động trực tiếp trên giao diện trình duyệt hiện tại. Bạn đang lọc Tab nào (ví dụ Tab <em>Waiting</em>), lọc theo ngày hay lọc theo Designer nào trên hệ thống mẹ thì Extension sẽ quét chính xác tất cả các đơn đang hiển thị trên trang đó.
               </p>
               <p>
-                • <strong>Tự động đối soát (Mapping) với Tacahu Ops:</strong> Dù trên Print bạn quét 100 đơn nhưng trên Tacahu Ops chỉ mới có 50 đơn, Backend sẽ tự động so khớp mã đơn và <strong>chỉ cập nhật ảnh cho đúng 50 đơn</strong> đang có trên hệ thống. Các đơn khác được bỏ qua an toàn mà không sinh lỗi.
+                • <strong>Tự động đối soát (Mapping) với Tacahu Ops:</strong> Dù trên hệ thống mẹ bạn quét 100 đơn nhưng trên Tacahu Ops chỉ mới có 50 đơn, Backend sẽ tự động so khớp mã đơn và <strong>chỉ cập nhật ảnh cho đúng 50 đơn</strong> đang có trên hệ thống. Các đơn khác được bỏ qua an toàn mà không sinh lỗi.
               </p>
               <p>
-                • <strong>Mẹo phân trang:</strong> Trên Print, hãy chỉnh mục <em>Rows per page</em> thành <strong>50 hoặc 100 đơn/trang</strong>. Bạn chỉ cần 1 cú click là quét xong toàn bộ đơn của cả trang trong 2-3 giây. Nếu có trang 2, 3 thì chuyển trang và quét tiếp.
+                • <strong>Mẹo phân trang:</strong> Trên trang quản trị, hãy chỉnh mục <em>Rows per page</em> thành <strong>50 hoặc 100 đơn/trang</strong>. Bạn chỉ cần 1 cú click là quét xong toàn bộ đơn của cả trang trong 2-3 giây. Nếu có trang 2, 3 thì chuyển trang và quét tiếp.
               </p>
             </div>
           </div>
@@ -188,7 +188,7 @@ export function PrintervalHubPage() {
                 <span>Lợi ích:</span>
               </div>
               <p className="text-[11px] text-slate-600 leading-relaxed">
-                Mỗi khi bạn mở trang Print, tiện ích sẽ tự động quét và đẩy ngầm tất cả ảnh về Tacahu trong 2 giây mà không cần bấm nút.
+                Mỗi khi bạn mở trang quản trị, tiện ích sẽ tự động quét và đẩy ngầm tất cả ảnh về Tacahu trong 2 giây mà không cần bấm nút.
               </p>
             </div>
           </div>
@@ -200,7 +200,7 @@ export function PrintervalHubPage() {
               <h3 className="text-sm font-bold text-slate-900 mt-0.5">Xem Trước & Click-to-Copy Sang Figma/Photoshop</h3>
             </div>
             <p className="text-xs text-slate-600 leading-relaxed">
-              Trên bảng đơn Print, Extension sẽ hiển thị các ô ảnh thu nhỏ (1, 2, 3...) ngay dưới từng mã đơn <code className="text-slate-800 font-mono bg-slate-100 px-1 py-0.5 rounded">DJ...</code>.
+              Trên bảng đơn, Extension sẽ hiển thị các ô ảnh thu nhỏ (1, 2, 3...) ngay dưới từng mã đơn <code className="text-slate-800 font-mono bg-slate-100 px-1 py-0.5 rounded">DJ...</code>.
             </p>
             <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-700 space-y-1">
               <div className="flex items-center gap-1.5 text-slate-800 font-semibold">
@@ -218,4 +218,3 @@ export function PrintervalHubPage() {
     </DashboardLayout>
   )
 }
-

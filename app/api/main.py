@@ -37,16 +37,22 @@ DEPRECATED_PATHS = {
     "/api/orders/sync-status/run",
     "/api/orders/sync-status/reset",
     "/api/orders/sync-printerval-status",
+    "/api/orders/sync-platform-status",
     "/api/orders/printerval-credentials",
     "/api/orders/bulk-printerval-assignment",
+    "/api/orders/bulk-platform-assignment",
     "/api/printerval-login/status",
     "/api/printerval-login/start",
     "/api/printerval-login/done",
+    "/api/platform-login/status",
+    "/api/platform-login/start",
+    "/api/platform-login/done",
     "/api/orders/bulk-assign",
 }
 DEPRECATED_PATH_PATTERNS = (
     re.compile(r"^/api/orders/[^/]+/assign$"),
     re.compile(r"^/api/orders/[^/]+/printerval-assignment$"),
+    re.compile(r"^/api/orders/[^/]+/platform-assignment$"),
 )
 
 

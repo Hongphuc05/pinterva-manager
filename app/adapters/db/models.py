@@ -79,6 +79,10 @@ class User(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
+    @property
+    def platform_designer_option(self) -> str | None:
+        return self.printerval_designer_option
+
 
 class Batch(Base):
     __tablename__ = "batches"
@@ -224,6 +228,26 @@ class Order(Base):
     )
 
     __mapper_args__ = {"version_id_col": version}
+
+    @property
+    def platform_status(self) -> str | None:
+        return self.printerval_status
+
+    @property
+    def platform_status_synced_at(self) -> datetime | None:
+        return self.printerval_status_synced_at
+
+    @property
+    def platform_designer(self) -> str | None:
+        return self.printerval_designer
+
+    @property
+    def platform_assignment_lifecycle(self) -> str | None:
+        return self.printerval_assignment_lifecycle
+
+    @property
+    def platform_assignment_error(self) -> str | None:
+        return self.printerval_assignment_error
 
 
 class OrderAsset(Base):

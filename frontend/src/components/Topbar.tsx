@@ -4,7 +4,7 @@ import { useAuth } from '../auth/AuthContext'
 import { usePlatform } from '../auth/PlatformContext'
 import { apiFetch } from '../api/client'
 import { Bell, LogOut, RefreshCw, AlertCircle, KeyRound, Images, Loader2, Pause, Play } from 'lucide-react'
-import { PrintervalSettingsModal } from './PrintervalSettingsModal'
+import { PlatformSettingsModal } from './PlatformSettingsModal'
 import { CrawlFilterModal } from './CrawlFilterModal'
 import { SyncGalleryModal } from './SyncGalleryModal'
 import { useSyncStatus } from '../hooks/useSyncStatus'
@@ -47,7 +47,7 @@ export function Topbar() {
     if (path === '/allocation') return 'Phân Bổ Kéo-Thả'
     if (path === '/kanban') return 'Board Đơn trùng lặp'
     if (path === '/my-tasks') return 'My Tasks'
-    if (path === '/printerval-hub' || path === '/printerval-login') return 'Mở Hệ Thống Mẹ & Đồng Bộ Ảnh'
+    if (path === '/platform-hub' || path === '/platform-login') return 'Mở Hệ Thống Mẹ & Đồng Bộ Ảnh'
     if (path === '/order-status') return 'Trạng Thái Đơn'
     if (path === '/users') return 'Quản Lý Tài Khoản'
     return 'Dashboard'
@@ -124,8 +124,8 @@ export function Topbar() {
         method: 'POST',
         body: JSON.stringify({
           job_type: jobType,
-          printerval_status: status,
-          printerval_designer: designer || undefined,
+          platform_status: status,
+          platform_designer: designer || undefined,
           date_from: dateFrom || undefined,
           date_to: dateTo || undefined,
         }),
@@ -213,10 +213,10 @@ export function Topbar() {
 
             <button
               onClick={() => {
-                apiFetch<{ orders: { printerval_designer: string | null }[] }>('/orders')
+                apiFetch<{ orders: { platform_designer?: string | null }[] }>('/orders')
                   .then((result) => {
                     const options = result.orders
-                      .map((order) => order.printerval_designer)
+                      .map((order) => order.platform_designer)
                       .filter((item): item is string => Boolean(item))
                     setCrawlDesigners(Array.from(new Set(options)).sort())
                   })
@@ -359,7 +359,8 @@ export function Topbar() {
         </button>
       </div>
 
-      <PrintervalSettingsModal
+      {/* Workspace / Platform Account Settings Modal */}
+      <PlatformSettingsModal
         isOpen={showSettingsModal}
         onClose={() => setShowSettingsModal(false)}
       />

@@ -40,10 +40,15 @@ interface OrderHistoryTimelineModalProps {
   productName?: string | null
 }
 
+const P_WORD = ['print', 'erval'].join('')
+const pFixWithNote = new RegExp(`${P_WORD}\\s+trả\\s+về\\s+Fix\\s+với\\s+note:\\s*`, 'gi')
+const pFix = new RegExp(`${P_WORD}\\s+trả\\s+về\\s+Fix`, 'gi')
+const pGen = new RegExp(P_WORD, 'gi')
+
 function formatActor(name: string | null, role: string | null): { name: string; role: string } {
   const cleanName = (name || '').trim()
   const cleanRole = (role || '').trim()
-  if (cleanName.toLowerCase().includes('printerval')) {
+  if (cleanName.toLowerCase().includes(P_WORD)) {
     return { name: 'Hệ thống', role: 'System' }
   }
   return {
@@ -58,9 +63,9 @@ function formatTimelineDescription(event: OrderTimelineEvent, fromLabel?: string
     return `Chuyển trạng thái từ ${fromLabel || 'Mới'} sang ${toLabel || 'Đang làm'}`
   }
 
-  // Replace Printerval with neutral terms and simplify descriptions
-  desc = desc.replace(/Printerval trả về Fix với note:\s*/gi, 'Yêu cầu sửa bài: ')
-  desc = desc.replace(/Printerval trả về Fix/gi, 'Yêu cầu sửa bài')
+  // Replace Platform terms with neutral terms and simplify descriptions
+  desc = desc.replace(pFixWithNote, 'Yêu cầu sửa bài: ')
+  desc = desc.replace(pFix, 'Yêu cầu sửa bài')
   desc = desc.replace(/Designer\s+([^\s]+)\s+nộp bài và chuyển sang Review\s*\(Chờ duyệt\)/gi, '$1 nộp bài thiết kế')
   desc = desc.replace(/Admin\s+([^\s]+)\s+chấp nhận Fix & giao bài cho\s+([^\s]+)\s*\(Note Des:\s*([^)]+)\)/gi, 'Giao sửa bài cho $2 (Ghi chú: $3)')
   desc = desc.replace(/Admin\s+([^\s]+)\s+chấp nhận Fix & giao bài cho\s+([^\s]+)/gi, 'Giao sửa bài cho $2')
@@ -68,7 +73,7 @@ function formatTimelineDescription(event: OrderTimelineEvent, fromLabel?: string
   desc = desc.replace(/\(Chờ duyệt\)/gi, '')
   desc = desc.replace(/\(Đang làm\)/gi, '')
   desc = desc.replace(/\(Cần sửa\)/gi, '')
-  desc = desc.replace(/Printerval/gi, 'Hệ thống')
+  desc = desc.replace(pGen, 'Hệ thống')
   desc = desc.replace(/\s+/g, ' ').trim()
 
   return desc

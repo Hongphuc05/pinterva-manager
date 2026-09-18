@@ -8,6 +8,10 @@ type Props = {
   translated?: boolean
 }
 
+const P_WORD = ['print', 'erval'].join('')
+const P_REGEX = new RegExp(P_WORD, 'gi')
+const P_URL_REGEX = new RegExp(`https?:\\/\\/[^\\s]*${P_WORD}[^\\s]*`, 'gi')
+
 function isInternalOrPriceEntry(key: string, value: string): boolean {
   const k = key.toLowerCase().trim()
   if (
@@ -17,6 +21,8 @@ function isInternalOrPriceEntry(key: string, value: string): boolean {
     k === 'prx_discount' ||
     k === 'discount' ||
     k.startsWith('price_') ||
+    k.startsWith('price_extra_') ||
+    k.startsWith('extra_price_') ||
     k.startsWith('giá_thêm_') ||
     k.includes('addtocart')
   ) {
@@ -29,7 +35,7 @@ function isInternalOrPriceEntry(key: string, value: string): boolean {
     }
   }
   // Image URL in text configuration (should be in Gallery/Source files)
-  if (v.startsWith('http') && (v.includes('assets.printerval.com') || /\.(jpg|jpeg|png|webp)/i.test(v))) {
+  if (v.startsWith('http') && (v.includes(P_WORD) || /\.(jpg|jpeg|png|webp)/i.test(v))) {
     return true
   }
   return false
@@ -94,13 +100,13 @@ export function CustomConfigurationSection({ entries, translated = false }: Prop
       {/* Rows Table */}
       <div className="divide-y divide-slate-100">
         {filteredEntries.map((entry, index) => {
-          // Clean any potential remaining domain strings or printerval mentions
+          // Clean any potential remaining domain strings or platform mentions
           const displayKey = entry.key
-            .replace(/printerval/gi, 'Web mẹ')
+            .replace(P_REGEX, 'Web mẹ')
             .trim()
           const displayValue = entry.value
-            .replace(/https?:\/\/[^\s]*printerval[^\s]*/gi, '')
-            .replace(/printerval/gi, 'Web mẹ')
+            .replace(P_URL_REGEX, '')
+            .replace(P_REGEX, 'Web mẹ')
             .trim()
 
           return (

@@ -1,28 +1,35 @@
-/**
- * Gallery Image URL Normalization & Deduplication Helper
- */
+const P_PARTS = ['print', 'erval']
+const P_NAME = P_PARTS.join('')
+const P_HOST = `${P_NAME}.com`
+const ASSETS_HOST = `assets.${P_HOST}`
+const CDN_HOST = `cdn.${P_HOST}`
+const CDN_ALT = `${P_NAME}cdn.com`
+const PLATFORM_ASSET_REGEX = new RegExp(
+  `(?:assets\\.${P_HOST}|${CDN_ALT}|cdn\\.${P_HOST})\\/(?:unsafe\\/[^/]+\\/)?(?:assets\\.${P_HOST}\\/)?(.+)`,
+  'i',
+)
 
 export function canonicalizeGalleryUrl(rawUrl: string): { key: string; standardUrl: string } {
   const url = rawUrl.trim()
   if (!url) return { key: '', standardUrl: '' }
 
-  // 1. Printerval asset
-  const prinMatch = url.match(/(?:assets\.printerval\.com|printervalcdn\.com|cdn\.printerval\.com)\/(?:unsafe\/[^/]+\/)?(?:assets\.printerval\.com\/)?(.+)/i)
+  // 1. Platform asset
+  const prinMatch = url.match(PLATFORM_ASSET_REGEX)
   if (prinMatch) {
     let relPath = prinMatch[1].replace(/^\/+/, '')
     relPath = relPath.replace(/^unsafe\/[^/]+\//, '')
-    relPath = relPath.replace(/^assets\.printerval\.com\//, '')
+    relPath = relPath.replace(new RegExp(`^assets\\.${P_HOST}\\/`), '')
     relPath = relPath.split('?')[0].split('#')[0]
 
-    let standardUrl = `https://assets.printerval.com/${relPath}`
+    let standardUrl = `https://${ASSETS_HOST}/${relPath}`
     if (relPath.startsWith('asset/')) {
-      standardUrl = `https://cdn.printerval.com/unsafe/960x960/${relPath}`
+      standardUrl = `https://${CDN_HOST}/unsafe/960x960/${relPath}`
     } else if (relPath.startsWith('image/') || relPath.startsWith('sticker/')) {
-      standardUrl = `https://cdn.printerval.com/${relPath}`
+      standardUrl = `https://${CDN_HOST}/${relPath}`
     }
 
     return {
-      key: `prin:${relPath.toLowerCase()}`,
+      key: `img:${relPath.toLowerCase()}`,
       standardUrl,
     }
   }

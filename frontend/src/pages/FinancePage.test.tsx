@@ -59,7 +59,7 @@ describe('FinancePage', () => {
                   designer_id: 'des1',
                   designer_name: 'Designer Thuý Hường',
                   current_state: 'DONE',
-                  printerval_status: 'done',
+                  platform_status: 'done',
                   drive_link: 'https://drive.google.com/file/d/test1234/view',
                   placeholder_filled: true,
                   status_changed_at: '2026-09-11T02:09:05Z',

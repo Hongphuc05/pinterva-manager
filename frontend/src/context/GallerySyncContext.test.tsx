@@ -32,7 +32,7 @@ describe('GallerySyncContext', () => {
       external_order_id: 'DJ1001',
       product_name: 'T-Shirt A',
       thumbnail_url: 'https://thumb.a',
-      sales_url: 'https://printerval.com/a',
+      sales_url: 'https://mock-shop.com/a',
       image_count: 1,
     }
 
@@ -41,7 +41,7 @@ describe('GallerySyncContext', () => {
       external_order_id: 'DJ1002',
       product_name: 'T-Shirt B',
       thumbnail_url: 'https://thumb.b',
-      sales_url: 'https://printerval.com/b',
+      sales_url: 'https://mock-shop.com/b',
       image_count: 1,
     }
 

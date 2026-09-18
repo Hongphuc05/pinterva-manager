@@ -30,7 +30,7 @@ type DesignerOrder = {
   thumbnail_url: string | null
   deadline_at_ext: string | null
   product_name: string | null
-  printerval_designer: string | null
+  platform_designer?: string | null
   note_outsource?: string | null
   previous_note_outsource?: string | null
   fix_approved_by_admin?: boolean
@@ -40,7 +40,7 @@ type DesignerWorkload = {
   id: string
   username: string
   full_name: string
-  printerval_designer_option: string | null
+  platform_designer_option?: string | null
   total_orders: number
   doing_count: number
   review_count: number
@@ -60,7 +60,7 @@ export function DesignerBoardPage() {
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
   const [showDoneColumn, setShowDoneColumn] = useState(true)
   const [expandedDesignerIds, setExpandedDesignerIds] = useState<Set<string>>(() => new Set())
-  const [syncingPrinterval, setSyncingPrinterval] = useState(false)
+  const [syncingPlatform, setSyncingPlatform] = useState(false)
   const [fixActionModal, setFixActionModal] = useState<{
     isOpen: boolean
     orderId: string
@@ -89,7 +89,7 @@ export function DesignerBoardPage() {
     setLoading(true)
     try {
       const data = await apiFetch<DesignerWorkload[]>('/designers/workload')
-      setDesigners(data)
+      setDesigners(data || [])
       setError(null)
     } catch (err: any) {
       setError(err.message || 'Không thể tải bảng tiến độ Designer.')
@@ -98,15 +98,15 @@ export function DesignerBoardPage() {
     }
   }
 
-  async function handleSyncPrintervalStatus(orderIds?: string[]) {
+  async function handleSyncPlatformStatus(orderIds?: string[]) {
     if (!orderIds?.length) {
       return
     }
-    setSyncingPrinterval(true)
+    setSyncingPlatform(true)
     window.dispatchEvent(new CustomEvent('sync-platform-start'))
     try {
       const res = await apiFetch<{ synced_count: number; updated_count: number; message: string }>(
-        '/orders/sync-printerval-status',
+        '/orders/sync-platform-status',
         {
           method: 'POST',
           body: JSON.stringify({ order_ids: orderIds }),
@@ -120,7 +120,7 @@ export function DesignerBoardPage() {
     } catch (err: any) {
       alert(err.message || 'Lỗi khi đồng bộ trạng thái từ Web mẹ')
     } finally {
-      setSyncingPrinterval(false)
+      setSyncingPlatform(false)
       window.dispatchEvent(new CustomEvent('sync-platform-end'))
     }
   }
@@ -133,15 +133,15 @@ export function DesignerBoardPage() {
   const totalFix = designers.reduce((sum, d) => sum + d.fix_count, 0)
   const totalDone = designers.reduce((sum, d) => sum + d.done_count, 0)
 
-  // Filtering
+  // Filter designers based on search and active state filter
   const filteredDesigners = designers.filter((des) => {
-    const matchSearch =
+    const desOpt = des.platform_designer_option
+    const matchesSearch =
       des.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       des.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (des.printerval_designer_option &&
-        des.printerval_designer_option.toLowerCase().includes(searchQuery.toLowerCase()))
+      (desOpt && desOpt.toLowerCase().includes(searchQuery.toLowerCase()))
 
-    if (!matchSearch) return false
+    if (!matchesSearch) return false
 
     if (filterMode === 'needs_review') return des.review_count > 0
     if (filterMode === 'has_fix') return des.fix_count > 0
@@ -182,7 +182,7 @@ export function DesignerBoardPage() {
           )
           .map((o) => o.id)
       )
-      handleSyncPrintervalStatus(targetOrderIds)
+      handleSyncPlatformStatus(targetOrderIds)
     }
     window.addEventListener('request-sync-current-tab', handleRequestSync)
     return () => window.removeEventListener('request-sync-current-tab', handleRequestSync)
@@ -205,13 +205,13 @@ export function DesignerBoardPage() {
 
           <div className="flex items-center gap-2">
             <button
-              onClick={() => handleSyncPrintervalStatus(visibleSyncOrderIds)}
-              disabled={syncingPrinterval || visibleSyncOrderIds.length === 0}
+              onClick={() => handleSyncPlatformStatus(visibleSyncOrderIds)}
+              disabled={syncingPlatform || visibleSyncOrderIds.length === 0}
               className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-xl border border-purple-200 shadow-2xs transition-all cursor-pointer disabled:opacity-50"
               title="Chỉ đồng bộ các đơn Doing / Review / Fix đang hiển thị trên bảng"
             >
-              <RefreshCw className={`h-3.5 w-3.5 text-purple-600 ${syncingPrinterval ? 'animate-spin' : ''}`} />
-              <span>{syncingPrinterval ? 'Đang quét Print...' : `Đồng Bộ Đang Hiển Thị (${visibleSyncOrderIds.length})`}</span>
+              <RefreshCw className={`h-3.5 w-3.5 text-purple-600 ${syncingPlatform ? 'animate-spin' : ''}`} />
+              <span>{syncingPlatform ? 'Đang quét hệ thống...' : `Đồng Bộ Đang Hiển Thị (${visibleSyncOrderIds.length})`}</span>
             </button>
 
             <button
@@ -445,9 +445,9 @@ export function DesignerBoardPage() {
                         <div className="flex items-center gap-2 flex-wrap">
                           <h3 className="font-bold text-sm text-slate-900">{des.full_name}</h3>
                           <span className="text-[11px] font-mono text-slate-400">(@{des.username})</span>
-                          {des.printerval_designer_option && (
+                          {des.platform_designer_option && (
                             <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-blue-50 text-[#0052CC] border border-blue-200">
-                              Print: {des.printerval_designer_option}
+                              Acc Mẹ: {des.platform_designer_option}
                             </span>
                           )}
                         </div>
@@ -591,12 +591,12 @@ export function DesignerBoardPage() {
                               {reviewOrders.length > 0 && (
                                 <button
                                   type="button"
-                                  disabled={syncingPrinterval}
-                                  onClick={() => handleSyncPrintervalStatus(reviewOrders.map((o) => o.id))}
+                                  disabled={syncingPlatform}
+                                  onClick={() => handleSyncPlatformStatus(reviewOrders.map((o) => o.id))}
                                   className="p-1 text-purple-600 hover:bg-purple-100 rounded transition-colors disabled:opacity-50"
-                                  title="Làm mới trạng thái các đơn này từ Print"
+                                  title="Làm mới trạng thái các đơn này"
                                 >
-                                  <RefreshCw className={`h-3 w-3 ${syncingPrinterval ? 'animate-spin' : ''}`} />
+                                  <RefreshCw className={`h-3 w-3 ${syncingPlatform ? 'animate-spin' : ''}`} />
                                 </button>
                               )}
                               <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-purple-100 text-purple-800">
@@ -650,22 +650,22 @@ export function DesignerBoardPage() {
                                     </div>
                                   </div>
 
-                                  {/* Review status notice - Decisions handled automatically by Printerval */}
+                                  {/* Review status notice - Decisions handled automatically */}
                                   <div className="pt-1.5 border-t border-purple-100 flex items-center justify-between">
                                     <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-purple-100/80 text-purple-800 text-[11px] font-medium">
                                       <Clock className="h-3 w-3 text-purple-600 animate-pulse" />
-                                      <span>Chờ Print QC duyệt</span>
+                                      <span>Chờ QC duyệt</span>
                                     </div>
 
                                     <div className="flex items-center gap-1">
                                       <button
                                         type="button"
-                                        disabled={syncingPrinterval}
-                                        onClick={() => handleSyncPrintervalStatus([o.id])}
+                                        disabled={syncingPlatform}
+                                        onClick={() => handleSyncPlatformStatus([o.id])}
                                         className="p-1 text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors disabled:opacity-50"
-                                        title="Kiểm tra kết quả QC từ Print"
+                                        title="Kiểm tra kết quả QC"
                                       >
-                                        <RefreshCw className={`h-3 w-3 ${syncingPrinterval ? 'animate-spin' : ''}`} />
+                                        <RefreshCw className={`h-3 w-3 ${syncingPlatform ? 'animate-spin' : ''}`} />
                                       </button>
                                       <button
                                         type="button"
@@ -700,12 +700,12 @@ export function DesignerBoardPage() {
                               {fixOrders.length > 0 && (
                                 <button
                                   type="button"
-                                  disabled={syncingPrinterval}
-                                  onClick={() => handleSyncPrintervalStatus(fixOrders.map((o) => o.id))}
+                                  disabled={syncingPlatform}
+                                  onClick={() => handleSyncPlatformStatus(fixOrders.map((o) => o.id))}
                                   className="p-1 text-orange-600 hover:bg-orange-100 rounded transition-colors disabled:opacity-50"
-                                  title="Làm mới trạng thái các đơn này từ Print"
+                                  title="Làm mới trạng thái các đơn này"
                                 >
-                                  <RefreshCw className={`h-3 w-3 ${syncingPrinterval ? 'animate-spin' : ''}`} />
+                                  <RefreshCw className={`h-3 w-3 ${syncingPlatform ? 'animate-spin' : ''}`} />
                                 </button>
                               )}
                               <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-orange-100 text-orange-800">

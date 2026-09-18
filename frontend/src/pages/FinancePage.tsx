@@ -78,7 +78,7 @@ export type CreditedTask = {
   designer_id: string | null
   designer_name: string
   current_state: string
-  printerval_status: string | null
+  platform_status?: string | null
   drive_link: string | null
   placeholder_filled?: boolean
   status_changed_at: string | null

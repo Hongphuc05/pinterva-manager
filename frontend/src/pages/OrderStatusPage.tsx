@@ -5,7 +5,7 @@ import { useAuth } from '../auth/AuthContext'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { useSyncStatus } from '../hooks/useSyncStatus'
 import { Pagination, paginate } from '../components/Pagination'
-import { getStatusInfo, getPrintervalStatusInfo } from '../utils/statusTranslation'
+import { getStatusInfo, getPlatformStatusInfo } from '../utils/statusTranslation'
 import { Package, RefreshCw, Radio, Loader2, UserPlus, X, User, AlertTriangle, Search, Filter } from 'lucide-react'
 
 type OrderRow = {
@@ -15,11 +15,11 @@ type OrderRow = {
   product_name: string | null
   thumbnail_url: string | null
   assigned_designer_name: string | null
-  printerval_status: string | null
-  printerval_status_synced_at: string | null
-  printerval_designer: string | null
-  printerval_assignment_lifecycle: string | null
-  printerval_assignment_error: string | null
+  platform_status?: string | null
+  platform_status_synced_at?: string | null
+  platform_designer?: string | null
+  platform_assignment_lifecycle?: string | null
+  platform_assignment_error?: string | null
 }
 
 type UserOption = {
@@ -29,10 +29,9 @@ type UserOption = {
   role: string
 }
 
-// Once submitted, a Designer/Status change runs in the background (Playwright/HTTP
-// write to Printerval) — poll a bit faster than the page's own idle refresh while any
-// row is still "pending" so the per-row spinner actually clears once it lands, instead
-// of only updating on the next manual/scheduled sync.
+// Once submitted, a Designer/Status change runs in the background
+// poll a bit faster than the page's own idle refresh while any
+// row is still "pending" so the per-row spinner actually clears once it lands.
 const PENDING_POLL_MS = 3000
 
 export function OrderStatusPage() {
@@ -43,14 +42,14 @@ export function OrderStatusPage() {
   const { status, triggerRun, isTriggering } = useSyncStatus()
 
   const [usersList, setUsersList] = useState<UserOption[]>([])
-  const [printervalDesigners, setPrintervalDesigners] = useState<string[]>([])
-  const [printervalStatuses, setPrintervalStatuses] = useState<string[]>([])
-  const [loadingPrintervalOptions, setLoadingPrintervalOptions] = useState(false)
+  const [platformDesigners, setPlatformDesigners] = useState<string[]>([])
+  const [platformStatuses, setPlatformStatuses] = useState<string[]>([])
+  const [loadingPlatformOptions, setLoadingPlatformOptions] = useState(false)
 
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([])
   const [bulkDesignerId, setBulkDesignerId] = useState('')
-  const [bulkPrintervalDesigner, setBulkPrintervalDesigner] = useState('')
-  const [bulkPrintervalStatus, setBulkPrintervalStatus] = useState('Doing')
+  const [bulkPlatformDesigner, setBulkPlatformDesigner] = useState('')
+  const [bulkPlatformStatus, setBulkPlatformStatus] = useState('Doing')
   const [bulkApplying, setBulkApplying] = useState(false)
 
   const [searchQuery, setSearchQuery] = useState('')
@@ -60,21 +59,27 @@ export function OrderStatusPage() {
 
   const [editingOrder, setEditingOrder] = useState<OrderRow | null>(null)
   const [editDesignerId, setEditDesignerId] = useState('')
-  const [editPrintervalDesigner, setEditPrintervalDesigner] = useState('')
-  const [editPrintervalStatus, setEditPrintervalStatus] = useState('Doing')
+  const [editPlatformDesigner, setEditPlatformDesigner] = useState('')
+  const [editPlatformStatus, setEditPlatformStatus] = useState('Doing')
   const [applying, setApplying] = useState(false)
 
-  // "Cập nhật toàn bộ" (refresh-detail) is synchronous on the backend (single order,
-  // normally sub-second) — track per-row in-flight state purely client-side rather
-  // than adding another lifecycle-tracked/polled system for one blocking call.
+  // Track per-row in-flight state purely client-side
   const [refreshingDetailIds, setRefreshingDetailIds] = useState<Set<string>>(new Set())
 
   const pendingPollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   async function load() {
     try {
-      const data = await apiFetch<{ orders: OrderRow[] }>('/orders')
-      setOrders(data.orders)
+      const data = await apiFetch<{ orders: any[] }>('/orders')
+      const mapped: OrderRow[] = (data.orders || []).map((o) => ({
+        ...o,
+        platform_status: o.platform_status || null,
+        platform_status_synced_at: o.platform_status_synced_at || null,
+        platform_designer: o.platform_designer || null,
+        platform_assignment_lifecycle: o.platform_assignment_lifecycle || null,
+        platform_assignment_error: o.platform_assignment_error || null,
+      }))
+      setOrders(mapped)
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Không tải được danh sách đơn.')
     }
@@ -93,11 +98,9 @@ export function OrderStatusPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status?.is_running])
 
-  // Keep polling while any row's Printerval Designer/Status change is still in flight
-  // ("pending") — otherwise the spinner would only ever clear on the next scheduled
-  // mirror sync (up to 5 minutes later) or a manual page reload.
+  // Keep polling while any row's Platform Designer/Status change is still in flight
   useEffect(() => {
-    const anyPending = orders.some((o) => o.printerval_assignment_lifecycle === 'pending')
+    const anyPending = orders.some((o) => o.platform_assignment_lifecycle === 'pending')
     if (pendingPollRef.current) clearTimeout(pendingPollRef.current)
     if (anyPending) {
       pendingPollRef.current = setTimeout(load, PENDING_POLL_MS)
@@ -108,45 +111,46 @@ export function OrderStatusPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orders])
 
-  async function loadPrintervalOptions(orderId: string) {
-    setLoadingPrintervalOptions(true)
+  async function loadPlatformOptions(orderId: string) {
+    setLoadingPlatformOptions(true)
     try {
       const result = await apiFetch<{ designers: string[]; statuses: string[] }>(
-        `/orders/${orderId}/printerval-options`
+        `/orders/${orderId}/platform-options`
       )
-      setPrintervalDesigners(result.designers)
-      setPrintervalStatuses(result.statuses)
+      setPlatformDesigners(result.designers)
+      setPlatformStatuses(result.statuses)
     } catch (err) {
-      setPrintervalDesigners([])
-      setPrintervalStatuses([])
-      setError(err instanceof ApiError ? err.message : 'Không tải được danh sách Designer Print.')
+      setPlatformDesigners([])
+      setPlatformStatuses([])
+      setError(err instanceof ApiError ? err.message : 'Không tải được danh sách Designer trên hệ thống.')
     } finally {
-      setLoadingPrintervalOptions(false)
+      setLoadingPlatformOptions(false)
     }
   }
 
-  async function refreshPrintervalDesignerOptions() {
-    setLoadingPrintervalOptions(true)
+  async function refreshPlatformDesignerOptions() {
+    setLoadingPlatformOptions(true)
     try {
       const result = await apiFetch<{ designers: string[]; statuses: string[] }>(
-        '/platforms/printerval-options/refresh',
+        '/platforms/platform-options/refresh',
         { method: 'POST' }
       )
-      setPrintervalDesigners(result.designers)
-      setPrintervalStatuses(result.statuses)
+      setPlatformDesigners(result.designers)
+      setPlatformStatuses(result.statuses)
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Không cập nhật được Designer Print.')
+      setError(err instanceof ApiError ? err.message : 'Không cập nhật được Designer trên hệ thống.')
     } finally {
-      setLoadingPrintervalOptions(false)
+      setLoadingPlatformOptions(false)
     }
   }
 
   function openEdit(order: OrderRow) {
     setEditingOrder(order)
     setEditDesignerId('')
-    setEditPrintervalDesigner(order.printerval_designer || '')
-    setEditPrintervalStatus(order.printerval_status ? order.printerval_status[0].toUpperCase() + order.printerval_status.slice(1) : 'Doing')
-    loadPrintervalOptions(order.id)
+    setEditPlatformDesigner(order.platform_designer || '')
+    const curStatus = order.platform_status
+    setEditPlatformStatus(curStatus ? curStatus[0].toUpperCase() + curStatus.slice(1) : 'Doing')
+    loadPlatformOptions(order.id)
   }
 
   function handleToggleSelect(orderId: string) {
@@ -163,24 +167,24 @@ export function OrderStatusPage() {
         o.external_order_id.toLowerCase().includes(q) ||
         (o.product_name && o.product_name.toLowerCase().includes(q)) ||
         (o.assigned_designer_name && o.assigned_designer_name.toLowerCase().includes(q)) ||
-        (o.printerval_designer && o.printerval_designer.toLowerCase().includes(q))
+        (o.platform_designer && o.platform_designer.toLowerCase().includes(q))
       if (!matches) return false
     }
 
     if (statusFilter) {
-      const pStatus = (o.printerval_status || '').toLowerCase()
+      const pStatus = (o.platform_status || '').toLowerCase()
       const target = statusFilter.toLowerCase()
       if (pStatus !== target && o.state.toLowerCase() !== target) return false
     }
 
     if (designerFilter) {
       if (designerFilter === 'unassigned') {
-        if (o.assigned_designer_name || o.printerval_designer) return false
+        if (o.assigned_designer_name || o.platform_designer) return false
       } else {
         const desUser = usersList.find((u) => u.id === designerFilter)
         if (desUser) {
           const name = desUser.full_name || desUser.username
-          if (o.assigned_designer_name !== name && o.printerval_designer !== name) return false
+          if (o.assigned_designer_name !== name && o.platform_designer !== name) return false
         }
       }
     }
@@ -202,8 +206,8 @@ export function OrderStatusPage() {
   useEffect(() => {
     const firstOrderId = selectedOrderIds[0]
     if (!firstOrderId) return
-    setBulkPrintervalDesigner('')
-    loadPrintervalOptions(firstOrderId)
+    setBulkPlatformDesigner('')
+    loadPlatformOptions(firstOrderId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedOrderIds.length > 0 ? selectedOrderIds[0] : null])
 
@@ -230,15 +234,15 @@ export function OrderStatusPage() {
 
   async function handleApplyEdit(e: React.FormEvent) {
     e.preventDefault()
-    if (!editingOrder || !editPrintervalDesigner) return
+    if (!editingOrder || !editPlatformDesigner) return
     setApplying(true)
     try {
-      await apiFetch(`/orders/${editingOrder.id}/printerval-assignment`, {
+      await apiFetch(`/orders/${editingOrder.id}/platform-assignment`, {
         method: 'POST',
         body: JSON.stringify({
           designer_id: editDesignerId || null,
-          printerval_designer: editPrintervalDesigner,
-          printerval_status: editPrintervalStatus,
+          platform_designer: editPlatformDesigner,
+          platform_status: editPlatformStatus,
         }),
       })
       setEditingOrder(null)
@@ -251,22 +255,22 @@ export function OrderStatusPage() {
   }
 
   async function handleBulkApply() {
-    if (selectedOrderIds.length === 0 || !bulkPrintervalStatus) return
+    if (selectedOrderIds.length === 0 || !bulkPlatformStatus) return
     setBulkApplying(true)
     try {
-      const res = await apiFetch<{ queued_count: number }>('/orders/bulk-printerval-assignment', {
+      const res = await apiFetch<{ queued_count: number }>('/orders/bulk-platform-assignment', {
         method: 'POST',
         body: JSON.stringify({
           order_ids: selectedOrderIds,
           designer_id: bulkDesignerId || null,
-          printerval_designer: bulkPrintervalDesigner || null,
-          printerval_status: bulkPrintervalStatus,
+          platform_designer: bulkPlatformDesigner || null,
+          platform_status: bulkPlatformStatus,
         }),
       })
       setError(null)
       setSelectedOrderIds([])
       setBulkDesignerId('')
-      setBulkPrintervalDesigner('')
+      setBulkPlatformDesigner('')
       load()
       if (res.queued_count === 0) setError('Không có đơn nào được xếp đồng bộ.')
     } catch (err) {
@@ -282,11 +286,11 @@ export function OrderStatusPage() {
         <div>
           <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
             <Radio className="h-4 w-4 text-[#0052CC]" />
-            Trạng Thái Đơn — Mirror Từ Print
+            Trạng Thái Đơn — Mirror Từ Web Mẹ
           </h2>
           <p className="text-xs text-slate-500 mt-1">
-            Cột "Trạng thái Print" tự động đồng bộ theo lịch (mặc định mỗi 5 phút), hoặc bấm nút bên cạnh để đồng bộ ngay.
-            {isAdmin && ' Admin có thể sửa Designer/Trạng thái Print trực tiếp từng đơn hoặc chọn nhiều đơn để sửa hàng loạt.'}
+            Cột "Trạng thái Web mẹ" tự động đồng bộ theo lịch (mặc định mỗi 5 phút), hoặc bấm nút bên cạnh để đồng bộ ngay.
+            {isAdmin && ' Admin có thể sửa Designer/Trạng thái Web mẹ trực tiếp từng đơn hoặc chọn nhiều đơn để sửa hàng loạt.'}
             {status?.last_finished_at && (
               <span className="ml-1 text-slate-400">
                 Lần đồng bộ gần nhất: {new Date(status.last_finished_at).toLocaleString('vi-VN')}
@@ -395,11 +399,11 @@ export function OrderStatusPage() {
           <div className="flex items-center gap-3 flex-wrap">
             <button
               type="button"
-              onClick={refreshPrintervalDesignerOptions}
-              disabled={loadingPrintervalOptions}
+              onClick={refreshPlatformDesignerOptions}
+              disabled={loadingPlatformOptions}
               className="px-3 py-1.5 text-xs font-bold text-white border border-white/40 rounded-lg hover:bg-white/10 disabled:opacity-60"
             >
-              Cập nhật lựa chọn Print
+              Cập nhật lựa chọn Web mẹ
             </button>
             <select
               value={bulkDesignerId}
@@ -412,27 +416,27 @@ export function OrderStatusPage() {
               ))}
             </select>
             <select
-              value={bulkPrintervalDesigner}
-              onChange={(e) => setBulkPrintervalDesigner(e.target.value)}
-              disabled={loadingPrintervalOptions}
+              value={bulkPlatformDesigner}
+              onChange={(e) => setBulkPlatformDesigner(e.target.value)}
+              disabled={loadingPlatformOptions}
               className="bg-white text-slate-800 text-xs font-semibold px-3 py-1.5 rounded-lg border border-white/30 focus:outline-none shadow-xs disabled:opacity-60"
             >
               <option value="">
-                {loadingPrintervalOptions ? 'Đang tải DES Print...' : '-- Giữ nguyên DES / Chọn DES Print --'}
+                {loadingPlatformOptions ? 'Đang tải DES...' : '-- Giữ nguyên DES / Chọn DES Mẹ --'}
               </option>
-              {printervalDesigners.map((d) => <option key={d} value={d}>{d}</option>)}
+              {platformDesigners.map((d) => <option key={d} value={d}>{d}</option>)}
             </select>
             <select
-              value={bulkPrintervalStatus}
-              onChange={(e) => setBulkPrintervalStatus(e.target.value)}
-              disabled={loadingPrintervalOptions}
+              value={bulkPlatformStatus}
+              onChange={(e) => setBulkPlatformStatus(e.target.value)}
+              disabled={loadingPlatformOptions}
               className="bg-white text-slate-800 text-xs font-semibold px-3 py-1.5 rounded-lg border border-white/30 focus:outline-none shadow-xs disabled:opacity-60"
             >
-              {(printervalStatuses.length ? printervalStatuses : ['Doing', 'Review', 'Fix', 'Done']).map((s) => <option key={s} value={s}>{s}</option>)}
+              {(platformStatuses.length ? platformStatuses : ['Doing', 'Review', 'Fix', 'Done']).map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
             <button
               onClick={handleBulkApply}
-              disabled={selectedOrderIds.length === 0 || !bulkPrintervalStatus || bulkApplying || loadingPrintervalOptions}
+              disabled={selectedOrderIds.length === 0 || !bulkPlatformStatus || bulkApplying || loadingPlatformOptions}
               className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold text-[#0052CC] bg-white hover:bg-slate-100 rounded-lg shadow-sm transition-all disabled:opacity-50 cursor-pointer"
             >
               {bulkApplying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
@@ -466,7 +470,7 @@ export function OrderStatusPage() {
                 <th className="py-3 px-4 w-14 text-center">Ảnh</th>
                 <th className="py-3 px-4">{isAdmin ? 'Mã Đơn' : 'Tên Đơn Hàng'}</th>
                 <th className="py-3 px-4">Trạng Thái Nội Bộ</th>
-                <th className="py-3 px-4">Trạng Thái Print</th>
+                <th className="py-3 px-4">Trạng Thái Web Mẹ</th>
                 <th className="py-3 px-4">DES</th>
                 <th className="py-3 px-4">Đồng bộ lúc</th>
                 {isAdmin && <th className="py-3 px-4 text-right">Thao Tác</th>}
@@ -483,8 +487,8 @@ export function OrderStatusPage() {
               ) : (
                 paginatedOrders.map((o) => {
                   const internal = getStatusInfo(o.state)
-                  const site = getPrintervalStatusInfo(o.printerval_status)
-                  const isPending = o.printerval_assignment_lifecycle === 'pending'
+                  const site = getPlatformStatusInfo(o.platform_status || null)
+                  const isPending = o.platform_assignment_lifecycle === 'pending'
                   const isSelected = selectedOrderIds.includes(o.id)
                   return (
                     <tr key={o.id} className={`hover:bg-blue-50/40 ${isSelected ? 'bg-blue-50/60' : ''}`}>
@@ -536,7 +540,6 @@ export function OrderStatusPage() {
                         >
                           {internal.label}
                         </span>
-
                       </td>
                       <td className="py-2.5 px-4">
                         <span className="inline-flex items-center gap-1.5">
@@ -547,16 +550,16 @@ export function OrderStatusPage() {
                             {site.label}
                           </span>
                           {isPending && (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin text-[#0052CC]" aria-label="Đang đồng bộ Print" />
+                            <Loader2 className="h-3.5 w-3.5 animate-spin text-[#0052CC]" aria-label="Đang đồng bộ Web mẹ" />
                           )}
-                          {o.printerval_assignment_error && (
+                          {o.platform_assignment_error && (
                             <span
                               className="cursor-help"
-                              title={`Lần sửa gần nhất thất bại: ${o.printerval_assignment_error}`}
+                              title={`Lần sửa gần nhất thất bại: ${o.platform_assignment_error}`}
                             >
                               <AlertTriangle
                                 className="h-3.5 w-3.5 text-red-600"
-                                aria-label="Đồng bộ Print thất bại"
+                                aria-label="Đồng bộ Web mẹ thất bại"
                               />
                             </span>
                           )}
@@ -571,7 +574,7 @@ export function OrderStatusPage() {
                                 ? 'bg-blue-50 text-[#0052CC] hover:bg-blue-100'
                                 : 'bg-slate-50 text-slate-400 hover:text-[#0052CC] hover:bg-blue-50'
                             }`}
-                            title="Click để sửa Designer/Trạng thái Print"
+                            title="Click để sửa Designer/Trạng thái Web mẹ"
                           >
                             <User className="h-3 w-3" />
                             <span>{o.assigned_designer_name || '+ Phân công'}</span>
@@ -579,15 +582,15 @@ export function OrderStatusPage() {
                         ) : (
                           o.assigned_designer_name || <span className="text-slate-300">-</span>
                         )}
-                        {o.printerval_designer && (
+                        {o.platform_designer && (
                           <p className="mt-1 text-[10px] font-medium text-slate-500">
-                            Print DES: {o.printerval_designer}
+                            Acc Mẹ DES: {o.platform_designer}
                           </p>
                         )}
                       </td>
                       <td className="py-2.5 px-4 font-mono text-slate-400">
-                        {o.printerval_status_synced_at
-                          ? new Date(o.printerval_status_synced_at).toLocaleString('vi-VN')
+                        {o.platform_status_synced_at
+                          ? new Date(o.platform_status_synced_at).toLocaleString('vi-VN')
                           : '-'}
                       </td>
                       {isAdmin && (
@@ -596,7 +599,7 @@ export function OrderStatusPage() {
                             <button
                               onClick={() => handleRefreshDetail(o.id)}
                               disabled={refreshingDetailIds.has(o.id)}
-                              title="Cập nhật toàn bộ thông tin đơn từ Print (SKU, ảnh nguồn, deadline...) — như Danh Sách Đơn Hàng"
+                              title="Cập nhật toàn bộ thông tin đơn từ Web mẹ (SKU, ảnh nguồn, deadline...)"
                               className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors shadow-2xs cursor-pointer disabled:opacity-50"
                             >
                               <RefreshCw className={`h-3 w-3 ${refreshingDetailIds.has(o.id) ? 'animate-spin' : ''}`} />
@@ -640,7 +643,7 @@ export function OrderStatusPage() {
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50">
               <div className="flex items-center gap-2">
                 <UserPlus className="h-5 w-5 text-[#0052CC]" />
-                <h2 className="text-base font-bold text-slate-800">Sửa Designer / Trạng Thái Print</h2>
+                <h2 className="text-base font-bold text-slate-800">Sửa Designer / Trạng Thái Web Mẹ</h2>
               </div>
               <button
                 onClick={() => setEditingOrder(null)}
@@ -669,7 +672,7 @@ export function OrderStatusPage() {
                   onChange={(e) => setEditDesignerId(e.target.value)}
                   className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-[#0052CC]/20 focus:border-[#0052CC]"
                 >
-                  <option value="">-- Không chọn (chỉ sửa Print) --</option>
+                  <option value="">-- Không chọn (chỉ sửa Web mẹ) --</option>
                   {usersList.map((u) => (
                     <option key={u.id} value={u.id}>{u.full_name || u.username} ({u.role})</option>
                   ))}
@@ -678,42 +681,42 @@ export function OrderStatusPage() {
 
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-700 block">
-                  Designer trên Print <span className="text-red-500">*</span>
+                  Designer trên Web Mẹ <span className="text-red-500">*</span>
                 </label>
                 <button
                   type="button"
-                  onClick={refreshPrintervalDesignerOptions}
-                  disabled={loadingPrintervalOptions}
+                  onClick={refreshPlatformDesignerOptions}
+                  disabled={loadingPlatformOptions}
                   className="mb-1 text-[11px] font-semibold text-[#0052CC] hover:underline disabled:opacity-50"
                 >
-                  Cập nhật lựa chọn từ Print
+                  Cập nhật lựa chọn từ Web mẹ
                 </button>
                 <select
                   required
-                  value={editPrintervalDesigner}
-                  onChange={(e) => setEditPrintervalDesigner(e.target.value)}
-                  disabled={loadingPrintervalOptions}
+                  value={editPlatformDesigner}
+                  onChange={(e) => setEditPlatformDesigner(e.target.value)}
+                  disabled={loadingPlatformOptions}
                   className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-[#0052CC]/20 focus:border-[#0052CC] disabled:bg-slate-100"
                 >
                   <option value="">
-                    {loadingPrintervalOptions ? 'Đang tải danh sách...' : '-- Chọn Designer Print --'}
+                    {loadingPlatformOptions ? 'Đang tải danh sách...' : '-- Chọn Designer Web Mẹ --'}
                   </option>
-                  {printervalDesigners.map((d) => <option key={d} value={d}>{d}</option>)}
+                  {platformDesigners.map((d) => <option key={d} value={d}>{d}</option>)}
                 </select>
               </div>
 
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-700 block">
-                  Trạng thái trên Print <span className="text-red-500">*</span>
+                  Trạng thái trên Web Mẹ <span className="text-red-500">*</span>
                 </label>
                 <select
                   required
-                  value={editPrintervalStatus}
-                  onChange={(e) => setEditPrintervalStatus(e.target.value)}
-                  disabled={loadingPrintervalOptions}
+                  value={editPlatformStatus}
+                  onChange={(e) => setEditPlatformStatus(e.target.value)}
+                  disabled={loadingPlatformOptions}
                   className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-[#0052CC]/20 focus:border-[#0052CC] disabled:bg-slate-100"
                 >
-                  {(printervalStatuses.length ? printervalStatuses : ['Doing']).map((s) => <option key={s} value={s}>{s}</option>)}
+                  {(platformStatuses.length ? platformStatuses : ['Doing']).map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
 
@@ -727,7 +730,7 @@ export function OrderStatusPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={applying || loadingPrintervalOptions || !editPrintervalDesigner}
+                  disabled={applying || loadingPlatformOptions || !editPlatformDesigner}
                   className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-[#0052CC] hover:bg-[#0041A3] rounded-xl transition-colors shadow-2xs disabled:opacity-50 cursor-pointer"
                 >
                   {applying && <Loader2 className="h-3.5 w-3.5 animate-spin" />}

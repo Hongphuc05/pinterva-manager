@@ -93,7 +93,9 @@ class OrderSummaryOut(BaseModel):
     # Read-only mirror of Printerval's own site status — never written back to the
     # site from here (see app/application/status_sync.py).
     printerval_status: str | None = None
+    platform_status: str | None = None
     printerval_status_synced_at: datetime | None = None
+    platform_status_synced_at: datetime | None = None
     status_changed_at: datetime | None = None
     note_outsource: str = ""
     previous_note_outsource: str | None = None
@@ -108,8 +110,11 @@ class OrderSummaryOut(BaseModel):
     source_download_all_url: str | None = None
     product_image_urls: list[str] | None = None
     printerval_designer: str | None = None
+    platform_designer: str | None = None
     printerval_assignment_lifecycle: str | None = None
+    platform_assignment_lifecycle: str | None = None
     printerval_assignment_error: str | None = None
+    platform_assignment_error: str | None = None
     is_paid: bool = False
     paid_at: datetime | None = None
     review_submitted_at: datetime | None = None
@@ -187,6 +192,7 @@ class BatchGalleryImportResponse(BaseModel):
 
 
 @router.post("/integrations/printerval-gallery", response_model=SingleGalleryImportResponse)
+@router.post("/integrations/platform-gallery", response_model=SingleGalleryImportResponse)
 def import_single_printerval_gallery(
     payload: GalleryImportItem,
     platform_id: uuid.UUID | None = Query(default=None),
@@ -197,7 +203,7 @@ def import_single_printerval_gallery(
 
     raw_id = payload.external_order_id.strip()
     if not raw_id:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Thiếu mã đơn Printerval")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Thiếu mã đơn")
 
     m = re.search(r"([A-Za-z0-9_-]+)", raw_id)
     external_order_id = m.group(1).upper() if m else raw_id.upper()
@@ -226,6 +232,7 @@ def import_single_printerval_gallery(
 
 
 @router.post("/integrations/printerval-gallery/batch", response_model=BatchGalleryImportResponse)
+@router.post("/integrations/platform-gallery/batch", response_model=BatchGalleryImportResponse)
 def import_batch_printerval_gallery(
     payload: BatchGalleryImportRequest,
     db: Session = Depends(get_db),
@@ -647,7 +654,9 @@ class OrderDetailOut(BaseModel):
     source_download_all_url: str | None = None
     product_image_urls: list[str] | None = None
     printerval_designer: str | None = None
+    platform_designer: str | None = None
     printerval_status: str | None = None
+    platform_status: str | None = None
     status_changed_at: datetime | None = None
     created_at: datetime
 
@@ -985,6 +994,7 @@ def api_refresh_order_detail(
 
 
 @router.get("/orders/{order_id}/printerval-options", response_model=PrintervalOptionsResponse)
+@router.get("/orders/{order_id}/platform-options", response_model=PrintervalOptionsResponse)
 def api_printerval_options(
     order_id: str,
     user: User = Depends(require_role("admin")),
@@ -1005,6 +1015,7 @@ def api_printerval_options(
 
 
 @router.post("/platforms/printerval-options/refresh", response_model=PrintervalOptionsResponse)
+@router.post("/platforms/platform-options/refresh", response_model=PrintervalOptionsResponse)
 def api_refresh_printerval_options(
     user: User = Depends(require_role("admin")),
     platform_id: uuid.UUID = Depends(get_current_platform_id),
@@ -1044,6 +1055,10 @@ def api_refresh_printerval_options(
 
 @router.post(
     "/orders/{order_id}/printerval-assignment",
+    response_model=PrintervalAssignmentResponse,
+)
+@router.post(
+    "/orders/{order_id}/platform-assignment",
     response_model=PrintervalAssignmentResponse,
 )
 def api_printerval_assignment(
@@ -1099,6 +1114,10 @@ def api_printerval_assignment(
 
 @router.post(
     "/orders/bulk-printerval-assignment",
+    response_model=BulkPrintervalAssignmentResponse,
+)
+@router.post(
+    "/orders/bulk-platform-assignment",
     response_model=BulkPrintervalAssignmentResponse,
 )
 def api_bulk_printerval_assignment(
@@ -1463,17 +1482,20 @@ def api_orders_refresh(
 
 
 @router.get("/printerval-login/status", response_model=PrintervalLoginStatus)
+@router.get("/platform-login/status", response_model=PrintervalLoginStatus)
 def api_printerval_login_status(user: User = Depends(require_role("admin"))):
     return PrintervalLoginStatus(session_open=login_session.is_session_open())
 
 
 @router.post("/printerval-login/start", response_model=PrintervalLoginStatus)
+@router.post("/platform-login/start", response_model=PrintervalLoginStatus)
 def api_printerval_login_start(user: User = Depends(require_role("admin"))):
     login_session.start_session()
     return PrintervalLoginStatus(session_open=True)
 
 
 @router.post("/printerval-login/done", response_model=PrintervalLoginStatus)
+@router.post("/platform-login/done", response_model=PrintervalLoginStatus)
 def api_printerval_login_done(user: User = Depends(require_role("admin"))):
     login_session.close_session()
     return PrintervalLoginStatus(session_open=False)
@@ -2161,6 +2183,7 @@ class SyncPrintervalStatusPayload(BaseModel):
 
 
 @router.post("/orders/sync-printerval-status")
+@router.post("/orders/sync-platform-status")
 def api_sync_printerval_status(
     payload: SyncPrintervalStatusPayload,
     user: User = Depends(get_current_user),
@@ -2247,6 +2270,7 @@ class DesignerWorkloadOrderOut(BaseModel):
     deadline_at_ext: str | None = None
     product_name: str | None = None
     printerval_designer: str | None = None
+    platform_designer: str | None = None
     note_outsource: str = ""
     previous_note_outsource: str | None = None
     fix_approved_by_admin: bool = False
@@ -2257,6 +2281,7 @@ class DesignerWorkloadOut(BaseModel):
     username: str
     full_name: str
     printerval_designer_option: str | None = None
+    platform_designer_option: str | None = None
     total_orders: int
     waiting_count: int = 0
     doing_count: int
@@ -2323,11 +2348,11 @@ def api_designers_workload(
                 return 1
             if s == "IN_PROGRESS":
                 return 2
-            if s in ("WAITING", "ASSIGNED", "OPEN"):
+            if s in ("WAITING", "OPEN"):
                 return 3
             return 4
 
-        des_orders.sort(key=lambda o: state_priority(o.state))
+        des_orders.sort(key=lambda x: (state_priority(x.state), -(x.created_at.timestamp() if x.created_at else 0)))
 
         results.append(
             DesignerWorkloadOut(
@@ -2335,6 +2360,7 @@ def api_designers_workload(
                 username=des.username,
                 full_name=des.full_name or des.username,
                 printerval_designer_option=des.printerval_designer_option,
+                platform_designer_option=des.printerval_designer_option,
                 total_orders=len(des_orders),
                 waiting_count=waiting_count,
                 doing_count=doing_count,
@@ -2350,6 +2376,7 @@ def api_designers_workload(
                         deadline_at_ext=str(o.deadline_at_ext) if o.deadline_at_ext else None,
                         product_name=o.product_name,
                         printerval_designer=o.printerval_designer,
+                        platform_designer=o.printerval_designer,
                         note_outsource=o.note_outsource or "",
                         previous_note_outsource=o.previous_note_outsource,
                         fix_approved_by_admin=o.fix_approved_by_admin,

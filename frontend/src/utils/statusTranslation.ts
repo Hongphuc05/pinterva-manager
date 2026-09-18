@@ -83,10 +83,10 @@ export function getStatusInfo(state: string): StateInfo {
   )
 }
 
-// The 6 real site statuses on Printerval itself (docs/phase0-field-map.md §1),
-// mirrored read-only into Order.printerval_status — distinct from STATE_MAP above,
+// The 6 real site statuses on the Platform itself,
+// mirrored read-only into Order.platform_status — distinct from STATE_MAP above,
 // which is this app's own internal workflow state.
-export const PRINTERVAL_STATUS_MAP: Record<string, StateInfo> = {
+export const PLATFORM_STATUS_MAP: Record<string, StateInfo> = {
   waiting: {
     label: 'Waiting',
     description: 'Chưa có designer nhận trên Web mẹ.',
@@ -119,7 +119,7 @@ export const PRINTERVAL_STATUS_MAP: Record<string, StateInfo> = {
   },
 }
 
-export function getPrintervalStatusInfo(status: string | null): StateInfo {
+export function getPlatformStatusInfo(status: string | null): StateInfo {
   if (!status) {
     return {
       label: 'Chưa đồng bộ',
@@ -128,7 +128,7 @@ export function getPrintervalStatusInfo(status: string | null): StateInfo {
     }
   }
   return (
-    PRINTERVAL_STATUS_MAP[status] ?? {
+    PLATFORM_STATUS_MAP[status] ?? {
       label: status,
       description: 'Trạng thái thật trên Web mẹ',
       badgeClass: 'bg-slate-100 text-slate-700 border-slate-200',

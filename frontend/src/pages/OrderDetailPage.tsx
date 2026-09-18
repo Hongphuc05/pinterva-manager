@@ -79,8 +79,8 @@ type OrderDetail = {
   source_files: SourceFile[] | null
   source_download_all_url: string | null
   product_image_urls?: string[] | null
-  printerval_designer: string | null
-  printerval_status: string | null
+  platform_designer?: string | null
+  platform_status?: string | null
   created_at: string
 }
 
@@ -127,13 +127,18 @@ export function OrderDetailPage() {
 
   async function loadOrderDetail() {
     if (!id) return
-    apiFetch<{ order: OrderDetail; history: WorkflowEvent[] }>(`/orders/${id}`)
+    apiFetch<{ order: any; history: WorkflowEvent[] }>(`/orders/${id}`)
       .then((data) => {
-        setOrder(data.order)
-        setDesignerNoteInput(data.order.designer_note || '')
+        const orderData: OrderDetail = {
+          ...data.order,
+          platform_designer: data.order.platform_designer || null,
+          platform_status: data.order.platform_status || null,
+        }
+        setOrder(orderData)
+        setDesignerNoteInput(orderData.designer_note || '')
         setHistory(data.history)
-        if (data.order.result_versions && data.order.result_versions.length > 0) {
-          const latest = data.order.result_versions[data.order.result_versions.length - 1]
+        if (orderData.result_versions && orderData.result_versions.length > 0) {
+          const latest = orderData.result_versions[orderData.result_versions.length - 1]
           if (latest?.drive_url) {
             setDriveUrl(latest.drive_url)
           }
@@ -309,7 +314,7 @@ export function OrderDetailPage() {
 
     const addVariant = (name?: string | null, value?: string | null) => {
       if (!name || !value) return
-      // Printerval sometimes returns labels such as "| Size" from the source
+      // Sometimes labels such as "| Size" are returned from the source
       // markup. Strip presentation separators before deduplicating/grouping.
       const normalizedName = name.trim().replace(/^[|•·\s]+|[|•·\s]+$/g, '').trim()
       if (!normalizedName) return
@@ -595,12 +600,12 @@ export function OrderDetailPage() {
                     <span>DES: {order.assigned_designer_name}</span>
                   </span>
                 )}
-                {isAdmin && order.printerval_designer && (
+                {isAdmin && order.platform_designer && (
                   <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-violet-50 text-violet-700 text-xs font-semibold border border-violet-100">
                     <User className="h-3.5 w-3.5" />
                     <span>
-                      Print: {order.printerval_designer}
-                      {order.printerval_status ? ` · ${order.printerval_status}` : ''}
+                      Acc Mẹ: {order.platform_designer}
+                      {order.platform_status ? ` · ${order.platform_status}` : ''}
                     </span>
                   </span>
                 )}
@@ -712,7 +717,7 @@ export function OrderDetailPage() {
         </div>
 
         {/* Designer Task Actions Block */}
-        {(order.assignment_id || order.printerval_designer || isAdmin) && (
+        {(order.assignment_id || order.platform_designer || isAdmin) && (
           <div className="p-5 rounded-xl bg-blue-50/40 border border-blue-200 space-y-4">
             <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
               <CheckSquare className="h-4 w-4 text-[#0052CC]" />
@@ -1057,7 +1062,7 @@ export function OrderDetailPage() {
           </div>
         )}
 
-        {/* Custom configuration mirrors Printerval's two configuration tables. */}
+        {/* Custom configuration */}
         {order.custom_config && order.custom_config.original && order.custom_config.original.length > 0 && (
           <div className="space-y-3 pt-4 border-t border-slate-100">
             <CustomConfigurationSection entries={order.custom_config.original} />
@@ -1094,7 +1099,7 @@ export function OrderDetailPage() {
           />
         )}
 
-        {/* These three cards use the same order as Printerval itself. */}
+        {/* Source Files Card */}
         <SourceFilesCard
           sourceFiles={order.source_files}
           downloadAllUrl={order.source_download_all_url}

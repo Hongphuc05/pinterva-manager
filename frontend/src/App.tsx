@@ -12,7 +12,7 @@ import { DesignerBoardPage } from './pages/DesignerBoardPage'
 import { OrderHistoryPage } from './pages/OrderHistoryPage'
 import { FinancePage } from './pages/FinancePage'
 import { DuplicateBoardPage } from './pages/DuplicateBoardPage'
-import { PrintervalHubPage } from './pages/PrintervalHubPage'
+import { PlatformHubPage } from './pages/PlatformHubPage'
 
 function App() {
   return (
@@ -76,16 +76,12 @@ function App() {
             }
           />
           <Route
-            path="/printerval-hub"
+            path="/platform-hub"
             element={
               <ProtectedRoute allowedRoles={['admin']}>
-                <PrintervalHubPage />
+                <PlatformHubPage />
               </ProtectedRoute>
             }
-          />
-          <Route
-            path="/printerval-login"
-            element={<Navigate to="/printerval-hub" replace />}
           />
           <Route
             path="/my-tasks"

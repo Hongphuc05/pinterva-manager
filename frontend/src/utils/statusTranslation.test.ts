@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { resolveExternalUrl, getStatusInfo, getPrintervalStatusInfo } from './statusTranslation'
+import { resolveExternalUrl, getStatusInfo, getPlatformStatusInfo } from './statusTranslation'
 
 describe('resolveExternalUrl', () => {
   it('returns null for empty, undefined or whitespace inputs', () => {
@@ -42,7 +42,7 @@ describe('resolveExternalUrl', () => {
   })
 })
 
-describe('getStatusInfo & getPrintervalStatusInfo', () => {
+describe('getStatusInfo & getPlatformStatusInfo', () => {
   it('returns appropriate labels for workflow states', () => {
     expect(getStatusInfo('WAITING').label).toBe('Chờ nhận')
     expect(getStatusInfo('WAITING').description).toBe('Đang chờ được phân công.')
@@ -55,11 +55,12 @@ describe('getStatusInfo & getPrintervalStatusInfo', () => {
     expect(getStatusInfo('DONE').label).toBe('Hoàn thành')
   })
 
-  it('returns appropriate labels for printerval statuses', () => {
-    expect(getPrintervalStatusInfo('waiting').label).toBe('Waiting')
-    expect(getPrintervalStatusInfo('doing').label).toBe('Doing')
-    expect(getPrintervalStatusInfo('review').label).toBe('Review')
-    expect(getPrintervalStatusInfo('fix').label).toBe('Fix')
-    expect(getPrintervalStatusInfo(null).label).toBe('Chưa đồng bộ')
+  it('returns appropriate labels for platform statuses', () => {
+    expect(getPlatformStatusInfo('waiting').label).toBe('Waiting')
+    expect(getPlatformStatusInfo('doing').label).toBe('Doing')
+    expect(getPlatformStatusInfo('review').label).toBe('Review')
+    expect(getPlatformStatusInfo('fix').label).toBe('Fix')
+    expect(getPlatformStatusInfo(null).label).toBe('Chưa đồng bộ')
   })
 })
+
