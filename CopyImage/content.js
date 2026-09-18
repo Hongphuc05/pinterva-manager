@@ -465,6 +465,14 @@
         return { key: clean.toLowerCase(), standardUrl: clean };
     }
 
+    function toAbsoluteProductImageUrl(rawUrl) {
+        const raw = String(rawUrl || '').trim();
+        if (!raw || /^(?:data|blob|javascript|about):/i.test(raw)) return null;
+        if (/^https?:\/\//i.test(raw)) return raw;
+        if (raw.startsWith('//')) return `https:${raw}`;
+        return `https://printerval.com${raw.startsWith('/') ? '' : '/'}${raw}`;
+    }
+
     // ---------------------------------------------------------
     // HTML Parsing & Gallery Extraction
     // ---------------------------------------------------------
@@ -502,12 +510,13 @@
                         img.getAttribute('data-zoom-image') ||
                         img.getAttribute('data-large-img-url') ||
                         img.getAttribute('data-high-res-src') ||
-                        img.getAttribute('src') ||
                         img.getAttribute('data-src') ||
-                        img.getAttribute('loading-src');
+                        img.getAttribute('loading-src') ||
+                        img.getAttribute('src');
             if (!raw) return;
 
-            const absolute = raw.startsWith('http') ? raw : (raw.startsWith('//') ? 'https:' + raw : 'https://printerval.com' + raw);
+            const absolute = toAbsoluteProductImageUrl(raw);
+            if (!absolute) return;
             const { key, standardUrl } = canonicalizeUrl(absolute);
             if (!key || seenKeys.has(key)) return;
 

@@ -4,7 +4,6 @@ import re
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict
@@ -117,13 +116,9 @@ CRAWLED_ASSETS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "cra
 
 
 def _is_allowed_gallery_url(url: str) -> bool:
-    u_lower = url.lower().strip()
-    if u_lower.startswith("/crawled_assets/") or u_lower.startswith("/assets/") or u_lower.startswith("/order_assets/"):
-        return True
-    if u_lower.startswith("data:image/"):
-        return True
-    parsed = urlparse(url)
-    return parsed.scheme in ("https", "http") and bool(parsed.hostname)
+    from app.application.gallery_helper import is_allowed_gallery_url
+
+    return is_allowed_gallery_url(url)
 
 
 class GalleryImportItem(BaseModel):

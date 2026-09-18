@@ -24,6 +24,7 @@ from app.config import get_settings
 
 FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 CRAWLED_ASSETS_DIR = Path(__file__).resolve().parent.parent.parent / "crawled_assets"
+SPA_HTML_HEADERS = {"Cache-Control": "no-cache, no-store, must-revalidate"}
 logger = logging.getLogger(__name__)
 
 # These routes are retained only to give deployed clients a migration window.
@@ -142,8 +143,9 @@ def create_app() -> FastAPI:
                 and candidate.is_file()
                 and candidate.resolve().is_relative_to(FRONTEND_DIST.resolve())
             ):
-                return FileResponse(candidate)
-            return FileResponse(FRONTEND_DIST / "index.html")
+                headers = SPA_HTML_HEADERS if candidate.name == "index.html" else None
+                return FileResponse(candidate, headers=headers)
+            return FileResponse(FRONTEND_DIST / "index.html", headers=SPA_HTML_HEADERS)
 
     return app
 

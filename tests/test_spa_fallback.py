@@ -41,6 +41,7 @@ def test_spa_route_falls_back_to_index_html(fake_dist_client):
     resp = fake_dist_client.get("/orders")
     assert resp.status_code == 200
     assert "fake spa shell" in resp.text
+    assert resp.headers["cache-control"] == "no-cache, no-store, must-revalidate"
 
 
 def test_public_file_at_dist_root_is_served_verbatim(fake_dist_client):

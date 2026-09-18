@@ -86,6 +86,23 @@ def test_import_single_printerval_gallery_invalid_urls(client, db_session):
     assert resp.status_code == 422
 
 
+def test_import_single_printerval_gallery_rejects_malformed_lazy_image_placeholder(client, db_session):
+    _seed_platform(db_session)
+    order = Order(external_order_id="DJ1002", platform_id=DEFAULT_PLATFORM_ID, state=OrderState.OPEN.value)
+    db_session.add(order)
+    db_session.commit()
+
+    resp = client.post(
+        "/api/integrations/printerval-gallery",
+        json={
+            "external_order_id": "DJ1002",
+            "image_urls": ["https://printerval.comdata:image/svg+xml;base64,placeholder"],
+        },
+    )
+
+    assert resp.status_code == 422
+
+
 def test_import_batch_printerval_gallery_success(client, db_session):
     _seed_platform(db_session)
     o1 = Order(external_order_id="DJ2001", platform_id=DEFAULT_PLATFORM_ID, state=OrderState.OPEN.value)
@@ -157,4 +174,3 @@ def test_download_extension_zip(client):
         assert "background.js" in namelist
         assert "content.js" in namelist
         assert "options.html" in namelist
-

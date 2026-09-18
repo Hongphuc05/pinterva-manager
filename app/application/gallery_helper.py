@@ -1,6 +1,37 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import urlparse
+
+
+_MALFORMED_PRINTERVAL_PLACEHOLDER_URL = re.compile(
+    r"^https?://(?:www\.)?printerval\.com(?:data:|blob:|javascript:|about:)",
+    re.IGNORECASE,
+)
+
+
+def is_allowed_gallery_url(raw_url: str) -> bool:
+    """Accept displayable gallery URLs and reject lazy-load placeholders.
+
+    A browser page can expose an ``img`` whose ``src`` is a ``data:`` or ``blob:``
+    placeholder.  Older gallery extractors prefixed that value with the product
+    host, producing URLs such as ``https://printerval.comdata:image/...``.  They
+    look like HTTP URLs but can never resolve to an image.
+    """
+    url = raw_url.strip()
+    if not url:
+        return False
+
+    lowered = url.lower()
+    if lowered.startswith(("/crawled_assets/", "/assets/", "/order_assets/")):
+        return True
+    if lowered.startswith("data:image/"):
+        return True
+    if _MALFORMED_PRINTERVAL_PLACEHOLDER_URL.match(url):
+        return False
+
+    parsed = urlparse(url)
+    return parsed.scheme in ("https", "http") and bool(parsed.hostname)
 
 
 def canonicalize_gallery_url(raw_url: str) -> tuple[str, str]:
@@ -56,6 +87,8 @@ def deduplicate_gallery_urls(urls: list[str] | None) -> list[str]:
     result = []
     for u in urls:
         if not isinstance(u, str) or not u.strip():
+            continue
+        if not is_allowed_gallery_url(u):
             continue
         key, standard_url = canonicalize_gallery_url(u)
         if key and key not in seen:
