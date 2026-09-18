@@ -331,6 +331,12 @@ export function OrderDetailPage() {
 
     return list
   })()
+  const sizeValues = variantsToDisplay
+    .filter((variant) => variant.name.trim().toLowerCase() === 'size')
+    .map((variant) => variant.value)
+  const nonSizeVariants = variantsToDisplay.filter(
+    (variant) => variant.name.trim().toLowerCase() !== 'size',
+  )
 
   // Find sample image (from sku_image_url or product_skus)
   const sampleMockupUrl =
@@ -607,12 +613,26 @@ export function OrderDetailPage() {
                   </>
                 )}
                 <span>Category: <strong className="text-slate-700">{order.product_category ?? '-'}</strong></span>
-                {variantsToDisplay.map((v, idx) => (
+                {nonSizeVariants.map((v, idx) => (
                   <span key={idx} className="flex items-center gap-3">
                     <span>•</span>
                     <span>{v.name}: <strong className="text-slate-700">{v.value}</strong></span>
                   </span>
                 ))}
+                {sizeValues.length > 0 && (
+                  <span className="flex flex-wrap items-center gap-1.5">
+                    <span>•</span>
+                    <span>Size:</span>
+                    {sizeValues.map((size) => (
+                      <strong
+                        key={size}
+                        className="rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-slate-700"
+                      >
+                        {size}
+                      </strong>
+                    ))}
+                  </span>
+                )}
                 {sampleMockupUrl && (
                   <>
                     <span>•</span>
