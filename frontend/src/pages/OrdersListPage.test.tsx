@@ -743,4 +743,101 @@ describe('OrdersListPage', () => {
     fireEvent.click(unassignBtn)
     await waitFor(() => expect(revokeCalledWith).toEqual({ order_ids: ['o-waiting-1'] }))
   })
+
+  it('renders CopyableProductName and handles inline design submission for designer', async () => {
+    let patchedStateBody: any = null
+    let assignmentResultBody: any = null
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, init?: RequestInit) => {
+        if (url.includes('/api/me')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ id: 'des10', role: 'designer', full_name: 'Test Designer' }),
+          })
+        }
+        if (url.includes('/api/platforms')) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ platforms: [] }) })
+        }
+        if (url.includes('/api/assignments/assign-99/results')) {
+          assignmentResultBody = JSON.parse(init?.body as string)
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ success: true }) })
+        }
+        if (url.includes('/api/orders/order-99/state')) {
+          patchedStateBody = JSON.parse(init?.body as string)
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ success: true }) })
+        }
+        if (url.includes('/api/orders')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              orders: [
+                {
+                  id: 'order-99',
+                  assignment_id: 'assign-99',
+                  external_order_id: 'ORD-DESIGN-99',
+                  product_name: 'Awesome Vintage T-Shirt',
+                  state: 'IN_PROGRESS',
+                  template_missing: false,
+                  batch_id: null,
+                  sku: 'SKU99',
+                  thumbnail_url: null,
+                  order_created_at_ext: '2026-09-10T14:28:00',
+                  deadline_at_ext: null,
+                  created_at: '2026-01-01T00:00:00',
+                  drive_url: null,
+                },
+              ],
+            }),
+          })
+        }
+        return Promise.reject(new Error(`unexpected fetch: ${url}`))
+      })
+    )
+
+    render(
+      <BrowserRouter>
+        <AuthProvider>
+          <PlatformProvider>
+            <ToastProvider>
+              <GallerySyncProvider>
+                <OrdersListPage />
+              </GallerySyncProvider>
+            </ToastProvider>
+          </PlatformProvider>
+        </AuthProvider>
+      </BrowserRouter>
+    )
+
+    // Wait for product name to be displayed
+    await waitFor(() => expect(screen.getByText('Awesome Vintage T-Shirt')).toBeInTheDocument())
+
+    // Product name button has copy title
+    const copyButton = screen.getByTitle('Click để sao chép tên sản phẩm')
+    expect(copyButton).toBeInTheDocument()
+
+    // Inline input with placeholder
+    const input = screen.getByPlaceholderText('Dán link thiết kế (Drive, Canva, DropBox...)') as HTMLInputElement
+    expect(input).toBeInTheDocument()
+
+    // Fill in link
+    fireEvent.change(input, { target: { value: 'https://drive.google.com/file/d/123/view' } })
+    expect(input.value).toBe('https://drive.google.com/file/d/123/view')
+
+    // Click "Nộp bài"
+    const submitBtn = screen.getByRole('button', { name: /Nộp bài/i })
+    expect(submitBtn).toBeInTheDocument()
+    fireEvent.click(submitBtn)
+
+    await waitFor(() => {
+      expect(assignmentResultBody).toBeTruthy()
+      expect(assignmentResultBody.drive_url).toBe('https://drive.google.com/file/d/123/view')
+      expect(patchedStateBody).toBeTruthy()
+      expect(patchedStateBody.state).toBe('QC_PENDING')
+      expect(patchedStateBody.drive_url).toBe('https://drive.google.com/file/d/123/view')
+    })
+  })
 })

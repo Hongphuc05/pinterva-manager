@@ -8,6 +8,7 @@ import { ImageModal } from '../components/ImageModal'
 import { StatusDropdown } from '../components/StatusDropdown'
 import { Pagination, paginate } from '../components/Pagination'
 import { CopyableOrderCode } from '../components/CopyableOrderCode'
+import { CopyableProductName } from '../components/CopyableProductName'
 import { useToast } from '../context/ToastContext'
 import { useGallerySync } from '../context/GallerySyncContext'
 import { useSyncStatus } from '../hooks/useSyncStatus'
@@ -68,6 +69,8 @@ export type OrderSummary = {
   fix_approved_by_admin?: boolean
   fix_rejected_by_admin?: boolean
   designer_note?: string
+  admin_note?: string | null
+  drive_url?: string | null
   template_missing?: boolean
   duplicate_check_status?: string
   is_paid?: boolean
@@ -265,6 +268,10 @@ export function OrdersListPage() {
   const [movingToDuplicateDomain, setMovingToDuplicateDomain] = useState(false)
   const [deleteConfirmModalOpen, setDeleteConfirmModalOpen] = useState(false)
   const [isBulkDeleting, setIsBulkDeleting] = useState(false)
+
+  // Inline submission state for Designer
+  const [inlineSubmissionLinks, setInlineSubmissionLinks] = useState<Record<string, string>>({})
+  const [isSubmittingInline, setIsSubmittingInline] = useState<Record<string, boolean>>({})
 
   const regularDesigners = usersList.filter((candidate) => candidate.role === 'designer')
 
@@ -736,18 +743,48 @@ export function OrdersListPage() {
     }
   }
 
-  // Quick change order state for Admin
-  async function handleQuickStateChange(orderId: string, newState: string, flashMsg: string) {
+
+  // Inline submit result link for Designer from outer list
+  async function handleInlineSubmit(order: OrderSummary, linkValue: string) {
+    const trimmed = (linkValue || '').trim()
+    if (!trimmed) {
+      showToast('Vui lòng dán link kết quả thiết kế (Drive, Canva, DropBox...) trước khi nộp bài!', 'error')
+      return
+    }
+
+    setIsSubmittingInline((prev) => ({ ...prev, [order.id]: true }))
     try {
-      await apiFetch(`/orders/${orderId}/state`, {
+      if (order.assignment_id) {
+        try {
+          await apiFetch(`/assignments/${order.assignment_id}/results`, {
+            method: 'POST',
+            body: JSON.stringify({
+              drive_url: trimmed,
+              request_id: crypto.randomUUID(),
+            }),
+          })
+        } catch (assignErr) {
+          console.warn('Ghi nhận assignment result:', assignErr)
+        }
+      }
+
+      await apiFetch(`/orders/${order.id}/state`, {
         method: 'PATCH',
-        body: JSON.stringify({ state: newState }),
+        body: JSON.stringify({
+          state: 'QC_PENDING',
+          drive_url: trimmed,
+          note_outsource: trimmed,
+        }),
       })
-      setFlash(flashMsg)
-      markTabMoved(orderId)
+
+      showToast(`Đã nộp bài thiết kế thành công cho đơn: ${order.product_name || order.external_order_id}`, 'success')
+      markTabMoved(order.id)
+      window.dispatchEvent(new CustomEvent('orders-updated'))
       await loadOrders()
     } catch (err: any) {
-      setError(err?.message || 'Không thể đổi trạng thái đơn.')
+      showToast(err?.message || 'Không thể nộp kết quả.', 'error')
+    } finally {
+      setIsSubmittingInline((prev) => ({ ...prev, [order.id]: false }))
     }
   }
 
@@ -2177,23 +2214,21 @@ export function OrdersListPage() {
                   <th className="py-3 px-4">Thông Tin Đơn Hàng</th>
                   <th className="py-3 px-4 text-right w-72">Phân Loại / Thao Tác</th>
                 </tr>
-              ) : (
+              ) : isAdmin ? (
                 <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-semibold uppercase text-slate-500 tracking-wider">
-                  {isAdmin && (
-                    <th className="py-3 px-3 w-10 text-center">
-                      <input
-                        type="checkbox"
-                        checked={
-                          paginatedOrders.length > 0 &&
-                          paginatedOrders.every((o) => selectedOrderIds.includes(o.id))
-                        }
-                        onChange={(e) => handleSelectAll(e.target.checked)}
-                        className="rounded border-slate-300 text-[#0052CC] focus:ring-[#0052CC] h-3.5 w-3.5 cursor-pointer"
-                      />
-                    </th>
-                  )}
+                  <th className="py-3 px-3 w-10 text-center">
+                    <input
+                      type="checkbox"
+                      checked={
+                        paginatedOrders.length > 0 &&
+                        paginatedOrders.every((o) => selectedOrderIds.includes(o.id))
+                      }
+                      onChange={(e) => handleSelectAll(e.target.checked)}
+                      className="rounded border-slate-300 text-[#0052CC] focus:ring-[#0052CC] h-3.5 w-3.5 cursor-pointer"
+                    />
+                  </th>
                   <th className="py-3 px-3 w-14 text-center">Ảnh</th>
-                  <th className="py-3 px-4">{isAdmin ? 'Mã Đơn' : 'Tên Đơn Hàng'}</th>
+                  <th className="py-3 px-4">Mã Đơn</th>
                   <th className="py-3 px-4">Trạng Thái</th>
                   <th className="py-3 px-4">Des Đảm Nhận</th>
                   <th className="py-3 px-4 whitespace-nowrap">
@@ -2206,21 +2241,31 @@ export function OrdersListPage() {
                       Order At <ArrowDownUp className={`h-3.5 w-3.5 ${dateSort.field === 'order_created_at_ext' ? 'text-[#0052CC]' : ''}`} />
                     </button>
                   </th>
-                  {isAdmin && (
-                    <th className="py-3 px-4 whitespace-nowrap">
-                      <button type="button" onClick={() => toggleDateSort('created_at')} className="inline-flex items-center gap-1 hover:text-[#0052CC]" title="Sắp xếp theo ngày tạo (crawl)">
-                        Ngày tạo (crawl) <ArrowDownUp className={`h-3.5 w-3.5 ${dateSort.field === 'created_at' ? 'text-[#0052CC]' : ''}`} />
-                      </button>
-                    </th>
-                  )}
+                  <th className="py-3 px-4 whitespace-nowrap">
+                    <button type="button" onClick={() => toggleDateSort('created_at')} className="inline-flex items-center gap-1 hover:text-[#0052CC]" title="Sắp xếp theo ngày tạo (crawl)">
+                      Ngày tạo (crawl) <ArrowDownUp className={`h-3.5 w-3.5 ${dateSort.field === 'created_at' ? 'text-[#0052CC]' : ''}`} />
+                    </button>
+                  </th>
                   <th className="py-3 px-4 text-right">Thao Tác</th>
+                </tr>
+              ) : (
+                <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-semibold uppercase text-slate-500 tracking-wider">
+                  <th className="py-3 px-3 w-16 text-center">Ảnh</th>
+                  <th className="py-3 px-4 min-w-[220px]">Tên Sản Phẩm (Click để copy)</th>
+                  <th className="py-3 px-4 w-52">Trạng Thái &amp; Ghi Chú</th>
+                  <th className="py-3 px-4 w-36 whitespace-nowrap">
+                    <button type="button" onClick={() => toggleDateSort('status_changed_at')} className="inline-flex items-center gap-1 hover:text-[#0052CC]" title="Sắp xếp theo thời gian chuyển vào tab (UTC+7)">
+                      Thời Gian <ArrowDownUp className={`h-3.5 w-3.5 ${dateSort.field === 'status_changed_at' ? 'text-[#0052CC]' : ''}`} />
+                    </button>
+                  </th>
+                  <th className="py-3 px-4 min-w-[320px]">Nộp Link Bài Thiết Kế</th>
                 </tr>
               )}
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
               {paginatedOrders.length === 0 ? (
                 <tr>
-                  <td colSpan={isSupport ? 4 : isAdmin ? 9 : 7} className="py-12 text-center text-slate-400">
+                  <td colSpan={isSupport ? 4 : isAdmin ? 9 : 5} className="py-12 text-center text-slate-400">
                     {ordersLoading ? (
                       <>
                         <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin opacity-50 text-[#0052CC]" />
@@ -2434,38 +2479,36 @@ export function OrdersListPage() {
                             </div>
                           </td>
                         </>
-                      ) : (
+                      ) : isAdmin ? (
                         <>
-                          {isAdmin && (
-                            <td className="py-2.5 px-3 text-center" onClick={(e) => e.stopPropagation()}>
-                              <input
-                                type="checkbox"
-                                checked={isSelected}
-                                onClick={(e) => {
-                                  if (e.shiftKey && lastSelectedIndex !== null) {
-                                    const start = Math.min(lastSelectedIndex, idx)
-                                    const end = Math.max(lastSelectedIndex, idx)
-                                    const rangeIds = paginatedOrders.slice(start, end + 1).map((item) => item.id)
-                                    setSelectedOrderIds((prev) => Array.from(new Set([...prev, ...rangeIds])))
-                                  } else {
-                                    setSelectedOrderIds((prev) =>
-                                      prev.includes(o.id) ? prev.filter((id) => id !== o.id) : [...prev, o.id]
-                                    )
-                                    setLastSelectedIndex(idx)
-                                  }
-                                }}
-                                onChange={() => {}}
-                                className="rounded border-slate-300 text-[#0052CC] focus:ring-[#0052CC] h-3.5 w-3.5 cursor-pointer"
-                              />
-                            </td>
-                          )}
+                          <td className="py-2.5 px-3 text-center" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onClick={(e) => {
+                                if (e.shiftKey && lastSelectedIndex !== null) {
+                                  const start = Math.min(lastSelectedIndex, idx)
+                                  const end = Math.max(lastSelectedIndex, idx)
+                                  const rangeIds = paginatedOrders.slice(start, end + 1).map((item) => item.id)
+                                  setSelectedOrderIds((prev) => Array.from(new Set([...prev, ...rangeIds])))
+                                } else {
+                                  setSelectedOrderIds((prev) =>
+                                    prev.includes(o.id) ? prev.filter((id) => id !== o.id) : [...prev, o.id]
+                                  )
+                                  setLastSelectedIndex(idx)
+                                }
+                              }}
+                              onChange={() => {}}
+                              className="rounded border-slate-300 text-[#0052CC] focus:ring-[#0052CC] h-3.5 w-3.5 cursor-pointer"
+                            />
+                          </td>
 
                           {/* Image Thumbnail with Click-to-Zoom */}
                           <td className="py-2.5 px-3 text-center" onClick={(e) => e.stopPropagation()}>
                             {o.thumbnail_url ? (
                               <img
                                 src={resolveAssetUrl(o.thumbnail_url)}
-                                alt={isAdmin ? o.external_order_id : (o.product_name || 'Đơn thiết kế')}
+                                alt={o.external_order_id}
                                 title="Click để xem ảnh phóng to"
                                 onClick={() => setSelectedImage(resolveAssetUrl(o.thumbnail_url) ?? null)}
                                 className="h-16 w-16 rounded-xl object-cover border border-slate-200 mx-auto shadow-xs cursor-pointer hover:scale-105 transition-transform hover:ring-2 hover:ring-[#0052CC]"
@@ -2479,57 +2522,34 @@ export function OrdersListPage() {
 
                           {/* Order Code / Product Name */}
                           <td className="py-2.5 px-4 font-semibold text-[#0052CC]">
-                            {isAdmin ? (
-                              <>
-                                <div className="flex items-center gap-1.5 flex-wrap">
-                                  <CopyableOrderCode code={o.external_order_id} />
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <CopyableOrderCode code={o.external_order_id} />
 
-                                  {/* Admin: Orange exclamation mark if NOT checked by support across ALL tabs */}
-                                  {(!o.duplicate_check_status || o.duplicate_check_status === 'uncheck') && (
-                                    <span
-                                      className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-900 shadow-2xs"
-                                      title="Support team chưa kiểm tra trùng lặp cho đơn này"
-                                    >
-                                      <AlertTriangle className="h-3 w-3 text-amber-600 shrink-0" />
-                                      <span>Chưa kiểm tra</span>
-                                    </span>
-                                  )}
+                              {/* Admin: Orange exclamation mark if NOT checked by support across ALL tabs */}
+                              {(!o.duplicate_check_status || o.duplicate_check_status === 'uncheck') && (
+                                <span
+                                  className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-900 shadow-2xs"
+                                  title="Support team chưa kiểm tra trùng lặp cho đơn này"
+                                >
+                                  <AlertTriangle className="h-3 w-3 text-amber-600 shrink-0" />
+                                  <span>Chưa kiểm tra</span>
+                                </span>
+                              )}
 
-                                  {o.work_domain === 'duplicate' && (
-                                    <span className="inline-flex rounded border border-violet-200 bg-violet-50 px-1.5 py-0.2 text-[10px] font-bold text-violet-700">
-                                      Đơn trùng
-                                    </span>
-                                  )}
-                                  {o.template_missing && (
-                                    <span className="inline-flex rounded border border-rose-200 bg-rose-50 px-1.5 py-0.2 text-[10px] font-bold text-rose-700">Thiếu temp</span>
-                                  )}
-                                </div>
+                              {o.work_domain === 'duplicate' && (
+                                <span className="inline-flex rounded border border-violet-200 bg-violet-50 px-1.5 py-0.2 text-[10px] font-bold text-violet-700">
+                                  Đơn trùng
+                                </span>
+                              )}
+                              {o.template_missing && (
+                                <span className="inline-flex rounded border border-rose-200 bg-rose-50 px-1.5 py-0.2 text-[10px] font-bold text-rose-700">Thiếu temp</span>
+                              )}
+                            </div>
 
-                                {o.product_name && (
-                                  <p className="text-[11px] text-slate-500 font-normal line-clamp-1 mt-0.5" title={o.product_name}>
-                                    {o.product_name}
-                                  </p>
-                                )}
-                              </>
-                            ) : (
-                              <div className="space-y-1">
-                                <div className="flex items-center gap-1.5 flex-wrap">
-                                  <Link
-                                    to={`/orders/${o.id}`}
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      dismissHighlight(o.id)
-                                    }}
-                                    className="hover:underline flex items-center gap-1 text-xs font-bold text-slate-900 leading-snug"
-                                    title={o.product_name || 'Đơn hàng thiết kế'}
-                                  >
-                                    <span className="line-clamp-2">{o.product_name || 'Đơn hàng thiết kế'}</span>
-                                  </Link>
-                                  {o.template_missing && (
-                                    <span className="inline-flex rounded border border-rose-200 bg-rose-50 px-1.5 py-0.2 text-[10px] font-bold text-rose-700 shrink-0">Thiếu temp</span>
-                                  )}
-                                </div>
-                              </div>
+                            {o.product_name && (
+                              <p className="text-[11px] text-slate-500 font-normal line-clamp-1 mt-0.5" title={o.product_name}>
+                                {o.product_name}
+                              </p>
                             )}
 
                             {/* Badges and links */}
@@ -2546,7 +2566,7 @@ export function OrdersListPage() {
                                   <ExternalLink className="h-2.5 w-2.5" />
                                 </a>
                               )}
-                              {isAdmin && o.external_order_url && (
+                              {o.external_order_url && (
                                 <a
                                   href={o.external_order_url}
                                   target="_blank"
@@ -2611,52 +2631,21 @@ export function OrdersListPage() {
                             )}
                           </td>
 
-                          {/* Status Column: Dropdown for Admin, Clear Badges for Designer */}
+                          {/* Status Column: Dropdown for Admin */}
                           <td className="py-2.5 px-4" onClick={(e) => e.stopPropagation()}>
-                            {isAdmin ? (
-                              <StatusDropdown
-                                orderId={o.id}
-                                externalOrderId={o.external_order_id}
-                                currentState={o.state}
-                                disabled={Boolean(o.template_missing)}
-                                onStatusChanged={(newState) => {
-                                  markTabMoved(o.id)
-                                  setOrders((prev) =>
-                                    prev.map((item) => (item.id === o.id ? { ...item, state: newState } : item))
-                                  )
-                                }}
-                              />
-                            ) : (
-                              <div>
-                                {o.template_missing ? (
-                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold rounded-lg bg-rose-100 text-rose-800 border border-rose-300 select-none shadow-2xs">
-                                    <Flag className="h-3 w-3" />
-                                    <span>Chờ cập nhật</span>
-                                  </span>
-                                ) : ['REVISION', 'REVISION_REQUESTED', 'FIX'].includes((o.state || '').toUpperCase()) ? (
-                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold rounded-lg bg-rose-100 text-rose-800 border border-rose-300 select-none shadow-2xs">
-                                    <span className="h-2 w-2 rounded-full bg-rose-500 animate-pulse" />
-                                    <span>Cần sửa gấp</span>
-                                  </span>
-                                ) : ['QC_PENDING', 'RESULT_SUBMITTED', 'SUBMITTING_TO_SITE', 'REVIEW'].includes((o.state || '').toUpperCase()) ? (
-                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold rounded-lg bg-purple-100 text-purple-800 border border-purple-300 select-none shadow-2xs">
-                                    <span className="h-2 w-2 rounded-full bg-purple-500" />
-                                    <span>Chờ duyệt</span>
-                                  </span>
-                                ) : ['DONE', 'CLAIMED_IMPORTED', 'COMPLETED', 'SKIPPED'].includes((o.state || '').toUpperCase()) ? (
-                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold rounded-lg bg-emerald-100 text-emerald-800 border border-emerald-300 select-none shadow-2xs">
-                                    <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                                    <span>Hoàn thành</span>
-                                  </span>
-                                ) : (
-                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold rounded-lg bg-blue-100 text-blue-800 border border-blue-300 select-none shadow-2xs">
-                                    <span className="h-2 w-2 rounded-full bg-blue-500" />
-                                    <span>{['WAITING', 'OPEN_FOR_ALLOCATION', 'DISCOVERED', 'PENDING', 'OPEN'].includes((o.state || '').toUpperCase()) ? 'Chờ chia' : 'Đang làm'}</span>
-                                  </span>
-                                )}
-                              </div>
-                            )}
-                            {isAdmin && o.platform_status && (
+                            <StatusDropdown
+                              orderId={o.id}
+                              externalOrderId={o.external_order_id}
+                              currentState={o.state}
+                              disabled={Boolean(o.template_missing)}
+                              onStatusChanged={(newState) => {
+                                markTabMoved(o.id)
+                                setOrders((prev) =>
+                                  prev.map((item) => (item.id === o.id ? { ...item, state: newState } : item))
+                                )
+                              }}
+                            />
+                            {o.platform_status && (
                               <div className="mt-1 text-[10px] font-mono text-slate-400 flex items-center gap-1">
                                 <span>Prin:</span>
                                 <span className="font-semibold text-slate-600 inline-flex items-center gap-1">
@@ -2673,27 +2662,23 @@ export function OrdersListPage() {
                           <td className="py-2.5 px-4 font-medium text-slate-700" onClick={(e) => e.stopPropagation()}>
                             {o.assigned_designer_name ? (
                               <span
-                                onClick={() => isAdmin && openAssignModal(o)}
-                                className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-blue-50 text-[#0052CC] font-semibold text-xs ${
-                                  isAdmin ? 'cursor-pointer hover:bg-blue-100 hover:scale-105 transition-all' : ''
-                                }`}
-                                title={isAdmin ? 'Click để đổi Designer đảm nhận' : undefined}
+                                onClick={() => openAssignModal(o)}
+                                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-blue-50 text-[#0052CC] font-semibold text-xs cursor-pointer hover:bg-blue-100 hover:scale-105 transition-all"
+                                title="Click để đổi Designer đảm nhận"
                               >
                                 <User className="h-3 w-3" />
                                 <span>{o.assigned_designer_name}</span>
                               </span>
                             ) : (
                               <span
-                                onClick={() => isAdmin && openAssignModal(o)}
-                                className={`text-slate-400 font-normal text-xs ${
-                                  isAdmin ? 'cursor-pointer hover:text-[#0052CC] hover:underline font-semibold' : ''
-                                }`}
-                                title={isAdmin ? 'Click để phân công Designer' : undefined}
+                                onClick={() => openAssignModal(o)}
+                                className="text-slate-400 font-normal text-xs cursor-pointer hover:text-[#0052CC] hover:underline font-semibold"
+                                title="Click để phân công Designer"
                               >
-                                {isAdmin ? '+ Phân công' : 'Chưa phân bổ'}
+                                + Phân công
                               </span>
                             )}
-                            {isAdmin && (o.platform_designer || o.platform_assignment_lifecycle === 'pending') && (
+                            {(o.platform_designer || o.platform_assignment_lifecycle === 'pending') && (
                               <div className="mt-0.5 text-[10px] font-medium text-slate-500 flex items-center gap-1 max-w-[160px] truncate" title={o.platform_designer || ''}>
                                 <span>Prin:</span>
                                 <span className="inline-flex items-center gap-1 truncate">
@@ -2738,26 +2723,24 @@ export function OrdersListPage() {
                           </td>
 
                           {/* Created At (Tacahu Import Time) */}
-                          {isAdmin && (
-                            <td className="py-2.5 px-4 whitespace-nowrap">
-                              {(() => {
-                                const split = formatUtc7Split(o.created_at)
-                                if (!split) return <span className="text-slate-300 font-mono text-xs">-</span>
-                                return (
-                                  <div className="flex flex-col leading-tight" title="Thời gian tạo trong Tacahu">
-                                    <span className="font-mono text-xs font-medium text-slate-600">{split.time}</span>
-                                    <span className="font-mono text-[11px] text-slate-400">{split.date}</span>
-                                  </div>
-                                )
-                              })()}
-                            </td>
-                          )}
+                          <td className="py-2.5 px-4 whitespace-nowrap">
+                            {(() => {
+                              const split = formatUtc7Split(o.created_at)
+                              if (!split) return <span className="text-slate-300 font-mono text-xs">-</span>
+                              return (
+                                <div className="flex flex-col leading-tight" title="Thời gian tạo trong Tacahu">
+                                  <span className="font-mono text-xs font-medium text-slate-600">{split.time}</span>
+                                  <span className="font-mono text-[11px] text-slate-400">{split.date}</span>
+                                </div>
+                              )
+                            })()}
+                          </td>
 
                           {/* Actions Contextual to Active Tab */}
                           <td className="py-2.5 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center justify-end gap-1.5 flex-wrap">
                               {/* Doing Tab Action: Revoke Assignment for Admin */}
-                              {isAdmin && adminTab === 'doing' && (
+                              {adminTab === 'doing' && (
                                 <button
                                   type="button"
                                   onClick={() => handleRevokeAssignment([o.id])}
@@ -2769,102 +2752,297 @@ export function OrdersListPage() {
                                 </button>
                               )}
 
-                          {/* Fix Tab Actions: Accept Fix (Chấp nhận & giao Des) OR Reject Fix (Từ chối & gửi lại Review) */}
-                          {isAdmin && adminTab === 'fix' && (
-                            <>
-                              {o.fix_approved_by_admin ? (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-2xs">
-                                  <Check className="h-3.5 w-3.5 text-emerald-600" />
-                                  <span>Đã gửi fix cho des</span>
-                                </span>
-                              ) : o.fix_rejected_by_admin ? (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-purple-50 text-purple-700 border border-purple-200 shadow-2xs">
-                                  <Undo2 className="h-3.5 w-3.5 text-purple-600" />
-                                  <span>Đã từ chối fix</span>
-                                </span>
-                              ) : (
+                              {/* Fix Tab Actions: Accept Fix (Chấp nhận & giao Des) OR Reject Fix (Từ chối & gửi lại Review) */}
+                              {adminTab === 'fix' && (
                                 <>
-                                  <button
-                                    type="button"
-                                    onClick={() => openAcceptFixModal(o)}
-                                    className="inline-flex items-center gap-1 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 px-2.5 py-1 rounded-lg transition-colors cursor-pointer shadow-2xs"
-                                    title="Chấp nhận yêu cầu Fix và giao bài cho Designer"
-                                  >
-                                    <UserPlus className="h-3 w-3" />
-                                    <span>Chấp nhận Fix</span>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => openRejectFixModal(o)}
-                                    className="inline-flex items-center gap-1 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 px-2.5 py-1 rounded-lg transition-colors cursor-pointer shadow-2xs"
-                                    title="Từ chối Fix và gửi lại Review trên Web mẹ"
-                                  >
-                                    <Undo2 className="h-3 w-3" />
-                                    <span>Từ chối Fix</span>
-                                  </button>
+                                  {o.fix_approved_by_admin ? (
+                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-2xs">
+                                      <Check className="h-3.5 w-3.5 text-emerald-600" />
+                                      <span>Đã gửi fix cho des</span>
+                                    </span>
+                                  ) : o.fix_rejected_by_admin ? (
+                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-purple-50 text-purple-700 border border-purple-200 shadow-2xs">
+                                      <Undo2 className="h-3.5 w-3.5 text-purple-600" />
+                                      <span>Đã từ chối fix</span>
+                                    </span>
+                                  ) : (
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={() => openAcceptFixModal(o)}
+                                        className="inline-flex items-center gap-1 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 px-2.5 py-1 rounded-lg transition-colors cursor-pointer shadow-2xs"
+                                        title="Chấp nhận yêu cầu Fix và giao bài cho Designer"
+                                      >
+                                        <UserPlus className="h-3 w-3" />
+                                        <span>Chấp nhận Fix</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => openRejectFixModal(o)}
+                                        className="inline-flex items-center gap-1 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 px-2.5 py-1 rounded-lg transition-colors cursor-pointer shadow-2xs"
+                                        title="Từ chối Fix và gửi lại Review trên Web mẹ"
+                                      >
+                                        <Undo2 className="h-3 w-3" />
+                                        <span>Từ chối Fix</span>
+                                      </button>
+                                    </>
+                                  )}
                                 </>
                               )}
-                            </>
-                          )}
 
-                          {/* Designer Action: Doing Tab -> Submit Review & Flag Missing Template */}
-                          {!isManager && !o.template_missing && ['IN_PROGRESS', 'DOING', 'ASSIGNED', 'REVISION', 'REVISION_REQUESTED', 'FIX'].includes(o.state.toUpperCase()) && (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => handleQuickStateChange(o.id, 'QC_PENDING', 'Đã nộp bài và chuyển sang Review chờ duyệt.')}
-                                className="inline-flex items-center gap-1 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 px-2.5 py-1 rounded-lg transition-colors cursor-pointer shadow-2xs"
-                                title="Nộp bài và gửi đơn sang Review chờ duyệt"
+                              {/* Order Details Link */}
+                              <Link
+                                to={`/orders/${o.id}`}
+                                className="inline-flex items-center gap-0.5 text-xs font-semibold text-[#0052CC] hover:text-[#003D99] hover:bg-blue-50 px-2.5 py-1 rounded-md transition-colors"
                               >
-                                <Send className="h-3 w-3" />
-                                <span>Nộp bài</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => flagMissingTemplate(o)}
-                                disabled={!o.assignment_id || flaggingMissingOrderId === o.id}
-                                className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                title={!o.assignment_id ? 'Đơn chưa có assignment đang hoạt động' : 'Báo Admin rằng đơn này thiếu temp'}
-                              >
-                                {flaggingMissingOrderId === o.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Flag className="h-3 w-3" />}
-                                <span>{flaggingMissingOrderId === o.id ? 'Đang báo…' : 'Báo thiếu temp'}</span>
-                              </button>
-                            </>
-                          )}
+                                <span>Chi tiết</span>
+                                <ChevronRight className="h-3.5 w-3.5" />
+                              </Link>
+                            </div>
+                          </td>
+                        </>
+                      ) : (
+                        /* Designer View: Clean, basic info + Click-to-copy Product Name + Inline Link Submission */
+                        <>
+                          {/* 1. Thumbnail */}
+                          <td className="py-3 px-3 text-center" onClick={(e) => e.stopPropagation()}>
+                            {o.thumbnail_url ? (
+                              <img
+                                src={resolveAssetUrl(o.thumbnail_url)}
+                                alt={o.product_name || 'Đơn thiết kế'}
+                                title="Click để xem ảnh phóng to"
+                                onClick={() => setSelectedImage(resolveAssetUrl(o.thumbnail_url) ?? null)}
+                                className="h-16 w-16 rounded-xl object-cover border border-slate-200 mx-auto shadow-xs cursor-pointer hover:scale-105 transition-transform hover:ring-2 hover:ring-[#0052CC]"
+                              />
+                            ) : (
+                              <div className="h-16 w-16 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center mx-auto text-slate-400">
+                                <Package className="h-7 w-7" />
+                              </div>
+                            )}
+                          </td>
 
-                          {/* Designer Action: Review Tab -> Status indicator */}
-                          {!isManager && !o.template_missing && ['QC_PENDING', 'RESULT_SUBMITTED', 'SUBMITTING_TO_SITE', 'REVIEW'].includes(o.state.toUpperCase()) && (
-                            <span className="inline-flex items-center gap-1 rounded-md bg-purple-50 px-2 py-1 text-xs font-bold text-purple-700">
-                              <Check className="h-3 w-3" /> Đã gửi duyệt
-                            </span>
-                          )}
+                          {/* 2. Tên Sản Phẩm (Click để copy) + Xem chi tiết quick link */}
+                          <td className="py-3 px-4">
+                            <div className="space-y-1.5">
+                              <div className="flex items-start gap-1.5 flex-wrap">
+                                <CopyableProductName name={o.product_name || o.external_order_id} textSize="text-xs font-bold" />
+                                {o.template_missing && (
+                                  <span className="inline-flex rounded border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700 shrink-0">
+                                    Thiếu temp
+                                  </span>
+                                )}
+                                {o.work_domain === 'duplicate' && (
+                                  <span className="inline-flex rounded border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-[10px] font-bold text-violet-700 shrink-0">
+                                    Đơn trùng
+                                  </span>
+                                )}
+                              </div>
 
-                          {/* Designer Action: Missing Template */}
-                          {!isManager && o.template_missing && (
-                            <span className="inline-flex items-center gap-1 rounded-md bg-rose-50 px-2 py-1 text-xs font-bold text-rose-700">
-                              <Flag className="h-3 w-3" /> Chờ cập nhật
-                            </span>
-                          )}
+                              {/* Badges and Quick details link */}
+                              <div className="flex items-center gap-2 pt-0.5 flex-wrap" onClick={(e) => e.stopPropagation()}>
+                                <Link
+                                  to={`/orders/${o.id}`}
+                                  onClick={() => dismissHighlight(o.id)}
+                                  className="inline-flex items-center gap-1 text-[11px] font-bold text-[#0052CC] hover:text-[#003D99] hover:underline bg-blue-50/80 border border-blue-100 px-2 py-0.5 rounded transition-colors"
+                                  title="Xem toàn bộ thông tin chi tiết của đơn hàng"
+                                >
+                                  <span>Xem chi tiết</span>
+                                  <ChevronRight className="h-3 w-3" />
+                                </Link>
 
-                          {/* Designer Action: Done Tab */}
-                          {!isManager && ['DONE', 'CLAIMED_IMPORTED', 'COMPLETED', 'SKIPPED'].includes(o.state.toUpperCase()) && (
-                            <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-700">
-                              <Check className="h-3 w-3" /> Hoàn thành
-                            </span>
-                          )}
+                                {o.sku_image_url && (
+                                  <a
+                                    href={o.sku_image_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-[10px] font-bold text-[#0052CC] hover:underline inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-blue-50 border border-blue-100"
+                                    title="Xem ảnh SKU Print"
+                                  >
+                                    <span>Ảnh SKU</span>
+                                    <ExternalLink className="h-2.5 w-2.5" />
+                                  </a>
+                                )}
 
-                          {/* Order Details Link */}
-                          <Link
-                            to={`/orders/${o.id}`}
-                            className="inline-flex items-center gap-0.5 text-xs font-semibold text-[#0052CC] hover:text-[#003D99] hover:bg-blue-50 px-2.5 py-1 rounded-md transition-colors"
-                          >
-                            <span>Chi tiết</span>
-                            <ChevronRight className="h-3.5 w-3.5" />
-                          </Link>
-                        </div>
-                      </td>
-                    </>
-                  )}
+                                {o.source_files && o.source_files.length > 0 && (
+                                  <span className="text-[10px] font-bold text-slate-600 px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200">
+                                    {o.source_files.length} file source
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* 3. Trạng Thái & Ghi Chú */}
+                          <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
+                            <div className="space-y-1.5">
+                              {o.template_missing ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold rounded-lg bg-rose-100 text-rose-800 border border-rose-300 select-none shadow-2xs">
+                                  <Flag className="h-3 w-3" />
+                                  <span>Chờ cập nhật</span>
+                                </span>
+                              ) : ['REVISION', 'REVISION_REQUESTED', 'FIX'].includes((o.state || '').toUpperCase()) ? (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold rounded-lg bg-rose-100 text-rose-800 border border-rose-300 select-none shadow-2xs">
+                                  <span className="h-2 w-2 rounded-full bg-rose-500 animate-pulse" />
+                                  <span>Cần sửa gấp</span>
+                                </span>
+                              ) : ['QC_PENDING', 'RESULT_SUBMITTED', 'SUBMITTING_TO_SITE', 'REVIEW'].includes((o.state || '').toUpperCase()) ? (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold rounded-lg bg-purple-100 text-purple-800 border border-purple-300 select-none shadow-2xs">
+                                  <span className="h-2 w-2 rounded-full bg-purple-500" />
+                                  <span>Chờ duyệt</span>
+                                </span>
+                              ) : ['DONE', 'CLAIMED_IMPORTED', 'COMPLETED', 'SKIPPED'].includes((o.state || '').toUpperCase()) ? (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold rounded-lg bg-emerald-100 text-emerald-800 border border-emerald-300 select-none shadow-2xs">
+                                  <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                                  <span>Hoàn thành</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold rounded-lg bg-blue-100 text-blue-800 border border-blue-300 select-none shadow-2xs">
+                                  <span className="h-2 w-2 rounded-full bg-blue-500" />
+                                  <span>{['WAITING', 'OPEN_FOR_ALLOCATION', 'DISCOVERED', 'PENDING', 'OPEN'].includes((o.state || '').toUpperCase()) ? 'Chờ chia' : 'Đang làm'}</span>
+                                </span>
+                              )}
+
+                              {/* QC / Revision note */}
+                              {['REVISION', 'REVISION_REQUESTED', 'FIX'].includes((o.state || '').toUpperCase()) && o.note_outsource && (
+                                <div className="p-2 rounded-lg bg-amber-50 border border-amber-200 text-[11px] text-amber-950">
+                                  <div className="font-bold flex items-center gap-1 text-amber-900 mb-0.5">
+                                    <AlertTriangle className="h-3 w-3 text-amber-600 shrink-0" />
+                                    <span>Ghi chú QC sửa lại:</span>
+                                  </div>
+                                  <div className="whitespace-pre-wrap break-all leading-tight text-slate-800 line-clamp-3">
+                                    {o.note_outsource}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Admin note */}
+                              {o.admin_note && (
+                                <div className="p-1.5 rounded-md bg-slate-50 border border-slate-200 text-[10px] text-slate-700">
+                                  <span className="font-bold text-slate-800">Admin: </span>
+                                  <span className="line-clamp-2">{o.admin_note}</span>
+                                </div>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* 4. Thời Gian */}
+                          <td className="py-3 px-4 whitespace-nowrap">
+                            {(() => {
+                              const split = formatUtc7Split(o.status_changed_at || o.created_at)
+                              if (!split) return <span className="text-slate-300 font-mono text-xs">-</span>
+                              return (
+                                <div className="flex flex-col leading-tight" title="Thời gian chuyển vào tab / cập nhật gần nhất (UTC+7)">
+                                  <span className="font-mono text-xs font-bold text-slate-800">{split.time}</span>
+                                  <span className="font-mono text-[11px] text-slate-500">{split.date}</span>
+                                </div>
+                              )
+                            })()}
+                          </td>
+
+                          {/* 5. Nộp Link Bài Thiết Kế (Placeholder + Nút nộp bài trực tiếp ở ngoài) */}
+                          <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
+                            {(() => {
+                              const stateUpper = (o.state || '').toUpperCase()
+                              const isCompleted = ['DONE', 'CLAIMED_IMPORTED', 'COMPLETED', 'SKIPPED'].includes(stateUpper)
+                              const isReview = ['QC_PENDING', 'RESULT_SUBMITTED', 'SUBMITTING_TO_SITE', 'REVIEW'].includes(stateUpper)
+                              const isDoingOrFix = ['IN_PROGRESS', 'DOING', 'ASSIGNED', 'REVISION', 'REVISION_REQUESTED', 'FIX', 'OPEN', 'PENDING'].includes(stateUpper)
+                              const currentLink = inlineSubmissionLinks[o.id] !== undefined ? inlineSubmissionLinks[o.id] : (o.drive_url || '')
+                              const isSubmitting = Boolean(isSubmittingInline[o.id])
+
+                              return (
+                                <div className="space-y-2">
+                                  {/* Input & Submit for direct submission without entering details */}
+                                  <div className="flex items-center gap-1.5">
+                                    <input
+                                      type="url"
+                                      value={currentLink}
+                                      onChange={(e) => setInlineSubmissionLinks((prev) => ({ ...prev, [o.id]: e.target.value }))}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && !isSubmitting && !o.template_missing && currentLink.trim()) {
+                                          e.preventDefault()
+                                          handleInlineSubmit(o, currentLink)
+                                        }
+                                      }}
+                                      placeholder="Dán link thiết kế (Drive, Canva, DropBox...)"
+                                      disabled={isSubmitting || Boolean(o.template_missing)}
+                                      className="flex-1 min-w-[200px] rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900 placeholder:text-slate-400 focus:border-[#0052CC] focus:ring-1 focus:ring-[#0052CC] shadow-2xs disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => handleInlineSubmit(o, currentLink)}
+                                      disabled={isSubmitting || Boolean(o.template_missing) || !currentLink.trim()}
+                                      className="inline-flex items-center gap-1 text-xs font-bold text-white bg-[#0052CC] hover:bg-[#0043A6] disabled:bg-slate-300 disabled:cursor-not-allowed px-3 py-1.5 rounded-lg transition-colors cursor-pointer shadow-2xs shrink-0"
+                                      title="Nộp bài và chuyển đơn sang Review chờ duyệt"
+                                    >
+                                      {isSubmitting ? (
+                                        <>
+                                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                          <span>Đang nộp…</span>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <Send className="h-3.5 w-3.5" />
+                                          <span>Nộp bài</span>
+                                        </>
+                                      )}
+                                    </button>
+                                  </div>
+
+                                  {/* Action row underneath: Báo thiếu temp / link preview / review status */}
+                                  <div className="flex items-center justify-between gap-2 pt-0.5">
+                                    {!o.template_missing && isDoingOrFix && (
+                                      <button
+                                        type="button"
+                                        onClick={() => flagMissingTemplate(o)}
+                                        disabled={!o.assignment_id || flaggingMissingOrderId === o.id}
+                                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-700 hover:text-rose-800 hover:bg-rose-50 px-2 py-0.5 rounded transition-colors disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+                                        title={!o.assignment_id ? 'Đơn chưa có assignment đang hoạt động' : 'Báo Admin rằng đơn này thiếu temp'}
+                                      >
+                                        {flaggingMissingOrderId === o.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Flag className="h-3 w-3" />}
+                                        <span>{flaggingMissingOrderId === o.id ? 'Đang báo…' : 'Báo thiếu temp'}</span>
+                                      </button>
+                                    )}
+
+                                    {o.template_missing && (
+                                      <span className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
+                                        <Flag className="h-3 w-3 text-rose-600" />
+                                        <span>Đang chờ Admin bổ sung temp</span>
+                                      </span>
+                                    )}
+
+                                    {isReview && !o.template_missing && (
+                                      <span className="inline-flex items-center gap-1 text-[11px] font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
+                                        <Check className="h-3 w-3 text-purple-600" />
+                                        <span>Đã nộp bài (Chờ duyệt)</span>
+                                      </span>
+                                    )}
+
+                                    {isCompleted && (
+                                      <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                                        <Check className="h-3 w-3 text-emerald-600 stroke-[3]" />
+                                        <span>Đã hoàn thành</span>
+                                      </span>
+                                    )}
+
+                                    {o.drive_url && (
+                                      <a
+                                        href={o.drive_url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1 text-[11px] font-bold text-[#0052CC] hover:underline ml-auto"
+                                        title="Mở link bài thiết kế đã nộp"
+                                      >
+                                        <span>Xem link đã nộp</span>
+                                        <ExternalLink className="h-2.5 w-2.5" />
+                                      </a>
+                                    )}
+                                  </div>
+                                </div>
+                              )
+                            })()}
+                          </td>
+                        </>
+                      )}
                 </tr>
               )
             })

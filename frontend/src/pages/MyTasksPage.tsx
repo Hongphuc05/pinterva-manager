@@ -5,6 +5,7 @@ import { useAuth } from '../auth/AuthContext'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { ImageModal } from '../components/ImageModal'
 import { Pagination, paginate } from '../components/Pagination'
+import { CopyableProductName } from '../components/CopyableProductName'
 import { getStatusInfo } from '../utils/statusTranslation'
 import { 
   CheckSquare, 
@@ -213,12 +214,16 @@ export function MyTasksPage() {
                   {/* Order Info */}
                   <div className="flex-1 min-w-0 space-y-1">
                     <div className="flex items-center gap-2 flex-wrap">
+                      <CopyableProductName
+                        name={task.order.product_name || task.order.external_order_id}
+                        textSize="text-sm font-bold"
+                      />
                       <Link
                         to={`/orders/${task.order.id}`}
-                        className="text-base font-bold text-[#0052CC] hover:underline"
-                        title={task.order.product_name ?? 'Đơn thiết kế 2D'}
+                        className="text-xs font-semibold text-[#0052CC] hover:underline"
+                        title="Xem chi tiết đơn hàng"
                       >
-                        {task.order.product_name ?? 'Đơn thiết kế 2D'}
+                        (Chi tiết)
                       </Link>
 
                       {task.order.sku_image_url && (
