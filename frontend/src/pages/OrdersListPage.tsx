@@ -9,6 +9,7 @@ import { StatusDropdown } from '../components/StatusDropdown'
 import { Pagination, paginate } from '../components/Pagination'
 import { CopyableOrderCode } from '../components/CopyableOrderCode'
 import { CopyableProductName } from '../components/CopyableProductName'
+import { ProductQuickViewButton, ProductQuickViewModal } from '../components/ProductQuickViewModal'
 import { useToast } from '../context/ToastContext'
 import { useGallerySync } from '../context/GallerySyncContext'
 import { useSyncStatus } from '../hooks/useSyncStatus'
@@ -228,6 +229,7 @@ export function OrdersListPage() {
 
   // Modals state
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
+  const [quickViewOrderId, setQuickViewOrderId] = useState<string | null>(null)
 
   // Assignment Modal state
   const [assigningOrder, setAssigningOrder] = useState<OrderSummary | null>(null)
@@ -1271,6 +1273,12 @@ export function OrdersListPage() {
 
   return (
     <DashboardLayout>
+      {quickViewOrderId && (
+        <ProductQuickViewModal
+          orderId={quickViewOrderId}
+          onClose={() => setQuickViewOrderId(null)}
+        />
+      )}
       {/* Image Zoom Modal */}
       <ImageModal
         isOpen={!!selectedImage}
@@ -2828,6 +2836,7 @@ export function OrdersListPage() {
                             <div className="space-y-1.5">
                               <div className="flex items-start gap-1.5 flex-wrap">
                                 <CopyableProductName name={o.product_name || o.external_order_id} textSize="text-xs font-bold" />
+                                <ProductQuickViewButton onClick={() => setQuickViewOrderId(o.id)} />
                                 {o.template_missing && (
                                   <span className="inline-flex rounded border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700 shrink-0">
                                     Thiếu temp
