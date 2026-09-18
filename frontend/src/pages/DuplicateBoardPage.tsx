@@ -532,7 +532,7 @@ export function DuplicateBoardPage() {
                 }}
                 disabled={syncRequested || isTriggering || syncStatus?.is_running || boardOrderIds.length === 0}
                 className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#0052CC] px-3.5 py-2 text-xs font-bold text-white shadow-xs hover:bg-[#0041A3] disabled:opacity-50 cursor-pointer"
-                title="Đồng bộ trạng thái từ Printerval cho tất cả đơn trên board"
+                title="Đồng bộ trạng thái từ Print cho tất cả đơn trên board"
               >
                 <RefreshCw className={`h-3.5 w-3.5 ${(syncRequested || isTriggering || syncStatus?.is_running) ? 'animate-spin' : ''}`} />
                 <span>{(syncRequested || isTriggering || syncStatus?.is_running) ? 'Đang đồng bộ...' : 'Đồng bộ trạng thái'}</span>

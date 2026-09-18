@@ -118,7 +118,7 @@ export function DesignerBoardPage() {
         // notification or silent update
       }
     } catch (err: any) {
-      alert(err.message || 'Lỗi khi đồng bộ trạng thái từ Printerval')
+      alert(err.message || 'Lỗi khi đồng bộ trạng thái từ Print')
     } finally {
       setSyncingPrinterval(false)
       window.dispatchEvent(new CustomEvent('sync-printerval-end'))
@@ -211,7 +211,7 @@ export function DesignerBoardPage() {
               title="Chỉ đồng bộ các đơn Doing / Review / Fix đang hiển thị trên bảng"
             >
               <RefreshCw className={`h-3.5 w-3.5 text-purple-600 ${syncingPrinterval ? 'animate-spin' : ''}`} />
-              <span>{syncingPrinterval ? 'Đang quét Printerval...' : `Đồng Bộ Đang Hiển Thị (${visibleSyncOrderIds.length})`}</span>
+              <span>{syncingPrinterval ? 'Đang quét Print...' : `Đồng Bộ Đang Hiển Thị (${visibleSyncOrderIds.length})`}</span>
             </button>
 
             <button
@@ -447,7 +447,7 @@ export function DesignerBoardPage() {
                           <span className="text-[11px] font-mono text-slate-400">(@{des.username})</span>
                           {des.printerval_designer_option && (
                             <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-blue-50 text-[#0052CC] border border-blue-200">
-                              Printerval: {des.printerval_designer_option}
+                              Print: {des.printerval_designer_option}
                             </span>
                           )}
                         </div>
@@ -580,7 +580,7 @@ export function DesignerBoardPage() {
                           </div>
                         </div>
 
-                        {/* 2. Review Column (Chờ Printerval QC duyệt) */}
+                        {/* 2. Review Column (Chờ Print QC duyệt) */}
                         <div className="space-y-3">
                           <div className="flex items-center justify-between pb-2 border-b border-purple-200">
                             <span className="text-xs font-bold text-purple-800 flex items-center gap-1.5">
@@ -594,7 +594,7 @@ export function DesignerBoardPage() {
                                   disabled={syncingPrinterval}
                                   onClick={() => handleSyncPrintervalStatus(reviewOrders.map((o) => o.id))}
                                   className="p-1 text-purple-600 hover:bg-purple-100 rounded transition-colors disabled:opacity-50"
-                                  title="Làm mới trạng thái các đơn này từ Printerval"
+                                  title="Làm mới trạng thái các đơn này từ Print"
                                 >
                                   <RefreshCw className={`h-3 w-3 ${syncingPrinterval ? 'animate-spin' : ''}`} />
                                 </button>
@@ -654,7 +654,7 @@ export function DesignerBoardPage() {
                                   <div className="pt-1.5 border-t border-purple-100 flex items-center justify-between">
                                     <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-purple-100/80 text-purple-800 text-[11px] font-medium">
                                       <Clock className="h-3 w-3 text-purple-600 animate-pulse" />
-                                      <span>Chờ Printerval QC duyệt</span>
+                                      <span>Chờ Print QC duyệt</span>
                                     </div>
 
                                     <div className="flex items-center gap-1">
@@ -663,7 +663,7 @@ export function DesignerBoardPage() {
                                         disabled={syncingPrinterval}
                                         onClick={() => handleSyncPrintervalStatus([o.id])}
                                         className="p-1 text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors disabled:opacity-50"
-                                        title="Kiểm tra kết quả QC từ Printerval"
+                                        title="Kiểm tra kết quả QC từ Print"
                                       >
                                         <RefreshCw className={`h-3 w-3 ${syncingPrinterval ? 'animate-spin' : ''}`} />
                                       </button>
@@ -703,7 +703,7 @@ export function DesignerBoardPage() {
                                   disabled={syncingPrinterval}
                                   onClick={() => handleSyncPrintervalStatus(fixOrders.map((o) => o.id))}
                                   className="p-1 text-orange-600 hover:bg-orange-100 rounded transition-colors disabled:opacity-50"
-                                  title="Làm mới trạng thái các đơn này từ Printerval"
+                                  title="Làm mới trạng thái các đơn này từ Print"
                                 >
                                   <RefreshCw className={`h-3 w-3 ${syncingPrinterval ? 'animate-spin' : ''}`} />
                                 </button>
@@ -778,7 +778,7 @@ export function DesignerBoardPage() {
                                   {o.note_outsource && (
                                     <div className="p-2 rounded-lg bg-white/90 border border-orange-200/70 text-[11px] text-slate-700 max-h-24 overflow-y-auto whitespace-pre-wrap break-all leading-relaxed">
                                       <span className="font-semibold text-orange-900 block mb-0.5 text-[10px]">
-                                        Ghi chú QC Printerval:
+                                        Ghi chú QC Print:
                                       </span>
                                       {o.note_outsource}
                                     </div>
@@ -820,7 +820,7 @@ export function DesignerBoardPage() {
                                             })
                                           }
                                           className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1 text-[11px] font-bold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg transition-all shadow-2xs cursor-pointer"
-                                          title="Hủy Fix, kiểm tra lại link cũ và trả lại Review trên Printerval"
+                                          title="Hủy Fix, kiểm tra lại link cũ và trả lại Review trên Print"
                                         >
                                           <RotateCcw className="h-3 w-3" />
                                           <span>Hủy trả Review</span>

@@ -323,7 +323,7 @@ export function OrdersListPage() {
         setPrintervalDesigners([DEFAULT_PRINTERVAL_DES])
         setPrintervalStatuses(['Doing', 'Review', 'Fix', 'Done', 'Waiting'])
         setSelectedPrintervalDesigner(assigningOrder.printerval_designer || DEFAULT_PRINTERVAL_DES)
-        setError(err instanceof ApiError ? err.message : 'Không tải được danh sách Designer Printerval.')
+        setError(err instanceof ApiError ? err.message : 'Không tải được danh sách Designer Print.')
       })
       .finally(() => setLoadingPrintervalOptions(false))
   }, [assigningOrder, usersList])
@@ -366,7 +366,7 @@ export function OrdersListPage() {
       setPrintervalDesigners(result.designers)
       setPrintervalStatuses(result.statuses)
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Không cập nhật được Designer Printerval.')
+      setError(err instanceof ApiError ? err.message : 'Không cập nhật được Designer Print.')
     } finally {
       setLoadingPrintervalOptions(false)
     }
@@ -416,7 +416,7 @@ export function OrdersListPage() {
           printerval_status: bulkPrintervalStatus || 'Doing',
         }),
       })
-      setFlash(`Đã phân công ${res.queued_count} đơn sang Doing và xếp đồng bộ Printerval.`)
+      setFlash(`Đã phân công ${res.queued_count} đơn sang Doing và xếp đồng bộ Print.`)
       markTabMoved(selectedOrderIds)
       setSelectedOrderIds([])
       setBulkDesignerId('')
@@ -546,7 +546,7 @@ export function OrdersListPage() {
           }),
         }
       )
-      setFlash(`Đã phân công đơn ${assigningOrder.external_order_id} sang Doing và cập nhật Printerval.`)
+      setFlash(`Đã phân công đơn ${assigningOrder.external_order_id} sang Doing và cập nhật Print.`)
       markTabMoved(assigningOrder.id)
       setAssigningOrder(null)
       await loadOrders()
@@ -584,14 +584,14 @@ export function OrdersListPage() {
         }),
       })
       setFlash(
-        `Đã xếp cập nhật trạng thái ${printervalStatusValue} trên Printerval cho ${result.queued_count} đơn.`,
+        `Đã xếp cập nhật trạng thái ${printervalStatusValue} trên Print cho ${result.queued_count} đơn.`,
       )
       markTabMoved(printervalStatusTarget.orderIds)
       setSelectedOrderIds([])
       setPrintervalStatusTarget(null)
       await loadOrders()
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Không thể xếp cập nhật trạng thái trên Printerval.')
+      setError(err instanceof ApiError ? err.message : 'Không thể xếp cập nhật trạng thái trên Print.')
     } finally {
       setUpdatingPrintervalStatus(false)
     }
@@ -727,10 +727,10 @@ export function OrdersListPage() {
     window.dispatchEvent(new CustomEvent('sync-printerval-start'))
     try {
       await triggerRun(orderIds)
-      showToast('Đã xếp đồng bộ trạng thái Printerval trong nền.', 'info')
+      showToast('Đã xếp đồng bộ trạng thái Print trong nền.', 'info')
       window.dispatchEvent(new CustomEvent('sync-printerval-submitted'))
     } catch (err: any) {
-      showToast(err?.message || 'Lỗi khi đồng bộ từ Printerval.', 'error')
+      showToast(err?.message || 'Lỗi khi đồng bộ từ Print.', 'error')
     }
   }
 
@@ -1176,7 +1176,7 @@ export function OrdersListPage() {
           note_outsource: rejectFixOutsourceNote,
         }),
       })
-      showToast(`Đã từ chối Fix và gửi lại Review trên Printerval cho đơn ${rejectFixOrder.external_order_id}.`, 'success')
+      showToast(`Đã từ chối Fix và gửi lại Review trên Print cho đơn ${rejectFixOrder.external_order_id}.`, 'success')
       markTabMoved(rejectFixOrder.id)
       setRejectFixOrder(null)
       await loadOrders()
@@ -1757,9 +1757,9 @@ export function OrdersListPage() {
                   className="text-xs border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 font-medium focus:outline-none focus:border-[#0052CC] text-slate-700"
                   value={printervalStatusFilter}
                   onChange={(e) => setPrintervalStatusFilter(e.target.value)}
-                  title="Lọc theo trạng thái trên Printerval"
+                  title="Lọc theo trạng thái trên Print"
                 >
-                  <option value="">Tất cả trạng thái Printerval</option>
+                  <option value="">Tất cả trạng thái Print</option>
                   <option value="waiting">Prin: Waiting</option>
                   <option value="doing">Prin: Doing</option>
                   <option value="review">Prin: Review</option>
@@ -1958,7 +1958,7 @@ export function OrdersListPage() {
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-[#0052CC] bg-white hover:bg-slate-100 rounded-lg shadow-sm transition-all cursor-pointer"
             >
               <RefreshCw className="h-3.5 w-3.5" />
-              <span>Đổi trạng thái Printerval</span>
+              <span>Đổi trạng thái Print</span>
             </button>
 
             {/* Select Internal Designer */}
@@ -2220,7 +2220,7 @@ export function OrdersListPage() {
                         <Package className="h-10 w-10 mx-auto mb-2 opacity-30 text-slate-400" />
                         <p className="font-medium text-sm text-slate-500">Không có đơn hàng nào trong tab này</p>
                         <p className="text-xs text-slate-400 mt-1">
-                          Đơn hàng sẽ xuất hiện khi có sự thay đổi trạng thái hoặc quét đơn từ Printerval
+                          Đơn hàng sẽ xuất hiện khi có sự thay đổi trạng thái hoặc quét đơn từ Print
                         </p>
                       </>
                     )}
@@ -2350,7 +2350,7 @@ export function OrdersListPage() {
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="text-[11px] font-bold text-[#0052CC] hover:underline inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-50 border border-blue-100"
-                                    title="Xem ảnh SKU Printerval"
+                                    title="Xem ảnh SKU Print"
                                   >
                                     <span>Ảnh SKU</span>
                                     <ExternalLink className="h-2.5 w-2.5" />
@@ -2529,7 +2529,7 @@ export function OrdersListPage() {
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="text-[10px] font-bold text-[#0052CC] hover:underline inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-blue-50 border border-blue-100"
-                                  title="Xem ảnh SKU Printerval"
+                                  title="Xem ảnh SKU Print"
                                 >
                                   <span>Image</span>
                                   <ExternalLink className="h-2.5 w-2.5" />
@@ -2541,7 +2541,7 @@ export function OrdersListPage() {
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="text-[10px] font-bold text-[#0052CC] hover:underline inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-blue-50 border border-blue-100"
-                                  title="Mở đơn trên Printerval"
+                                  title="Mở đơn trên Print"
                                 >
                                   <span>Order</span>
                                   <ExternalLink className="h-2.5 w-2.5" />
@@ -2591,7 +2591,7 @@ export function OrdersListPage() {
                               <div className="mt-1.5 p-2 rounded-lg bg-orange-50 border border-orange-200 text-[11px] text-orange-950 font-normal">
                                 <div className="font-bold flex items-center gap-1 text-orange-900 mb-0.5">
                                   <AlertTriangle className="h-3 w-3 text-orange-600 shrink-0" />
-                                  <span>QC Printerval:</span>
+                                  <span>QC Print:</span>
                                 </div>
                                 <div className="whitespace-pre-wrap break-all leading-tight text-slate-800 line-clamp-2">
                                   {o.note_outsource}
@@ -2650,7 +2650,7 @@ export function OrdersListPage() {
                                 <span>Prin:</span>
                                 <span className="font-semibold text-slate-600 inline-flex items-center gap-1">
                                   {recentPrintervalChanges[o.id]?.statusChanged && (Date.now() - (recentPrintervalChanges[o.id]?.timestamp || 0) < 300000) && (
-                                    <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shadow-xs shrink-0" title="Trạng thái Printerval mới cập nhật (hiển thị 5 phút hoặc khi click)" />
+                                    <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shadow-xs shrink-0" title="Trạng thái Print mới cập nhật (hiển thị 5 phút hoặc khi click)" />
                                   )}
                                   <span>{o.printerval_status}</span>
                                 </span>
@@ -2687,7 +2687,7 @@ export function OrdersListPage() {
                                 <span>Prin:</span>
                                 <span className="inline-flex items-center gap-1 truncate">
                                   {recentPrintervalChanges[o.id]?.designerChanged && (Date.now() - (recentPrintervalChanges[o.id]?.timestamp || 0) < 300000) && (
-                                    <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shadow-xs shrink-0" title="Designer Printerval mới cập nhật (hiển thị 5 phút hoặc khi click)" />
+                                    <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse shadow-xs shrink-0" title="Designer Print mới cập nhật (hiển thị 5 phút hoặc khi click)" />
                                   )}
                                   <span className="truncate">{o.printerval_designer || '—'}</span>
                                 </span>
@@ -2784,7 +2784,7 @@ export function OrdersListPage() {
                                     type="button"
                                     onClick={() => openRejectFixModal(o)}
                                     className="inline-flex items-center gap-1 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 px-2.5 py-1 rounded-lg transition-colors cursor-pointer shadow-2xs"
-                                    title="Từ chối Fix và gửi lại Review trên Printerval"
+                                    title="Từ chối Fix và gửi lại Review trên Print"
                                   >
                                     <Undo2 className="h-3 w-3" />
                                     <span>Từ chối Fix</span>
@@ -2881,7 +2881,7 @@ export function OrdersListPage() {
             <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-6 py-4">
               <div className="flex items-center gap-2">
                 <RefreshCw className="h-5 w-5 text-[#0052CC]" />
-                <h2 className="text-base font-bold text-slate-800">Cập nhật trạng thái Printerval</h2>
+                <h2 className="text-base font-bold text-slate-800">Cập nhật trạng thái Print</h2>
               </div>
               <button
                 type="button"
@@ -2896,11 +2896,11 @@ export function OrdersListPage() {
               <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-xs text-slate-700">
                 <p className="font-bold text-slate-800">{printervalStatusTarget.title}</p>
                 {printervalStatusTarget.currentStatus && (
-                  <p className="mt-1">Trạng thái Printerval đã lưu: <strong>{printervalStatusTarget.currentStatus}</strong></p>
+                  <p className="mt-1">Trạng thái Print đã lưu: <strong>{printervalStatusTarget.currentStatus}</strong></p>
                 )}
               </div>
               <div className="space-y-1">
-                <label className="block text-xs font-bold text-slate-700">Trạng thái mới trên Printerval</label>
+                <label className="block text-xs font-bold text-slate-700">Trạng thái mới trên Print</label>
                 <select
                   value={printervalStatusValue}
                   onChange={(e) => setPrintervalStatusValue(e.target.value)}
@@ -2912,7 +2912,7 @@ export function OrdersListPage() {
                 </select>
               </div>
               <p className="text-[11px] leading-relaxed text-slate-500">
-                Thao tác này đẩy trạng thái lên Printerval. Hệ thống xếp việc vào worker nền và cập nhật kết quả tự động.
+                Thao tác này đẩy trạng thái lên Print. Hệ thống xếp việc vào worker nền và cập nhật kết quả tự động.
               </p>
               <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
                 <button
@@ -2998,7 +2998,7 @@ export function OrdersListPage() {
 
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-700 block">
-                  Designer trên Printerval <span className="text-red-500">*</span>
+                  Designer trên Print <span className="text-red-500">*</span>
                 </label>
                 <div className="flex items-center justify-between">
                   <button
@@ -3007,7 +3007,7 @@ export function OrdersListPage() {
                     disabled={loadingPrintervalOptions}
                     className="mb-1 text-[11px] font-semibold text-[#0052CC] hover:underline disabled:opacity-50"
                   >
-                    Cập nhật danh sách từ Printerval
+                    Cập nhật danh sách từ Print
                   </button>
                 </div>
                 <select
@@ -3026,7 +3026,7 @@ export function OrdersListPage() {
 
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-700 block">
-                  Trạng thái trên Printerval <span className="text-red-500">*</span>
+                  Trạng thái trên Print <span className="text-red-500">*</span>
                 </label>
                 <select
                   required
@@ -3149,14 +3149,14 @@ export function OrdersListPage() {
               {/* Outsource Note from Printerval */}
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-700 block flex items-center justify-between">
-                  <span>Ghi chú Outsource (Printerval QC)</span>
-                  <span className="text-[10px] text-amber-700 font-normal">Từ Printerval</span>
+                  <span>Ghi chú Outsource (Print QC)</span>
+                  <span className="text-[10px] text-amber-700 font-normal">Từ Print</span>
                 </label>
                 <textarea
                   rows={3}
                   value={acceptFixOutsourceNote}
                   onChange={(e) => setAcceptFixOutsourceNote(e.target.value)}
-                  placeholder="Ghi chú lỗi từ phía Printerval..."
+                  placeholder="Ghi chú lỗi từ phía Print..."
                   className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 bg-amber-50/40 focus:outline-none focus:ring-2 focus:ring-[#0052CC]/20 focus:border-[#0052CC] resize-none font-mono"
                 />
               </div>
@@ -3184,7 +3184,7 @@ export function OrdersListPage() {
         </div>
       )}
 
-      {/* Reject Fix Modal (Admin từ chối Fix & gửi lại Review trên Printerval) */}
+      {/* Reject Fix Modal (Admin từ chối Fix & gửi lại Review trên Print) */}
       {rejectFixOrder && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-200"
@@ -3224,7 +3224,7 @@ export function OrdersListPage() {
               {/* Note Outsource field for explanation */}
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-700 block">
-                  Ghi chú Outsource gửi lên Printerval
+                  Ghi chú Outsource gửi lên Print
                 </label>
                 <textarea
                   rows={4}
@@ -3241,7 +3241,7 @@ export function OrdersListPage() {
                   <span>Cơ chế hoạt động:</span>
                 </p>
                 <span>
-                  Hệ thống sẽ cập nhật trạng thái đơn trên Printerval thành <strong>Review</strong> kèm ghi chú outsource trên, và chuyển đơn trong hệ thống quay về tab <strong>Review</strong> để bên Printerval xem xét lại.
+                  Hệ thống sẽ cập nhật trạng thái đơn trên Print thành <strong>Review</strong> kèm ghi chú outsource trên, và chuyển đơn trong hệ thống quay về tab <strong>Review</strong> để bên Print xem xét lại.
                 </span>
               </div>
 

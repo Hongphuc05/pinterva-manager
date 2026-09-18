@@ -93,8 +93,8 @@ export function AdminFixActionModal({
               </h3>
               <p className="text-[11px] text-slate-500">
                 {isApprove
-                  ? 'Kiểm tra & chỉnh sửa Note outsource gửi cho Designer làm (Lưu ý: Không đẩy lên Printerval)'
-                  : 'Chỉnh sửa Note outsource và cập nhật ngược lại lên Printerval cùng trạng thái Review'}
+                  ? 'Kiểm tra & chỉnh sửa Note outsource gửi cho Designer làm (Lưu ý: Không đẩy lên Print)'
+                  : 'Chỉnh sửa Note outsource và cập nhật ngược lại lên Print cùng trạng thái Review'}
               </p>
             </div>
           </div>
@@ -122,24 +122,24 @@ export function AdminFixActionModal({
                 <span>Quy trình duyệt gửi Designer:</span>
               </div>
               <p className="text-[11px] text-emerald-800 leading-relaxed">
-                Bạn có thể để nguyên Note từ Printerval hoặc chỉnh sửa thêm chỉ dẫn. Khi bấm <strong>Check & Duyệt</strong>, Note này sẽ hiển thị cho Designer xem tại Todo, <strong>tuyệt đối không đẩy ngược lại lên Printerval</strong>.
+                Bạn có thể để nguyên Note từ Print hoặc chỉnh sửa thêm chỉ dẫn. Khi bấm <strong>Check & Duyệt</strong>, Note này sẽ hiển thị cho Designer xem tại Todo, <strong>tuyệt đối không đẩy ngược lại lên Print</strong>.
               </p>
             </div>
           ) : (
             <div className="p-3 bg-orange-50/80 border border-orange-200 text-orange-950 rounded-xl space-y-1">
               <div className="font-bold flex items-center gap-1.5 text-xs text-orange-900">
                 <RotateCcw className="w-4 h-4 text-orange-600 shrink-0" />
-                <span>Đồng bộ ngược lại Printerval:</span>
+                <span>Đồng bộ ngược lại Print:</span>
               </div>
               <p className="text-[11px] text-orange-800 leading-relaxed">
-                Hệ thống sẽ <strong>ghi đè Note outsource này lên Printerval</strong> và tự động cập nhật trạng thái đơn hàng trên Printerval về <strong>Review (Chờ duyệt)</strong>.
+                Hệ thống sẽ <strong>ghi đè Note outsource này lên Print</strong> và tự động cập nhật trạng thái đơn hàng trên Print về <strong>Review (Chờ duyệt)</strong>.
               </p>
             </div>
           )}
 
           <div className="space-y-1.5">
             <label className="font-semibold text-slate-800 block text-xs">
-              {isApprove ? 'Nội dung Note outsource gửi cho Designer:' : 'Nội dung Note outsource gửi lên Printerval:'}
+              {isApprove ? 'Nội dung Note outsource gửi cho Designer:' : 'Nội dung Note outsource gửi lên Print:'}
             </label>
             <textarea
               rows={6}
@@ -175,7 +175,7 @@ export function AdminFixActionModal({
             <span>
               {isApprove
                 ? 'Check & Duyệt'
-                : 'Gửi & Cập nhật Printerval'}
+                : 'Gửi & Cập nhật Print'}
             </span>
           </button>
         </div>

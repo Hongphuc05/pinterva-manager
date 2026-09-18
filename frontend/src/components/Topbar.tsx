@@ -47,7 +47,7 @@ export function Topbar() {
     if (path === '/allocation') return 'Phân Bổ Kéo-Thả'
     if (path === '/kanban') return 'Board Đơn trùng lặp'
     if (path === '/my-tasks') return 'My Tasks'
-    if (path === '/printerval-hub' || path === '/printerval-login') return 'Mở Printerval & Đồng Bộ Ảnh'
+    if (path === '/printerval-hub' || path === '/printerval-login') return 'Mở Print & Đồng Bộ Ảnh'
     if (path === '/order-status') return 'Trạng Thái Đơn'
     if (path === '/users') return 'Quản Lý Tài Khoản'
     return 'Dashboard'
@@ -109,7 +109,7 @@ export function Topbar() {
         await triggerRun()
         window.dispatchEvent(new CustomEvent('sync-printerval-submitted'))
       } catch (err: any) {
-        setFastSyncError(err?.message || 'Lỗi khi đồng bộ từ Printerval')
+        setFastSyncError(err?.message || 'Lỗi khi đồng bộ từ Print')
       } finally {
         setIsFastSyncing(false)
         window.dispatchEvent(new CustomEvent('sync-printerval-end'))
@@ -137,7 +137,7 @@ export function Topbar() {
       // Dispatch live update event so active views refresh immediately without destroying the toast popup
       window.dispatchEvent(new CustomEvent('orders-updated'))
     } catch (e: any) {
-      showToast(e?.message || 'Quét đơn thất bại — kiểm tra cấu hình tài khoản Printerval API.', 'error')
+      showToast(e?.message || 'Quét đơn thất bại — kiểm tra cấu hình tài khoản Print API.', 'error')
     } finally {
       setRefreshing(false)
     }
@@ -198,10 +198,10 @@ export function Topbar() {
           <button
             onClick={() => user.role === 'admin' ? setShowSettingsModal(true) : null}
             className={`flex items-center gap-2 px-3 py-1.5 text-xs font-semibold bg-blue-50/80 hover:bg-blue-100/80 border border-blue-200 text-[#0052CC] rounded-xl shadow-2xs transition-all ${user.role === 'admin' ? 'cursor-pointer' : 'cursor-default'}`}
-            title={user.role === 'admin' ? "Click để đổi Workspace hoặc Đăng nhập Acc Mẹ Printerval mới" : "Acc Mẹ Printerval đang hoạt động"}
+            title={user.role === 'admin' ? "Click để đổi Workspace hoặc Đăng nhập Acc Mẹ Print mới" : "Acc Mẹ Print đang hoạt động"}
           >
             <KeyRound className="h-4 w-4 text-[#0052CC]" />
-            <span>Acc Mẹ Printerval:</span>
+            <span>Acc Mẹ Print:</span>
             <strong className="font-mono text-slate-800 bg-white px-2 py-0.5 rounded border border-blue-100">
               {activePlatform?.account_username || 'Chưa chọn Acc Mẹ'}
             </strong>
@@ -229,10 +229,10 @@ export function Topbar() {
                   ? 'bg-blue-50 text-[#0052CC] border-blue-300 shadow-inner'
                   : 'bg-[#0052CC] hover:bg-[#0041A3] border-transparent text-white shadow-2xs'
               } disabled:opacity-75 cursor-pointer`}
-              title="Quét đơn mới từ Printerval API"
+              title="Quét đơn mới từ Print API"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin text-white' : 'text-white'}`} />
-              <span>{refreshing ? 'Đang Quét Đơn...' : 'Quét Đơn Printerval'}</span>
+              <span>{refreshing ? 'Đang Quét Đơn...' : 'Quét Đơn Print'}</span>
             </button>
 
             {/* Gallery Sync Button / Live Progress Bar */}
@@ -316,10 +316,10 @@ export function Topbar() {
           disabled={isFastSyncing || !!syncStatus?.is_running}
           title={
             isFastSyncing || syncStatus?.is_running
-              ? 'Đang đồng bộ trạng thái đơn từ Printerval...'
+              ? 'Đang đồng bộ trạng thái đơn từ Print...'
               : fastSyncError || syncStatus?.last_error
               ? `Lần đồng bộ trước lỗi: ${fastSyncError || syncStatus?.last_error}`
-              : 'Bấm để làm mới trạng thái các đơn trong tab đang chọn từ Printerval'
+              : 'Bấm để làm mới trạng thái các đơn trong tab đang chọn từ Print'
           }
           className="relative p-2 rounded-lg text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer disabled:cursor-wait"
         >

@@ -56,7 +56,7 @@ export function PrintervalLoginPage() {
               <Globe className="h-6 w-6" />
             </div>
             <div>
-              <h1 className="text-lg font-bold text-slate-800">Đăng Nhập Tài Khoản Printerval Công Ty</h1>
+              <h1 className="text-lg font-bold text-slate-800">Đăng Nhập Tài Khoản Print Công Ty</h1>
               <p className="text-xs text-slate-500">Kết nối trình duyệt Chrome thật để lưu cookie phiên làm việc dùng cho việc crawl đơn tự động</p>
             </div>
           </div>
@@ -82,7 +82,7 @@ export function PrintervalLoginPage() {
             <p className="text-xs text-slate-500">
               {sessionOpen
                 ? 'Đăng nhập vào tài khoản công ty trên cửa sổ Chrome vừa bật, sau đó nhấn "Hoàn Tất & Lưu Session" bên dưới để đóng cửa sổ.'
-                : 'Bấm nút bên dưới để hệ thống mở cửa sổ Chrome tương tác. Sau khi mở, hãy thực hiện đăng nhập tài khoản Printerval admin.'}
+                : 'Bấm nút bên dưới để hệ thống mở cửa sổ Chrome tương tác. Sau khi mở, hãy thực hiện đăng nhập tài khoản Print admin.'}
             </p>
           </div>
 

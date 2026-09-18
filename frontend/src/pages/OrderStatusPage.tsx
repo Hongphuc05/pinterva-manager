@@ -119,7 +119,7 @@ export function OrderStatusPage() {
     } catch (err) {
       setPrintervalDesigners([])
       setPrintervalStatuses([])
-      setError(err instanceof ApiError ? err.message : 'Không tải được danh sách Designer Printerval.')
+      setError(err instanceof ApiError ? err.message : 'Không tải được danh sách Designer Print.')
     } finally {
       setLoadingPrintervalOptions(false)
     }
@@ -135,7 +135,7 @@ export function OrderStatusPage() {
       setPrintervalDesigners(result.designers)
       setPrintervalStatuses(result.statuses)
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Không cập nhật được Designer Printerval.')
+      setError(err instanceof ApiError ? err.message : 'Không cập nhật được Designer Print.')
     } finally {
       setLoadingPrintervalOptions(false)
     }
@@ -282,11 +282,11 @@ export function OrderStatusPage() {
         <div>
           <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
             <Radio className="h-4 w-4 text-[#0052CC]" />
-            Trạng Thái Đơn — Mirror Từ Printerval
+            Trạng Thái Đơn — Mirror Từ Print
           </h2>
           <p className="text-xs text-slate-500 mt-1">
-            Cột "Trạng thái Printerval" tự động đồng bộ theo lịch (mặc định mỗi 5 phút), hoặc bấm nút bên cạnh để đồng bộ ngay.
-            {isAdmin && ' Admin có thể sửa Designer/Trạng thái Printerval trực tiếp từng đơn hoặc chọn nhiều đơn để sửa hàng loạt.'}
+            Cột "Trạng thái Print" tự động đồng bộ theo lịch (mặc định mỗi 5 phút), hoặc bấm nút bên cạnh để đồng bộ ngay.
+            {isAdmin && ' Admin có thể sửa Designer/Trạng thái Print trực tiếp từng đơn hoặc chọn nhiều đơn để sửa hàng loạt.'}
             {status?.last_finished_at && (
               <span className="ml-1 text-slate-400">
                 Lần đồng bộ gần nhất: {new Date(status.last_finished_at).toLocaleString('vi-VN')}
@@ -399,7 +399,7 @@ export function OrderStatusPage() {
               disabled={loadingPrintervalOptions}
               className="px-3 py-1.5 text-xs font-bold text-white border border-white/40 rounded-lg hover:bg-white/10 disabled:opacity-60"
             >
-              Cập nhật lựa chọn Printerval
+              Cập nhật lựa chọn Print
             </button>
             <select
               value={bulkDesignerId}
@@ -418,7 +418,7 @@ export function OrderStatusPage() {
               className="bg-white text-slate-800 text-xs font-semibold px-3 py-1.5 rounded-lg border border-white/30 focus:outline-none shadow-xs disabled:opacity-60"
             >
               <option value="">
-                {loadingPrintervalOptions ? 'Đang tải DES Printerval...' : '-- Giữ nguyên DES / Chọn DES Printerval --'}
+                {loadingPrintervalOptions ? 'Đang tải DES Print...' : '-- Giữ nguyên DES / Chọn DES Print --'}
               </option>
               {printervalDesigners.map((d) => <option key={d} value={d}>{d}</option>)}
             </select>
@@ -466,7 +466,7 @@ export function OrderStatusPage() {
                 <th className="py-3 px-4 w-14 text-center">Ảnh</th>
                 <th className="py-3 px-4">{isAdmin ? 'Mã Đơn' : 'Tên Đơn Hàng'}</th>
                 <th className="py-3 px-4">Trạng Thái Nội Bộ</th>
-                <th className="py-3 px-4">Trạng Thái Printerval</th>
+                <th className="py-3 px-4">Trạng Thái Print</th>
                 <th className="py-3 px-4">DES</th>
                 <th className="py-3 px-4">Đồng bộ lúc</th>
                 {isAdmin && <th className="py-3 px-4 text-right">Thao Tác</th>}
@@ -547,7 +547,7 @@ export function OrderStatusPage() {
                             {site.label}
                           </span>
                           {isPending && (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin text-[#0052CC]" aria-label="Đang đồng bộ Printerval" />
+                            <Loader2 className="h-3.5 w-3.5 animate-spin text-[#0052CC]" aria-label="Đang đồng bộ Print" />
                           )}
                           {o.printerval_assignment_error && (
                             <span
@@ -556,7 +556,7 @@ export function OrderStatusPage() {
                             >
                               <AlertTriangle
                                 className="h-3.5 w-3.5 text-red-600"
-                                aria-label="Đồng bộ Printerval thất bại"
+                                aria-label="Đồng bộ Print thất bại"
                               />
                             </span>
                           )}
@@ -571,7 +571,7 @@ export function OrderStatusPage() {
                                 ? 'bg-blue-50 text-[#0052CC] hover:bg-blue-100'
                                 : 'bg-slate-50 text-slate-400 hover:text-[#0052CC] hover:bg-blue-50'
                             }`}
-                            title="Click để sửa Designer/Trạng thái Printerval"
+                            title="Click để sửa Designer/Trạng thái Print"
                           >
                             <User className="h-3 w-3" />
                             <span>{o.assigned_designer_name || '+ Phân công'}</span>
@@ -581,7 +581,7 @@ export function OrderStatusPage() {
                         )}
                         {o.printerval_designer && (
                           <p className="mt-1 text-[10px] font-medium text-slate-500">
-                            Printerval DES: {o.printerval_designer}
+                            Print DES: {o.printerval_designer}
                           </p>
                         )}
                       </td>
@@ -596,7 +596,7 @@ export function OrderStatusPage() {
                             <button
                               onClick={() => handleRefreshDetail(o.id)}
                               disabled={refreshingDetailIds.has(o.id)}
-                              title="Cập nhật toàn bộ thông tin đơn từ Printerval (SKU, ảnh nguồn, deadline...) — như Danh Sách Đơn Hàng"
+                              title="Cập nhật toàn bộ thông tin đơn từ Print (SKU, ảnh nguồn, deadline...) — như Danh Sách Đơn Hàng"
                               className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors shadow-2xs cursor-pointer disabled:opacity-50"
                             >
                               <RefreshCw className={`h-3 w-3 ${refreshingDetailIds.has(o.id) ? 'animate-spin' : ''}`} />
@@ -640,7 +640,7 @@ export function OrderStatusPage() {
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50">
               <div className="flex items-center gap-2">
                 <UserPlus className="h-5 w-5 text-[#0052CC]" />
-                <h2 className="text-base font-bold text-slate-800">Sửa Designer / Trạng Thái Printerval</h2>
+                <h2 className="text-base font-bold text-slate-800">Sửa Designer / Trạng Thái Print</h2>
               </div>
               <button
                 onClick={() => setEditingOrder(null)}
@@ -669,7 +669,7 @@ export function OrderStatusPage() {
                   onChange={(e) => setEditDesignerId(e.target.value)}
                   className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-[#0052CC]/20 focus:border-[#0052CC]"
                 >
-                  <option value="">-- Không chọn (chỉ sửa Printerval) --</option>
+                  <option value="">-- Không chọn (chỉ sửa Print) --</option>
                   {usersList.map((u) => (
                     <option key={u.id} value={u.id}>{u.full_name || u.username} ({u.role})</option>
                   ))}
@@ -678,7 +678,7 @@ export function OrderStatusPage() {
 
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-700 block">
-                  Designer trên Printerval <span className="text-red-500">*</span>
+                  Designer trên Print <span className="text-red-500">*</span>
                 </label>
                 <button
                   type="button"
@@ -686,7 +686,7 @@ export function OrderStatusPage() {
                   disabled={loadingPrintervalOptions}
                   className="mb-1 text-[11px] font-semibold text-[#0052CC] hover:underline disabled:opacity-50"
                 >
-                  Cập nhật lựa chọn từ Printerval
+                  Cập nhật lựa chọn từ Print
                 </button>
                 <select
                   required
@@ -696,7 +696,7 @@ export function OrderStatusPage() {
                   className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-[#0052CC]/20 focus:border-[#0052CC] disabled:bg-slate-100"
                 >
                   <option value="">
-                    {loadingPrintervalOptions ? 'Đang tải danh sách...' : '-- Chọn Designer Printerval --'}
+                    {loadingPrintervalOptions ? 'Đang tải danh sách...' : '-- Chọn Designer Print --'}
                   </option>
                   {printervalDesigners.map((d) => <option key={d} value={d}>{d}</option>)}
                 </select>
@@ -704,7 +704,7 @@ export function OrderStatusPage() {
 
               <div className="space-y-1">
                 <label className="text-xs font-bold text-slate-700 block">
-                  Trạng thái trên Printerval <span className="text-red-500">*</span>
+                  Trạng thái trên Print <span className="text-red-500">*</span>
                 </label>
                 <select
                   required

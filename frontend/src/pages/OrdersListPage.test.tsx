@@ -8,7 +8,7 @@ import { ToastProvider } from '../context/ToastContext'
 import { OrdersListPage } from './OrdersListPage'
 
 describe('OrdersListPage', () => {
-  it('renders orders and Printerval status filter for admin', async () => {
+  it('renders orders and Print status filter for admin', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn((url: string) => {
@@ -67,7 +67,7 @@ describe('OrdersListPage', () => {
     expect(screen.getByText('Order At')).toBeInTheDocument()
     expect(screen.getByText('14:28:00')).toBeInTheDocument()
     expect(screen.getByText('10/09/2026')).toBeInTheDocument()
-    expect(screen.getByText('Tất cả trạng thái Printerval')).toBeInTheDocument()
+    expect(screen.getByText('Tất cả trạng thái Print')).toBeInTheDocument()
   })
 
   it('hides order code DJ1 and renders 4 tabs for designer', async () => {

@@ -590,7 +590,7 @@ export function OrderDetailPage() {
                   <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-violet-50 text-violet-700 text-xs font-semibold border border-violet-100">
                     <User className="h-3.5 w-3.5" />
                     <span>
-                      Printerval: {order.printerval_designer}
+                      Print: {order.printerval_designer}
                       {order.printerval_status ? ` · ${order.printerval_status}` : ''}
                     </span>
                   </span>

@@ -124,7 +124,7 @@ export function SyncGalleryModal() {
                 <p className="text-amber-800 leading-relaxed text-[11px]">
                   Nếu trang sản phẩm yêu cầu xác thực, hãy mở{' '}
                   <code className="bg-amber-100 px-1 py-0.5 rounded font-mono font-bold">chrome://extensions</code> và
-                  bấm <strong>Reload 🔄</strong> extension <strong>Printerval Admin POD Tool</strong>.
+                  bấm <strong>Reload 🔄</strong> extension <strong>Print Admin POD Tool</strong>.
                 </p>
               </div>
             </div>
