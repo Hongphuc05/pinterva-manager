@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Tacahu POD - Printerval Gallery Sync & Copy Tool",
-  "version": "16.1",
+  "version": "16.2",
   "description": "Tự động quét, xem trước, click-to-copy và đồng bộ hàng loạt bộ ảnh sản phẩm từ Printerval về Tacahu Ops.",
   "permissions": [
     "activeTab",

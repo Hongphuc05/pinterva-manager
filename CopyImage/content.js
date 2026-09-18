@@ -11,6 +11,13 @@
         autoScanOnLoad: false,
         maxConcurrency: 5,
     };
+    const extensionVersion = (() => {
+        try {
+            return chrome.runtime.getManifest().version;
+        } catch (e) {
+            return 'unknown';
+        }
+    })();
 
     function getEnvBadgeHtml(apiUrl) {
         const raw = (apiUrl || '').trim();
@@ -175,6 +182,7 @@
                 <div style="display: flex; align-items: center; gap: 6px;">
                     <div style="width: 9px; height: 9px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 8px #22c55e;" id="tacahu-status-dot"></div>
                     <span style="font-weight: 700; font-size: 12px; background: linear-gradient(90deg, #60a5fa, #a855f7); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Tacahu Sync</span>
+                    <span style="font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 999px; color: #bfdbfe; background: rgba(59, 130, 246, 0.18); border: 1px solid rgba(96, 165, 250, 0.35);">v${extensionVersion}</span>
                     ${getEnvBadgeHtml(cachedSettings.apiBaseUrl)}
                 </div>
                 <div style="height: 16px; width: 1px; background: #334155;"></div>
