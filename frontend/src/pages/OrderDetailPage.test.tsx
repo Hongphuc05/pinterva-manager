@@ -276,7 +276,8 @@ describe('OrderDetailPage', () => {
                 product_category: 'Lunch Bags',
                 product_variants: [
                   { name: 'Type', value: 'Fleece Blanket' },
-                  { name: 'Size', value: '60" x 80"' },
+                  { name: '| Size', value: '60" x 80"' },
+                  { name: '| Size', value: '50" x 60"' },
                 ],
                 product_skus: [],
                 multiple_design: false,
@@ -318,6 +319,9 @@ describe('OrderDetailPage', () => {
     expect(screen.getByText('Lunch Bags')).toBeInTheDocument()
     expect(screen.getByText('Fleece Blanket')).toBeInTheDocument()
     expect(screen.getByText('60" x 80"')).toBeInTheDocument()
+    expect(screen.getByText('50" x 60"')).toBeInTheDocument()
+    expect(screen.getByText('Size:')).toBeInTheDocument()
+    expect(screen.queryByText('| Size:')).not.toBeInTheDocument()
 
     // 2. Shows single Order At card
     expect(screen.getByText(/Thời Gian Khách Đặt \(Order At\)/i)).toBeInTheDocument()

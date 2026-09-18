@@ -310,10 +310,14 @@ export function OrderDetailPage() {
 
     const addVariant = (name?: string | null, value?: string | null) => {
       if (!name || !value) return
-      const k = `${name.trim().toLowerCase()}:${value.trim().toLowerCase()}`
+      // Printerval sometimes returns labels such as "| Size" from the source
+      // markup. Strip presentation separators before deduplicating/grouping.
+      const normalizedName = name.trim().replace(/^[|•·\s]+|[|•·\s]+$/g, '').trim()
+      if (!normalizedName) return
+      const k = `${normalizedName.toLowerCase()}:${value.trim().toLowerCase()}`
       if (!seen.has(k)) {
         seen.add(k)
-        list.push({ name: name.trim(), value: value.trim() })
+        list.push({ name: normalizedName, value: value.trim() })
       }
     }
 
