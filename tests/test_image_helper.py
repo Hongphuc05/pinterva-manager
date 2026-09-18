@@ -1,6 +1,7 @@
 import httpx
 
 from app.adapters.printerval.image_helper import (
+    download_and_save_image,
     extract_image_url_from_dict_or_html,
     normalize_image_url,
 )
@@ -57,4 +58,18 @@ def test_download_and_save_image(tmp_path):
     assert file_path.exists()
     assert file_path.read_bytes() == b"fake-image-bytes"
 
+
+def test_disabled_download_does_not_create_asset_directory(tmp_path):
+    assets_dir = tmp_path / "read-only-crawled-assets"
+
+    result = download_and_save_image(
+        "DJ3971873",
+        "https://assets.printerval.com/preview.png",
+        assets_dir=assets_dir,
+        platform_id="platform-1",
+        download=False,
+    )
+
+    assert result is None
+    assert not assets_dir.exists()
 

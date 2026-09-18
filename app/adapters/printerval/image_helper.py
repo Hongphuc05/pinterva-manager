@@ -112,6 +112,14 @@ def download_and_save_image(
     if raw_url.startswith("/crawled_assets/"):
         return raw_url
 
+    # Fast API crawling deliberately keeps the remote thumbnail URL and must not
+    # touch the asset volume.  In particular, it must not create a platform
+    # directory before noticing that downloading is disabled: a read-only or
+    # temporarily unavailable asset mount should never turn a successful order
+    # scan into a failed crawl.
+    if not download:
+        return None
+
     target_dir = assets_dir / str(platform_id) if platform_id else assets_dir
     target_dir.mkdir(parents=True, exist_ok=True)
 
