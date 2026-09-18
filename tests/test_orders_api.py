@@ -590,6 +590,43 @@ def test_api_update_order_state_flow(client, db_session):
     assert len(single_hist) >= 4
 
 
+def test_resolve_missing_template_returns_assigned_order_to_doing(client, db_session):
+    platform = Platform(name="Missing template platform", account_username="missing@example.com")
+    designer = User(
+        username="missing-designer",
+        full_name="Missing Designer",
+        role="designer",
+        password_hash=hash_password("s3cret!"),
+    )
+    db_session.add_all([platform, designer])
+    db_session.flush()
+    order = Order(
+        external_order_id="MISSING-TEMPLATE-1",
+        platform_id=platform.id,
+        state=OrderState.IN_PROGRESS.value,
+        template_missing=True,
+    )
+    db_session.add(order)
+    db_session.flush()
+    assignment = Assignment(order_id=order.id, designer_id=designer.id, status="approved", sub_status="waiting_template")
+    db_session.add(assignment)
+    db_session.commit()
+    _login(client, db_session, "admin", username="missing-template-admin")
+
+    response = client.post(
+        f"/api/orders/{order.id}/resolve-missing-template",
+        json={"designer_note": "Temp: https://example.com/template"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["state"] == OrderState.IN_PROGRESS.value
+    db_session.refresh(order)
+    db_session.refresh(assignment)
+    assert order.template_missing is False
+    assert order.designer_note == "Temp: https://example.com/template"
+    assert assignment.sub_status == "todo"
+
+
 def test_api_approve_and_reject_fix_flow(client, db_session):
     import uuid
 

@@ -79,6 +79,42 @@ def test_get_order_detail_for_user_designer_cannot_view_unassigned_order(db_sess
     assert assigned_result.external_order_id == "DJ1"
 
 
+def test_trello_designer_only_sees_own_duplicate_orders(db_session):
+    trello_designer = _make_user(db_session, "designer-trello", "trello_q5a")
+    other_trello_designer = _make_user(db_session, "designer-trello", "trello_q5b")
+    owned = Order(
+        external_order_id="DUP-OWNED",
+        state=OrderState.IN_PROGRESS.value,
+        work_domain="duplicate",
+    )
+    another = Order(
+        external_order_id="DUP-ANOTHER",
+        state=OrderState.IN_PROGRESS.value,
+        work_domain="duplicate",
+    )
+    standard = Order(
+        external_order_id="STANDARD-ORDER",
+        state=OrderState.IN_PROGRESS.value,
+        work_domain="standard",
+    )
+    db_session.add_all([owned, another, standard])
+    db_session.flush()
+    db_session.add_all(
+        [
+            Assignment(order_id=owned.id, designer_id=trello_designer.id, status="approved"),
+            Assignment(order_id=another.id, designer_id=other_trello_designer.id, status="approved"),
+        ]
+    )
+    db_session.commit()
+
+    orders = list_orders_for_user(db_session, trello_designer)
+
+    assert [order.external_order_id for order in orders] == ["DUP-OWNED"]
+    assert get_order_detail_for_user(db_session, trello_designer, str(owned.id)) is owned
+    assert get_order_detail_for_user(db_session, trello_designer, str(another.id)) is None
+    assert get_order_detail_for_user(db_session, trello_designer, str(standard.id)) is None
+
+
 def test_get_order_detail_for_user_invalid_uuid_returns_none(db_session):
     admin = _make_user(db_session, "admin", "admin1")
 

@@ -10,7 +10,8 @@ from sqlalchemy.orm import Session
 from app.adapters.db.models import User
 from app.adapters.google.drive_adapter import GoogleDriveAdapter
 from app.adapters.google.drive_interface import DriveAdapter
-from app.api.deps import get_db, require_role
+from app.api.deps import get_db, require_any_role
+from app.domain.access import ROLE_DESIGNER, ROLE_DESIGNER_TRELLO
 from app.application.designer_tasks import (
     DriveUnavailableError,
     DriveValidationError,
@@ -119,7 +120,7 @@ def _raise_task_error(exc: Exception) -> None:
 
 @router.get("/my-tasks", response_model=TasksResponse)
 def api_my_tasks(
-    user: User = Depends(require_role("designer")), db: Session = Depends(get_db)
+    user: User = Depends(require_any_role(ROLE_DESIGNER, ROLE_DESIGNER_TRELLO)), db: Session = Depends(get_db)
 ):
     return TasksResponse(tasks=list_my_tasks(db, user.id))
 
@@ -128,7 +129,7 @@ def api_my_tasks(
 def api_start_task(
     assignment_id: uuid.UUID,
     payload: RequestIdPayload,
-    user: User = Depends(require_role("designer")),
+    user: User = Depends(require_any_role(ROLE_DESIGNER, ROLE_DESIGNER_TRELLO)),
     db: Session = Depends(get_db),
 ):
     try:
@@ -145,7 +146,7 @@ def api_start_task(
 def api_update_sub_status(
     assignment_id: uuid.UUID,
     payload: SubStatusPayload,
-    user: User = Depends(require_role("designer")),
+    user: User = Depends(require_any_role(ROLE_DESIGNER, ROLE_DESIGNER_TRELLO)),
     db: Session = Depends(get_db),
 ):
     try:
@@ -163,7 +164,7 @@ def api_update_sub_status(
 def api_flag_missing_template(
     assignment_id: uuid.UUID,
     payload: RequestIdPayload,
-    user: User = Depends(require_role("designer")),
+    user: User = Depends(require_any_role(ROLE_DESIGNER, ROLE_DESIGNER_TRELLO)),
     db: Session = Depends(get_db),
 ):
     try:
@@ -181,7 +182,7 @@ def api_flag_missing_template(
 def api_submit_result(
     assignment_id: uuid.UUID,
     payload: SubmitResultPayload,
-    user: User = Depends(require_role("designer")),
+    user: User = Depends(require_any_role(ROLE_DESIGNER, ROLE_DESIGNER_TRELLO)),
     db: Session = Depends(get_db),
     drive_adapter: DriveAdapter = Depends(get_drive_adapter),
 ):

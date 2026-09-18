@@ -27,7 +27,7 @@ def list_orders_for_user(
     """Admin and Support see all platform orders (optionally filtered).
     Designer sees ONLY orders assigned to themselves.
     """
-    if user.role == ROLE_DESIGNER:
+    if user.role in (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO):
         designer_id = str(user.id)
 
     query = session.query(Order)
@@ -174,8 +174,20 @@ def get_order_detail_for_user(session: Session, user: User, order_id: str) -> Or
         if assignment is None and not is_printerval_match:
             return None
 
-    if user.role == ROLE_DESIGNER_TRELLO and order.work_domain != WORK_DOMAIN_DUPLICATE:
-        return None
+    if user.role == ROLE_DESIGNER_TRELLO:
+        if order.work_domain != WORK_DOMAIN_DUPLICATE:
+            return None
+        assignment = (
+            session.query(Assignment)
+            .filter(
+                Assignment.order_id == order.id,
+                Assignment.designer_id == user.id,
+                Assignment.status != "cancelled",
+            )
+            .first()
+        )
+        if assignment is None:
+            return None
 
     return order
 

@@ -69,6 +69,8 @@ from app.domain.access import (
     ROLE_DESIGNER,
     ROLE_DESIGNER_TRELLO,
     ROLE_SUPPORT,
+    WORK_DOMAIN_DUPLICATE,
+    WORK_DOMAIN_STANDARD,
 )
 from app.domain.models import OrderState
 
@@ -1831,18 +1833,18 @@ def api_resolve_missing_template(
     order.template_missing_reported_at = None
     order.template_missing_reported_by_id = None
     assignment.sub_status = "todo"
-    if order.state != OrderState.WAITING.value:
+    if order.state != OrderState.IN_PROGRESS.value:
         apply_transition(
-            db, order, OrderState.WAITING, actor_id=user.id,
+            db, order, OrderState.IN_PROGRESS, actor_id=user.id,
             evidence={"action": "RESOLVE_MISSING_TEMPLATE", "actor_role": "admin", "actor_name": user.full_name or user.username,
-                      "description": "Admin đã bổ sung temp/ghi chú và trả đơn về To-do cho Designer."},
+                      "description": "Admin đã bổ sung temp/ghi chú và trả đơn về Doing cho Designer."},
             commit=False,
         )
     else:
         db.add(WorkflowEvent(
-            order_id=order.id, from_state=old_state, to_state=OrderState.WAITING.value, actor_id=user.id,
+            order_id=order.id, from_state=old_state, to_state=OrderState.IN_PROGRESS.value, actor_id=user.id,
             evidence={"action": "RESOLVE_MISSING_TEMPLATE", "actor_role": "admin", "actor_name": user.full_name or user.username,
-                      "description": "Admin đã bổ sung temp/ghi chú và trả đơn về To-do cho Designer."},
+                      "description": "Admin đã bổ sung temp/ghi chú và trả đơn về Doing cho Designer."},
         ))
     db.commit()
     return {"ok": True, "state": order.state, "designer_note": order.designer_note}
@@ -1887,7 +1889,15 @@ def api_update_order_state(
         )
     target_state = state_mapping[raw_state]
 
-    if user.role == "designer":
+    if user.role in (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO):
+        expected_domain = (
+            WORK_DOMAIN_DUPLICATE if user.role == ROLE_DESIGNER_TRELLO else WORK_DOMAIN_STANDARD
+        )
+        if order.work_domain != expected_domain:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "Bạn chỉ có thể cập nhật đơn thuộc phạm vi công việc của mình.",
+            )
         if target_state not in (OrderState.WAITING, OrderState.IN_PROGRESS, OrderState.QC_PENDING):
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN,
@@ -1950,7 +1960,7 @@ def api_update_order_state(
         )
         db.add(rv)
 
-    actor_disp = f"{'Designer ' if user.role == 'designer' else ('Admin ' if user.role == 'admin' else '')}{actor_name}"
+    actor_disp = f"{'Designer ' if user.role in (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO) else ('Admin ' if user.role == ROLE_ADMIN else '')}{actor_name}"
     if target_state == OrderState.IN_PROGRESS:
         if old_state in (OrderState.QC_PENDING.value, "REVIEW"):
             action_type = "REVERT_TO_DOING"

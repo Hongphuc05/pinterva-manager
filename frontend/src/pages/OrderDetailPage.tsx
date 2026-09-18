@@ -159,7 +159,7 @@ export function OrderDetailPage() {
         method: resolveMissingTemplate ? 'POST' : 'PUT',
         body: JSON.stringify({ designer_note: designerNoteInput }),
       })
-      setActionSuccess(resolveMissingTemplate ? 'Đã cập nhật temp và trả đơn về To-do.' : 'Đã gửi ghi chú xuống Designer.')
+      setActionSuccess(resolveMissingTemplate ? 'Đã cập nhật temp và trả đơn về Doing.' : 'Đã gửi ghi chú xuống Designer.')
       await loadOrderDetail()
       window.dispatchEvent(new CustomEvent('orders-updated'))
     } catch (caught) {
@@ -1050,12 +1050,10 @@ export function OrderDetailPage() {
                   placeholder="Nhập hướng dẫn, link temp hoặc yêu cầu cho Designer..."
                   className="w-full rounded-lg border border-slate-200 bg-white p-2 text-xs focus:border-[#0052CC] focus:outline-none" />
                 <div className="flex flex-wrap gap-2">
-                  <button type="button" onClick={() => saveDesignerNote(false)} disabled={savingDesignerNote}
-                    className="rounded-lg bg-[#0052CC] px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50">Lưu ghi chú</button>
-                  {order.template_missing && (
-                    <button type="button" onClick={() => saveDesignerNote(true)} disabled={savingDesignerNote}
-                      className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50">Cập nhật temp & trả To-do</button>
-                  )}
+                  <button type="button" onClick={() => saveDesignerNote(Boolean(order.template_missing))} disabled={savingDesignerNote}
+                    className="rounded-lg bg-[#0052CC] px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50">
+                    {order.template_missing ? 'Cập nhật' : 'Lưu ghi chú'}
+                  </button>
                 </div>
               </div>
             )}

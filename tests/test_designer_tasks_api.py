@@ -69,6 +69,36 @@ def test_my_tasks_requires_designer_and_scopes_to_current_designer(client, db_se
     assert task["order"]["external_order_id"] == order.external_order_id
 
 
+def test_my_tasks_accepts_trello_designer(client, db_session):
+    trello_designer = _login(client, db_session, "designer-trello", "trello-tasks")
+    assignment, order = _seed_owned_task(db_session, trello_designer)
+    order.work_domain = "duplicate"
+    db_session.commit()
+
+    response = client.get("/api/my-tasks")
+
+    assert response.status_code == 200
+    assert response.json()["tasks"][0]["assignment_id"] == str(assignment.id)
+
+
+def test_trello_designer_can_submit_result_for_owned_duplicate_order(client, db_session):
+    trello_designer = _login(client, db_session, "designer-trello", "trello-submitter")
+    assignment, order = _seed_owned_task(db_session, trello_designer, OrderState.IN_PROGRESS.value)
+    order.work_domain = "duplicate"
+    db_session.commit()
+
+    response = client.post(
+        f"/api/assignments/{assignment.id}/results",
+        json={
+            "drive_url": "https://drive.google.com/file/d/known-file/view",
+            "request_id": "trello-submit-1",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["state"] == OrderState.QC_PENDING.value
+
+
 def test_result_api_verifies_drive_and_enters_qc_queue(client, db_session):
     designer = _login(client, db_session, "designer", "submitter")
     assignment, _ = _seed_owned_task(db_session, designer, OrderState.IN_PROGRESS.value)

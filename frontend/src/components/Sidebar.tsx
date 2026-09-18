@@ -70,6 +70,7 @@ export function Sidebar() {
       label: 'Công việc',
       items: [
         { label: 'Board Đơn trùng lặp', path: '/kanban', icon: Columns3 },
+        { label: 'Đơn Hàng', path: '/orders', icon: ListOrdered },
         { label: 'Tài Chính', path: '/finance', icon: Coins },
       ],
     },
