@@ -467,7 +467,7 @@ export function OrderStatusPage() {
                     />
                   </th>
                 )}
-                <th className="py-3 px-4 w-14 text-center">Ảnh</th>
+                <th className="py-3 px-4 w-28 text-center">Ảnh</th>
                 <th className="py-3 px-4">{isAdmin ? 'Mã Đơn' : 'Tên Đơn Hàng'}</th>
                 <th className="py-3 px-4">Trạng Thái Nội Bộ</th>
                 <th className="py-3 px-4">Trạng Thái Web Mẹ</th>
@@ -507,10 +507,10 @@ export function OrderStatusPage() {
                           <img
                             src={resolveAssetUrl(o.thumbnail_url)}
                             alt={isAdmin ? o.external_order_id : (o.product_name || 'Đơn thiết kế')}
-                            className="h-10 w-10 rounded-lg object-cover border border-slate-200 mx-auto"
+                            className="h-16 w-16 rounded-lg object-cover border border-slate-200 mx-auto"
                           />
                         ) : (
-                          <div className="h-10 w-10 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center mx-auto text-slate-400">
+                          <div className="h-16 w-16 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center mx-auto text-slate-400">
                             <Package className="h-5 w-5" />
                           </div>
                         )}

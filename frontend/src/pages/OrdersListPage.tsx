@@ -2218,7 +2218,7 @@ export function OrdersListPage() {
                       className="rounded border-slate-300 text-[#0052CC] focus:ring-[#0052CC] h-3.5 w-3.5 cursor-pointer"
                     />
                   </th>
-                  <th className="py-3 px-3 w-16 text-center">Ảnh</th>
+                  <th className="py-3 px-3 w-28 text-center">Ảnh</th>
                   <th className="py-3 px-4">Thông Tin Đơn Hàng</th>
                   <th className="py-3 px-4 text-right w-72">Phân Loại / Thao Tác</th>
                 </tr>
@@ -2235,7 +2235,7 @@ export function OrdersListPage() {
                       className="rounded border-slate-300 text-[#0052CC] focus:ring-[#0052CC] h-3.5 w-3.5 cursor-pointer"
                     />
                   </th>
-                  <th className="py-3 px-3 w-20 text-center">Ảnh</th>
+                  <th className="py-3 px-3 w-28 text-center">Ảnh</th>
                   <th className="py-3 px-4">Mã Đơn</th>
                   <th className="py-3 px-4">Trạng Thái</th>
                   <th className="py-3 px-4">Des Đảm Nhận</th>
@@ -2258,7 +2258,7 @@ export function OrdersListPage() {
                 </tr>
               ) : (
                 <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-semibold uppercase text-slate-500 tracking-wider">
-                  <th className="py-3 px-3 w-16 text-center">Ảnh</th>
+                  <th className="py-3 px-3 w-28 text-center">Ảnh</th>
                   <th className="py-3 px-4 min-w-[220px]">Tên Sản Phẩm (Click để copy)</th>
                   <th className="py-3 px-4 w-52">Trạng Thái &amp; Ghi Chú</th>
                   <th className="py-3 px-4 w-36 whitespace-nowrap">
@@ -2346,10 +2346,10 @@ export function OrdersListPage() {
                                 alt={o.external_order_id}
                                 title="Click để xem ảnh phóng to"
                                 onClick={() => setSelectedImage(resolveAssetUrl(o.thumbnail_url) ?? null)}
-                                className="h-16 w-16 rounded-xl object-cover border border-slate-200 mx-auto shadow-xs cursor-pointer hover:scale-105 transition-transform hover:ring-2 hover:ring-[#0052CC]"
+                                className="h-20 w-20 rounded-xl object-cover border border-slate-200 mx-auto shadow-xs cursor-pointer hover:scale-105 transition-transform hover:ring-2 hover:ring-[#0052CC]"
                               />
                             ) : (
-                              <div className="h-16 w-16 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center mx-auto text-slate-400">
+                              <div className="h-20 w-20 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center mx-auto text-slate-400">
                                 <Package className="h-7 w-7" />
                               </div>
                             )}
@@ -2521,10 +2521,10 @@ export function OrdersListPage() {
                                 alt={o.external_order_id}
                                 title="Click để xem ảnh phóng to"
                                 onClick={() => setSelectedImage(resolveAssetUrl(o.thumbnail_url) ?? null)}
-                                className="h-16 w-16 rounded-xl object-cover border border-slate-200 mx-auto shadow-xs cursor-pointer hover:scale-105 transition-transform hover:ring-2 hover:ring-[#0052CC]"
+                                className="h-20 w-20 rounded-xl object-cover border border-slate-200 mx-auto shadow-xs cursor-pointer hover:scale-105 transition-transform hover:ring-2 hover:ring-[#0052CC]"
                               />
                             ) : (
-                              <div className="h-16 w-16 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center mx-auto text-slate-400">
+                              <div className="h-20 w-20 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center mx-auto text-slate-400">
                                 <Package className="h-7 w-7" />
                               </div>
                             )}
@@ -2822,10 +2822,10 @@ export function OrdersListPage() {
                                 alt={o.product_name || 'Đơn thiết kế'}
                                 title="Click để xem ảnh phóng to"
                                 onClick={() => setSelectedImage(resolveAssetUrl(o.thumbnail_url) ?? null)}
-                                className="h-16 w-16 rounded-xl object-cover border border-slate-200 mx-auto shadow-xs cursor-pointer hover:scale-105 transition-transform hover:ring-2 hover:ring-[#0052CC]"
+                                className="h-20 w-20 rounded-xl object-cover border border-slate-200 mx-auto shadow-xs cursor-pointer hover:scale-105 transition-transform hover:ring-2 hover:ring-[#0052CC]"
                               />
                             ) : (
-                              <div className="h-16 w-16 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center mx-auto text-slate-400">
+                              <div className="h-20 w-20 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center mx-auto text-slate-400">
                                 <Package className="h-7 w-7" />
                               </div>
                             )}

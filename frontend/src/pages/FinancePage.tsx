@@ -1410,7 +1410,7 @@ export function FinancePage() {
                           />
                         </th>
                       )}
-                      <th className="py-3 px-3 w-20 text-center">Ảnh</th>
+                      <th className="py-3 px-3 w-28 text-center">Ảnh</th>
                       <th className="py-3 px-4">{isAdmin ? 'Mã Đơn / Tên Sản Phẩm' : 'Tên Sản Phẩm'}</th>
                       {isAdmin && <th className="py-3 px-4">Designer</th>}
                       <th className="py-3 px-4">Trạng Thái</th>
@@ -1480,10 +1480,10 @@ export function FinancePage() {
                                   alt={isAdmin ? task.external_order_id : (task.product_name || 'Ảnh sản phẩm')}
                                   title="Click để phóng to"
                                   onClick={() => setSelectedImage(resolveAssetUrl(task.thumbnail_url) ?? null)}
-                                  className="h-16 w-16 rounded-xl object-cover border border-slate-200 mx-auto shadow-xs cursor-pointer hover:scale-105 transition-transform hover:ring-2 hover:ring-[#0052CC]"
+                                  className="h-20 w-20 rounded-xl object-cover border border-slate-200 mx-auto shadow-xs cursor-pointer hover:scale-105 transition-transform hover:ring-2 hover:ring-[#0052CC]"
                                 />
                               ) : (
-                                <div className="h-16 w-16 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center mx-auto text-slate-400">
+                                <div className="h-20 w-20 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center mx-auto text-slate-400">
                                   <Package className="h-6 w-6" />
                                 </div>
                               )}
@@ -2470,7 +2470,7 @@ export function FinancePage() {
                             title="Chọn tất cả đơn trên trang này"
                           />
                         </th>
-                        <th className="py-3 px-3 w-20 text-center">Ảnh</th>
+                        <th className="py-3 px-3 w-28 text-center">Ảnh</th>
                         <th className="py-3 px-4">Mã Đơn / Tên Sản Phẩm</th>
                         <th className="py-3 px-4">Trạng Thái</th>
                         <th className="py-3 px-4 whitespace-nowrap">Thời Gian Nộp</th>
@@ -2529,10 +2529,10 @@ export function FinancePage() {
                                     alt={task.external_order_id}
                                     title="Click để phóng to"
                                     onClick={() => setSelectedImage(resolveAssetUrl(task.thumbnail_url) ?? null)}
-                                    className="h-16 w-16 rounded-xl object-cover border border-slate-200 mx-auto shadow-xs cursor-pointer hover:scale-105 transition-transform hover:ring-2 hover:ring-[#0052CC]"
+                                    className="h-20 w-20 rounded-xl object-cover border border-slate-200 mx-auto shadow-xs cursor-pointer hover:scale-105 transition-transform hover:ring-2 hover:ring-[#0052CC]"
                                   />
                                 ) : (
-                                  <div className="h-16 w-16 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center mx-auto text-slate-400">
+                                  <div className="h-20 w-20 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center mx-auto text-slate-400">
                                     <Package className="h-6 w-6" />
                                   </div>
                                 )}
