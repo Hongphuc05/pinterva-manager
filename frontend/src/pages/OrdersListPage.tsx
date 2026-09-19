@@ -9,7 +9,7 @@ import { StatusDropdown } from '../components/StatusDropdown'
 import { Pagination, paginate } from '../components/Pagination'
 import { CopyableOrderCode } from '../components/CopyableOrderCode'
 import { CopyableProductName } from '../components/CopyableProductName'
-import { ProductQuickViewButton, ProductQuickViewModal } from '../components/ProductQuickViewModal'
+import { ProductQuickViewModal } from '../components/ProductQuickViewModal'
 import { useToast } from '../context/ToastContext'
 import { useGallerySync } from '../context/GallerySyncContext'
 import { useSyncStatus } from '../hooks/useSyncStatus'
@@ -2302,16 +2302,20 @@ export function OrdersListPage() {
                       key={o.id}
                       onClick={() => {
                         dismissHighlight(o.id)
-                        navigate(`/orders/${o.id}`)
+                        if (isAdmin || isSupport) {
+                          navigate(`/orders/${o.id}`)
+                        } else {
+                          setQuickViewOrderId(o.id)
+                        }
                       }}
                       className={`transition-all duration-150 cursor-pointer ${
                         isHighlighted
                           ? 'bg-emerald-50/80 border-l-4 border-l-emerald-500 shadow-xs'
                           : isSelected
-                          ? 'bg-blue-50/80 font-medium'
-                          : 'hover:bg-blue-50/60'
-                      }`}
-                      title="Click vào dòng để xem chi tiết đơn hàng"
+                            ? 'bg-blue-50/80 font-medium'
+                            : 'hover:bg-blue-50/60'
+                        }`}
+                      title={isAdmin || isSupport ? 'Click vào dòng để xem chi tiết đơn hàng' : 'Click vào dòng để xem nhanh sản phẩm'}
                     >
                       {isSupport ? (
                         <>
@@ -2836,7 +2840,6 @@ export function OrdersListPage() {
                             <div className="space-y-1.5">
                               <div className="flex items-start gap-1.5 flex-wrap">
                                 <CopyableProductName name={o.product_name || o.external_order_id} textSize="text-xs font-bold" />
-                                <ProductQuickViewButton onClick={() => setQuickViewOrderId(o.id)} />
                                 {o.template_missing && (
                                   <span className="inline-flex rounded border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700 shrink-0">
                                     Thiếu temp

@@ -71,6 +71,14 @@ export function ProductQuickViewModal({ orderId, onClose }: Props) {
   }, [])
 
   useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onClose])
+
+  useEffect(() => {
     let active = true
     apiFetch<{ order: QuickViewOrder }>(`/orders/${orderId}`)
       .then((data) => {
