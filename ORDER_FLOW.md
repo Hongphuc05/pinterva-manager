@@ -82,13 +82,12 @@ Admin hoặc Support Team kiểm tra danh sách đơn mới tại tab Chờ phâ
 
 #### A. Đơn không trùng (`work_domain = "standard"`, `duplicate_check_status = "non_duplicate"`)
 - Đây là đơn thông thường, cần được chia trực tiếp cho các Designer trong nhóm.
-- **Thao tác Admin**: Admin chọn đơn và chọn Designer phụ trách từ danh sách. Trong popup modal **Phân công Designer**, mục **Trạng thái trên Web mẹ** luôn được **mặc định là `Doing`** để ngay khi bấm xác nhận, đơn sẽ lập tức chuyển sang Doing ở cả hệ thống Tacahu và Web mẹ.
+- **Thao tác Admin**: Admin chọn đơn và chọn Designer phụ trách từ danh sách.
 - **Hành động hệ thống**:
   1. Ghi nhận phân công (`Assignment`) cho Designer được chọn.
-  2. Cập nhật trạng thái đơn hàng sang `IN_PROGRESS` (Doing) và hiển thị ở tab **Doing** của Designer.
-  3. Gửi thông báo Telegram tức thì cho Designer kèm mockup sản phẩm và deadline.
-  4. Tạo request đồng bộ cập nhật trạng thái đơn hàng trên Platform thành `Doing` và gán tên Designer lên Platform.
-  5. Đơn hàng xuất hiện tại tab **Doing** trong tài khoản của Designer được gán.
+  2. Cập nhật trạng thái đơn hàng sang `IN_PROGRESS` (Doing).
+  3. Gọi task đồng bộ ngầm (`sync_assignment_to_printerval_task`) để cập nhật trạng thái đơn hàng trên Platform thành `Doing` và gán tên Designer lên Platform.
+  4. Đơn hàng xuất hiện tại tab **Doing** trong tài khoản của Designer được gán.
 
 #### B. Đơn trùng (`work_domain = "duplicate"`, `duplicate_check_status = "duplicate"`)
 > [!NOTE]
