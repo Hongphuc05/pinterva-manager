@@ -790,6 +790,32 @@ def mark_orders_paid(
                 )
             )
     db.commit()
+
+    # Telegram notification for each paid designer
+    try:
+        from collections import defaultdict
+
+        from app.adapters.db.models import Assignment, Platform
+        from app.workers.telegram_tasks import async_notify_designer_payment
+
+        plat = db.get(Platform, platform_id)
+        std_rate = plat.standard_order_rate if plat else 40000
+        dup_rate = plat.duplicate_order_rate if plat else 40000
+
+        des_summary = defaultdict(lambda: {"count": 0, "amount": 0})
+        for o in orders:
+            rate = o.custom_rate if o.custom_rate is not None else (dup_rate if o.work_domain == "duplicate" else std_rate)
+            asgn = db.query(Assignment).filter(Assignment.order_id == o.id, Assignment.status != "cancelled").first()
+            if asgn and asgn.designer_id:
+                des_summary[asgn.designer_id]["count"] += 1
+                des_summary[asgn.designer_id]["amount"] += rate
+
+        for des_id, stats in des_summary.items():
+            if stats["count"] > 0:
+                async_notify_designer_payment.delay(str(des_id), stats["count"], stats["amount"])
+    except Exception:
+        pass
+
     return {"ok": True, "updated_count": len(orders)}
 
 

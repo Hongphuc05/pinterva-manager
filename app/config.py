@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     order_sheet_backup_hour: int = 0
     order_sheet_backup_minute: int = 10
     celery_timezone: str = "Asia/Ho_Chi_Minh"
+    # Telegram Bot integration configuration
+    telegram_bot_token: str | None = None
+    telegram_bot_username: str | None = None
+    telegram_webhook_secret: str | None = None
+    telegram_notifications_enabled: bool = True
 
     @field_validator("order_sheet_backup_hour")
     @classmethod

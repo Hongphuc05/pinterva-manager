@@ -82,6 +82,14 @@ class User(Base):
     # skipped, not guessed, for that case. Set by admin, must match an option that
     # genuinely exists on the site or the write dead-letters (EXTERNAL_CHANGED).
     printerval_designer_option: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Telegram integration
+    telegram_chat_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    telegram_username: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    telegram_link_code: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    telegram_link_code_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    telegram_notifications_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=text("true"), nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -509,3 +517,22 @@ class FinanceNote(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
+
+
+class TelegramActionLog(Base):
+    """Audit log & opaque token store for Telegram inline callbacks (Approve/Reject Fix, etc.)."""
+
+    __tablename__ = "telegram_action_logs"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    order_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("orders.id"), nullable=True)
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    action_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    callback_token: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

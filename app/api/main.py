@@ -18,6 +18,7 @@ from app.api.routes import orders_api as orders_api_routes
 from app.api.routes import platforms_api as platforms_api_routes
 from app.api.routes import protected_example
 from app.api.routes import sync_jobs_api as sync_jobs_api_routes
+from app.api.routes import telegram_api as telegram_api_routes
 from app.api.routes import users_api as users_api_routes
 from app.application.auth import read_session_token
 from app.config import get_settings
@@ -127,6 +128,7 @@ def create_app() -> FastAPI:
     app.include_router(finance_api_routes.router, prefix="/api")
     app.include_router(designer_tasks_api_routes.router, prefix="/api")
     app.include_router(duplicate_board_api_routes.router, prefix="/api")
+    app.include_router(telegram_api_routes.router, prefix="/api")
     app.include_router(protected_example.router, prefix="/api")
 
     CRAWLED_ASSETS_DIR.mkdir(parents=True, exist_ok=True)

@@ -1998,6 +1998,14 @@ def api_update_order_state(
             )
         except Exception:
             pass
+
+        # Telegram notification for Admin
+        try:
+            from app.workers.telegram_tasks import async_notify_admin_review_submitted
+
+            async_notify_admin_review_submitted.delay(str(order.id), des_name or actor_name)
+        except Exception:
+            pass
     elif target_state == OrderState.REVISION:
         action_type = "REQUEST_FIX"
         desc = f"{actor_disp} yêu cầu sửa bài (Fix)"
@@ -2080,9 +2088,11 @@ def api_approve_fix(
         order.note_outsource = payload.note_outsource.strip()
 
     assigned_designer_name = None
+    target_des_id = None
     if payload.designer_id:
         target_des = db.get(User, payload.designer_id)
         if target_des:
+            target_des_id = target_des.id
             assigned_designer_name = target_des.full_name or target_des.username
             curr_assignment = (
                 db.query(Assignment)
@@ -2094,6 +2104,17 @@ def api_approve_fix(
                 curr_assignment.status = "approved"
             else:
                 db.add(Assignment(order_id=order.id, designer_id=target_des.id, status="approved"))
+    else:
+        curr_assignment = (
+            db.query(Assignment)
+            .filter(Assignment.order_id == order.id, Assignment.status != "cancelled")
+            .first()
+        )
+        if curr_assignment and curr_assignment.designer_id:
+            target_des_id = curr_assignment.designer_id
+            target_des = db.get(User, curr_assignment.designer_id)
+            if target_des:
+                assigned_designer_name = target_des.full_name or target_des.username
 
     order.state = OrderState.REVISION.value
     order.fix_approved_by_admin = True
@@ -2122,6 +2143,15 @@ def api_approve_fix(
     db.add(event)
     db.commit()
     db.refresh(order)
+
+    # Telegram notification for designer
+    if target_des_id:
+        try:
+            from app.workers.telegram_tasks import async_notify_designer_urgent_fix
+
+            async_notify_designer_urgent_fix.delay(str(order.id), str(target_des_id), order.designer_note)
+        except Exception:
+            pass
 
     return {
         "ok": True,

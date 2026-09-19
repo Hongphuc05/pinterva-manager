@@ -102,6 +102,16 @@ def queue_assignment_command(
 
         session.commit()
 
+        # Telegram notification for designer
+        if designer is not None:
+            try:
+                from app.workers.telegram_tasks import async_notify_designer_new_order
+
+                for order in orders:
+                    async_notify_designer_new_order.delay(str(order.id), str(designer.id))
+            except Exception:
+                pass
+
         from app.workers.assignment_sync_tasks import sync_printerval_assignment_request
 
         for request in requests:

@@ -3,10 +3,11 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { usePlatform } from '../auth/PlatformContext'
 import { apiFetch } from '../api/client'
-import { Bell, LogOut, RefreshCw, AlertCircle, KeyRound, Images, Loader2, Pause, Play, Menu, MoreHorizontal } from 'lucide-react'
+import { Bell, LogOut, RefreshCw, AlertCircle, KeyRound, Images, Loader2, Pause, Play, Menu, MoreHorizontal, Send } from 'lucide-react'
 import { PlatformSettingsModal } from './PlatformSettingsModal'
 import { CrawlFilterModal } from './CrawlFilterModal'
 import { SyncGalleryModal } from './SyncGalleryModal'
+import { TelegramModal } from './TelegramModal'
 import { useSyncStatus } from '../hooks/useSyncStatus'
 import { useGallerySync } from '../context/GallerySyncContext'
 import { useToast } from '../context/ToastContext'
@@ -23,6 +24,7 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
   const [refreshing, setRefreshing] = useState(false)
   const [showSettingsModal, setShowSettingsModal] = useState(false)
   const [showCrawlModal, setShowCrawlModal] = useState(false)
+  const [showTelegramModal, setShowTelegramModal] = useState(false)
   const [crawlDesigners, setCrawlDesigners] = useState<string[]>([])
   const [isFastSyncing, setIsFastSyncing] = useState(false)
   const [fastSyncError, setFastSyncError] = useState<string | null>(null)
@@ -365,6 +367,17 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
           />
         </button>
 
+        {/* Telegram Bot Connection */}
+        <button
+          type="button"
+          onClick={() => setShowTelegramModal(true)}
+          className="flex items-center gap-1.5 rounded-lg border border-sky-100 bg-sky-50 px-2.5 py-1.5 text-xs font-semibold text-sky-700 hover:bg-sky-100 transition-colors"
+          title="Kết nối Telegram Bot để nhận thông báo"
+        >
+          <Send className="h-3.5 w-3.5 -translate-x-0.5 translate-y-0.5 text-sky-500" />
+          <span className="hidden md:inline">Telegram</span>
+        </button>
+
         {/* Bell Notifications */}
         <div className="relative">
           <button className="p-2 rounded-lg text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors">
@@ -397,6 +410,9 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
 
       {mobileActionsOpen && (
         <div className="absolute right-3 top-[calc(100%+0.5rem)] z-50 w-60 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl sm:hidden">
+          <button type="button" onClick={() => { setShowTelegramModal(true); setMobileActionsOpen(false) }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-xs font-semibold text-sky-700 hover:bg-sky-50">
+            <Send className="h-4 w-4 text-sky-500" /> Kết nối Telegram
+          </button>
           {user.role === 'admin' && (
             <>
               <button type="button" onClick={() => { setShowSettingsModal(true); setMobileActionsOpen(false) }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50">
@@ -427,6 +443,10 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
         onSearch={handleRefreshCrawl}
         loading={refreshing}
         designers={crawlDesigners}
+      />
+      <TelegramModal
+        isOpen={showTelegramModal}
+        onClose={() => setShowTelegramModal(false)}
       />
       <SyncGalleryModal />
     </header>

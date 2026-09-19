@@ -201,6 +201,22 @@ def sync_selected_order_statuses(
                                     )
                                 )
                                 changed = True
+
+                                # Telegram alert for Admin
+                                try:
+                                    from app.workers.telegram_tasks import (
+                                        async_notify_admin_excessive_fix,
+                                        async_notify_admin_new_fix,
+                                    )
+
+                                    async_notify_admin_new_fix.delay(str(order.id))
+                                    if order.fix_return_count >= 3:
+                                        des_label = order.printerval_designer or "Designer"
+                                        async_notify_admin_excessive_fix.delay(
+                                            str(order.id), des_label, order.fix_return_count
+                                        )
+                                except Exception:
+                                    pass
                             elif (
                                 norm_status == "REVIEW"
                                 and order.state == "REVISION"
