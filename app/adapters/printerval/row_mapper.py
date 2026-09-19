@@ -105,50 +105,151 @@ def _is_internal_or_price_key(key: str, val: Any) -> bool:
 def _is_image_config_entry(key: str, val: Any) -> bool:
     """Filter out photo/image entries from custom config text table since they belong
     in the order's source_files/gallery rather than raw JSON strings."""
-    if isinstance(val, dict) and val.get("type") == "image":
+    k_lower = str(key).lower().strip()
+    if k_lower in ("images", "layers", "canvas", "disable_make_change", "template_id"):
+        return True
+    if isinstance(val, dict) and (val.get("type") == "image" or "maskPath" in val or "digit_image" in val):
+        return True
+    if isinstance(val, list):
         return True
     if isinstance(val, str):
         val_s = val.strip()
-        if val_s.startswith("{") and val_s.endswith("}") and '"type": "image"' in val_s:
+        if (val_s.startswith("{") and val_s.endswith("}")) and ('"type": "image"' in val_s or '"maskPath"' in val_s):
             return True
-        if val_s.startswith("http") and any(ext in val_s.lower() for ext in (".jpg", ".jpeg", ".png", ".webp")):
+        if (val_s.startswith("[") and val_s.endswith("]")) and ('"type": "image"' in val_s or '"maskPath"' in val_s or '"uid"' in val_s):
+            return True
+        if val_s.startswith("http") and any(ext in val_s.lower() for ext in (".jpg", ".jpeg", ".png", ".webp", ".svg")):
             return True
     return False
+
+
+def _clean_custom_config_value(val: Any) -> str:
+    if isinstance(val, (dict, list)):
+        return json.dumps(val, ensure_ascii=False)
+    return str(val).strip()
+
+
+def _parse_custom_config_dict(raw_dict: dict[str, Any]) -> list[CustomConfigEntry]:
+    results: list[CustomConfigEntry] = []
+
+    def safe_parse_json(val: Any) -> Any:
+        if isinstance(val, str):
+            val_s = val.strip()
+            if (val_s.startswith("{") and val_s.endswith("}")) or (val_s.startswith("[") and val_s.endswith("]")):
+                try:
+                    return json.loads(val_s)
+                except (TypeError, ValueError):
+                    return val
+        return val
+
+    # 1. Parse `options` (Customily / Canvas option selections: colors, variant options, customer uploads)
+    options_raw = raw_dict.get("options")
+    if options_raw:
+        options = safe_parse_json(options_raw)
+        if isinstance(options, list):
+            for opt in options:
+                if not isinstance(opt, dict):
+                    continue
+                label = opt.get("label") or opt.get("name") or opt.get("title")
+                if not label:
+                    continue
+                label_str = str(label).strip()
+
+                # Prefer human-readable value_name (e.g. "1", "Image 1", "Blonde") over raw numeric value
+                val_name = opt.get("value_name")
+                if val_name is not None and str(val_name).strip() != "":
+                    val_str = str(val_name).strip()
+                else:
+                    raw_v = opt.get("value")
+                    if isinstance(raw_v, dict):
+                        val_str = str(raw_v.get("name") or raw_v.get("value") or "").strip()
+                    else:
+                        val_str = str(raw_v or "").strip()
+
+                if not val_str or _is_internal_or_price_key(label_str, val_str):
+                    continue
+
+                # If the value is a direct upload path / url, extract clean filename
+                if val_str.startswith("/customize/") or val_str.startswith("http"):
+                    clean_name = val_str.split("?", 1)[0].rstrip("/").split("/")[-1]
+                    val_str = clean_name if clean_name else val_str
+
+                results.append(CustomConfigEntry(key=label_str, value=val_str))
+
+    # 2. Parse `texts` (Custom personalized text lines: Name, Number, Year, Message)
+    texts_raw = raw_dict.get("texts")
+    if texts_raw:
+        texts = safe_parse_json(texts_raw)
+        if isinstance(texts, list):
+            for idx, item in enumerate(texts):
+                if not isinstance(item, dict):
+                    continue
+                label = item.get("label") or item.get("name") or item.get("title") or f"Custom Text {idx + 1}"
+                label_str = str(label).strip()
+                text_val = item.get("text") or item.get("value") or item.get("val")
+                if text_val is None:
+                    continue
+                text_str = str(text_val).strip()
+                if not text_str or _is_internal_or_price_key(label_str, text_str):
+                    continue
+                results.append(CustomConfigEntry(key=label_str, value=text_str))
+
+    # 3. Direct key-value pairs (Standard / simple personalization)
+    known_technical_keys = {
+        "disable_make_change",
+        "images",
+        "texts",
+        "options",
+        "canvas",
+        "layers",
+        "template_id",
+        "fonts",
+        "elements",
+        "preview",
+        "thumbnails",
+    }
+
+    for k, v in raw_dict.items():
+        k_str = str(k).strip()
+        if k_str.lower() in known_technical_keys:
+            continue
+        if _is_internal_or_price_key(k_str, v):
+            continue
+        if _is_image_config_entry(k_str, v):
+            continue
+
+        val_str = _clean_custom_config_value(v)
+        val_str = val_str.replace("https://assets.printerval.com", "").replace("http://assets.printerval.com", "")
+        if val_str:
+            results.append(CustomConfigEntry(key=k_str, value=val_str))
+
+    return results
 
 
 def _parse_custom_config(sku_data: dict[str, Any] | None) -> CustomConfig | None:
     if not sku_data:
         return None
-    raw_config = sku_data.get("configurations")
-    if isinstance(raw_config, str):
-        try:
-            config = json.loads(raw_config)
-        except (TypeError, ValueError):
-            return None
-    else:
-        config = raw_config
-    if not isinstance(config, dict) or not config:
+
+    def safe_parse_json(val: Any) -> Any:
+        if isinstance(val, str):
+            try:
+                return json.loads(val)
+            except (TypeError, ValueError):
+                return None
+        return val
+
+    raw_config = safe_parse_json(sku_data.get("configurations"))
+    if not isinstance(raw_config, dict) or not raw_config:
         return None
 
-    def serialize(value: Any) -> str:
-        return json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else str(value)
+    original = _parse_custom_config_dict(raw_config)
 
-    def clean_entries(raw_dict: dict[str, Any]) -> list[CustomConfigEntry]:
-        results: list[CustomConfigEntry] = []
-        for k, v in raw_dict.items():
-            if _is_internal_or_price_key(k, v):
-                continue
-            if _is_image_config_entry(k, v):
-                continue
-            val_str = serialize(v)
-            # Remove any raw domain leaks
-            val_str = val_str.replace("https://assets.printerval.com", "").replace("http://assets.printerval.com", "")
-            results.append(CustomConfigEntry(key=str(k).strip(), value=val_str))
-        return results
+    raw_translated = safe_parse_json(sku_data.get("translated_configurations"))
+    translated = _parse_custom_config_dict(raw_translated) if isinstance(raw_translated, dict) else []
 
-    original = clean_entries(config)
-    raw_translated = sku_data.get("translated_configurations")
-    translated = clean_entries(raw_translated) if isinstance(raw_translated, dict) else []
+    if not original and not translated:
+        return None
+
     return CustomConfig(original=original, translated_vn=translated)
 
 
@@ -366,124 +467,154 @@ def extract_source_asset_url(row: dict[str, Any]) -> str | None:
 
 
 def extract_source_files(row: dict[str, Any]) -> list[dict[str, str]] | None:
-    """Extract list of customer uploaded source images/files."""
+    """Extract list of customer uploaded source images/files and canvas image assets."""
     sources: list[dict[str, str]] = []
+    seen_urls: set[str] = set()
 
-    # 1. From the SKU's own `configurations` — the customer's raw personalization
-    # uploads (e.g. "Your Photo 1".."Your Photo N"), distinct from `designs` above
-    # (the designer's finished/composited output). This is the block the live site's
-    # own "SOURCE" panel shows — confirmed 2026-09-08 against a real row whose
-    # `designs` entry was an unrelated file (api_client.find_order bug, now fixed),
-    # while `configurations` held the customer's actual uploaded photos.
+    def normalize_url(raw_url: str) -> str:
+        u = raw_url.strip()
+        if u.startswith("//"):
+            return f"https:{u}"
+        if u.startswith("/"):
+            return f"https://assets.printerval.com{u}"
+        return u
+
+    def source_name(url: str, label: str | None = None) -> str:
+        if label and not label.startswith("http") and "/" not in label and len(label.strip()) <= 80:
+            return label.strip()
+        clean = url.split("?", 1)[0].rstrip("/")
+        fname = clean.split("/")[-1]
+        return fname or "source"
+
+    def add_source(url: Any, label: str | None = None) -> None:
+        if not isinstance(url, str) or not url.strip():
+            return
+        clean_url = normalize_url(url)
+        clean_lower = clean_url.lower()
+        if not (clean_lower.startswith("http://") or clean_lower.startswith("https://")):
+            return
+        if clean_url in seen_urls:
+            return
+        seen_urls.add(clean_url)
+        sources.append({"name": source_name(clean_url, label), "url": clean_url})
+
+    def safe_parse_json(val: Any) -> Any:
+        if isinstance(val, str):
+            val_s = val.strip()
+            if (val_s.startswith("{") and val_s.endswith("}")) or (val_s.startswith("[") and val_s.endswith("]")):
+                try:
+                    return json.loads(val_s)
+                except (TypeError, ValueError):
+                    return val
+        return val
+
+    # 1. From the SKU's own `configurations`
     meta = _meta_data(row)
     raw_skus = meta.get("product_skus")
     sku_entries = list(raw_skus.values()) if isinstance(raw_skus, dict) else []
-    configs: list[dict[str, Any]] = []
+
+    # Check `layers` first (authoritative when present e.g. DJ3976109)
+    has_layers = False
     for sku_data in sku_entries:
-        raw_config = sku_data.get("configurations") if isinstance(sku_data, dict) else None
-        if isinstance(raw_config, str):
-            try:
-                config = json.loads(raw_config)
-            except (TypeError, ValueError):
-                config = None
-        else:
-            config = raw_config
-        if isinstance(config, dict):
-            configs.append(config)
+        if not isinstance(sku_data, dict):
+            continue
+        raw_config = safe_parse_json(sku_data.get("configurations"))
+        if not isinstance(raw_config, dict):
+            continue
+        layers = safe_parse_json(raw_config.get("layers"))
+        if isinstance(layers, list) and layers:
+            has_layers = True
+            for layer in layers:
+                if isinstance(layer, dict):
+                    url = layer.get("value") or layer.get("src") or layer.get("url")
+                    if isinstance(url, str) and url.strip():
+                        clean_url = normalize_url(url)
+                        sources.append({"name": source_name(clean_url, layer.get("name")), "url": clean_url})
+                elif isinstance(layer, str) and layer.strip():
+                    clean_url = normalize_url(layer)
+                    sources.append({"name": source_name(clean_url), "url": clean_url})
 
-    def source_name(url: str) -> str:
-        return url.split("?", 1)[0].rstrip("/").split("/")[-1] or "source"
+    if has_layers:
+        return sources if sources else None
 
-    def sources_from_config_list(key: str) -> list[dict[str, str]]:
-        """Read the list-backed configuration fields used by Printerval SOURCE.
+    for sku_data in sku_entries:
+        if not isinstance(sku_data, dict):
+            continue
+        raw_config = safe_parse_json(sku_data.get("configurations"))
+        if not isinstance(raw_config, dict):
+            continue
 
-        The API serializes ``layers`` as a JSON string.  Each layer is one row in
-        Printerval's SOURCE card, even when several rows intentionally point at
-        the same upload URL.  Returning this list first preserves that cardinality;
-        recursively scanning every nested URL would incorrectly count metadata
-        such as ``upload_image_url`` a second time.
-        """
-        result: list[dict[str, str]] = []
-        for config in configs:
-            value = config.get(key)
-            if isinstance(value, str):
-                try:
-                    value = json.loads(value)
-                except (TypeError, ValueError):
-                    continue
-            if not isinstance(value, list):
+        # 1a. Images array (e.g. Customily 16 images in DJ4005539)
+        images = safe_parse_json(raw_config.get("images"))
+        if isinstance(images, list):
+            for img_item in images:
+                if isinstance(img_item, dict):
+                    img_url = img_item.get("value") or img_item.get("src") or img_item.get("url")
+                    add_source(img_url, img_item.get("name") or img_item.get("label"))
+                elif isinstance(img_item, str):
+                    add_source(img_item)
+
+        # 1b. Options array (e.g. Customer uploaded image in option)
+        options = safe_parse_json(raw_config.get("options"))
+        if isinstance(options, list):
+            for opt in options:
+                if isinstance(opt, dict):
+                    opt_val = opt.get("value")
+                    opt_thumb = opt.get("thumb_image") or opt.get("preview")
+                    opt_label = opt.get("label") or opt.get("name")
+                    if isinstance(opt_val, str) and (opt_val.startswith("http") or opt_val.startswith("/customize/") or any(ext in opt_val.lower() for ext in (".jpg", ".jpeg", ".png", ".webp"))):
+                        add_source(opt_val, opt_label)
+                    elif isinstance(opt_thumb, str) and opt_thumb.startswith("http"):
+                        add_source(opt_thumb, opt_label)
+
+        # 1c. Direct key-values (e.g. {"Your Photo 1": {"type": "image", "value": "..."}})
+        def collect_configuration_images(entry: Any, label: str | None = None) -> None:
+            parsed = safe_parse_json(entry)
+            if isinstance(parsed, dict):
+                if parsed.get("type") == "image" or "value" in parsed or "src" in parsed:
+                    url = parsed.get("value") or parsed.get("src") or parsed.get("url")
+                    if isinstance(url, str) and (url.startswith("http") or url.startswith("/customize/")):
+                        add_source(url, label)
+                for nested_k, nested_v in parsed.items():
+                    if nested_k in ("canvas", "disable_make_change", "texts", "template_id"):
+                        continue
+                    collect_configuration_images(nested_v, str(nested_k))
+            elif isinstance(parsed, list):
+                for nested_v in parsed:
+                    collect_configuration_images(nested_v)
+
+        for key, entry in raw_config.items():
+            if key in ("images", "layers", "options", "canvas", "disable_make_change", "texts", "template_id"):
                 continue
-            for item in value:
-                if not isinstance(item, dict):
-                    continue
-                url = item.get("value")
-                if isinstance(url, str) and url.strip().lower().startswith(("http://", "https://")):
-                    clean_url = url.strip()
-                    result.append({"name": source_name(clean_url), "url": clean_url})
-        return result
-
-    # On the live DJ3976109 payload, `layers` contains exactly the 22 entries
-    # shown in Printerval's SOURCE card.  Do not mix `options` or `designs` into
-    # this result: those fields are configuration/UI metadata, not extra SOURCE rows.
-    layer_sources = sources_from_config_list("layers")
-    if layer_sources:
-        return layer_sources
-
-    # Some products have simple uploads but no canvas-layer configuration.  Their
-    # `options` list is the equivalent authoritative source list.
-    option_sources = sources_from_config_list("options")
-    if option_sources:
-        return option_sources
-
-    def collect_configuration_images(entry: Any, label: str | None = None) -> None:
-        """The live site uses both `{photo: {type, value}}` and
-        `{images: [{type, value}, ...]}`.  SOURCE lists every image in either
-        shape, including repeated filenames, so do not deduplicate here."""
-        if isinstance(entry, dict):
-            if entry.get("type") == "image":
-                url = entry.get("value") or entry.get("src")
-                if isinstance(url, str) and url.strip():
-                    sources.append({"name": label or url.rstrip("/").split("/")[-1], "url": url.strip()})
-            else:
-                for nested_key, nested in entry.items():
-                    collect_configuration_images(nested, str(nested_key))
-        elif isinstance(entry, list):
-            for nested in entry:
-                collect_configuration_images(nested)
-
-    for config in configs:
-        for key, entry in config.items():
             collect_configuration_images(entry, str(key))
 
-    # 2. From row.get("designs") when no configuration-level source list exists.
+    # 2. From `designs` in row
     designs = row.get("designs")
     if isinstance(designs, list):
         for item in designs:
             if isinstance(item, dict):
                 url = item.get("url") or item.get("image_url") or item.get("file_url")
-                name = item.get("name") or item.get("file_name") or (url.split("/")[-1] if url else "source.jpg")
-                if url:
-                    sources.append({"name": str(name), "url": str(url)})
+                name = item.get("name") or item.get("file_name")
+                add_source(url, name)
+            elif isinstance(item, str):
+                add_source(item)
 
-    # 3. From custom_design_files / attachments
+    # 3. From `custom_design_files` / `attachments` / `source_files` in row
     attachments = row.get("custom_design_files") or row.get("attachments") or row.get("source_files")
     if isinstance(attachments, list):
         for item in attachments:
             if isinstance(item, dict):
                 url = item.get("url") or item.get("file_url")
-                name = item.get("name") or item.get("file_name") or (url.split("/")[-1] if url else "source.jpg")
-                if url:
-                    sources.append({"name": str(name), "url": str(url)})
-            elif isinstance(item, str) and item.strip():
-                name = item.split("/")[-1]
-                sources.append({"name": name, "url": item.strip()})
+                name = item.get("name") or item.get("file_name")
+                add_source(url, name)
+            elif isinstance(item, str):
+                add_source(item)
 
     # 4. Fallback: single personalization image
     if not sources:
         single_url = extract_source_asset_url(row)
         if single_url:
-            name = single_url.split("/")[-1]
-            sources.append({"name": name, "url": single_url})
+            add_source(single_url)
 
     return sources if sources else None
 

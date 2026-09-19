@@ -288,3 +288,95 @@ def test_extract_source_files_combines_sources_from_each_sku_configuration():
         {"name": "2xl-1.png", "url": "https://assets.example/2xl-1.png"},
         {"name": "2xl-2.png", "url": "https://assets.example/2xl-2.png"},
     ]
+
+
+def test_extract_source_files_customily_payload_with_16_images_and_upload():
+    """DJ4005539 real-world scenario: 16 customily background/asset images in `images` array
+    plus 1 user uploaded image in `options` array."""
+    customily_images = [
+        {"type": "image", "value": f"https://cdn.customily.com/product-images/img-{i}.jpg", "order": i}
+        for i in range(16)
+    ]
+    options = [
+        {"id": 16, "label": "Number Of Image", "value": 0, "value_name": "1"},
+        {"id": 1, "label": "Choose Background Color", "value": "Image 1", "value_name": "Image 1"},
+        {"id": 4, "label": "Upload Image 1", "value": "/customize/2026/09/14/user-upload-abc.png", "value_name": "Image 1"},
+    ]
+    row = {
+        "meta_data": json.dumps({
+            "product_skus": {
+                "sku1": {
+                    "configurations": json.dumps({
+                        "disable_make_change": "true",
+                        "images": json.dumps(customily_images),
+                        "texts": "[]",
+                        "options": json.dumps(options),
+                        "canvas": json.dumps({"width": 1000, "height": 1000}),
+                    })
+                }
+            }
+        })
+    }
+
+    sources = extract_source_files(row)
+    assert sources is not None
+    # 16 customily images + 1 user upload
+    assert len(sources) == 17
+    # First 16 are customily images
+    for i in range(16):
+        assert sources[i]["url"] == f"https://cdn.customily.com/product-images/img-{i}.jpg"
+        assert sources[i]["name"] == f"img-{i}.jpg"
+    # 17th is normalized user upload
+    assert sources[16]["url"] == "https://assets.printerval.com/customize/2026/09/14/user-upload-abc.png"
+
+
+def test_parse_custom_config_customily_payload_cleanly():
+    """DJ4005539 real-world scenario: custom_config must parse options/texts into clean key-value pairs
+    and never leak raw technical keys (images, canvas, disable_make_change)."""
+    options = [
+        {"id": 16, "label": "Number Of Image", "value": 0, "value_name": "1"},
+        {"id": 1, "label": "Choose Background Color", "value": "Image 1", "value_name": "Image 1"},
+        {"id": 3, "label": "Choose Flower Color", "value": "Image 3", "value_name": "Image 3"},
+        {"id": 4, "label": "Upload Image 1", "value": "/customize/2026/09/14/user-upload-abc.png", "value_name": "Image 1"},
+        {"id": 15, "label": "Choose Leave Color", "value": "Image 3", "value_name": "Image 3"},
+    ]
+    sku_data = {
+        "configurations": json.dumps({
+            "disable_make_change": "true",
+            "images": json.dumps([{"type": "image", "value": "https://cdn.customily.com/img.jpg"}]),
+            "texts": json.dumps([{"label": "Custom Name", "text": "Olivia"}]),
+            "options": json.dumps(options),
+            "canvas": json.dumps({"width": 1000, "height": 1000}),
+        }),
+        "translated_configurations": json.dumps({
+            "options": json.dumps([
+                {"label": "Số Lượng Ảnh", "value_name": "1"},
+                {"label": "Chọn Màu Nền", "value_name": "Ảnh 1"},
+            ]),
+        }),
+    }
+
+    from app.adapters.printerval.row_mapper import _parse_custom_config
+    result = _parse_custom_config(sku_data)
+
+    assert result is not None
+    orig_dict = {e.key: e.value for e in result.original}
+    assert orig_dict == {
+        "Number Of Image": "1",
+        "Choose Background Color": "Image 1",
+        "Choose Flower Color": "Image 3",
+        "Upload Image 1": "Image 1",
+        "Choose Leave Color": "Image 3",
+        "Custom Name": "Olivia",
+    }
+    # Ensure no technical metadata leaks
+    assert "disable_make_change" not in orig_dict
+    assert "images" not in orig_dict
+    assert "canvas" not in orig_dict
+
+    trans_dict = {e.key: e.value for e in result.translated_vn}
+    assert trans_dict == {
+        "Số Lượng Ảnh": "1",
+        "Chọn Màu Nền": "Ảnh 1",
+    }
+

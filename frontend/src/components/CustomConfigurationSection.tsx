@@ -15,6 +15,13 @@ const P_URL_REGEX = new RegExp(`https?:\\/\\/[^\\s]*${P_WORD}[^\\s]*`, 'gi')
 function isInternalOrPriceEntry(key: string, value: string): boolean {
   const k = key.toLowerCase().trim()
   if (
+    k === 'disable_make_change' ||
+    k === 'canvas' ||
+    k === 'template_id' ||
+    k === 'images' ||
+    k === 'layers' ||
+    k === 'texts' ||
+    k === 'options' ||
     k === 'price_addtocart' ||
     k === 'giá_thêm_vào_giỏ_hàng' ||
     k === 'price' ||
@@ -29,8 +36,11 @@ function isInternalOrPriceEntry(key: string, value: string): boolean {
     return true
   }
   const v = value.trim()
-  if (v.startsWith('{') && v.endsWith('}')) {
-    if (v.includes('"price"') || v.includes('"prx_discount"') || v.includes('"type": "image"')) {
+  if (v === '[]' || v === '{}') {
+    return true
+  }
+  if ((v.startsWith('{') && v.endsWith('}')) || (v.startsWith('[') && v.endsWith(']'))) {
+    if (v.includes('"price"') || v.includes('"prx_discount"') || v.includes('"type": "image"') || v.includes('"uid"') || v.includes('"width"') || v.includes('"template_id"')) {
       return true
     }
   }
