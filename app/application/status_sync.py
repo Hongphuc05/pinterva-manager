@@ -59,6 +59,28 @@ def _row_designer(row: dict, designer_map: dict[str, str] | None = None) -> str 
 logger = logging.getLogger(__name__)
 
 
+def _dispatch_admin_fix_notifications(order: Order) -> None:
+    """Dispatch Fix notifications after the order transition is committed."""
+    try:
+        from app.workers.telegram_tasks import (
+            async_notify_admin_excessive_fix,
+            async_notify_admin_new_fix,
+            safe_dispatch_telegram_task,
+        )
+
+        safe_dispatch_telegram_task(async_notify_admin_new_fix, str(order.id))
+        if order.fix_return_count >= 3:
+            designer_label = order.printerval_designer or "Designer"
+            safe_dispatch_telegram_task(
+                async_notify_admin_excessive_fix,
+                str(order.id),
+                designer_label,
+                order.fix_return_count,
+            )
+    except Exception:
+        logger.exception("Failed to dispatch Telegram Fix notification for order %s", order.id)
+
+
 def sync_selected_order_statuses(
     session: Session,
     platform: Platform,
@@ -140,6 +162,7 @@ def sync_selected_order_statuses(
             # board/tab sync due to SQLAlchemy's Order.version optimistic lock.
             for attempt in range(3):
                 try:
+                    notify_admin_fix = False
                     session.expire_all()
                     order = session.get(Order, order_id)
                     if order is None:
@@ -201,22 +224,7 @@ def sync_selected_order_statuses(
                                     )
                                 )
                                 changed = True
-
-                                # Telegram alert for Admin
-                                try:
-                                    from app.workers.telegram_tasks import (
-                                        async_notify_admin_excessive_fix,
-                                        async_notify_admin_new_fix,
-                                    )
-
-                                    async_notify_admin_new_fix.delay(str(order.id))
-                                    if order.fix_return_count >= 3:
-                                        des_label = order.printerval_designer or "Designer"
-                                        async_notify_admin_excessive_fix.delay(
-                                            str(order.id), des_label, order.fix_return_count
-                                        )
-                                except Exception:
-                                    pass
+                                notify_admin_fix = True
                             elif (
                                 norm_status == "REVIEW"
                                 and order.state == "REVISION"
@@ -262,6 +270,8 @@ def sync_selected_order_statuses(
                         order.printerval_status_synced_at = now_utc
 
                     session.commit()
+                    if notify_admin_fix:
+                        _dispatch_admin_fix_notifications(order)
                     if changed:
                         updated += 1
                     break
@@ -316,6 +326,7 @@ def sync_platform_order_statuses(
         not_found = 0
         for order in orders:
             try:
+                notify_admin_fix = False
                 row = client.find_order(
                     order.external_order_id, statuses=_status_guess_order(order.printerval_status)
                 )
@@ -327,13 +338,14 @@ def sync_platform_order_statuses(
                         session.commit()
                         updated += 1
                     continue
+                order_changed = False
                 found_status = row.get("status")
                 if found_status and found_status != order.printerval_status:
                     order.printerval_status = found_status
-                    updated += 1
+                    order_changed = True
                 elif not found_status and order.printerval_status == "cancelled":
                     order.printerval_status = None
-                    updated += 1
+                    order_changed = True
 
                 norm_st = (found_status or "").upper()
                 if norm_st == "FIX" and order.state in ("QC_PENDING", "REVIEW", "IN_PROGRESS"):
@@ -346,7 +358,8 @@ def sync_platform_order_statuses(
                         order.note_outsource = found_note
                     order.fix_approved_by_admin = False
                     order.fix_rejected_by_admin = False
-                    updated += 1
+                    notify_admin_fix = True
+                    order_changed = True
                 elif (
                     norm_st == "REVIEW"
                     and order.state == "REVISION"
@@ -354,18 +367,20 @@ def sync_platform_order_statuses(
                 ):
                     order.state = "QC_PENDING"
                     order.status_changed_at = datetime.now(UTC)
-                    updated += 1
+                    order_changed = True
                 elif norm_st == "DONE" and order.state != "DONE":
                     order.state = "DONE"
-                    updated += 1
+                    order_changed = True
 
                 found_designer = _row_designer(row, designer_map=designer_map)
                 if found_designer and found_designer != order.printerval_designer:
                     order.printerval_designer = found_designer
                     order.printerval_designer_synced_at = datetime.now(UTC)
+                    order_changed = True
                 elif not found_designer and order.printerval_designer and "@" in order.printerval_designer:
                     order.printerval_designer = None
                     order.printerval_designer_synced_at = datetime.now(UTC)
+                    order_changed = True
                 order.printerval_status_synced_at = datetime.now(UTC)
 
                 # Re-apply full detail metadata (source files, SKU data, custom config, notes, deadlines).
@@ -374,8 +389,13 @@ def sync_platform_order_statuses(
                 )
                 if detail_result.success:
                     _apply_order_detail_result(order, detail_result)
+                    order_changed = True
 
+                if order_changed:
+                    updated += 1
                 session.commit()
+                if notify_admin_fix:
+                    _dispatch_admin_fix_notifications(order)
             except StaleDataError:
                 # Concurrent transaction modified this order; rollback this order and continue
                 session.rollback()

@@ -60,6 +60,7 @@ export type OrderSummary = {
   product_skus: { sku?: string | null }[] | null
   order_created_at_ext: string | null
   deadline_at_ext: string | null
+  deadline_tacahu?: string | null
   sku_image_url: string | null
   external_order_url: string | null
   source_files: { name: string; url: string }[] | null

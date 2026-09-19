@@ -57,6 +57,7 @@ type OrderDetail = {
   multiple_design: boolean
   double_sided: boolean
   deadline_at_ext: string | null
+  deadline_tacahu: string | null
   order_created_at_ext?: string | null
   created_at_ext?: string | null
   note_outsource: string
@@ -997,7 +998,7 @@ export function OrderDetailPage() {
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-xs">
+          <div className={`grid grid-cols-1 gap-4 text-xs ${isAdmin ? 'md:grid-cols-5' : 'md:grid-cols-4'}`}>
             <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
               <span className="text-slate-400 font-semibold block uppercase text-[10px]">Thời Gian Khách Đặt (Order At)</span>
               <p className="font-mono font-semibold text-slate-700 flex items-center gap-1">
@@ -1011,12 +1012,22 @@ export function OrderDetailPage() {
             </div>
 
             <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-              <span className="text-slate-400 font-semibold block uppercase text-[10px]">Thời Hạn (Deadline)</span>
+              <span className="text-slate-400 font-semibold block uppercase text-[10px]">Hạn chót Tacahu</span>
               <p className="font-mono font-semibold text-slate-700 flex items-center gap-1">
                 <Clock className="h-3.5 w-3.5 text-amber-600" />
-                <span>{order.deadline_at_ext ? new Date(order.deadline_at_ext).toLocaleString('vi-VN') : '-'}</span>
+                <span>{order.deadline_tacahu ? new Date(order.deadline_tacahu).toLocaleString('vi-VN') : '-'}</span>
               </p>
             </div>
+
+            {isAdmin && (
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
+                <span className="text-slate-400 font-semibold block uppercase text-[10px]">Deadline Printerval</span>
+                <p className="font-mono font-semibold text-slate-700 flex items-center gap-1">
+                  <Clock className="h-3.5 w-3.5 text-slate-500" />
+                  <span>{order.deadline_at_ext ? new Date(order.deadline_at_ext).toLocaleString('vi-VN') : '-'}</span>
+                </p>
+              </div>
+            )}
 
             <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
               <span className="text-slate-400 font-semibold block uppercase text-[10px]">Mẫu hàng</span>

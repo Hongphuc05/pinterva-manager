@@ -55,7 +55,7 @@ class TaskOrderOut(BaseModel):
     product_category: str | None = None
     product_variants: list[dict] | None = None
     product_skus: list[dict] | None = None
-    deadline_at_ext: str | None
+    deadline_tacahu: str | None
     note_outsource: str | None = None
     designer_note: str = ""
     template_missing: bool = False

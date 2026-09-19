@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 
@@ -99,6 +100,8 @@ def test_designer_api_orders_list_contains_zero_printerval(client: TestClient, d
         external_order_url="https://printerval.com/admin/orders?id=99901",
         printerval_designer="nguyen van designer prin",
         printerval_status="doing",
+        deadline_at_ext=datetime(2026, 9, 20, 10, 0),
+        deadline_tacahu=datetime(2026, 9, 20, 3, 0, tzinfo=UTC),
         source_download_all_url="https://printerval.com/admin/orders/download-all?id=99901",
         source_files=[
             {"name": "Printerval Art.png", "url": "https://assets.printerval.com/files/art.png"}
@@ -134,6 +137,8 @@ def test_designer_api_orders_list_contains_zero_printerval(client: TestClient, d
     assert "external_order_url" not in des_orders[0]
     assert "printerval_designer" not in des_orders[0]
     assert "printerval_status" not in des_orders[0]
+    assert "deadline_at_ext" not in des_orders[0]
+    assert des_orders[0]["deadline_tacahu"] is not None
     assert des_orders[0]["assigned_designer_name"] == designer.full_name
     assert des_orders[0]["thumbnail_url"].startswith("/api/assets/proxy?u=")
 
@@ -148,6 +153,8 @@ def test_designer_api_orders_list_contains_zero_printerval(client: TestClient, d
     detail_data = resp_detail.json()["order"]
     assert "external_order_url" not in detail_data
     assert "printerval_status" not in detail_data
+    assert "deadline_at_ext" not in detail_data
+    assert detail_data["deadline_tacahu"] is not None
     assert detail_data["thumbnail_url"].startswith("/api/assets/proxy?u=")
     assert len(detail_data["product_image_urls"]) == 2
     assert all(url.startswith("/api/assets/proxy?u=") for url in detail_data["product_image_urls"])

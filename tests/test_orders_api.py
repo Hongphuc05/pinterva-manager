@@ -808,3 +808,38 @@ def test_designer_cannot_list_view_or_update_an_unreleased_fix(client, db_sessio
     db_session.commit()
 
     assert [item["id"] for item in client.get("/api/orders").json()["orders"]] == [str(order.id)]
+
+
+def test_designer_submit_review_does_not_notify_admin_telegram(client, db_session, monkeypatch):
+    _seed_platform(db_session)
+    designer = _login(client, db_session, "designer", "submit_review_no_telegram_admin")
+    order = Order(
+        external_order_id="DJ-SUBMIT-NO-TELE-ADMIN",
+        platform_id=DEFAULT_PLATFORM_ID,
+        state=OrderState.IN_PROGRESS.value,
+        product_name="T-Shirt 2D",
+    )
+    db_session.add(order)
+    db_session.flush()
+    db_session.add(Assignment(order_id=order.id, designer_id=designer.id, status="approved"))
+    db_session.commit()
+
+    # Track any calls to async_notify_admin_review_submitted
+    from app.workers import telegram_tasks
+    admin_review_calls = []
+    monkeypatch.setattr(
+        telegram_tasks.async_notify_admin_review_submitted,
+        "delay",
+        lambda *args: admin_review_calls.append(args),
+    )
+
+    response = client.patch(
+        f"/api/orders/{order.id}/state",
+        json={"state": "QC_PENDING", "drive_url": "https://drive.google.com/file/d/submitted/view"},
+    )
+    assert response.status_code == 200
+    db_session.refresh(order)
+    assert order.state == OrderState.QC_PENDING.value
+    # Must NOT dispatch any notification to admin for submitted review
+    assert len(admin_review_calls) == 0
+

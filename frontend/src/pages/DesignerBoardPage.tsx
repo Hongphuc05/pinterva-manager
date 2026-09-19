@@ -31,7 +31,7 @@ type DesignerOrder = {
   state: string
   thumbnail_url: string | null
   product_image_urls?: string[] | null
-  deadline_at_ext: string | null
+  deadline_tacahu: string | null
   product_name: string | null
   platform_designer?: string | null
   note_outsource?: string | null
@@ -571,10 +571,10 @@ export function DesignerBoardPage() {
                                           {o.product_name || 'Đơn 2D Custom'}
                                         </Link>
                                       </div>
-                                      {o.deadline_at_ext && (
+                                      {o.deadline_tacahu && (
                                         <p className="text-[10px] text-slate-400 font-mono mt-0.5 flex items-center gap-1">
                                           <Clock className="h-2.5 w-2.5" />
-                                          <span>{o.deadline_at_ext}</span>
+                                          <span>{new Date(o.deadline_tacahu).toLocaleString('vi-VN')}</span>
                                         </p>
                                       )}
                                     </div>
@@ -694,10 +694,10 @@ export function DesignerBoardPage() {
                                           {o.product_name || 'Đơn 2D Custom'}
                                         </Link>
                                       </div>
-                                      {o.deadline_at_ext && (
+                                      {o.deadline_tacahu && (
                                         <p className="text-[10px] text-slate-400 font-mono mt-0.5 flex items-center gap-1">
                                           <Clock className="h-2.5 w-2.5" />
-                                          <span>{o.deadline_at_ext}</span>
+                                          <span>{new Date(o.deadline_tacahu).toLocaleString('vi-VN')}</span>
                                         </p>
                                       )}
                                     </div>
@@ -833,10 +833,10 @@ export function DesignerBoardPage() {
                                           </p>
                                         </div>
                                       )}
-                                      {o.deadline_at_ext && (
+                                      {o.deadline_tacahu && (
                                         <p className="text-[10px] text-slate-400 font-mono mt-0.5 flex items-center gap-1">
                                           <Clock className="h-2.5 w-2.5" />
-                                          <span>{o.deadline_at_ext}</span>
+                                          <span>{new Date(o.deadline_tacahu).toLocaleString('vi-VN')}</span>
                                         </p>
                                       )}
                                     </div>

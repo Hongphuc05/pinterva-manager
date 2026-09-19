@@ -531,7 +531,7 @@ def _card(order: Order, assignee: User | None) -> dict:
         "external_order_id": order.external_order_id,
         "product_name": order.product_name,
         "thumbnail_url": encode_proxy_url(order.thumbnail_url),
-        "deadline_at_ext": order.deadline_at_ext.isoformat() if order.deadline_at_ext else None,
+        "deadline_tacahu": order.deadline_tacahu.isoformat() if order.deadline_tacahu else None,
         "order_created_at_ext": order.order_created_at_ext.isoformat() if order.order_created_at_ext else None,
         "created_at": order.created_at.isoformat() if order.created_at else None,
         "status_changed_at": order.status_changed_at.isoformat() if order.status_changed_at else None,
@@ -566,7 +566,7 @@ def _board_order_buckets(session: Session, *, platform_id: uuid.UUID) -> dict[st
         .filter(Order.platform_id == platform_id, Order.work_domain == WORK_DOMAIN_DUPLICATE)
         .order_by(
             Order.duplicate_board_position.asc().nullslast(),
-            Order.deadline_at_ext.nullslast(),
+            Order.deadline_tacahu.nullslast(),
             Order.created_at.desc(),
         )
         .all()
@@ -683,7 +683,7 @@ def list_duplicate_board(
         .filter(Order.platform_id == platform_id, Order.work_domain == WORK_DOMAIN_DUPLICATE)
         .order_by(
             Order.duplicate_board_position.asc().nullslast(),
-            Order.deadline_at_ext.nullslast(),
+            Order.deadline_tacahu.nullslast(),
             Order.created_at.desc(),
         )
         .all()

@@ -1,5 +1,6 @@
 import httpx
 
+import app.application.status_sync as status_sync_module
 from app.adapters.db.models import Order, Platform, PlatformSyncState, WorkflowEvent
 from app.adapters.printerval.api_client import FIND_PATH, LOGIN_PATH, PrintervalApiClient
 from app.application.status_sync import (
@@ -103,7 +104,13 @@ def test_sync_selected_order_statuses_only_updates_requested_orders(db_session):
     assert untouched.printerval_status == "doing"
 
 
-def test_selected_sync_turns_printerval_fix_into_the_existing_admin_fix_flow(db_session):
+def test_selected_sync_turns_printerval_fix_into_the_existing_admin_fix_flow(db_session, monkeypatch):
+    notifications = []
+    monkeypatch.setattr(
+        status_sync_module,
+        "_dispatch_admin_fix_notifications",
+        lambda order: notifications.append(order.id),
+    )
     platform = Platform(name="P1", account_username="acc1@printerval.com", team_outsource="team-a")
     db_session.add(platform)
     db_session.flush()
@@ -137,6 +144,7 @@ def test_selected_sync_turns_printerval_fix_into_the_existing_admin_fix_flow(db_
     assert order.fix_approved_by_admin is False
     assert order.fix_return_count == 1
     assert event.evidence["action"] == "REQUEST_FIX"
+    assert notifications == [order.id]
 
     # Re-reading the same Fix state is not another return from Printerval.
     sync_selected_order_statuses(
@@ -149,6 +157,41 @@ def test_selected_sync_turns_printerval_fix_into_the_existing_admin_fix_flow(db_
     )
     db_session.refresh(order)
     assert order.fix_return_count == 1
+    assert notifications == [order.id]
+
+
+def test_scheduled_sync_dispatches_admin_telegram_notification_for_new_fix(db_session, monkeypatch):
+    notifications = []
+    monkeypatch.setattr(
+        status_sync_module,
+        "_dispatch_admin_fix_notifications",
+        lambda order: notifications.append(order.id),
+    )
+    platform = Platform(name="P1", account_username="acc1@printerval.com", team_outsource="team-a")
+    db_session.add(platform)
+    db_session.flush()
+    order = Order(
+        external_order_id="DJ1006",
+        platform_id=platform.id,
+        state="IN_PROGRESS",
+        printerval_status="doing",
+    )
+    db_session.add(order)
+    db_session.commit()
+
+    result = sync_platform_order_statuses(
+        db_session,
+        platform,
+        api_client=_mock_client({
+            "DJ1006": {"id": 1006, "status": "fix", "note": "Sửa lại mockup"}
+        }),
+    )
+
+    db_session.refresh(order)
+    assert result["updated"] == 1
+    assert order.state == "REVISION"
+    assert order.fix_return_count == 1
+    assert notifications == [order.id]
 
 
 def test_selected_sync_reconciles_a_legacy_rejected_fix_when_printerval_is_review(db_session):

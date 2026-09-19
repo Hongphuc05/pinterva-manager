@@ -189,6 +189,7 @@ def scan_orders_fast(
     job_type: str = ALL_JOB_TYPES,
     date_from: str | None = None,
     date_to: str | None = None,
+    deadline_tacahu: datetime | None = None,
 ) -> dict:
     """Read-only API scan: upsert the selected site queue without claiming jobs."""
     cursor: str | None = None
@@ -239,6 +240,7 @@ def scan_orders_fast(
                     printerval_designer=summary.designer,
                     printerval_designer_synced_at=datetime.now(UTC) if summary.designer else None,
                     printerval_status=incoming_status,
+                    deadline_tacahu=deadline_tacahu,
                     # A freshly discovered order has just entered this dashboard tab.
                     # This timestamp is distinct from the external Order At field.
                     status_changed_at=observed_at,

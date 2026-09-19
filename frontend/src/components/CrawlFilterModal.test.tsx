@@ -16,9 +16,10 @@ describe('CrawlFilterModal', () => {
     )
 
     fireEvent.change(screen.getByLabelText('Designer'), { target: { value: '__unassigned__' } })
+    fireEvent.change(screen.getByLabelText('Hạn chót Tacahu'), { target: { value: '2026-09-20T10:30' } })
     fireEvent.click(screen.getByRole('button', { name: 'Search' }))
 
-    expect(onSearch).toHaveBeenCalledWith('Tất cả 2D & 3D', 'Waiting', '__unassigned__', '', '')
+    expect(onSearch).toHaveBeenCalledWith('Tất cả 2D & 3D', 'Waiting', '__unassigned__', '', '', '2026-09-20T10:30')
   })
 
   it('submits Printerval Choose Designer as its own filter', () => {
@@ -34,8 +35,9 @@ describe('CrawlFilterModal', () => {
     )
 
     fireEvent.change(screen.getByLabelText('Designer'), { target: { value: '__choose_designer__' } })
+    fireEvent.change(screen.getByLabelText('Hạn chót Tacahu'), { target: { value: '2026-09-20T10:30' } })
     fireEvent.click(screen.getByRole('button', { name: 'Search' }))
 
-    expect(onSearch).toHaveBeenCalledWith('Tất cả 2D & 3D', 'Waiting', '__choose_designer__', '', '')
+    expect(onSearch).toHaveBeenCalledWith('Tất cả 2D & 3D', 'Waiting', '__choose_designer__', '', '', '2026-09-20T10:30')
   })
 })

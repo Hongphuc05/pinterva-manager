@@ -124,7 +124,7 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
     }
   }
 
-  async function handleRefreshCrawl(jobType: string, status: string, designer: string, dateFrom: string, dateTo: string) {
+  async function handleRefreshCrawl(jobType: string, status: string, designer: string, dateFrom: string, dateTo: string, deadlineTacahu: string) {
     setRefreshing(true)
     try {
       const res = await apiFetch<{ flash: string }>('/orders/refresh', {
@@ -135,6 +135,7 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
           printerval_designer: designer || undefined,
           date_from: dateFrom || undefined,
           date_to: dateTo || undefined,
+          deadline_tacahu: deadlineTacahu,
         }),
       })
       const isErr = res.flash.includes('thất bại') || res.flash.includes('lỗi')

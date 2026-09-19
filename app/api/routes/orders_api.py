@@ -5,6 +5,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict
@@ -95,6 +96,7 @@ class OrderSummaryOut(BaseModel):
     product_skus: list[dict] | None = None
     order_created_at_ext: datetime | None = None
     deadline_at_ext: datetime | None = None
+    deadline_tacahu: datetime | None = None
     created_at: datetime
     # Read-only mirror of Printerval's own site status — never written back to the
     # site from here (see app/application/status_sync.py).
@@ -639,6 +641,7 @@ class OrderDetailOut(BaseModel):
     double_sided: bool
     priority_label: str | None
     deadline_at_ext: datetime | None
+    deadline_tacahu: datetime | None = None
     order_created_at_ext: datetime | None = None
     created_at_ext: datetime | None = None
     note_outsource: str
@@ -744,6 +747,7 @@ class RefreshRequest(BaseModel):
     # "YYYY-MM-DD HH:MM:SS"). Only applies on the fast HTTP path (job_type == default).
     date_from: str | None = None
     date_to: str | None = None
+    deadline_tacahu: datetime | None = None
 
 
 class PrintervalLoginStatus(BaseModel):
@@ -1445,6 +1449,15 @@ def api_orders_refresh(
     db: Session = Depends(get_db),
 ):
     try:
+        if payload.deadline_tacahu is None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "Vui lòng chọn Deadline Tacahu cho đợt đơn này.",
+            )
+        deadline_tacahu = payload.deadline_tacahu
+        if deadline_tacahu.tzinfo is None:
+            deadline_tacahu = deadline_tacahu.replace(tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))
+        deadline_tacahu = deadline_tacahu.astimezone(UTC)
         settings = get_settings()
         platform = db.get(Platform, platform_id)
         if (
@@ -1477,6 +1490,7 @@ def api_orders_refresh(
                 job_type=payload.job_type,
                 date_from=f"{payload.date_from} 00:00:00" if payload.date_from else None,
                 date_to=f"{payload.date_to} 23:59:59" if payload.date_to else None,
+                deadline_tacahu=deadline_tacahu,
             )
         flash = (
             f"Đã quét nhanh qua API ({crawl_username}): {summary['scanned']} đơn khớp bộ lọc, "
@@ -2027,14 +2041,6 @@ def api_update_order_state(
             )
         except Exception:
             pass
-
-        # Telegram notification for Admin
-        try:
-            from app.workers.telegram_tasks import async_notify_admin_review_submitted
-
-            async_notify_admin_review_submitted.delay(str(order.id), des_name or actor_name)
-        except Exception:
-            pass
     elif target_state == OrderState.REVISION:
         action_type = "REQUEST_FIX"
         desc = f"{actor_disp} yêu cầu sửa bài (Fix)"
@@ -2367,6 +2373,7 @@ class DesignerWorkloadOrderOut(BaseModel):
     thumbnail_url: str | None = None
     product_image_urls: list[str] | None = None
     deadline_at_ext: str | None = None
+    deadline_tacahu: str | None = None
     product_name: str | None = None
     work_domain: str = "standard"
     printerval_designer: str | None = None
@@ -2481,6 +2488,9 @@ def api_designers_workload(
                             else ([o.thumbnail_url] if o.thumbnail_url else None)
                         ),
                         deadline_at_ext=str(o.deadline_at_ext) if o.deadline_at_ext else None,
+                        deadline_tacahu=(
+                            o.deadline_tacahu.isoformat() if o.deadline_tacahu else None
+                        ),
                         product_name=o.product_name,
                         work_domain=o.work_domain or "standard",
                         printerval_designer=o.printerval_designer,

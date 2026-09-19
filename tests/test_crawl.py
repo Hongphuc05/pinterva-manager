@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 
@@ -44,6 +45,38 @@ def test_fast_scan_records_initial_tab_entry_time(db_session):
     assert result == {"scanned": 1, "added": 1, "updated": 0}
     assert order.status_changed_at is not None
     assert order.printerval_status == "waiting"
+
+
+def test_fast_scan_sets_tacahu_deadline_only_when_creating_an_order(db_session):
+    adapter = FakePrintervalAdapter()
+    _seed_waiting_order(adapter, "DJ0000997")
+    _seed_waiting_order(adapter, "DJ0000998")
+    platform = Platform(name="Test platform", account_username="test@example.com")
+    db_session.add(platform)
+    db_session.flush()
+    existing_deadline = datetime(2026, 9, 20, 3, 0, tzinfo=UTC)
+    existing = Order(
+        external_order_id="DJ0000998",
+        platform_id=platform.id,
+        state=OrderState.OPEN.value,
+        deadline_tacahu=existing_deadline,
+    )
+    db_session.add(existing)
+    db_session.commit()
+
+    crawl_deadline = datetime(2026, 9, 21, 3, 0, tzinfo=UTC)
+    scan_orders_fast(
+        db_session,
+        adapter,
+        platform_id=platform.id,
+        status="Waiting",
+        deadline_tacahu=crawl_deadline,
+    )
+
+    created = db_session.query(Order).filter_by(external_order_id="DJ0000997").one()
+    db_session.refresh(existing)
+    assert created.deadline_tacahu == crawl_deadline
+    assert existing.deadline_tacahu == existing_deadline
 
 
 def test_fast_scan_repairs_legacy_missing_tab_entry_time(db_session):

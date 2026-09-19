@@ -40,7 +40,7 @@ type Task = {
     product_category: string | null
     product_variants: { name: string; value: string }[] | null
     product_skus: { sku?: string | null }[] | null
-    deadline_at_ext: string | null
+    deadline_tacahu: string | null
     note_outsource: string | null
     fix_return_count?: number
     designer_note: string
@@ -277,10 +277,10 @@ export function MyTasksPage() {
                       <p className="rounded bg-blue-50 px-2 py-1 text-xs text-slate-700 whitespace-pre-wrap"><strong>Ghi chú Admin:</strong> {task.order.designer_note}</p>
                     )}
                     <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 font-mono pt-0.5">
-                      {task.order.deadline_at_ext && (
+                      {task.order.deadline_tacahu && (
                         <span className="flex items-center gap-1">
                           <Clock className="h-3.5 w-3.5 text-amber-600" />
-                          <span>Deadline: {new Date(task.order.deadline_at_ext).toLocaleString('vi-VN')}</span>
+                          <span>Hạn chót Tacahu: {new Date(task.order.deadline_tacahu).toLocaleString('vi-VN')}</span>
                         </span>
                       )}
 

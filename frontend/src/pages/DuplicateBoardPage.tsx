@@ -32,7 +32,7 @@ type DuplicateCard = {
   external_order_id: string
   product_name: string | null
   thumbnail_url: string | null
-  deadline_at_ext: string | null
+  deadline_tacahu: string | null
   order_created_at_ext?: string | null
   created_at?: string | null
   status_changed_at?: string | null
@@ -123,7 +123,7 @@ function sortedCards(cards: DuplicateCard[], statusSortEnabled: boolean) {
   return [...cards].sort((left, right) => {
     const stateDifference = (stateSortRank[left.state] ?? 99) - (stateSortRank[right.state] ?? 99)
     if (stateDifference !== 0) return stateDifference
-    return (left.deadline_at_ext || '').localeCompare(right.deadline_at_ext || '')
+    return (left.deadline_tacahu || '').localeCompare(right.deadline_tacahu || '')
   })
 }
 
@@ -1018,9 +1018,9 @@ export function DuplicateBoardPage() {
                                 Fix × {card.fix_return_count}
                               </span>
                             )}
-                            {card.deadline_at_ext && (
+                            {card.deadline_tacahu && (
                               <span className="font-medium text-slate-400">
-                                {new Date(card.deadline_at_ext).toLocaleDateString('vi-VN')}
+                                {new Date(card.deadline_tacahu).toLocaleDateString('vi-VN')}
                               </span>
                             )}
                           </div>

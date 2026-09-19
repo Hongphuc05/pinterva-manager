@@ -85,7 +85,7 @@ def list_my_tasks(session: Session, designer_id: uuid.UUID) -> list[dict]:
                 ),
             ),
         )
-        .order_by(Order.deadline_at_ext.nullslast(), Order.created_at.desc())
+        .order_by(Order.deadline_tacahu.nullslast(), Order.created_at.desc())
         .all()
     )
     tasks = []
@@ -137,8 +137,8 @@ def list_my_tasks(session: Session, designer_id: uuid.UUID) -> list[dict]:
             "product_category": order.product_category,
             "product_variants": order.product_variants,
             "product_skus": order.product_skus,
-            "deadline_at_ext": (
-                order.deadline_at_ext.isoformat() if order.deadline_at_ext else None
+            "deadline_tacahu": (
+                order.deadline_tacahu.isoformat() if order.deadline_tacahu else None
             ),
             "created_at": order.created_at.isoformat() if order.created_at else None,
             "note_outsource": order.note_outsource,

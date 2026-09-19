@@ -198,20 +198,19 @@ def notify_designer_new_order(
     if not order:
         return False
 
-    from app.application.sanitization import sanitize_text
-
-    p_name = html.escape(sanitize_text(order.product_name or "Sản phẩm", "Web mẹ"))
-    deadline_str = order.deadline_at_ext.strftime("%d/%m/%Y %H:%M") if order.deadline_at_ext else "Không có"
+    p_name = html.escape(order.product_name or "Sản phẩm")
+    order_id_code = html.escape(order.external_order_id)
+    deadline_str = order.deadline_tacahu.strftime("%d/%m/%Y %H:%M") if order.deadline_tacahu else "Không có"
 
     text = (
         f"🎨 <b>BẠN CÓ ĐƠN HÀNG MỚI (DOING)!</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📦 <b>Tên đơn:</b> {p_name}\n"
+        f"📦 <b>Mã đơn:</b> <code>{order_id_code}</code>\n"
+        f"👕 <b>Sản phẩm:</b> {p_name}\n"
         f"⏰ <b>Hạn chót:</b> {deadline_str}\n"
     )
     if order.designer_note:
-        clean_note = html.escape(sanitize_text(order.designer_note, "Web mẹ"))
-        text += f"📝 <b>Note Admin:</b> {clean_note}\n"
+        text += f"📝 <b>Note Admin:</b> {html.escape(order.designer_note)}\n"
 
     thumb = order.thumbnail_url or (order.product_image_urls[0] if order.product_image_urls else None)
     if thumb:
@@ -236,17 +235,17 @@ def notify_designer_urgent_fix(
     if not order:
         return False
 
-    from app.application.sanitization import sanitize_text
-
-    p_name = html.escape(sanitize_text(order.product_name or "Sản phẩm", "Web mẹ"))
+    order_id_code = html.escape(order.external_order_id)
+    p_name = html.escape(order.product_name or "Sản phẩm")
     fix_cnt = order.fix_return_count or 1
-    qc_note = html.escape(sanitize_text(order.note_outsource or "Không có note chi tiết", "Web mẹ"))
-    adm_note = html.escape(sanitize_text(admin_note or order.designer_note or "Sửa theo yêu cầu của khách", "Web mẹ"))
+    qc_note = html.escape(order.note_outsource or "Không có note chi tiết")
+    adm_note = html.escape(admin_note or order.designer_note or "Sửa theo yêu cầu của khách")
 
     text = (
         f"🚨 <b>CẢNH BÁO: ĐƠN CẦN SỬA GẤP (FIX)!</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📦 <b>Tên đơn:</b> {p_name}\n"
+        f"📦 <b>Mã đơn:</b> <code>{order_id_code}</code>\n"
+        f"👕 <b>Sản phẩm:</b> {p_name}\n"
         f"🔄 <b>Lần fix thứ:</b> #{fix_cnt}\n"
         f"💬 <b>Yêu cầu của khách/QC:</b> {qc_note}\n"
         f"📌 <b>Hướng dẫn từ Admin:</b> {adm_note}\n"
@@ -467,4 +466,5 @@ def notify_admin_system_alert(
     )
     for cid in chat_ids:
         send_message(cid, text)
+    return True
     return True

@@ -9,7 +9,7 @@ const JOB_TYPES = ['Tất cả 2D & 3D', '2D', '3D', 'ART', 'WOOD', 'CALENDAR', 
 type CrawlFilterModalProps = {
   isOpen: boolean
   onClose: () => void
-  onSearch: (jobType: string, status: string, designer: string, dateFrom: string, dateTo: string) => void
+  onSearch: (jobType: string, status: string, designer: string, dateFrom: string, dateTo: string, deadlineTacahu: string) => void
   loading: boolean
   designers: string[]
 }
@@ -30,6 +30,7 @@ export function CrawlFilterModal({ isOpen, onClose, onSearch, loading, designers
   const [designer, setDesigner] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  const [deadlineTacahu, setDeadlineTacahu] = useState('')
 
   if (!isOpen) return null
 
@@ -92,6 +93,19 @@ export function CrawlFilterModal({ isOpen, onClose, onSearch, loading, designers
           </div>
 
           <div className="space-y-1">
+            <label htmlFor="crawl-deadline-tacahu" className="text-xs font-bold text-slate-700 block">Hạn chót Tacahu</label>
+            <input
+              id="crawl-deadline-tacahu"
+              type="datetime-local"
+              value={deadlineTacahu}
+              onChange={(e) => setDeadlineTacahu(e.target.value)}
+              required
+              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#0052CC]/20 focus:border-[#0052CC]"
+            />
+            <p className="text-[10px] text-slate-400">Deadline nội bộ do Admin Tacahu đặt cho toàn bộ đơn mới của lần quét này.</p>
+          </div>
+
+          <div className="space-y-1">
             <label className="text-xs font-bold text-slate-700 block">Ngày tạo — Date from/to</label>
             <div className="grid grid-cols-2 gap-3">
               <input
@@ -121,6 +135,7 @@ export function CrawlFilterModal({ isOpen, onClose, onSearch, loading, designers
                 setDesigner('')
                 setDateFrom('')
                 setDateTo('')
+                setDeadlineTacahu('')
               }}
               className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl cursor-pointer"
             >
@@ -129,8 +144,8 @@ export function CrawlFilterModal({ isOpen, onClose, onSearch, loading, designers
             </button>
             <button
               type="button"
-              disabled={loading}
-              onClick={() => onSearch(jobType, status, designer, dateFrom, dateTo)}
+              disabled={loading || !deadlineTacahu}
+              onClick={() => onSearch(jobType, status, designer, dateFrom, dateTo, deadlineTacahu)}
               className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-[#0052CC] hover:bg-[#0041A3] rounded-xl disabled:opacity-50 cursor-pointer"
             >
               <Search className="h-3.5 w-3.5" />

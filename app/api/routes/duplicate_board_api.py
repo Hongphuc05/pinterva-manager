@@ -27,7 +27,7 @@ class DuplicateCardOut(BaseModel):
     external_order_id: str
     product_name: str | None
     thumbnail_url: str | None
-    deadline_at_ext: datetime | None
+    deadline_tacahu: datetime | None
     order_created_at_ext: datetime | None = None
     created_at: datetime | None = None
     status_changed_at: datetime | None = None

@@ -169,6 +169,12 @@ class Order(Base):
     deadline_at_ext: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=False), nullable=True
     )
+    # Internal deadline chosen by Tacahu Admin for the crawl batch that first
+    # imported this order. It is deliberately independent from the source site's
+    # deadline_at_ext and is never refreshed from Printerval.
+    deadline_tacahu: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     note_outsource: Mapped[str] = mapped_column(
         Text, nullable=False, default="", server_default=text("''")
     )

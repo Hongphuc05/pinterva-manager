@@ -10,6 +10,7 @@ type ConfigEntry = { key: string; value: string }
 type QuickViewOrder = {
   id: string
   product_name: string | null
+  deadline_tacahu?: string | null
   order_created_at_ext?: string | null
   created_at_ext?: string | null
   product_category: string | null
@@ -144,6 +145,7 @@ export function ProductQuickViewModal({ orderId, onClose }: Props) {
                   <Info label="Style" value={style} />
                 </div>
                 <Info label="Order at" value={orderAt} />
+                <Info label="Hạn chót Tacahu" value={order.deadline_tacahu ? new Date(order.deadline_tacahu).toLocaleString('vi-VN') : '—'} />
               </div>
 
               <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:items-start">

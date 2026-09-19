@@ -94,7 +94,7 @@ class DesignerOrderSummaryOut(BaseModel):
     assignment_id: Any | None = None
     product_skus: list[dict] | None = None
     order_created_at_ext: Any | None = None
-    deadline_at_ext: Any | None = None
+    deadline_tacahu: Any | None = None
     created_at: Any | None = None
     status_changed_at: Any | None = None
     note_outsource: str = ""
@@ -126,7 +126,7 @@ class DesignerOrderDetailOut(BaseModel):
     multiple_design: bool = False
     double_sided: bool = False
     priority_label: str | None = None
-    deadline_at_ext: Any | None = None
+    deadline_tacahu: Any | None = None
     order_created_at_ext: Any | None = None
     created_at_ext: Any | None = None
     created_at: Any | None = None
@@ -163,6 +163,7 @@ def sanitize_order_summary_for_designer(item: Any) -> Any:
         "printerval_assignment_error",
         "source_download_all_url",
         "design_tool_url",
+        "deadline_at_ext",
     ]:
         item_dict.pop(k, None)
 
@@ -198,6 +199,7 @@ def sanitize_order_detail_for_designer(item: Any) -> Any:
         "printerval_status",
         "source_download_all_url",
         "design_tool_url",
+        "deadline_at_ext",
     ]:
         item_dict.pop(k, None)
 
