@@ -1,6 +1,5 @@
-from __future__ import annotations
-
 import logging
+import threading
 import uuid
 
 from app.adapters.db.session import SessionLocal
@@ -17,6 +16,21 @@ from app.application.telegram_service import (
 from app.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
+
+
+def safe_dispatch_telegram_task(task, *args, **kwargs) -> None:
+    """Safely dispatch celery task or fallback to background thread immediately."""
+    if not is_telegram_configured():
+        return
+    try:
+        task.delay(*args, **kwargs)
+    except Exception as exc:
+        logger.warning("Celery dispatch failed for %s, falling back to background thread: %s", getattr(task, "name", str(task)), exc)
+        try:
+            t = threading.Thread(target=task, args=args, kwargs=kwargs, daemon=True)
+            t.start()
+        except Exception:
+            logger.exception("Failed background thread fallback for %s", getattr(task, "name", str(task)))
 
 
 @celery_app.task(name="app.workers.telegram_tasks.async_notify_designer_new_order")

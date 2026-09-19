@@ -1603,6 +1603,14 @@ def api_assign_order(
     db.add(event)
     db.commit()
 
+    # Telegram notification for designer
+    try:
+        from app.workers.telegram_tasks import async_notify_designer_new_order, safe_dispatch_telegram_task
+
+        safe_dispatch_telegram_task(async_notify_designer_new_order, str(order.id), str(designer.id))
+    except Exception:
+        pass
+
     synced_message = _trigger_printerval_assignment_sync(order, designer)
     return {
         "ok": True,
@@ -1705,6 +1713,15 @@ def api_bulk_assign_orders(
         db.add(event)
 
     db.commit()
+
+    # Telegram notification for designer
+    try:
+        from app.workers.telegram_tasks import async_notify_designer_new_order, safe_dispatch_telegram_task
+
+        for order in orders:
+            safe_dispatch_telegram_task(async_notify_designer_new_order, str(order.id), str(designer.id))
+    except Exception:
+        pass
 
     message = f"Đã phân công thành công {updated_count} đơn hàng cho {designer.full_name or designer.username}."
     if designer.printerval_designer_option:
@@ -2147,9 +2164,9 @@ def api_approve_fix(
     # Telegram notification for designer
     if target_des_id:
         try:
-            from app.workers.telegram_tasks import async_notify_designer_urgent_fix
+            from app.workers.telegram_tasks import async_notify_designer_urgent_fix, safe_dispatch_telegram_task
 
-            async_notify_designer_urgent_fix.delay(str(order.id), str(target_des_id), order.designer_note)
+            safe_dispatch_telegram_task(async_notify_designer_urgent_fix, str(order.id), str(target_des_id), order.designer_note)
         except Exception:
             pass
 

@@ -105,10 +105,10 @@ def queue_assignment_command(
         # Telegram notification for designer
         if designer is not None:
             try:
-                from app.workers.telegram_tasks import async_notify_designer_new_order
+                from app.workers.telegram_tasks import async_notify_designer_new_order, safe_dispatch_telegram_task
 
                 for order in orders:
-                    async_notify_designer_new_order.delay(str(order.id), str(designer.id))
+                    safe_dispatch_telegram_task(async_notify_designer_new_order, str(order.id), str(designer.id))
             except Exception:
                 pass
 
@@ -123,6 +123,16 @@ def queue_assignment_command(
             _upsert_internal_assignment(session, order, designer)
         order.state = target_state.value
     session.commit()
+
+    # Telegram notification for designer
+    if designer is not None:
+        try:
+            from app.workers.telegram_tasks import async_notify_designer_new_order, safe_dispatch_telegram_task
+
+            for order in orders:
+                safe_dispatch_telegram_task(async_notify_designer_new_order, str(order.id), str(designer.id))
+        except Exception:
+            pass
 
     # Status-only commands use the same durable request as Designer+Status commands.
     # This makes queued/running/failure visible in Order.printerval_assignment_lifecycle.

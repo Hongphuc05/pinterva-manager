@@ -796,7 +796,7 @@ def mark_orders_paid(
         from collections import defaultdict
 
         from app.adapters.db.models import Assignment, Platform
-        from app.workers.telegram_tasks import async_notify_designer_payment
+        from app.workers.telegram_tasks import async_notify_designer_payment, safe_dispatch_telegram_task
 
         plat = db.get(Platform, platform_id)
         std_rate = plat.standard_order_rate if plat else 40000
@@ -812,7 +812,7 @@ def mark_orders_paid(
 
         for des_id, stats in des_summary.items():
             if stats["count"] > 0:
-                async_notify_designer_payment.delay(str(des_id), stats["count"], stats["amount"])
+                safe_dispatch_telegram_task(async_notify_designer_payment, str(des_id), stats["count"], stats["amount"])
     except Exception:
         pass
 

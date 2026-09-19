@@ -511,6 +511,15 @@ def move_duplicate_order(
                 before_order_id=before_order_id,
             )
         session.commit()
+
+        # Telegram notification for designer
+        try:
+            from app.workers.telegram_tasks import async_notify_designer_new_order, safe_dispatch_telegram_task
+
+            safe_dispatch_telegram_task(async_notify_designer_new_order, str(order.id), str(target.id))
+        except Exception:
+            pass
+
         return _card(order, target)
 
     raise DuplicateBoardError("Cột đích không hợp lệ")

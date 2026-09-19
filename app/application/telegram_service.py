@@ -90,9 +90,16 @@ def send_photo(
     reply_markup: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Send photo with optional caption and buttons."""
+    # If photo_url is not a valid public http/https URL, fallback directly to text message
+    clean_url = (photo_url or "").strip()
+    if not clean_url.startswith("http://") and not clean_url.startswith("https://"):
+        if caption:
+            return send_message(chat_id, caption, parse_mode=parse_mode, reply_markup=reply_markup)
+        return None
+
     payload: dict[str, Any] = {
         "chat_id": chat_id,
-        "photo": photo_url,
+        "photo": clean_url,
         "parse_mode": parse_mode,
     }
     if caption:
