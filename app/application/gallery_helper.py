@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from urllib.parse import urlparse
 
-
 _MALFORMED_PRINTERVAL_PLACEHOLDER_URL = re.compile(
     r"^https?://(?:www\.)?printerval\.com(?:data:|blob:|javascript:|about:)",
     re.IGNORECASE,

@@ -20,14 +20,12 @@ from app.adapters.db.models import (
     WorkflowEvent,
 )
 from app.api.deps import DEFAULT_PLATFORM_ID, get_current_platform_id, get_current_user, get_db
-from app.application.sanitization import encode_proxy_url, sanitize_text
+from app.application.sanitization import encode_proxy_url
 from app.domain.access import (
     ROLE_ADMIN,
     ROLE_DESIGNER,
     ROLE_DESIGNER_TRELLO,
-    ROLE_SUPPORT,
     WORK_DOMAIN_DUPLICATE,
-    WORK_DOMAIN_STANDARD,
 )
 from app.domain.models import OrderState
 

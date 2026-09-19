@@ -1,26 +1,17 @@
 from __future__ import annotations
 
-import base64
 import json
-import uuid
-from datetime import UTC, datetime
 
-import pytest
 from fastapi.testclient import TestClient
 
-from app.adapters.db.models import Assignment, Order, Platform, User, WorkflowEvent
-from app.api.deps import SESSION_COOKIE_NAME
+from app.adapters.db.models import Assignment, Order, Platform, User
 from app.application.auth import create_session_token, hash_password
 from app.application.sanitization import (
     decode_proxy_url,
     encode_proxy_url,
     sanitize_custom_config,
-    sanitize_order_detail_for_designer,
-    sanitize_order_summary_for_designer,
-    sanitize_platform_for_designer,
     sanitize_source_files,
     sanitize_text,
-    sanitize_workflow_event_for_designer,
 )
 
 

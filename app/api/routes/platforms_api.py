@@ -14,7 +14,7 @@ from app.application.platform_credentials import (
     verify_and_save_platform_credentials,
 )
 from app.application.sanitization import sanitize_platform_for_designer
-from app.domain.access import ROLE_ADMIN, ROLE_SUPPORT
+from app.domain.access import ROLE_ADMIN
 
 router = APIRouter(prefix="/platforms", tags=["platforms"])
 

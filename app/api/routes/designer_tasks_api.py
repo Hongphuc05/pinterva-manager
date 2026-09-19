@@ -11,7 +11,6 @@ from app.adapters.db.models import User
 from app.adapters.google.drive_adapter import GoogleDriveAdapter
 from app.adapters.google.drive_interface import DriveAdapter
 from app.api.deps import get_db, require_any_role
-from app.domain.access import ROLE_DESIGNER, ROLE_DESIGNER_TRELLO
 from app.application.designer_tasks import (
     DriveUnavailableError,
     DriveValidationError,
@@ -23,6 +22,7 @@ from app.application.designer_tasks import (
     update_sub_status,
 )
 from app.application.operations import IdempotencyKeyReusedError, OperationInProgressError
+from app.domain.access import ROLE_DESIGNER, ROLE_DESIGNER_TRELLO
 
 router = APIRouter()
 
