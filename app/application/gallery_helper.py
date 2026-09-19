@@ -43,7 +43,14 @@ def canonicalize_gallery_url(raw_url: str) -> tuple[str, str]:
     if not url:
         return ("", "")
 
-    # 1. Printerval asset
+    # 1. eBay asset. Some legacy imports accidentally prefix a direct eBay URL
+    # with assets.printerval.com; unwrap it before the generic platform rule.
+    ebay_match = re.search(r"(?:assets\.printerval\.com/)?i\.ebayimg\.com/(?:thumbs/)?images/([^/]+/[^/]+)", url, re.IGNORECASE)
+    if ebay_match:
+        img_path = ebay_match.group(1)
+        return (f"ebay:{img_path.lower()}", f"https://i.ebayimg.com/images/{img_path}/s-l1600.webp")
+
+    # 2. Printerval asset
     prin_match = re.search(
         r"(?:https?:)?(?://)?(?:assets\.printerval\.com|printervalcdn\.com|cdn\.printerval\.com)/(?:unsafe/[^/]+/)?(?:assets\.printerval\.com/)?(.+)",
         url,
@@ -65,7 +72,7 @@ def canonicalize_gallery_url(raw_url: str) -> tuple[str, str]:
             standard_url = f"https://assets.printerval.com/{rel_path}"
         return (canonical_key, standard_url)
 
-    # 2. eBay asset
+    # 3. eBay asset
     ebay_match = re.search(r"i\.ebayimg\.com/(?:thumbs/)?images/([^/]+/[^/]+)", url, re.IGNORECASE)
     if ebay_match:
         img_path = ebay_match.group(1)

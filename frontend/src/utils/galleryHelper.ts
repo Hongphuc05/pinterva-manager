@@ -32,7 +32,14 @@ export function canonicalizeGalleryUrl(rawUrl: string): { key: string; standardU
     // Continue with the normal URL canonicalization below.
   }
 
-  // 1. Platform asset
+  // 1. eBay asset, including legacy URLs incorrectly prefixed by the source CDN.
+  const embeddedEbayMatch = url.match(/(?:assets\.[^/]+\/)?i\.ebayimg\.com\/(?:thumbs\/)?images\/([^/]+\/[^/]+)/i)
+  if (embeddedEbayMatch) {
+    const imgPath = embeddedEbayMatch[1]
+    return { key: `ebay:${imgPath.toLowerCase()}`, standardUrl: `https://i.ebayimg.com/images/${imgPath}/s-l1600.webp` }
+  }
+
+  // 2. Platform asset
   const prinMatch = url.match(PLATFORM_ASSET_REGEX)
   if (prinMatch) {
     let relPath = prinMatch[1].replace(/^\/+/, '')
@@ -53,7 +60,7 @@ export function canonicalizeGalleryUrl(rawUrl: string): { key: string; standardU
     }
   }
 
-  // 2. eBay asset
+  // 3. eBay asset
   const ebayMatch = url.match(/i\.ebayimg\.com\/(?:thumbs\/)?images\/([^/]+\/[^/]+)/i)
   if (ebayMatch) {
     const imgPath = ebayMatch[1]
