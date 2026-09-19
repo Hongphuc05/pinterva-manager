@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { usePlatform } from '../auth/PlatformContext'
 import { apiFetch } from '../api/client'
-import { Bell, LogOut, RefreshCw, AlertCircle, KeyRound, Images, Loader2, Pause, Play } from 'lucide-react'
+import { Bell, LogOut, RefreshCw, AlertCircle, KeyRound, Images, Loader2, Pause, Play, Menu, MoreHorizontal } from 'lucide-react'
 import { PlatformSettingsModal } from './PlatformSettingsModal'
 import { CrawlFilterModal } from './CrawlFilterModal'
 import { SyncGalleryModal } from './SyncGalleryModal'
@@ -11,7 +11,11 @@ import { useSyncStatus } from '../hooks/useSyncStatus'
 import { useGallerySync } from '../context/GallerySyncContext'
 import { useToast } from '../context/ToastContext'
 
-export function Topbar() {
+interface TopbarProps {
+  onOpenNavigation: () => void
+}
+
+export function Topbar({ onOpenNavigation }: TopbarProps) {
   const { user, logout } = useAuth()
   const { activePlatform } = usePlatform()
   const navigate = useNavigate()
@@ -22,6 +26,7 @@ export function Topbar() {
   const [crawlDesigners, setCrawlDesigners] = useState<string[]>([])
   const [isFastSyncing, setIsFastSyncing] = useState(false)
   const [fastSyncError, setFastSyncError] = useState<string | null>(null)
+  const [mobileActionsOpen, setMobileActionsOpen] = useState(false)
   const { status: syncStatus, triggerRun } = useSyncStatus()
   const {
     isSyncing: isGallerySyncing,
@@ -143,16 +148,36 @@ export function Topbar() {
     }
   }
 
+  function openCrawlFilter() {
+    apiFetch<{ orders: { platform_designer?: string | null }[] }>('/orders')
+      .then((result) => {
+        const options = result.orders
+          .map((order) => order.platform_designer)
+          .filter((item): item is string => Boolean(item))
+        setCrawlDesigners(Array.from(new Set(options)).sort())
+      })
+      .catch(() => setCrawlDesigners([]))
+    setShowCrawlModal(true)
+  }
+
   if (!user) return null
 
   return (
-    <header className="h-16 bg-white border-b border-[hsl(var(--border))] sticky top-0 z-40 px-6 flex justify-between items-center shadow-xs">
+    <header className="relative sticky top-0 z-40 flex h-16 items-center justify-between border-b border-[hsl(var(--border))] bg-white px-3 shadow-xs sm:px-5 xl:px-6">
       {/* Title & Breadcrumb */}
-      <div className="flex items-center gap-3">
-        <h2 className="text-lg font-bold tracking-tight text-[hsl(var(--foreground))]">
+      <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+        <button
+          type="button"
+          onClick={onOpenNavigation}
+          className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 md:hidden"
+          aria-label="Mở điều hướng"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+        <h2 className="truncate text-base font-bold tracking-tight text-[hsl(var(--foreground))] sm:text-lg">
           {getPageTitle(location.pathname)}
         </h2>
-        <span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-mono border border-blue-200">
+        <span className="hidden rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 font-mono text-xs text-blue-700 sm:inline">
           V1.2
         </span>
       </div>
@@ -193,11 +218,11 @@ export function Topbar() {
       })()}
 
       {/* Action Controls */}
-      <div className="flex items-center gap-3">
+      <div className="flex shrink-0 items-center gap-1 sm:gap-2 xl:gap-3">
         {(user.role === 'admin' || user.role === 'support') && (
           <button
             onClick={() => user.role === 'admin' ? setShowSettingsModal(true) : null}
-            className={`flex items-center gap-2 px-3 py-1.5 text-xs font-semibold bg-blue-50/80 hover:bg-blue-100/80 border border-blue-200 text-[#0052CC] rounded-xl shadow-2xs transition-all ${user.role === 'admin' ? 'cursor-pointer' : 'cursor-default'}`}
+            className={`hidden items-center gap-2 rounded-xl border border-blue-200 bg-blue-50/80 px-3 py-1.5 text-xs font-semibold text-[#0052CC] shadow-2xs transition-all xl:flex ${user.role === 'admin' ? 'cursor-pointer hover:bg-blue-100/80' : 'cursor-default'}`}
             title={user.role === 'admin' ? "Click để đổi Workspace hoặc Đăng nhập Acc Mẹ mới" : "Acc Mẹ đang hoạt động"}
           >
             <KeyRound className="h-4 w-4 text-[#0052CC]" />
@@ -209,22 +234,23 @@ export function Topbar() {
         )}
 
         {user.role === 'admin' && (
+          <button
+            type="button"
+            onClick={() => setShowSettingsModal(true)}
+            className="hidden rounded-lg p-2 text-[#0052CC] hover:bg-blue-50 md:inline-flex xl:hidden"
+            title="Cấu hình tài khoản Print"
+          >
+            <KeyRound className="h-4 w-4" />
+          </button>
+        )}
+
+        {user.role === 'admin' && (
           <>
 
             <button
-              onClick={() => {
-                apiFetch<{ orders: { platform_designer?: string | null }[] }>('/orders')
-                  .then((result) => {
-                    const options = result.orders
-                      .map((order) => order.platform_designer)
-                      .filter((item): item is string => Boolean(item))
-                    setCrawlDesigners(Array.from(new Set(options)).sort())
-                  })
-                  .catch(() => setCrawlDesigners([]))
-                setShowCrawlModal(true)
-              }}
+              onClick={openCrawlFilter}
               disabled={refreshing}
-              className={`flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold rounded-xl border transition-all ${
+              className={`hidden items-center gap-2 rounded-xl border px-3.5 py-1.5 text-xs font-semibold transition-all md:flex ${
                 refreshing
                   ? 'bg-blue-50 text-[#0052CC] border-blue-300 shadow-inner'
                   : 'bg-[#0052CC] hover:bg-[#0041A3] border-transparent text-white shadow-2xs'
@@ -232,7 +258,7 @@ export function Topbar() {
               title="Quét đơn mới từ Print API"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin text-white' : 'text-white'}`} />
-              <span>{refreshing ? 'Đang Quét Đơn...' : 'Quét Đơn Print'}</span>
+              <span className="hidden xl:inline">{refreshing ? 'Đang Quét Đơn...' : 'Quét Đơn Print'}</span>
             </button>
 
             {/* Gallery Sync Button / Live Progress Bar */}
@@ -240,11 +266,11 @@ export function Topbar() {
               <button
                 type="button"
                 onClick={() => triggerSyncWaiting(false)}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 shadow-2xs transition-all cursor-pointer"
+              className="hidden items-center gap-1.5 rounded-xl border border-purple-200 bg-purple-50 px-3.5 py-1.5 text-xs font-semibold text-purple-700 shadow-2xs transition-all hover:bg-purple-100 md:flex"
                 title="Đồng bộ bộ ảnh cho toàn bộ đơn trong Waiting (tự động bỏ qua các đơn đã có đủ ảnh)"
               >
                 <Images className="h-3.5 w-3.5 text-purple-600" />
-                <span>Đồng bộ bộ ảnh</span>
+                <span className="hidden xl:inline">Đồng bộ bộ ảnh</span>
                 {pendingWaitingCount > 0 && (
                   <span className="px-1.5 py-0.2 rounded-full bg-purple-200/80 text-purple-900 text-[10px] font-bold font-mono">
                     {pendingWaitingCount}
@@ -252,7 +278,7 @@ export function Topbar() {
                 )}
               </button>
             ) : (
-              <div className="flex items-center gap-1.5">
+              <div className="hidden items-center gap-1.5 md:flex">
                 <button
                   type="button"
                   onClick={openGalleryModal}
@@ -347,17 +373,48 @@ export function Topbar() {
           </button>
         </div>
 
-        <div className="h-6 w-px bg-slate-200"></div>
+        <div className="hidden h-6 w-px bg-slate-200 sm:block"></div>
 
         {/* Logout */}
         <button
           onClick={handleLogout}
-          className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 rounded-lg transition-colors border border-red-100 cursor-pointer"
+          className="hidden items-center gap-2 rounded-lg border border-red-100 px-3 py-1.5 text-xs font-semibold text-red-600 transition-colors hover:bg-red-50 sm:flex"
         >
           <LogOut className="h-3.5 w-3.5" />
           <span>Đăng xuất</span>
         </button>
+
+        <button
+          type="button"
+          onClick={() => setMobileActionsOpen((current) => !current)}
+          className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 sm:hidden"
+          aria-label="Mở thao tác nhanh"
+          aria-expanded={mobileActionsOpen}
+        >
+          <MoreHorizontal className="h-5 w-5" />
+        </button>
       </div>
+
+      {mobileActionsOpen && (
+        <div className="absolute right-3 top-[calc(100%+0.5rem)] z-50 w-60 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl sm:hidden">
+          {user.role === 'admin' && (
+            <>
+              <button type="button" onClick={() => { setShowSettingsModal(true); setMobileActionsOpen(false) }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                <KeyRound className="h-4 w-4 text-[#0052CC]" /> Tài khoản Print
+              </button>
+              <button type="button" onClick={() => { openCrawlFilter(); setMobileActionsOpen(false) }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                <RefreshCw className="h-4 w-4 text-[#0052CC]" /> Quét đơn Print
+              </button>
+              <button type="button" onClick={() => { triggerSyncWaiting(false); setMobileActionsOpen(false) }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                <Images className="h-4 w-4 text-purple-600" /> Đồng bộ bộ ảnh
+              </button>
+            </>
+          )}
+          <button type="button" onClick={() => { void handleLogout(); setMobileActionsOpen(false) }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-xs font-semibold text-red-600 hover:bg-red-50">
+            <LogOut className="h-4 w-4" /> Đăng xuất
+          </button>
+        </div>
+      )}
 
       {/* Workspace / Platform Account Settings Modal */}
       <PlatformSettingsModal

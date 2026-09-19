@@ -509,7 +509,7 @@ export function DuplicateBoardPage() {
 
   return (
     <DashboardLayout>
-      <section className="-m-6 min-h-[calc(100vh-4rem)] bg-[#f1f2f4] p-6 lg:-m-8 lg:p-8">
+      <section className="-m-3 min-h-[calc(100vh-4rem)] bg-[#f1f2f4] p-3 sm:-m-5 sm:p-5 md:-m-6 md:p-6 xl:-m-8 xl:p-8">
         {/* Main Board Header */}
         <header className="mb-4 flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-xs">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
