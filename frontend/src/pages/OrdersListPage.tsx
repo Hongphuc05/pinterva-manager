@@ -1932,7 +1932,7 @@ export function OrdersListPage() {
 
       {/* Bulk Action Bar (For Admin when orders selected) */}
       {isAdmin && selectedOrderIds.length > 0 && (
-        <div className="sticky -top-7 z-30 bg-[#0052CC] text-white px-5 py-3 rounded-xl shadow-lg flex flex-wrap items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2 border border-blue-400/30 sm:-top-10 md:-top-12 xl:-top-14">
+        <div className="sticky -top-2 z-30 bg-[#0052CC] text-white px-5 py-3 rounded-xl shadow-lg flex flex-wrap items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2 border border-blue-400/30 sm:-top-5 md:-top-7 xl:-top-9">
           <div className="flex items-center gap-2">
             <span className="bg-white/20 px-3 py-1 rounded-lg text-xs font-bold font-mono">
               Đã chọn {selectedOrderIds.length} đơn hàng
