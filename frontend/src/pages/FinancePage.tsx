@@ -883,7 +883,7 @@ export function FinancePage() {
       {activeMainTab === 'finance' && (
         <div className="space-y-6">
           {/* Global Summary KPI Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+          <div className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${isAdmin ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}>
             <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs flex items-center justify-between">
               <div>
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Tổng Đơn Tính Công</p>
@@ -891,9 +891,9 @@ export function FinancePage() {
                   <h3 className="text-2xl font-bold font-mono text-[#0052CC]">
                     {data?.total_credited_tasks ?? 0}
                   </h3>
-                  <span className="text-xs font-mono font-bold text-slate-500">
+                  {isAdmin && <span className="text-xs font-mono font-bold text-slate-500">
                     ({((data?.total_amount_credited ?? ((data?.total_credited_tasks ?? 0) * standardRate))).toLocaleString('vi-VN')} đ)
-                  </span>
+                  </span>}
                 </div>
                 <p className="text-[11px] text-slate-400 mt-0.5">Vào Review + Có link bài</p>
               </div>
@@ -909,9 +909,9 @@ export function FinancePage() {
                   <h3 className="text-2xl font-bold font-mono text-amber-600">
                     {data?.total_unpaid_tasks ?? 0}
                   </h3>
-                  <span className="text-xs font-mono font-bold text-amber-700">
+                  {isAdmin && <span className="text-xs font-mono font-bold text-amber-700">
                     ({((data?.total_amount_unpaid ?? ((data?.total_unpaid_tasks ?? 0) * standardRate))).toLocaleString('vi-VN')} đ)
-                  </span>
+                  </span>}
                 </div>
                 <p className="text-[11px] text-slate-400 mt-0.5">Chờ thanh toán công</p>
               </div>
@@ -938,7 +938,7 @@ export function FinancePage() {
               </div>
             </div>
 
-            {isAdmin ? (
+            {isAdmin && (
               <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs flex items-center justify-between">
                 <div>
                   <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Designer Hoạt Động</p>
@@ -949,19 +949,6 @@ export function FinancePage() {
                 </div>
                 <div className="p-3 bg-purple-50 text-purple-600 rounded-xl border border-purple-100">
                   <Users className="h-6 w-6" />
-                </div>
-              </div>
-            ) : (
-              <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Đã Hoàn Thành (Done)</p>
-                  <h3 className="text-2xl font-bold font-mono text-emerald-600 mt-1">
-                    {data?.total_done_tasks ?? 0}
-                  </h3>
-                  <p className="text-[11px] text-slate-400 mt-0.5">Đơn duyệt hoàn tất</p>
-                </div>
-                <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl border border-emerald-100">
-                  <CheckCircle2 className="h-6 w-6" />
                 </div>
               </div>
             )}
@@ -1420,21 +1407,21 @@ export function FinancePage() {
                       )}
                       <th className="py-3 px-4">Link Bài Nộp</th>
                       <th className="py-3 px-4 text-center">Số Lần Nộp</th>
-                      <th className="py-3 px-4 text-center whitespace-nowrap">Đơn Giá (VNĐ)</th>
+                      {isAdmin && <th className="py-3 px-4 text-center whitespace-nowrap">Đơn Giá (VNĐ)</th>}
                       <th className="py-3 px-4 text-right">Thao Tác</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {loading ? (
                       <tr>
-                        <td colSpan={isAdmin ? (paymentSubTab === 'paid' ? 11 : 10) : (paymentSubTab === 'paid' ? 9 : 8)} className="py-12 text-center text-slate-400">
+                        <td colSpan={isAdmin ? (paymentSubTab === 'paid' ? 11 : 10) : (paymentSubTab === 'paid' ? 8 : 7)} className="py-12 text-center text-slate-400">
                           <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin opacity-50 text-[#0052CC]" />
                           <p className="font-medium text-sm text-slate-500">Đang tải danh sách đơn...</p>
                         </td>
                       </tr>
                     ) : !data?.tasks || data.tasks.length === 0 ? (
                       <tr>
-                        <td colSpan={isAdmin ? (paymentSubTab === 'paid' ? 11 : 10) : (paymentSubTab === 'paid' ? 9 : 8)} className="py-12 text-center text-slate-400">
+                        <td colSpan={isAdmin ? (paymentSubTab === 'paid' ? 11 : 10) : (paymentSubTab === 'paid' ? 8 : 7)} className="py-12 text-center text-slate-400">
                           <Package className="h-10 w-10 mx-auto mb-2 opacity-30" />
                           <p className="font-medium text-sm text-slate-500">
                             {paymentSubTab === 'unpaid' ? 'Không có đơn nào chưa thanh toán' : 'Chưa có đơn nào đã thanh toán'}
@@ -1624,12 +1611,14 @@ export function FinancePage() {
                               </span>
                             </td>
 
-                            {/* Price / Rate (VNĐ) */}
-                            <td className="py-2.5 px-4 text-center whitespace-nowrap">
-                              <span className="font-mono font-bold text-slate-800 bg-slate-50 px-2 py-1 rounded-lg border border-slate-200 text-xs">
-                                {taskPrice.toLocaleString('vi-VN')} đ
-                              </span>
-                            </td>
+                            {/* Price / Rate remains admin-only; designer view tracks tasks, not money. */}
+                            {isAdmin && (
+                              <td className="py-2.5 px-4 text-center whitespace-nowrap">
+                                <span className="font-mono font-bold text-slate-800 bg-slate-50 px-2 py-1 rounded-lg border border-slate-200 text-xs">
+                                  {taskPrice.toLocaleString('vi-VN')} đ
+                                </span>
+                              </td>
+                            )}
 
                             {/* Actions */}
                             <td className="py-2.5 px-4 text-right">
