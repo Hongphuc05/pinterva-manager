@@ -26,6 +26,7 @@ from app.application.designer_tasks import (
 from app.application.processing_leases import ProcessingLeaseConflictError
 from app.application.operations import IdempotencyKeyReusedError, OperationInProgressError
 from app.domain.access import ROLE_DESIGNER, ROLE_DESIGNER_TRELLO
+from app.domain.models import OrderState
 
 router = APIRouter()
 
@@ -236,4 +237,19 @@ def api_submit_result(
         )
     except Exception as exc:  # routed through stable HTTP errors above
         _raise_task_error(exc)
+    if result.get("sync_printerval_review"):
+        try:
+            from app.workers.assignment_sync_tasks import sync_order_review_to_printerval_task
+
+            sync_order_review_to_printerval_task.delay(
+                result["order_id"],
+                None,
+                "Review",
+                expected_state=OrderState.QC_PENDING.value,
+                expected_fix_approved=True,
+            )
+        except Exception:
+            # The internal review transition is authoritative and committed; a
+            # failed enqueue is observable/retriable independently.
+            pass
     return TaskMutationResponse(**result)

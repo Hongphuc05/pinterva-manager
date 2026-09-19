@@ -14,6 +14,7 @@ from app.application.duplicate_board import (
     DuplicateBoardError,
     list_duplicate_board,
     move_duplicate_order,
+    remove_duplicate_from_backlog,
     set_cross_designer_drag_enabled,
     set_orders_duplicate_status,
     set_orders_work_domain,
@@ -82,6 +83,20 @@ class SetDuplicateCheckStatusRequest(BaseModel):
 
 class DuplicateBoardSettingsRequest(BaseModel):
     cross_designer_drag_enabled: bool
+
+
+@router.post("/duplicate-board/remove-from-duplicate")
+def api_remove_from_duplicate_backlog(
+    payload: MoveDuplicateCardRequest,
+    user: User = Depends(require_any_role(ROLE_ADMIN, ROLE_SUPPORT, ROLE_DESIGNER_TRELLO)),
+    platform_id: uuid.UUID = Depends(get_current_platform_id), db: Session = Depends(get_db),
+):
+    try:
+        remove_duplicate_from_backlog(db, actor=user, platform_id=platform_id, order_id=payload.order_id, expected_version=payload.expected_version)
+        return {"ok": True}
+    except DuplicateBoardError as exc:
+        db.rollback()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
 
 @router.get("/duplicate-board", response_model=DuplicateBoardResponse)

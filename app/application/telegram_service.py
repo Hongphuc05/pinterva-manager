@@ -248,7 +248,6 @@ def notify_designer_urgent_fix(
     order_id_code = html.escape(order.external_order_id)
     p_name = html.escape(order.product_name or "Sản phẩm")
     fix_cnt = order.fix_return_count or 1
-    qc_note = html.escape(order.note_outsource or "Không có note chi tiết")
     adm_note = html.escape(admin_note or order.designer_note or "Sửa theo yêu cầu của khách")
 
     text = (
@@ -258,7 +257,6 @@ def notify_designer_urgent_fix(
         f"👕 <b>Sản phẩm:</b> {p_name}\n"
         f"🔄 <b>Lần fix thứ:</b> #{fix_cnt}\n"
         f"⏰ <b>Hạn sửa:</b> {format_vietnam_time(order.fix_deadline_at)}\n"
-        f"💬 <b>Yêu cầu của khách/QC:</b> {qc_note}\n"
         f"📌 <b>Hướng dẫn từ Admin:</b> {adm_note}\n"
         f"⚡ <i>Vui lòng vào tab <b>Cần sửa gấp</b> trên web để xử lý ngay!</i>"
     )

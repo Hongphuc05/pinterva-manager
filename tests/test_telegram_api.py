@@ -181,3 +181,32 @@ def test_telegram_notification_formatters(db_session):
         # Payment
         res3 = notify_designer_payment(db_session, user.id, 10, 400000)
         assert res3 is True
+
+
+def test_urgent_fix_telegram_never_includes_printerval_outsource_note(db_session):
+    designer = User(
+        username="fix-private-note-designer",
+        full_name="Fix Private Note Designer",
+        role="designer",
+        password_hash=hash_password("pass"),
+        telegram_chat_id="101010",
+        telegram_notifications_enabled=True,
+        active=True,
+    )
+    order = Order(
+        external_order_id="DJ-FIX-PRIVATE",
+        state=OrderState.REVISION.value,
+        product_name="Hoodie",
+        note_outsource="PRIVATE PRINT QC NOTE",
+        designer_note="Chỉnh lại logo theo ảnh mẫu",
+    )
+    db_session.add_all([designer, order])
+    db_session.commit()
+
+    with patch("app.application.telegram_service.send_telegram_request") as mock_send:
+        mock_send.return_value = {"ok": True}
+        assert notify_designer_urgent_fix(db_session, order.id, designer.id) is True
+
+    payload = mock_send.call_args.args[1]
+    assert "Chỉnh lại logo theo ảnh mẫu" in payload["text"]
+    assert "PRIVATE PRINT QC NOTE" not in payload["text"]

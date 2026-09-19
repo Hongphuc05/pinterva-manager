@@ -897,14 +897,18 @@ export function OrderDetailPage() {
               )}
             </div>
 
-            {/* Submit Drive Link Form */}
+            {/* A Fix reuses its first result link; Designer can only update it back to Review. */}
             {!isDone && (
               <form
                 className="space-y-2 pt-3 border-t border-blue-100"
-                onSubmit={handleInitiateReviewSubmit}
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  if (isFix) void handleConfirmSubmit()
+                  else handleInitiateReviewSubmit()
+                }}
               >
                 <div className="flex flex-col sm:flex-row gap-3">
-                  <div className="relative flex-1">
+                  {!isFix && <div className="relative flex-1">
                     <input
                       type="text"
                       disabled={isReview || busyAssignment}
@@ -928,7 +932,7 @@ export function OrderDetailPage() {
                         <span>Đã khóa ở Review</span>
                       </span>
                     )}
-                  </div>
+                  </div>}
 
                   <button
                     type="submit"
@@ -940,7 +944,7 @@ export function OrderDetailPage() {
                     }`}
                   >
                     <Send className="h-3.5 w-3.5" />
-                    <span>{isReview ? 'Đã Nộp (Chờ Review)' : 'Nộp Bài QC (Màu Xanh)'}</span>
+                    <span>{isReview ? 'Đã Nộp (Chờ Review)' : isFix ? 'Cập nhật đơn' : 'Nộp Bài QC (Màu Xanh)'}</span>
                   </button>
                 </div>
 

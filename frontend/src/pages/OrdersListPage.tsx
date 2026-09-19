@@ -423,9 +423,11 @@ export function OrdersListPage() {
 
   async function handleBulkAssign() {
     if (!bulkDesignerId || selectedOrderIds.length === 0) return
+    const desUser = usersList.find((u) => u.id === bulkDesignerId)
+    const duplicateCodes = orders.filter((o) => selectedOrderIds.includes(o.id) && o.work_domain === 'duplicate').map((o) => o.external_order_id)
+    if (desUser?.role === 'designer' && duplicateCodes.length && !window.confirm(`Đơn ${duplicateCodes.join(', ')} là đơn trùng lặp. Bạn có thực sự muốn chia cho ${desUser.full_name || desUser.username} không?`)) return
     setBulkAssigning(true)
     try {
-      const desUser = usersList.find((u) => u.id === bulkDesignerId)
       const platformDes = bulkPlatformDesigner || desUser?.platform_designer_option || DEFAULT_PLATFORM_DES
       const res = await apiFetch<{ queued_count: number }>('/assignments', {
         method: 'POST',
@@ -575,6 +577,8 @@ export function OrdersListPage() {
   async function handleAssignOrder(e: React.FormEvent) {
     e.preventDefault()
     if (!assigningOrder || !selectedUserId || !selectedPlatformDesigner) return
+    const targetUser = usersList.find((u) => u.id === selectedUserId)
+    if (assigningOrder.work_domain === 'duplicate' && targetUser?.role === 'designer' && !window.confirm(`Đơn ${assigningOrder.external_order_id} là đơn trùng lặp. Bạn có thực sự muốn chia cho ${targetUser.full_name || targetUser.username} không?`)) return
     setAssigning(true)
     try {
       await apiFetch<{ request_ids: string[]; queued_count: number }>(
@@ -876,7 +880,6 @@ export function OrdersListPage() {
 
   const doingOrders = useMemo(() => {
     return orders.filter((o) => {
-      if (o.work_domain === 'duplicate') return false
       const st = (o.state || '').toUpperCase()
       return ['IN_PROGRESS', 'DOING', 'ASSIGNED'].includes(st)
     })
@@ -3039,9 +3042,9 @@ export function OrdersListPage() {
 
                                 return (
                                   <div className="space-y-2">
-                                    {/* Input & Submit for direct submission without entering details */}
+                                    {/* Fix reuses the first submission; Designer cannot replace its link. */}
                                     <div className="flex items-center gap-1.5">
-                                      <input
+                                      {!isFixOrder && <input
                                         type="url"
                                         value={currentLink}
                                         onChange={(e) => setInlineSubmissionLinks((prev) => ({ ...prev, [o.id]: e.target.value }))}
@@ -3054,8 +3057,8 @@ export function OrdersListPage() {
                                         placeholder={isFixOrder ? 'Link thiết kế (Tùy chọn với đơn Fix)...' : 'Dán link thiết kế (Drive, Canva, DropBox...)'}
                                         disabled={isSubmitting || Boolean(o.template_missing)}
                                         className="flex-1 min-w-[200px] rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900 placeholder:text-slate-400 focus:border-[#0052CC] focus:ring-1 focus:ring-[#0052CC] shadow-2xs disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed"
-                                      />
-                                      <OpenExternalLinkButton url={currentLink} label="Mở" />
+                                      />}
+                                      {!isFixOrder && <OpenExternalLinkButton url={currentLink} label="Mở" />}
                                       <button
                                         type="button"
                                         onClick={() => handleInlineSubmit(o, currentLink)}

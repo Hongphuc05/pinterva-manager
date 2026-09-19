@@ -133,6 +133,38 @@ def test_result_api_verifies_drive_and_enters_qc_queue(client, db_session):
     assert replay.json() == first.json()
 
 
+def test_fix_resubmission_queues_printerval_review_sync(client, db_session, monkeypatch):
+    designer = _login(client, db_session, "designer", "fix-resubmitter")
+    assignment, order = _seed_owned_task(db_session, designer, OrderState.REVISION.value)
+    order.fix_approved_by_admin = True
+    db_session.commit()
+    queued: list[tuple] = []
+    from app.workers import assignment_sync_tasks
+
+    monkeypatch.setattr(
+        assignment_sync_tasks.sync_order_review_to_printerval_task,
+        "delay",
+        lambda *args, **kwargs: queued.append((args, kwargs)),
+    )
+
+    response = client.post(
+        f"/api/assignments/{assignment.id}/results",
+        json={
+            "drive_url": "https://drive.google.com/file/d/known-file/view",
+            "request_id": "fix-resubmit-1",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["state"] == OrderState.QC_PENDING.value
+    assert queued == [
+        ((str(order.id), None, "Review"), {
+            "expected_state": OrderState.QC_PENDING.value,
+            "expected_fix_approved": True,
+        })
+    ]
+
+
 def test_my_tasks_suppresses_note_outsource_when_flagged(client, db_session):
     designer = _login(client, db_session, "designer", "suppressed-note-designer")
     assignment, order = _seed_owned_task(db_session, designer)
@@ -146,4 +178,3 @@ def test_my_tasks_suppresses_note_outsource_when_flagged(client, db_session):
     task_order = response.json()["tasks"][0]["order"]
     assert task_order["note_outsource"] == ""
     assert task_order["designer_note"] == "Admin added template: https://example.com/template"
-

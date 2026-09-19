@@ -34,6 +34,30 @@ class DuplicateBoardError(ValueError):
     pass
 
 
+def remove_duplicate_from_backlog(session: Session, *, actor: User, platform_id: uuid.UUID, order_id: uuid.UUID, expected_version: int | None = None) -> None:
+    """Return an unclaimed duplicate-board card to the ordinary Waiting queue.
+
+    This is deliberately not a delete: the order remains auditable and becomes
+    available for normal-designer assignment again.
+    """
+    order = session.query(Order).filter(Order.id == order_id, Order.platform_id == platform_id).with_for_update().one_or_none()
+    if order is None or order.work_domain != WORK_DOMAIN_DUPLICATE:
+        raise DuplicateBoardError("Đơn không còn thuộc board Đơn trùng lặp")
+    require_expected_order_version(order, expected_version)
+    if actor.role not in (ROLE_ADMIN, ROLE_SUPPORT, ROLE_DESIGNER_TRELLO):
+        raise DuplicateBoardError("Bạn không có quyền hủy đơn trùng lặp")
+    active = _active_assignments(session, order.id, lock=True)
+    if active or order.template_missing or order.state != OrderState.IN_PROGRESS.value:
+        raise DuplicateBoardError("Chỉ được hủy đơn đang ở cột Đơn hàng chưa có Designer nhận")
+    old_state = order.state
+    order.work_domain = WORK_DOMAIN_STANDARD
+    order.duplicate_check_status = "uncheck"
+    order.state = OrderState.WAITING.value
+    order.status_changed_at = datetime.now(UTC)
+    _event(session, order, actor.id, "removed_from_duplicate_backlog", from_state=old_state, to_state=order.state)
+    session.commit()
+
+
 def _active_assignments(session: Session, order_id: uuid.UUID, *, lock: bool) -> list[Assignment]:
     query = session.query(Assignment).filter(
         Assignment.order_id == order_id,

@@ -559,6 +559,20 @@ export function DuplicateBoardPage() {
     }
   }
 
+  async function removeFromDuplicateBacklog(card: DuplicateCard) {
+    if (!window.confirm(`Bỏ tag trùng lặp cho đơn ${card.external_order_id} và trả về Waiting để chia Designer thường?`)) return
+    setMovingCardId(card.id)
+    try {
+      await apiFetch('/duplicate-board/remove-from-duplicate', { method: 'POST', body: JSON.stringify({ order_id: card.id, expected_version: card.version }) })
+      await loadBoard()
+      showToast(`Đã trả đơn ${card.external_order_id} về Waiting.`, 'success')
+    } catch (err: any) {
+      showToast(err?.message || 'Không thể hủy tag trùng lặp.', 'error')
+    } finally {
+      setMovingCardId(null)
+    }
+  }
+
   async function updateCrossDesignerDrag(enabled: boolean) {
     if (!isAdmin) return
     setSavingSettings(true)
@@ -984,6 +998,11 @@ export function DuplicateBoardPage() {
                         </div>
 
                         <div className="min-w-0 px-1 pt-2">
+                          {column.id === 'orders' && (isAdmin || isSupport || user?.role === 'designer-trello') && (
+                            <button type="button" draggable={false} onClick={() => void removeFromDuplicateBacklog(card)} className="absolute right-3 top-3 z-20 rounded bg-rose-50 px-1.5 py-1 text-[10px] font-bold text-rose-700 hover:bg-rose-100">
+                              Bỏ trùng
+                            </button>
+                          )}
                           <CopyableOrderCode code={card.external_order_id} />
                           <Link to={`/orders/${card.id}`} className="block hover:underline">
                             <p className="mt-1 line-clamp-4 text-[12px] font-medium leading-relaxed text-slate-700">

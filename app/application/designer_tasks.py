@@ -323,6 +323,7 @@ def submit_result(
         assignment, order = _owned_task(session, assignment_id, designer_id, lock=True)
         require_expected_order_version(order, expected_version)
         ensure_processing_lease(session, order, actor_id=designer_id)
+        is_fix_resubmission = order.state == OrderState.REVISION.value
         if order.state not in (OrderState.IN_PROGRESS.value, OrderState.WAITING.value, OrderState.REVISION.value):
             raise ValueError(f"Task must be in progress, waiting, or revision to submit (current state: {order.state})")
         effective_drive_url = (drive_url or "").strip()
@@ -376,10 +377,12 @@ def submit_result(
         session.flush()
         return {
             "assignment_id": str(assignment.id),
+            "order_id": str(order.id),
             "result_version_id": str(result_version.id),
             "version_marker": result_version.version_marker,
             "state": order.state,
             "version": order.version,
+            "sync_printerval_review": is_fix_resubmission,
         }
 
     return run_idempotent(
