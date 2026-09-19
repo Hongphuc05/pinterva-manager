@@ -572,14 +572,12 @@ export function OrderDetailPage() {
                       loadOrderDetail()
                     }}
                   />
-                ) : (
+                ) : !isDone && (
                   <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold rounded-lg border select-none ${
                     order.template_missing
                       ? 'bg-rose-100 text-rose-800 border-rose-300'
                       : isReview
                       ? 'bg-purple-100 text-purple-800 border-purple-300'
-                      : isDone
-                      ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
                       : 'bg-blue-100 text-blue-800 border-blue-300'
                   }`}>
                     <span className={`h-2 w-2 rounded-full ${
@@ -587,11 +585,9 @@ export function OrderDetailPage() {
                         ? 'bg-rose-500'
                         : isReview
                         ? 'bg-purple-500'
-                        : isDone
-                        ? 'bg-emerald-500'
                         : 'bg-blue-500'
                     }`} />
-                    <span>{order.template_missing ? 'Chờ cập nhật' : isReview ? 'Chờ duyệt' : isDone ? 'Hoàn thành' : 'Đang làm'}</span>
+                    <span>{order.template_missing ? 'Chờ cập nhật' : isReview ? 'Chờ duyệt' : 'Đang làm'}</span>
                   </span>
                 )}
 

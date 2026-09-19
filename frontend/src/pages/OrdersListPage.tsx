@@ -2857,12 +2857,7 @@ export function OrdersListPage() {
                                   <span className="h-2 w-2 rounded-full bg-purple-500" />
                                   <span>Chờ duyệt</span>
                                 </span>
-                              ) : ['DONE', 'CLAIMED_IMPORTED', 'COMPLETED', 'SKIPPED'].includes((o.state || '').toUpperCase()) ? (
-                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold rounded-lg bg-emerald-100 text-emerald-800 border border-emerald-300 select-none shadow-2xs">
-                                  <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                                  <span>Hoàn thành</span>
-                                </span>
-                              ) : (
+                              ) : ['DONE', 'CLAIMED_IMPORTED', 'COMPLETED', 'SKIPPED'].includes((o.state || '').toUpperCase()) ? null : (
                                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold rounded-lg bg-blue-100 text-blue-800 border border-blue-300 select-none shadow-2xs">
                                   <span className="h-2 w-2 rounded-full bg-blue-500" />
                                   <span>{['WAITING', 'OPEN_FOR_ALLOCATION', 'DISCOVERED', 'PENDING', 'OPEN'].includes((o.state || '').toUpperCase()) ? 'Chờ chia' : 'Đang làm'}</span>

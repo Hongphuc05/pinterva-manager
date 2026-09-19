@@ -142,6 +142,8 @@ export type FinanceNoteListResponse = {
   total_pages: number
 }
 
+const COMPLETED_TASK_STATES = new Set(['DONE', 'COMPLETED', 'SKIPPED'])
+
 export function FinancePage() {
   const { user } = useAuth()
   const { showToast } = useToast()
@@ -1276,7 +1278,7 @@ export function FinancePage() {
                       <option value="">Tất cả Trạng Thái</option>
                       <option value="REVIEW">Chờ Duyệt (Review)</option>
                       <option value="FIX">Yêu Cầu Sửa (Fix)</option>
-                      <option value="DONE">Hoàn Thành (Done)</option>
+                      {isAdmin && <option value="DONE">Hoàn Thành (Done)</option>}
                     </select>
                   </div>
 
@@ -1437,6 +1439,7 @@ export function FinancePage() {
                       data.tasks.map((task, idx) => {
                         const isSelected = selectedOrderIds.includes(task.order_id)
                         const statusInfo = getStatusInfo(task.current_state)
+                        const isCompletedTask = COMPLETED_TASK_STATES.has(task.current_state.toUpperCase())
                         const submitTimeSplit = formatUtc7Split(task.review_submitted_at || task.status_changed_at || task.first_submitted_at)
                         const paidTimeSplit = formatUtc7Split(task.paid_at)
                         const taskPrice = task.rate ?? (task.work_domain === 'duplicate' ? duplicateRate : standardRate)
@@ -1539,14 +1542,17 @@ export function FinancePage() {
 
                             {/* Current Status */}
                             <td className="py-2.5 px-4">
-                              <span
-                                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold border ${
-                                  statusInfo.badgeClass
-                                }`}
-                              >
-                                <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                                <span>{statusInfo.label}</span>
-                              </span>
+                              {!isAdmin && task.is_paid ? (
+                                <span className="inline-flex items-center gap-1.5 rounded-md border border-emerald-300 bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-800">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                                  <span>Đã thanh toán</span>
+                                </span>
+                              ) : !isAdmin && isCompletedTask ? null : (
+                                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold border ${statusInfo.badgeClass}`}>
+                                  <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                                  <span>{statusInfo.label}</span>
+                                </span>
+                              )}
                             </td>
 
                             {/* Thời Gian Nộp Bài (UTC+7) Split 2 lines */}
