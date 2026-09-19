@@ -940,9 +940,15 @@ export function OrdersListPage() {
     !o.is_paid && ['DONE', 'CLAIMED_IMPORTED', 'COMPLETED', 'SKIPPED'].includes(o.state.toUpperCase())
   )
 
+  // Admin search must search across every status tab. Without a search query,
+  // keep the existing tab-scoped list and rendering behavior.
+  const isAdminGlobalSearch = isAdmin && searchQuery.trim().length > 0
+
   // Base list of orders depending on role and active tab
   let baseOrders: OrderSummary[] = orders
-  if (isSupport) {
+  if (isAdminGlobalSearch) {
+    baseOrders = orders
+  } else if (isSupport) {
     baseOrders =
       supportTab === 'all'
         ? supportUncheckedOrders
@@ -2132,7 +2138,7 @@ export function OrdersListPage() {
             <div className="inline-flex items-center gap-1.5 text-xs text-slate-500 bg-slate-100/80 px-2.5 py-1 rounded-md border border-slate-200/60">
               <span className="text-slate-400">Đang lọc từ:</span>
               <span className="font-mono font-bold text-slate-700">{baseOrders.length}</span>
-              <span>task trong tab</span>
+              <span>{isAdminGlobalSearch ? 'task trên toàn bộ tab' : 'task trong tab'}</span>
               {syncedImagesFilter && (
                 <span className="inline-flex items-center gap-1 ml-1 px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">
                   <Images className="h-2.5 w-2.5" />
