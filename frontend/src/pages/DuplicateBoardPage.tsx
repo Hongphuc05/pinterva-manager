@@ -66,6 +66,8 @@ type FixAction = {
   previousNote: string | null
 }
 
+type DesignerBoardTab = 'doing' | 'review'
+
 function stateLabel(state: string) {
   const labels: Record<string, string> = {
     OPEN: 'Chờ xử lý',
@@ -85,6 +87,14 @@ function stateClass(state: string) {
   if (state === 'QC_PENDING') return 'bg-violet-50 text-violet-700 border-violet-200'
   if (state === 'IN_PROGRESS') return 'bg-blue-50 text-blue-700 border-blue-200'
   return 'bg-slate-100 text-slate-600 border-slate-200'
+}
+
+function isDesignerReviewCard(card: DuplicateCard) {
+  return ['QC_PENDING', 'REVIEW', 'RESULT_SUBMITTED', 'SUBMITTING_TO_SITE'].includes((card.state || '').toUpperCase())
+}
+
+function isDesignerDoingCard(card: DuplicateCard) {
+  return !isDesignerReviewCard(card)
 }
 
 const stateSortRank: Record<string, number> = {
@@ -117,6 +127,7 @@ export function DuplicateBoardPage() {
   const [draggedCard, setDraggedCard] = useState<DuplicateCard | null>(null)
   const [dropTarget, setDropTarget] = useState<string | null>(null)
   const [dropInsertion, setDropInsertion] = useState<{ columnId: string; beforeCardId: string | null } | null>(null)
+  const [designerTabs, setDesignerTabs] = useState<Record<string, DesignerBoardTab>>({})
   const [movingCardId, setMovingCardId] = useState<string | null>(null)
   const [statusSortColumns, setStatusSortColumns] = useState<Set<string>>(() => new Set())
   const [savingSettings, setSavingSettings] = useState(false)
@@ -146,6 +157,14 @@ export function DuplicateBoardPage() {
 
   const isAdmin = user?.role === 'admin'
   const isSupport = user?.role === 'support'
+
+  function getDesignerTab(columnId: string): DesignerBoardTab {
+    return designerTabs[columnId] || 'doing'
+  }
+
+  function setDesignerTab(columnId: string, tab: DesignerBoardTab) {
+    setDesignerTabs((current) => ({ ...current, [columnId]: tab }))
+  }
 
   const loadBoard = useCallback(async () => {
     setLoading(true)
@@ -486,6 +505,11 @@ export function DuplicateBoardPage() {
       return
     }
 
+    let insertionBeforeCardId = beforeCardId
+    if (isDesigner && insertionBeforeCardId === null && getDesignerTab(column.id) === 'doing') {
+      insertionBeforeCardId = column.cards.find(isDesignerReviewCard)?.id ?? null
+    }
+
     setMovingCardId(draggedCard.id)
     const movedOrderCode = draggedCard.external_order_id
     try {
@@ -495,12 +519,13 @@ export function DuplicateBoardPage() {
           order_id: draggedCard.id,
           target_column_id: column.id,
           target_designer_id: isDesigner ? column.id : null,
-          before_order_id: beforeCardId,
+          before_order_id: insertionBeforeCardId,
           reorder: true,
         }),
       })
       await loadBoard()
       if (isDesigner) {
+        setDesignerTab(column.id, 'doing')
         showToast(`Đã phân công đơn ${movedOrderCode} cho ${column.title} và chuyển sang Doing.`, 'success')
       } else if (isDone) {
         showToast(`Đã chuyển đơn ${movedOrderCode} sang Done.`, 'success')
@@ -735,7 +760,11 @@ export function DuplicateBoardPage() {
               // First apply Done column specific filters if this is the Done column
               const stage1Cards = isDoneCol ? filterDoneCards(rawCards) : rawCards
               // Then apply global board filters (search query, state, designer)
-              const displayedCards = stage1Cards.filter(filterCardGlobal)
+              const filteredCards = stage1Cards.filter(filterCardGlobal)
+              const designerTab = column.column_type === 'designer' ? getDesignerTab(column.id) : null
+              const displayedCards = designerTab
+                ? filteredCards.filter(designerTab === 'review' ? isDesignerReviewCard : isDesignerDoingCard)
+                : filteredCards
               const cards = sortedCards(displayedCards, statusSortColumns.has(column.id))
 
               return (
@@ -828,6 +857,37 @@ export function DuplicateBoardPage() {
                       </div>
                     )}
 
+                    {column.column_type === 'designer' && (
+                      <div role="tablist" aria-label={`Trạng thái đơn của ${column.title}`} className="grid grid-cols-2 gap-1 rounded-lg bg-slate-200/70 p-1">
+                        {(['doing', 'review'] as const).map((tab) => {
+                          const count = filteredCards.filter(tab === 'review' ? isDesignerReviewCard : isDesignerDoingCard).length
+                          const active = getDesignerTab(column.id) === tab
+                          return (
+                            <button
+                              key={tab}
+                              type="button"
+                              draggable={false}
+                              role="tab"
+                              aria-selected={active}
+                              onClick={(event) => {
+                                event.preventDefault()
+                                event.stopPropagation()
+                                setDesignerTab(column.id, tab)
+                              }}
+                              className={`rounded-md px-2 py-1 text-[10px] font-bold transition-colors ${active
+                                ? tab === 'doing'
+                                  ? 'bg-blue-600 text-white shadow-xs'
+                                  : 'bg-violet-600 text-white shadow-xs'
+                                : 'text-slate-600 hover:bg-white'
+                              }`}
+                            >
+                              {tab === 'doing' ? 'Doing' : 'Review'} ({count})
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )}
+
                     {/* Filter bar (specifically for Done column) */}
                     {isDoneCol && (
                       <div className="space-y-1.5 pt-1 border-t border-emerald-200/60 text-xs">
@@ -891,27 +951,28 @@ export function DuplicateBoardPage() {
                           onDragOver={(event) => handleCardDragOver(event, column, card, cardIndex, cards)}
                           onDrop={(event) => void onDrop(event, column, dropInsertion?.beforeCardId ?? null)}
                           onDragEnd={onDragEnd}
-                          className={`group rounded-lg border border-slate-200 bg-white p-3 shadow-2xs transition-all hover:shadow-md ${
+                          className={`group relative min-h-72 rounded-xl border border-slate-200 bg-white p-2.5 shadow-2xs transition-all hover:shadow-md ${
                             draggedCard?.id === card.id ? 'opacity-40 scale-95' : ''
                           } ${movingCardId === card.id ? 'pointer-events-none opacity-60' : isSupport ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'}`}
                         >
-                        <div className="flex gap-2.5">
-                          <GripVertical className="mt-0.5 h-4 w-3 shrink-0 text-slate-300 group-hover:text-slate-500" />
+                        <div className="relative h-44 w-full overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
+                          <GripVertical className="absolute left-2 top-2 z-10 h-4 w-3 text-slate-400 opacity-70 group-hover:text-slate-600" />
                           {card.thumbnail_url ? (
-                            <img src={resolveAssetUrl(card.thumbnail_url)} alt="" className="h-11 w-11 rounded-md border border-slate-200 object-cover shrink-0" />
+                            <img src={resolveAssetUrl(card.thumbnail_url)} alt="" className="h-full w-full object-contain" />
                           ) : (
-                            <div className="flex h-11 w-11 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-400 shrink-0">
-                              <Package className="h-5 w-5" />
+                            <div className="flex h-full w-full items-center justify-center text-slate-400">
+                              <Package className="h-10 w-10" />
                             </div>
                           )}
-                          <div className="min-w-0 flex-1">
-                            <CopyableOrderCode code={card.external_order_id} />
-                            <Link to={`/orders/${card.id}`} className="block hover:underline">
-                              <p className="mt-0.5 line-clamp-2 text-[11px] font-medium leading-relaxed text-slate-600">
-                                {card.product_name || 'Đơn chưa có tên sản phẩm'}
-                              </p>
-                            </Link>
-                          </div>
+                        </div>
+
+                        <div className="min-w-0 px-1 pt-2">
+                          <CopyableOrderCode code={card.external_order_id} />
+                          <Link to={`/orders/${card.id}`} className="block hover:underline">
+                            <p className="mt-1 line-clamp-4 text-[12px] font-medium leading-relaxed text-slate-700">
+                              {card.product_name || 'Đơn chưa có tên sản phẩm'}
+                            </p>
+                          </Link>
                         </div>
 
                         {/* Extra card details in Done column */}
@@ -995,7 +1056,10 @@ export function DuplicateBoardPage() {
                           ? 'Chưa có đơn thiếu form'
                           : column.id === 'done'
                           ? 'Chưa có đơn hoàn thành'
-                          : 'Kéo đơn vào đây'}
+                          : getDesignerTab(column.id) === 'review'
+                            ? 'Chưa có đơn đang chờ Review'
+                            : 'Chưa có đơn Doing'
+                          }
                       </div>
                     )}
                   </div>
