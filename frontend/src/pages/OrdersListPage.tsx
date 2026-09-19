@@ -31,6 +31,8 @@ import {
   RefreshCw,
   AlertTriangle,
   ArrowDownUp,
+  ArrowDown,
+  ArrowUp,
   Flag,
   Check,
   Send,
@@ -1123,11 +1125,39 @@ export function OrdersListPage() {
     setSearchParams(next, { replace: true })
   }, [statusFilter, platformStatusFilter, designerFilter, batchFilter, searchQuery, dateFilterType, dateFrom, dateTo, activeDesignerTab, adminTab, dateSort, syncedImagesFilter])
 
+  // Reset sort to newest status_changed_at when tab changes
+  useEffect(() => {
+    setDateSort({ field: 'status_changed_at', direction: 'desc' })
+  }, [adminTab, activeDesignerTab])
+
   function toggleDateSort(field: 'order_created_at_ext' | 'created_at' | 'status_changed_at') {
     setDateSort((current) => ({
       field,
       direction: current.field === field && current.direction === 'desc' ? 'asc' : 'desc',
     }))
+  }
+
+  function renderDateSortIcon(field: 'order_created_at_ext' | 'created_at' | 'status_changed_at') {
+    if (dateSort.field !== field) {
+      return <ArrowDownUp className="h-3.5 w-3.5 text-slate-400 opacity-60" />
+    }
+    if (dateSort.direction === 'desc') {
+      return <ArrowDown className="h-3.5 w-3.5 text-[#0052CC] stroke-[2.5]" />
+    }
+    return <ArrowUp className="h-3.5 w-3.5 text-[#0052CC] stroke-[2.5]" />
+  }
+
+  function getDateSortTooltip(
+    field: 'order_created_at_ext' | 'created_at' | 'status_changed_at',
+    label: string
+  ) {
+    if (dateSort.field === field) {
+      if (dateSort.direction === 'desc') {
+        return `Đang sắp xếp: ${label} - Đơn gần nhất (Mới nhất) ↓. Bấm để đổi sang Xa nhất (Cũ nhất) ↑`
+      }
+      return `Đang sắp xếp: ${label} - Đơn xa nhất (Cũ nhất) ↑. Bấm để đổi sang Gần nhất (Mới nhất) ↓`
+    }
+    return `Bấm để sắp xếp theo ${label} (Mặc định: Gần nhất ↓)`
   }
 
   function applyDatePreset(preset: 'today' | 'yesterday' | '7days' | 'this_month' | 'all') {
@@ -2204,18 +2234,42 @@ export function OrdersListPage() {
                   <th className="py-3 px-4">Trạng Thái</th>
                   <th className="py-3 px-4">Des Đảm Nhận</th>
                   <th className="py-3 px-4 whitespace-nowrap">
-                    <button type="button" onClick={() => toggleDateSort('status_changed_at')} className="inline-flex items-center gap-1 hover:text-[#0052CC]" title="Sắp xếp theo thời gian chuyển vào tab (UTC+7)">
-                      Thời Gian <ArrowDownUp className={`h-3.5 w-3.5 ${dateSort.field === 'status_changed_at' ? 'text-[#0052CC]' : ''}`} />
+                    <button
+                      type="button"
+                      onClick={() => toggleDateSort('status_changed_at')}
+                      className={`inline-flex items-center gap-1.5 transition-colors ${
+                        dateSort.field === 'status_changed_at' ? 'text-[#0052CC] font-bold' : 'hover:text-[#0052CC]'
+                      }`}
+                      title={getDateSortTooltip('status_changed_at', 'Thời Gian (Vào tab)')}
+                    >
+                      <span>Thời Gian</span>
+                      {renderDateSortIcon('status_changed_at')}
                     </button>
                   </th>
                   <th className="py-3 px-4 whitespace-nowrap">
-                    <button type="button" onClick={() => toggleDateSort('order_created_at_ext')} className="inline-flex items-center gap-1 hover:text-[#0052CC]" title="Sắp xếp theo Order at">
-                      Order At <ArrowDownUp className={`h-3.5 w-3.5 ${dateSort.field === 'order_created_at_ext' ? 'text-[#0052CC]' : ''}`} />
+                    <button
+                      type="button"
+                      onClick={() => toggleDateSort('order_created_at_ext')}
+                      className={`inline-flex items-center gap-1.5 transition-colors ${
+                        dateSort.field === 'order_created_at_ext' ? 'text-[#0052CC] font-bold' : 'hover:text-[#0052CC]'
+                      }`}
+                      title={getDateSortTooltip('order_created_at_ext', 'Order At')}
+                    >
+                      <span>Order At</span>
+                      {renderDateSortIcon('order_created_at_ext')}
                     </button>
                   </th>
                   <th className="py-3 px-4 whitespace-nowrap">
-                    <button type="button" onClick={() => toggleDateSort('created_at')} className="inline-flex items-center gap-1 hover:text-[#0052CC]" title="Sắp xếp theo ngày tạo (crawl)">
-                      Ngày tạo (crawl) <ArrowDownUp className={`h-3.5 w-3.5 ${dateSort.field === 'created_at' ? 'text-[#0052CC]' : ''}`} />
+                    <button
+                      type="button"
+                      onClick={() => toggleDateSort('created_at')}
+                      className={`inline-flex items-center gap-1.5 transition-colors ${
+                        dateSort.field === 'created_at' ? 'text-[#0052CC] font-bold' : 'hover:text-[#0052CC]'
+                      }`}
+                      title={getDateSortTooltip('created_at', 'Ngày tạo (crawl)')}
+                    >
+                      <span>Ngày tạo (crawl)</span>
+                      {renderDateSortIcon('created_at')}
                     </button>
                   </th>
                   <th className="py-3 px-4 text-right">Thao Tác</th>
@@ -2226,8 +2280,16 @@ export function OrdersListPage() {
                   <th className="py-3 px-4 min-w-[220px]">Tên Sản Phẩm (Click để copy)</th>
                   <th className="py-3 px-4 w-52">Trạng Thái &amp; Ghi Chú</th>
                   <th className="py-3 px-4 w-36 whitespace-nowrap">
-                    <button type="button" onClick={() => toggleDateSort('status_changed_at')} className="inline-flex items-center gap-1 hover:text-[#0052CC]" title="Sắp xếp theo thời gian chuyển vào tab (UTC+7)">
-                      Thời Gian <ArrowDownUp className={`h-3.5 w-3.5 ${dateSort.field === 'status_changed_at' ? 'text-[#0052CC]' : ''}`} />
+                    <button
+                      type="button"
+                      onClick={() => toggleDateSort('status_changed_at')}
+                      className={`inline-flex items-center gap-1.5 transition-colors ${
+                        dateSort.field === 'status_changed_at' ? 'text-[#0052CC] font-bold' : 'hover:text-[#0052CC]'
+                      }`}
+                      title={getDateSortTooltip('status_changed_at', 'Thời Gian')}
+                    >
+                      <span>Thời Gian</span>
+                      {renderDateSortIcon('status_changed_at')}
                     </button>
                   </th>
                   {activeDesignerTab === 'doing' && (
