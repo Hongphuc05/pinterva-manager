@@ -18,6 +18,7 @@ celery_app = Celery(
         "app.workers.sync_job_tasks",
         "app.workers.assignment_sync_tasks",
         "app.workers.order_sheet_backup_tasks",
+        "app.workers.telegram_tasks",
     ],
 )
 
