@@ -160,12 +160,18 @@ def discover_waiting_orders(
 
 
 UNASSIGNED_DESIGNER_FILTER = "__unassigned__"
+CHOOSE_DESIGNER_FILTER = "__choose_designer__"
 
 
 def _is_unassigned_printerval_designer(designer: str | None) -> bool:
-    """Normalize Printerval's empty/select-placeholder designer values."""
+    """Match values that represent an actually empty/unassigned Designer field."""
     normalized = (designer or "").strip().casefold()
-    return normalized in {"", "chưa chia cho ai", "choose designer", "unassigned"}
+    return normalized in {"", "chưa chia cho ai", "unassigned"}
+
+
+def _is_choose_designer_printerval_designer(designer: str | None) -> bool:
+    """Match Printerval's visible default Designer select option exactly."""
+    return (designer or "").strip().casefold() == "choose designer"
 
 
 def scan_orders_fast(
@@ -199,6 +205,9 @@ def scan_orders_fast(
         for summary in result.orders:
             if designer == UNASSIGNED_DESIGNER_FILTER:
                 if not _is_unassigned_printerval_designer(summary.designer):
+                    continue
+            elif designer == CHOOSE_DESIGNER_FILTER:
+                if not _is_choose_designer_printerval_designer(summary.designer):
                     continue
             elif designer and summary.designer != designer:
                 continue

@@ -20,4 +20,22 @@ describe('CrawlFilterModal', () => {
 
     expect(onSearch).toHaveBeenCalledWith('Tất cả 2D & 3D', 'Waiting', '__unassigned__', '', '')
   })
+
+  it('submits Printerval Choose Designer as its own filter', () => {
+    const onSearch = vi.fn()
+    render(
+      <CrawlFilterModal
+        isOpen
+        onClose={vi.fn()}
+        onSearch={onSearch}
+        loading={false}
+        designers={[]}
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText('Designer'), { target: { value: '__choose_designer__' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }))
+
+    expect(onSearch).toHaveBeenCalledWith('Tất cả 2D & 3D', 'Waiting', '__choose_designer__', '', '')
+  })
 })

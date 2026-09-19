@@ -86,6 +86,30 @@ def test_fast_scan_can_filter_orders_without_a_printerval_designer(db_session):
     assert db_session.query(Order).filter_by(external_order_id="DJ0001001").count() == 1
     assert db_session.query(Order).filter_by(external_order_id="DJ0001002").count() == 0
 
+
+def test_fast_scan_can_filter_printerval_choose_designer_default(db_session):
+    adapter = FakePrintervalAdapter()
+    _seed_waiting_order(adapter, "DJ0001003", designer="Choose Designer")
+    _seed_waiting_order(adapter, "DJ0001004", designer=None)
+    _seed_waiting_order(adapter, "DJ0001005", designer="Designer A")
+    platform = Platform(name="Test platform", account_username="test@example.com")
+    db_session.add(platform)
+    db_session.commit()
+
+    result = scan_orders_fast(
+        db_session,
+        adapter,
+        platform_id=platform.id,
+        status="Waiting",
+        designer="__choose_designer__",
+    )
+
+    assert result == {"scanned": 1, "added": 1, "updated": 0}
+    assert db_session.query(Order).filter_by(external_order_id="DJ0001003").count() == 1
+    assert db_session.query(Order).filter_by(external_order_id="DJ0001004").count() == 0
+    assert db_session.query(Order).filter_by(external_order_id="DJ0001005").count() == 0
+
+
 def test_discover_waiting_orders_returns_only_new_ids(db_session):
     adapter = FakePrintervalAdapter()
     _seed_waiting_order(adapter, "DJ0000001")

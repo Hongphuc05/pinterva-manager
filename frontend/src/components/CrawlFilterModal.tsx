@@ -66,6 +66,7 @@ export function CrawlFilterModal({ isOpen, onClose, onSearch, loading, designers
               <select id="crawl-designer" value={designer} onChange={(e) => setDesigner(e.target.value)} className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300">
                 <option value="">Tất cả designer</option>
                 <option value="__unassigned__">Chưa chia cho ai</option>
+                <option value="__choose_designer__">Choose Designer (mặc định Printerval)</option>
                 {designers.map((item) => <option key={item} value={item}>{item}</option>)}
               </select>
             </div>
