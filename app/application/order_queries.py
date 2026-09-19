@@ -13,6 +13,13 @@ from app.domain.access import (
     WORK_DOMAIN_STANDARD,
 )
 
+FIX_STATES = frozenset({"REVISION", "REVISION_REQUESTED", "FIX"})
+
+
+def is_unreleased_fix(order: Order) -> bool:
+    """True when a Fix exists on Printerval but Admin has not released it to a designer."""
+    return (order.state or "").upper() in FIX_STATES and not bool(order.fix_approved_by_admin)
+
 
 def list_orders_for_user(
     session: Session,
@@ -42,6 +49,17 @@ def list_orders_for_user(
         query = query.filter(Order.work_domain == WORK_DOMAIN_STANDARD)
     elif work_domain:
         query = query.filter(Order.work_domain == work_domain)
+
+    # An existing approved Assignment is retained while an order waits for an
+    # Admin decision on a Printerval Fix. It must not grant the designer visibility
+    # or access to that unreleased revision.
+    if user.role in (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO):
+        query = query.filter(
+            or_(
+                Order.state.not_in(FIX_STATES),
+                Order.fix_approved_by_admin.is_(True),
+            )
+        )
 
     if duplicate_check_status:
         query = query.filter(Order.duplicate_check_status == duplicate_check_status)
@@ -153,6 +171,9 @@ def get_order_detail_for_user(session: Session, user: User, order_id: str) -> Or
         order = session.query(Order).filter(Order.external_order_id == order_id).first()
 
     if order is None:
+        return None
+
+    if user.role in (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO) and is_unreleased_fix(order):
         return None
 
     if user.role == ROLE_DESIGNER:

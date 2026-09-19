@@ -193,6 +193,43 @@ def test_sync_printerval_assignment_request_continues_http_only_when_playwright_
 
     # Must not raise — falls back to HTTP-only instead of aborting the whole request.
     assignment_sync_tasks.sync_printerval_assignment_request(str(request_id))
-
     assert captured["adapter"].fallback_adapter is None
     assert fake_session.closed is True
+
+
+def test_review_sync_skips_a_delayed_job_after_admin_releases_fix(monkeypatch):
+    """A queued Review write must not overwrite a later approved Fix on Printerval."""
+    from types import SimpleNamespace
+
+    order_id = uuid.uuid4()
+    order = SimpleNamespace(
+        id=order_id,
+        external_order_id="DJ_STALE_REVIEW",
+        state="REVISION",
+        fix_approved_by_admin=True,
+    )
+
+    class FakeSession:
+        def get(self, _model, _id):
+            return order
+
+        def refresh(self, _order):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(assignment_sync_tasks, "SessionLocal", FakeSession)
+
+    def _unexpected_client(*_args, **_kwargs):
+        raise AssertionError("stale Review job must stop before opening a Printerval client")
+
+    monkeypatch.setattr(assignment_sync_tasks, "PrintervalApiClient", _unexpected_client)
+
+    assignment_sync_tasks.sync_order_review_to_printerval_task(
+        str(order_id),
+        "old submitted link",
+        "Review",
+        expected_state="QC_PENDING",
+        expected_fix_approved=False,
+    )

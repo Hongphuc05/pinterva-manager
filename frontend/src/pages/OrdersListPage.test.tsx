@@ -146,6 +146,56 @@ describe('OrdersListPage', () => {
     expect(screen.getByText('Báo thiếu temp')).toBeInTheDocument()
   })
 
+  it('only shows Admin-approved Fix orders in the designer Fix tab', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) => {
+        if (url.includes('/api/me')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ id: 'des-fix', role: 'designer', full_name: 'Designer Fix' }),
+          })
+        }
+        if (url.includes('/api/platforms')) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ platforms: [] }) })
+        }
+        if (url.includes('/api/orders')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              orders: [
+                {
+                  id: 'fix-unreleased', external_order_id: 'DJ-HIDDEN-FIX', product_name: 'Fix chưa duyệt',
+                  state: 'REVISION', fix_approved_by_admin: false, template_missing: false,
+                  batch_id: null, sku: null, thumbnail_url: null, created_at: '2026-01-01T00:00:00Z',
+                },
+                {
+                  id: 'fix-approved', external_order_id: 'DJ-VISIBLE-FIX', product_name: 'Fix đã duyệt',
+                  state: 'REVISION', fix_approved_by_admin: true, template_missing: false,
+                  batch_id: null, sku: null, thumbnail_url: null, created_at: '2026-01-01T00:00:00Z',
+                },
+              ],
+            }),
+          })
+        }
+        return Promise.reject(new Error(`unexpected fetch: ${url}`))
+      }),
+    )
+
+    render(
+      <BrowserRouter>
+        <AuthProvider><PlatformProvider><ToastProvider><GallerySyncProvider><OrdersListPage /></GallerySyncProvider></ToastProvider></PlatformProvider></AuthProvider>
+      </BrowserRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText(/Cần Sửa Gấp \(Fix\)/i)).toBeInTheDocument())
+    fireEvent.click(screen.getByText(/Cần Sửa Gấp \(Fix\)/i))
+    expect(await screen.findByText('Fix đã duyệt')).toBeInTheDocument()
+    expect(screen.queryByText('Fix chưa duyệt')).not.toBeInTheDocument()
+  })
+
   it('renders Thời Gian column and Fix tab action buttons for Admin', async () => {
     vi.stubGlobal(
       'fetch',
@@ -180,6 +230,7 @@ describe('OrdersListPage', () => {
                   external_order_id: 'DJ999',
                   product_name: 'Fix Needed Hoodie',
                   state: 'REVISION',
+                  work_domain: 'duplicate',
                   batch_id: null,
                   sku: 'SKU999',
                   thumbnail_url: null,

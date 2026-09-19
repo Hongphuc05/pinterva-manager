@@ -1,4 +1,6 @@
 
+import pytest
+
 from app.adapters.db.models import Assignment, Order, User, WorkflowEvent
 from app.application.auth import hash_password
 from app.application.order_queries import (
@@ -77,6 +79,33 @@ def test_get_order_detail_for_user_designer_cannot_view_unassigned_order(db_sess
     assigned_result = get_order_detail_for_user(db_session, designer, str(order.id))
     assert assigned_result is not None
     assert assigned_result.external_order_id == "DJ1"
+
+
+@pytest.mark.parametrize(
+    ("role", "work_domain"),
+    [("designer", "standard"), ("designer-trello", "duplicate")],
+)
+def test_unreleased_fix_is_hidden_from_designers_until_admin_approves(db_session, role, work_domain):
+    designer = _make_user(db_session, role, f"unreleased-fix-{role}")
+    order = Order(
+        external_order_id=f"UNRELEASED-{role}",
+        state=OrderState.REVISION.value,
+        work_domain=work_domain,
+        fix_approved_by_admin=False,
+    )
+    db_session.add(order)
+    db_session.flush()
+    db_session.add(Assignment(order_id=order.id, designer_id=designer.id, status="approved"))
+    db_session.commit()
+
+    assert list_orders_for_user(db_session, designer) == []
+    assert get_order_detail_for_user(db_session, designer, str(order.id)) is None
+
+    order.fix_approved_by_admin = True
+    db_session.commit()
+
+    assert [item.id for item in list_orders_for_user(db_session, designer)] == [order.id]
+    assert get_order_detail_for_user(db_session, designer, str(order.id)) is order
 
 
 def test_trello_designer_only_sees_own_duplicate_orders(db_session):

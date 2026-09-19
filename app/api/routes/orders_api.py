@@ -47,8 +47,10 @@ from app.application.assignment_commands import (
 )
 from app.application.crawl import DiscoverFailedError, refresh_order_detail, scan_orders_fast
 from app.application.order_queries import (
+    FIX_STATES,
     get_order_detail_for_user,
     get_order_history,
+    is_unreleased_fix,
     list_orders_for_user,
 )
 from app.application.order_transitions import apply_transition
@@ -1900,6 +1902,11 @@ def api_update_order_state(
                 status.HTTP_403_FORBIDDEN,
                 "Bạn chỉ có thể cập nhật đơn thuộc phạm vi công việc của mình.",
             )
+        if is_unreleased_fix(order):
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Đơn Fix đang chờ Admin chấp nhận và giao lại; bạn chưa thể thao tác.",
+            )
         if target_state not in (OrderState.WAITING, OrderState.IN_PROGRESS, OrderState.QC_PENDING):
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN,
@@ -1982,7 +1989,13 @@ def api_update_order_state(
         # Sync Review status & Note outsource to Printerval
         try:
             from app.workers.assignment_sync_tasks import sync_order_review_to_printerval_task
-            sync_order_review_to_printerval_task.delay(str(order.id), order.note_outsource, "Review")
+            sync_order_review_to_printerval_task.delay(
+                str(order.id),
+                order.note_outsource,
+                "Review",
+                expected_state=OrderState.QC_PENDING.value,
+                expected_fix_approved=False,
+            )
         except Exception:
             pass
     elif target_state == OrderState.REVISION:
@@ -2177,7 +2190,13 @@ def api_reject_fix_to_review(
     # Sync to Printerval in background
     try:
         from app.workers.assignment_sync_tasks import sync_order_review_to_printerval_task
-        sync_order_review_to_printerval_task.delay(str(order.id), order.note_outsource, "Review")
+        sync_order_review_to_printerval_task.delay(
+            str(order.id),
+            order.note_outsource,
+            "Review",
+            expected_state=OrderState.QC_PENDING.value,
+            expected_fix_approved=False,
+        )
     except Exception:
         pass
 
@@ -2217,13 +2236,17 @@ def api_sync_printerval_status(
 
     # Build query for target orders
     query = db.query(Order).filter(Order.platform_id == platform_id)
-    if user.role == "designer":
+    if user.role in (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO):
         asgn_order_ids = (
             db.query(Assignment.order_id)
             .filter(Assignment.designer_id == user.id, Assignment.status != "cancelled")
-            .subquery()
+        )
+        expected_domain = (
+            WORK_DOMAIN_DUPLICATE if user.role == ROLE_DESIGNER_TRELLO else WORK_DOMAIN_STANDARD
         )
         query = query.filter(
+            Order.work_domain == expected_domain,
+            or_(Order.state.not_in(FIX_STATES), Order.fix_approved_by_admin.is_(True)),
             or_(
                 Order.id.in_(asgn_order_ids),
                 Order.printerval_designer == user.printerval_designer_option,
@@ -2442,13 +2465,17 @@ def api_get_orders_history(
         except ValueError:
             pass
 
-    if user.role == "designer":
+    if user.role in (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO):
         asgn_order_ids = (
             db.query(Assignment.order_id)
             .filter(Assignment.designer_id == user.id, Assignment.status != "cancelled")
-            .subquery()
+        )
+        expected_domain = (
+            WORK_DOMAIN_DUPLICATE if user.role == ROLE_DESIGNER_TRELLO else WORK_DOMAIN_STANDARD
         )
         query = query.filter(
+            Order.work_domain == expected_domain,
+            or_(Order.state.not_in(FIX_STATES), Order.fix_approved_by_admin.is_(True)),
             or_(
                 Order.id.in_(asgn_order_ids),
                 Order.printerval_designer == user.printerval_designer_option,
@@ -2572,23 +2599,12 @@ def api_get_single_order_history(
     if order is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
 
-    # If designer, ensure they have access to this order
-    if user.role == "designer":
-        asgn = (
-            db.query(Assignment)
-            .filter(
-                Assignment.order_id == order.id,
-                Assignment.designer_id == user.id,
-                Assignment.status != "cancelled",
-            )
-            .first()
-        )
-        is_assigned_name = (
-            (user.printerval_designer_option and order.printerval_designer == user.printerval_designer_option)
-            or (user.full_name and order.printerval_designer == user.full_name)
-        )
-        if not asgn and not is_assigned_name:
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "Bạn không có quyền xem lịch sử đơn hàng này")
+    # Reuse the same authorization gate as the detail page. This also hides a
+    # Printerval Fix until Admin explicitly releases it, and applies to Trello
+    # designers as well as regular designers.
+    if user.role in (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO):
+        if get_order_detail_for_user(db, user, str(order.id)) is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
 
     history = get_order_history(db, str(order.id))
     actor_ids = {e.actor_id for e in history if e.actor_id}

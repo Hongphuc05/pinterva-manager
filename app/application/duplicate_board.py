@@ -343,6 +343,12 @@ def move_duplicate_order(
     )
     if actor.role not in (ROLE_ADMIN, ROLE_DESIGNER_TRELLO):
         raise DuplicateBoardError("Bạn không có quyền thay đổi board này")
+    if (
+        actor.role == ROLE_DESIGNER_TRELLO
+        and (order.state or "").upper() in {"REVISION", "REVISION_REQUESTED", "FIX"}
+        and not order.fix_approved_by_admin
+    ):
+        raise DuplicateBoardError("Đơn Fix đang chờ Admin chấp nhận và giao lại; bạn chưa thể thao tác")
 
     # Determine destination type
     col_id = (target_column_id or "").strip()
@@ -633,7 +639,9 @@ def _reorder_duplicate_board(
             order.duplicate_board_position = position
 
 
-def list_duplicate_board(session: Session, *, platform_id: uuid.UUID) -> dict:
+def list_duplicate_board(
+    session: Session, *, platform_id: uuid.UUID, viewer: User | None = None
+) -> dict:
     platform = session.get(Platform, platform_id)
     if platform is None:
         raise DuplicateBoardError("Không tìm thấy platform đang chọn")
@@ -671,6 +679,15 @@ def list_duplicate_board(session: Session, *, platform_id: uuid.UUID) -> dict:
         )
         .all()
     )
+    if viewer and viewer.role == ROLE_DESIGNER_TRELLO:
+        orders = [
+            order
+            for order in orders
+            if not (
+                (order.state or "").upper() in {"REVISION", "REVISION_REQUESTED", "FIX"}
+                and not order.fix_approved_by_admin
+            )
+        ]
     active_assignments = (
         session.query(Assignment, User)
         .join(User, User.id == Assignment.designer_id)

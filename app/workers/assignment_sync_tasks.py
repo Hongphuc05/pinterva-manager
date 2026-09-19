@@ -149,9 +149,21 @@ def sync_assignment_to_printerval_task(order_id: str, designer_id: str) -> None:
 
 @celery_app.task(name="app.workers.assignment_sync_tasks.sync_order_review_to_printerval_task")
 def sync_order_review_to_printerval_task(
-    order_id: str, note_outsource: str | None = None, target_status: str = "Review"
+    order_id: str,
+    note_outsource: str | None = None,
+    target_status: str = "Review",
+    *,
+    expected_state: str | None = None,
+    expected_fix_approved: bool | None = None,
 ) -> None:
-    """Sync an order's Note Outsource (Drive link or instructions) and target status ("Review") to Printerval."""
+    """Sync a note and/or status to Printerval only when its workflow is still current.
+
+    A Designer's Review submission is asynchronous.  Without the expectation
+    guard, a delayed Review job could run after an Admin has accepted a newer
+    Fix request and incorrectly overwrite Printerval's Fix status.  Callers
+    that represent a state transition must therefore pass the state they
+    observed when enqueueing the job.
+    """
     from datetime import UTC, datetime
 
     logger.disabled = False
@@ -160,6 +172,28 @@ def sync_order_review_to_printerval_task(
         order = session.get(Order, uuid.UUID(order_id))
         if order is None:
             logger.error("sync_order_review_to_printerval_task: order %s not found", order_id)
+            return
+
+        def is_still_expected() -> bool:
+            """Reload before each external write so delayed jobs cannot win a newer flow."""
+            session.refresh(order)
+            if expected_state and (order.state or "").upper() != expected_state.upper():
+                return False
+            if (
+                expected_fix_approved is not None
+                and bool(order.fix_approved_by_admin) != expected_fix_approved
+            ):
+                return False
+            return True
+
+        if not is_still_expected():
+            logger.info(
+                "Skipping stale Printerval %s sync for %s (expected_state=%s, expected_fix_approved=%s)",
+                target_status,
+                order.external_order_id,
+                expected_state,
+                expected_fix_approved,
+            )
             return
 
         platform = session.get(Platform, order.platform_id) if order.platform_id else None
@@ -188,6 +222,9 @@ def sync_order_review_to_printerval_task(
 
                 note_ok = True
                 if note_outsource and note_outsource.strip():
+                    if not is_still_expected():
+                        logger.info("Skipping stale Printerval note sync for %s", order.external_order_id)
+                        return
                     note_ok = client.update_order_note_outsource(row_id, note_outsource.strip())
                     logger.info(
                         "HTTP update_order_note_outsource for %s: %s",
@@ -197,6 +234,13 @@ def sync_order_review_to_printerval_task(
 
                 status_ok = True
                 if target_status:
+                    if not is_still_expected():
+                        logger.info(
+                            "Skipping stale Printerval status sync (%s) for %s",
+                            target_status,
+                            order.external_order_id,
+                        )
+                        return
                     status_ok = client.update_order_status(row_id, target_status.lower(), locale)
                     logger.info(
                         "HTTP update_order_status (%s) for %s: %s",
@@ -244,6 +288,9 @@ def sync_order_review_to_printerval_task(
                 crawl_password=platform.account_password,
             )
             if note_outsource and note_outsource.strip():
+                if not is_still_expected():
+                    logger.info("Skipping stale Printerval note fallback for %s", order.external_order_id)
+                    return
                 try:
                     res_note = adapter.attach_result_link(order.external_order_id, note_outsource.strip())
                     logger.info("attach_result_link for %s: %s", order.external_order_id, res_note)
@@ -251,6 +298,13 @@ def sync_order_review_to_printerval_task(
                     logger.exception("Failed attach_result_link for %s", order.external_order_id)
 
             if target_status:
+                if not is_still_expected():
+                    logger.info(
+                        "Skipping stale Printerval status fallback (%s) for %s",
+                        target_status,
+                        order.external_order_id,
+                    )
+                    return
                 try:
                     res_status = adapter.set_status(order.external_order_id, target_status)
                     logger.info(
@@ -266,4 +320,3 @@ def sync_order_review_to_printerval_task(
             session_cm.__exit__(None, None, None)
     finally:
         session.close()
-

@@ -820,7 +820,9 @@ export function OrdersListPage() {
     return orders.filter((o) => o.work_domain !== 'duplicate' && o.duplicate_check_status === 'non_duplicate')
   }, [orders])
 
-  // Admin 5 Sub-Tabs Groups (excludes duplicate domain orders from standard tabs)
+  // Admin operational tabs stay scoped to standard work, except Fix: every
+  // returned Fix needs the same central Admin decision before any designer can
+  // resume, including cards on the shared duplicate board.
   const waitingOrders = useMemo(() => {
     return orders.filter((o) => {
       if (o.work_domain === 'duplicate') return false
@@ -861,7 +863,6 @@ export function OrdersListPage() {
 
   const fixOrders = useMemo(() => {
     return orders.filter((o) => {
-      if (o.work_domain === 'duplicate') return false
       const st = (o.state || '').toUpperCase()
       return ['REVISION', 'REVISION_REQUESTED', 'FIX'].includes(st)
     })
@@ -925,6 +926,7 @@ export function OrdersListPage() {
     (o) =>
       !o.template_missing &&
       !o.is_paid &&
+      o.fix_approved_by_admin === true &&
       ['REVISION', 'REVISION_REQUESTED', 'FIX'].includes(o.state.toUpperCase())
   )
   const designerReviewOrders = orders.filter(

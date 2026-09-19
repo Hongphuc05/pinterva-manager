@@ -560,19 +560,27 @@ def test_api_update_order_state_flow(client, db_session):
     assert resp.status_code == 200
     assert resp.json()["state"] == "REVISION"
 
-    # 5. Designer re-submits to REVIEW
+    # 5. Admin explicitly releases the Fix back to the assigned designer.
+    resp = client.post(
+        f"/api/orders/{order.id}/approve-fix",
+        json={"designer_id": str(des.id), "designer_note": "Sửa theo góp ý QC"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["fix_approved_by_admin"] is True
+
+    # 6. Designer re-submits to REVIEW
     client.post("/api/login", json={"username": "des_flow", "password": "s3cret!"})
     resp = client.patch(f"/api/orders/{order.id}/state", json={"state": "Review"})
     assert resp.status_code == 200
     assert resp.json()["state"] == "QC_PENDING"
 
-    # 6. Admin marks DONE
+    # 7. Admin marks DONE
     client.post("/api/login", json={"username": "admin_flow", "password": "s3cret!"})
     resp = client.patch(f"/api/orders/{order.id}/state", json={"state": "Done"})
     assert resp.status_code == 200
     assert resp.json()["state"] == "DONE"
 
-    # 7. Check workload API
+    # 8. Check workload API
     resp = client.get("/api/designers/workload")
     assert resp.status_code == 200
     workload = resp.json()
@@ -581,7 +589,7 @@ def test_api_update_order_state_flow(client, db_session):
     assert des_stat["done_count"] == 1
     assert des_stat["total_orders"] == 1
 
-    # 8. Check orders history API
+    # 9. Check orders history API
     resp = client.get("/api/orders-history")
     assert resp.status_code == 200
     hist_data = resp.json()
@@ -634,7 +642,7 @@ def test_resolve_missing_template_returns_assigned_order_to_doing(client, db_ses
     assert assignment.sub_status == "todo"
 
 
-def test_api_approve_and_reject_fix_flow(client, db_session):
+def test_api_approve_and_reject_fix_flow(client, db_session, monkeypatch):
     import uuid
 
     from app.adapters.db.models import Assignment, Order, Platform
@@ -653,6 +661,15 @@ def test_api_approve_and_reject_fix_flow(client, db_session):
 
     app = client.app
     app.dependency_overrides[get_current_platform_id] = lambda: platform.id
+
+    from app.workers import assignment_sync_tasks
+
+    sync_calls: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(
+        assignment_sync_tasks.sync_order_review_to_printerval_task,
+        "delay",
+        lambda *args, **kwargs: sync_calls.append((args, kwargs)),
+    )
 
     _login(client, db_session, "admin", username="admin_fix_test")
     des = _login(client, db_session, "designer", username="des_fix_test")
@@ -695,6 +712,7 @@ def test_api_approve_and_reject_fix_flow(client, db_session):
     db_session.commit()
 
     # 3. Admin approves fix for designer
+    sync_count_before_approval = len(sync_calls)
     client.post("/api/login", json={"username": "admin_fix_test", "password": "s3cret!"})
     resp = client.post(
         f"/api/orders/{order.id}/approve-fix",
@@ -704,6 +722,9 @@ def test_api_approve_and_reject_fix_flow(client, db_session):
     data = resp.json()
     assert data["fix_approved_by_admin"] is True
     assert "admin verified" in data["note_outsource"]
+    # Printerval has already set Fix. Admin approval only releases the local
+    # assignment; it must not overwrite the source status again.
+    assert len(sync_calls) == sync_count_before_approval
 
     # 4. Check TODO filter returns this order
     resp = client.get("/api/orders?status=TODO")
@@ -757,3 +778,33 @@ def test_api_orders_list_returns_active_assignment_id_for_designer(client, db_se
             "assignment_id": str(assignment.id),
         }
     ]
+
+
+def test_designer_cannot_list_view_or_update_an_unreleased_fix(client, db_session):
+    _seed_platform(db_session)
+    designer = _login(client, db_session, "designer", "unreleased_fix_orders_designer")
+    order = Order(
+        external_order_id="DJ-UNRELEASED-FIX",
+        platform_id=DEFAULT_PLATFORM_ID,
+        state=OrderState.REVISION.value,
+        fix_approved_by_admin=False,
+    )
+    db_session.add(order)
+    db_session.flush()
+    db_session.add(Assignment(order_id=order.id, designer_id=designer.id, status="approved"))
+    db_session.commit()
+
+    assert client.get("/api/orders").json()["orders"] == []
+    assert client.get(f"/api/orders/{order.id}").status_code == 404
+    assert client.get(f"/api/orders/{order.id}/history").status_code == 404
+    assert client.get("/api/orders-history", params={"order_id": str(order.id)}).json()["items"] == []
+    response = client.patch(
+        f"/api/orders/{order.id}/state",
+        json={"state": "QC_PENDING", "drive_url": "https://drive.google.com/file/d/unreleased/view"},
+    )
+    assert response.status_code == 409
+
+    order.fix_approved_by_admin = True
+    db_session.commit()
+
+    assert [item["id"] for item in client.get("/api/orders").json()["orders"]] == [str(order.id)]

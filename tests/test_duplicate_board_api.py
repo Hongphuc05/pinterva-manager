@@ -330,6 +330,42 @@ def test_regular_designer_cannot_see_duplicate_order_via_legacy_printerval_match
     assert response.json()["orders"] == []
 
 
+def test_trello_designer_cannot_see_or_move_an_unreleased_fix(client, db_session):
+    platform = _platform(db_session)
+    designer, headers = _login(client, db_session, "designer-trello", "trello-unreleased-fix", platform.id)
+    order = Order(
+        external_order_id="DUP-UNRELEASED-FIX",
+        platform_id=platform.id,
+        work_domain="duplicate",
+        state="REVISION",
+        fix_approved_by_admin=False,
+    )
+    db_session.add(order)
+    db_session.flush()
+    db_session.add(Assignment(order_id=order.id, designer_id=designer.id, status="approved"))
+    db_session.commit()
+    client.app.dependency_overrides[get_current_platform_id] = lambda: platform.id
+    try:
+        board = client.get("/api/duplicate-board", headers=headers)
+        move = client.post(
+            "/api/duplicate-board/move",
+            json={"order_id": str(order.id), "target_column_id": "done"},
+            headers=headers,
+        )
+    finally:
+        del client.app.dependency_overrides[get_current_platform_id]
+
+    assert board.status_code == 200
+    assert all(
+        card["id"] != str(order.id)
+        for column in board.json()["columns"]
+        for card in column["cards"]
+    )
+    assert move.status_code == 400
+    db_session.refresh(order)
+    assert order.state == "REVISION"
+
+
 def test_support_can_set_duplicate_check_status_and_reversible(client, db_session, monkeypatch):
     platform = _platform(db_session)
     support, headers = _login(client, db_session, "support", "support-duplicate-check-user", platform.id)

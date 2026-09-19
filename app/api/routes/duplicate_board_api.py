@@ -86,7 +86,7 @@ def api_duplicate_board(
     db: Session = Depends(get_db),
 ):
     try:
-        return DuplicateBoardResponse(**list_duplicate_board(db, platform_id=platform_id))
+        return DuplicateBoardResponse(**list_duplicate_board(db, platform_id=platform_id, viewer=user))
     except DuplicateBoardError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
 
