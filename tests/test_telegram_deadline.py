@@ -34,5 +34,7 @@ def test_new_order_notification_uses_tacahu_deadline(db_session):
 
     payload = send.call_args.args[1]
     message = payload.get("caption") or payload["text"]
-    assert "22/09/2026 09:30" in message
+    # Stored timestamps are UTC; Telegram must display the Admin-facing
+    # Vietnam time rather than silently showing UTC.
+    assert "22/09/2026 16:30" in message
     assert "23/09/2026 16:00" not in message

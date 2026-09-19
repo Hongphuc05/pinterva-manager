@@ -47,6 +47,7 @@ type ResultVersion = {
 
 type OrderDetail = {
   id: string
+  version: number
   external_order_id: string
   state: string
   product_name: string | null
@@ -85,6 +86,7 @@ type OrderDetail = {
   platform_designer?: string | null
   platform_status?: string | null
   created_at: string
+  updated_at: string
 }
 
 type WorkflowEvent = {
@@ -179,7 +181,7 @@ export function OrderDetailPage() {
     try {
       await apiFetch(`/assignments/${order.assignment_id}/flag-missing-template`, {
         method: 'POST',
-        body: JSON.stringify({ request_id: crypto.randomUUID() }),
+        body: JSON.stringify({ request_id: crypto.randomUUID(), expected_version: order.version }),
       })
       setActionSuccess('Đã báo thiếu temp. Đơn được chuyển sang mục Chờ cập nhật.')
       await loadOrderDetail()
@@ -213,6 +215,7 @@ export function OrderDetailPage() {
     setShowSubmitModal(false)
     try {
       const submittedText = driveUrl.trim()
+      let submittedByAssignment = false
       if (order.assignment_id) {
         try {
           await apiFetch(`/assignments/${order.assignment_id}/results`, {
@@ -220,20 +223,25 @@ export function OrderDetailPage() {
             body: JSON.stringify({
               drive_url: submittedText || 'Đã hoàn thành',
               request_id: crypto.randomUUID(),
+              expected_version: order.version,
             }),
           })
+          submittedByAssignment = true
         } catch (assignErr: any) {
           console.warn('Ghi nhận assignment result:', assignErr)
         }
       }
-      await apiFetch(`/orders/${order.id}/state`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          state: 'QC_PENDING',
-          drive_url: submittedText || undefined,
-          note_outsource: submittedText || undefined,
-        }),
-      })
+      if (!submittedByAssignment) {
+        await apiFetch(`/orders/${order.id}/state`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            state: 'QC_PENDING',
+            drive_url: submittedText || undefined,
+            note_outsource: submittedText || undefined,
+            expected_version: order.version,
+          }),
+        })
+      }
       setActionSuccess('Nộp bài QC và chuyển sang Review (Chờ duyệt) thành công!')
       window.dispatchEvent(new CustomEvent('orders-updated'))
       await loadOrderDetail()
@@ -260,7 +268,7 @@ export function OrderDetailPage() {
     try {
       await apiFetch(`/orders/${order.id}/state`, {
         method: 'PATCH',
-        body: JSON.stringify({ state: newState }),
+        body: JSON.stringify({ state: newState, expected_version: order.version }),
       })
       const stateLabel =
         newState === 'IN_PROGRESS'
@@ -568,6 +576,7 @@ export function OrderDetailPage() {
                 {isAdmin ? (
                   <StatusDropdown
                     orderId={order.id}
+                    orderVersion={order.version}
                     currentState={order.state}
                     onStatusChanged={(newState) => {
                       setOrder((prev) => prev ? { ...prev, state: newState } : null)
@@ -1240,6 +1249,7 @@ export function OrderDetailPage() {
           isOpen={fixActionModal.isOpen}
           onClose={() => setFixActionModal(null)}
           orderId={order.id}
+          orderVersion={order.version}
           externalOrderId={order.external_order_id}
           mode={fixActionModal.mode}
           currentNote={order.note_outsource}

@@ -32,6 +32,7 @@ type Task = {
   sub_status: string | null
   order: {
     id: string
+    version: number
     external_order_id: string
     state: string
     product_name: string | null
@@ -41,6 +42,7 @@ type Task = {
     product_variants: { name: string; value: string }[] | null
     product_skus: { sku?: string | null }[] | null
     deadline_tacahu: string | null
+    updated_at?: string | null
     note_outsource: string | null
     fix_return_count?: number
     designer_note: string
@@ -92,12 +94,15 @@ export function MyTasksPage() {
     setCurrentPage(1)
   }, [tasks.length])
 
-  async function flagMissingTemplate(assignmentId: string) {
-    setFlaggingAssignmentId(assignmentId)
+  async function flagMissingTemplate(task: Task) {
+    setFlaggingAssignmentId(task.assignment_id)
     try {
-      await apiFetch(`/assignments/${assignmentId}/flag-missing-template`, {
+      await apiFetch(`/assignments/${task.assignment_id}/flag-missing-template`, {
         method: 'POST',
-        body: JSON.stringify({ request_id: crypto.randomUUID() }),
+        body: JSON.stringify({
+          request_id: crypto.randomUUID(),
+          expected_version: task.order.version,
+        }),
       })
       await loadTasks()
     } catch (caught) {
@@ -329,7 +334,7 @@ export function MyTasksPage() {
                 <div className="shrink-0 w-full sm:w-auto text-right border-t sm:border-t-0 pt-3 sm:pt-0 border-slate-100">
                   <button
                     type="button"
-                    onClick={() => flagMissingTemplate(task.assignment_id)}
+                    onClick={() => flagMissingTemplate(task)}
                     disabled={flaggingAssignmentId === task.assignment_id}
                     className="mb-2 inline-flex w-full items-center justify-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
                   >

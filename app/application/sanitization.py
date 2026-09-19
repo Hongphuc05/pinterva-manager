@@ -82,6 +82,7 @@ def sanitize_custom_config(config: dict[str, Any] | None) -> dict[str, Any] | No
 
 class DesignerOrderSummaryOut(BaseModel):
     id: Any
+    version: int
     external_order_id: str
     state: str
     work_domain: str = "standard"
@@ -96,6 +97,7 @@ class DesignerOrderSummaryOut(BaseModel):
     order_created_at_ext: Any | None = None
     deadline_tacahu: Any | None = None
     created_at: Any | None = None
+    updated_at: Any | None = None
     status_changed_at: Any | None = None
     note_outsource: str = ""
     previous_note_outsource: str | None = None
@@ -115,6 +117,7 @@ class DesignerOrderSummaryOut(BaseModel):
 
 class DesignerOrderDetailOut(BaseModel):
     id: Any
+    version: int
     external_order_id: str
     state: str
     work_domain: str = "standard"
@@ -130,6 +133,7 @@ class DesignerOrderDetailOut(BaseModel):
     order_created_at_ext: Any | None = None
     created_at_ext: Any | None = None
     created_at: Any | None = None
+    updated_at: Any | None = None
     status_changed_at: Any | None = None
     note_outsource: str = ""
     previous_note_outsource: str | None = None

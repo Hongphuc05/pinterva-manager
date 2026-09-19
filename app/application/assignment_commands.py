@@ -19,6 +19,7 @@ from app.application.printerval_assignment_requests import (
     create_request,
     normalize_printerval_status,
 )
+from app.application.concurrency import require_expected_order_version
 from app.domain.models import OrderState
 
 
@@ -35,6 +36,7 @@ def queue_assignment_command(
     designer_id: uuid.UUID | None,
     printerval_designer: str | None,
     printerval_status: str,
+    expected_versions: dict[uuid.UUID, int] | None = None,
 ) -> tuple[list[PrintervalAssignmentRequest], int]:
     """Persist one assignment intent for each selected order and enqueue its sync.
 
@@ -76,10 +78,14 @@ def queue_assignment_command(
     orders = (
         session.query(Order)
         .filter(Order.id.in_(order_ids), Order.platform_id == platform_id)
+        .order_by(Order.id)
+        .with_for_update()
         .all()
     )
     if len(orders) != len(order_ids):
         raise AssignmentCommandError("Một số đơn hàng không tồn tại hoặc không thuộc nền tảng này")
+    for order in orders:
+        require_expected_order_version(order, (expected_versions or {}).get(order.id))
 
     requests: list[PrintervalAssignmentRequest] = []
     now_utc = datetime.now(UTC)
@@ -177,6 +183,7 @@ def revoke_assignment_command(
     platform_id: uuid.UUID,
     actor: User,
     order_ids: list[uuid.UUID],
+    expected_versions: dict[uuid.UUID, int] | None = None,
 ) -> int:
     """Revoke active assignments for orders before designer submits work.
     Reverts order state to WAITING, clears assigned designer, and cancels active assignments.
@@ -189,10 +196,14 @@ def revoke_assignment_command(
     orders = (
         session.query(Order)
         .filter(Order.id.in_(order_ids), Order.platform_id == platform_id)
+        .order_by(Order.id)
+        .with_for_update()
         .all()
     )
     if len(orders) != len(order_ids):
         raise AssignmentCommandError("Một số đơn hàng không tồn tại hoặc không thuộc nền tảng này")
+    for order in orders:
+        require_expected_order_version(order, (expected_versions or {}).get(order.id))
 
     # Only allowed before designer submits review (state not in QC_PENDING, RESULT_SUBMITTED, REVIEW, DONE, etc.)
     non_revocable = [

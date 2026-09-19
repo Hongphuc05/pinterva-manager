@@ -24,12 +24,14 @@ router = APIRouter()
 
 class DuplicateCardOut(BaseModel):
     id: str
+    version: int
     external_order_id: str
     product_name: str | None
     thumbnail_url: str | None
     deadline_tacahu: datetime | None
     order_created_at_ext: datetime | None = None
     created_at: datetime | None = None
+    updated_at: datetime | None = None
     status_changed_at: datetime | None = None
     paid_at: datetime | None = None
     is_paid: bool = False

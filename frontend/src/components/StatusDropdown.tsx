@@ -56,6 +56,7 @@ export const STATUS_OPTIONS: StatusOption[] = [
 
 type StatusDropdownProps = {
   orderId: string
+  orderVersion?: number
   externalOrderId?: string
   currentState: string
   onStatusChanged?: (newState: string) => void
@@ -64,6 +65,7 @@ type StatusDropdownProps = {
 
 export function StatusDropdown({
   orderId,
+  orderVersion,
   externalOrderId: _externalOrderId,
   currentState,
   onStatusChanged,
@@ -188,7 +190,10 @@ export function StatusDropdown({
     try {
       await apiFetch<{ ok: boolean; state: string }>(`/orders/${orderId}/state`, {
         method: 'PATCH',
-        body: JSON.stringify({ state: opt.key }),
+        body: JSON.stringify({
+          state: opt.key,
+          ...(typeof orderVersion === 'number' ? { expected_version: orderVersion } : {}),
+        }),
       })
       onStatusChanged?.(opt.key)
       window.dispatchEvent(new CustomEvent('orders-updated'))

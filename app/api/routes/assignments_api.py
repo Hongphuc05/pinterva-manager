@@ -7,6 +7,7 @@ from pydantic import AliasChoices, BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import User
+from app.api.concurrency import OrderCommandPayload
 from app.api.deps import get_current_platform_id, get_db, require_role
 from app.application.assignment_commands import (
     AssignmentCommandError,
@@ -17,8 +18,9 @@ from app.application.assignment_commands import (
 router = APIRouter(prefix="/assignments", tags=["assignments"])
 
 
-class CreateAssignmentRequest(BaseModel):
+class CreateAssignmentRequest(OrderCommandPayload):
     order_ids: list[uuid.UUID] = Field(min_length=1, max_length=100)
+    expected_versions: dict[uuid.UUID, int] | None = None
     designer_id: uuid.UUID | None = None
     # Accept the temporary frontend names introduced when the UI label changed
     # from Printerval to Print.  The command layer remains the single contract.
@@ -37,8 +39,9 @@ class CreateAssignmentResponse(BaseModel):
     queued_count: int
 
 
-class RevokeAssignmentRequest(BaseModel):
+class RevokeAssignmentRequest(OrderCommandPayload):
     order_ids: list[uuid.UUID] = Field(min_length=1, max_length=100)
+    expected_versions: dict[uuid.UUID, int] | None = None
 
 
 class RevokeAssignmentResponse(BaseModel):
@@ -62,6 +65,7 @@ def create_assignments(
             designer_id=payload.designer_id,
             printerval_designer=payload.printerval_designer,
             printerval_status=payload.printerval_status,
+            expected_versions=payload.expected_versions,
         )
     except AssignmentCommandError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
@@ -83,7 +87,8 @@ def revoke_assignments(
             db,
             platform_id=platform_id,
             actor=user,
-            order_ids=payload.order_ids,
+        order_ids=payload.order_ids,
+        expected_versions=payload.expected_versions,
         )
     except AssignmentCommandError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc

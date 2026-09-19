@@ -52,6 +52,7 @@ class DesignerSummaryOut(BaseModel):
 
 class CreditedTaskOut(BaseModel):
     order_id: str
+    order_version: int
     external_order_id: str
     product_name: str | None
     thumbnail_url: str | None
@@ -372,6 +373,7 @@ def get_finance_stats(
         if key not in submissions_by_key:
             submissions_by_key[key] = {
                 "order_id": str(order.id),
+                "order_version": order.version,
                 "external_order_id": order.external_order_id,
                 "product_name": order.product_name,
                 "thumbnail_url": order.thumbnail_url,
@@ -438,6 +440,7 @@ def get_finance_stats(
         if key not in submissions_by_key:
             submissions_by_key[key] = {
                 "order_id": str(order.id),
+                "order_version": order.version,
                 "external_order_id": order.external_order_id,
                 "product_name": order.product_name,
                 "thumbnail_url": order.thumbnail_url,
@@ -506,6 +509,7 @@ def get_finance_stats(
                 if key not in submissions_by_key:
                     submissions_by_key[key] = {
                         "order_id": str(order.id),
+                        "order_version": order.version,
                         "external_order_id": order.external_order_id,
                         "product_name": order.product_name,
                         "thumbnail_url": order.thumbnail_url,

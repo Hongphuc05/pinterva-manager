@@ -29,12 +29,14 @@ import { useToast } from '../context/ToastContext'
 
 type DuplicateCard = {
   id: string
+  version: number
   external_order_id: string
   product_name: string | null
   thumbnail_url: string | null
   deadline_tacahu: string | null
   order_created_at_ext?: string | null
   created_at?: string | null
+  updated_at?: string | null
   status_changed_at?: string | null
   paid_at?: string | null
   is_paid?: boolean
@@ -61,6 +63,7 @@ type DuplicateColumn = {
 
 type FixAction = {
   orderId: string
+  orderVersion: number
   externalOrderId: string
   mode: 'approve' | 'reject'
   currentNote: string
@@ -1033,6 +1036,7 @@ export function DuplicateBoardPage() {
                               draggable={false}
                               onClick={() => setFixAction({
                                 orderId: card.id,
+                                orderVersion: card.version,
                                 externalOrderId: card.external_order_id,
                                 mode: 'approve',
                                 currentNote: card.note_outsource,
@@ -1047,6 +1051,7 @@ export function DuplicateBoardPage() {
                               draggable={false}
                               onClick={() => setFixAction({
                                 orderId: card.id,
+                                orderVersion: card.version,
                                 externalOrderId: card.external_order_id,
                                 mode: 'reject',
                                 currentNote: card.note_outsource,
@@ -1095,6 +1100,7 @@ export function DuplicateBoardPage() {
           isOpen
           mode={fixAction.mode}
           orderId={fixAction.orderId}
+          orderVersion={fixAction.orderVersion}
           externalOrderId={fixAction.externalOrderId}
           currentNote={fixAction.currentNote}
           previousNote={fixAction.previousNote}

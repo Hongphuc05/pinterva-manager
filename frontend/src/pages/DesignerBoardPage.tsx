@@ -27,6 +27,7 @@ import { LinkifiedText } from '../components/LinkifiedText'
 
 type DesignerOrder = {
   id: string
+  version: number
   external_order_id: string
   state: string
   thumbnail_url: string | null
@@ -69,6 +70,7 @@ export function DesignerBoardPage() {
   const [fixActionModal, setFixActionModal] = useState<{
     isOpen: boolean
     orderId: string
+    orderVersion: number
     externalOrderId: string
     mode: 'approve' | 'reject'
     currentNote?: string | null
@@ -582,6 +584,7 @@ export function DesignerBoardPage() {
                                   <div className="pt-1 flex items-center justify-between">
                                     <StatusDropdown
                                       orderId={o.id}
+                                      orderVersion={o.version}
                                       externalOrderId={o.external_order_id}
                                       currentState={o.state}
                                     />
@@ -862,6 +865,7 @@ export function DesignerBoardPage() {
                                             setFixActionModal({
                                               isOpen: true,
                                               orderId: o.id,
+                                              orderVersion: o.version,
                                               externalOrderId: o.external_order_id,
                                               mode: 'approve',
                                               currentNote: o.note_outsource || '',
@@ -881,6 +885,7 @@ export function DesignerBoardPage() {
                                             setFixActionModal({
                                               isOpen: true,
                                               orderId: o.id,
+                                              orderVersion: o.version,
                                               externalOrderId: o.external_order_id,
                                               mode: 'reject',
                                               currentNote: o.note_outsource || '',
@@ -1057,6 +1062,7 @@ export function DesignerBoardPage() {
           isOpen={fixActionModal.isOpen}
           onClose={() => setFixActionModal(null)}
           orderId={fixActionModal.orderId}
+          orderVersion={fixActionModal.orderVersion}
           externalOrderId={fixActionModal.externalOrderId}
           mode={fixActionModal.mode}
           currentNote={fixActionModal.currentNote || ''}

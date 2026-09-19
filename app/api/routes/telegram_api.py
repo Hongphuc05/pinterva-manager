@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
@@ -160,6 +160,8 @@ async def api_telegram_webhook(
                 # Admin accepts fix
                 order.state = OrderState.REVISION.value
                 order.fix_approved_by_admin = True
+                order.fix_deadline_at = datetime.now(UTC) + timedelta(hours=1)
+                order.deadline_overdue_notified_at = None
                 order.status_changed_at = datetime.now(UTC)
                 action_log.status = "executed"
                 action_log.executed_at = datetime.now(UTC)

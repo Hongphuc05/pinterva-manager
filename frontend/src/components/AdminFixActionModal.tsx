@@ -6,6 +6,7 @@ interface AdminFixActionModalProps {
   isOpen: boolean
   mode: 'approve' | 'reject'
   orderId: string
+  orderVersion?: number
   externalOrderId: string
   currentNote: string
   previousNote?: string | null
@@ -17,6 +18,7 @@ export function AdminFixActionModal({
   isOpen,
   mode,
   orderId,
+  orderVersion,
   externalOrderId,
   currentNote,
   previousNote,
@@ -46,7 +48,10 @@ export function AdminFixActionModal({
           `/orders/${orderId}/approve-fix`,
           {
             method: 'POST',
-            body: JSON.stringify({ note_outsource: noteText.trim() }),
+            body: JSON.stringify({
+              note_outsource: noteText.trim(),
+              ...(typeof orderVersion === 'number' ? { expected_version: orderVersion } : {}),
+            }),
           }
         )
         onSuccess(res.note_outsource || noteText.trim())
@@ -55,7 +60,10 @@ export function AdminFixActionModal({
           `/orders/${orderId}/reject-fix-to-review`,
           {
             method: 'POST',
-            body: JSON.stringify({ note_outsource: noteText.trim() }),
+            body: JSON.stringify({
+              note_outsource: noteText.trim(),
+              ...(typeof orderVersion === 'number' ? { expected_version: orderVersion } : {}),
+            }),
           }
         )
         onSuccess(res.note_outsource || noteText.trim())

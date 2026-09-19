@@ -84,6 +84,7 @@ export type DesignerSummary = {
 
 export type CreditedTask = {
   order_id: string
+  order_version: number
   external_order_id: string
   product_name: string | null
   thumbnail_url: string | null

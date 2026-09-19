@@ -886,9 +886,7 @@ describe('OrdersListPage', () => {
     await waitFor(() => {
       expect(assignmentResultBody).toBeTruthy()
       expect(assignmentResultBody.drive_url).toBe('https://drive.google.com/file/d/123/view')
-      expect(patchedStateBody).toBeTruthy()
-      expect(patchedStateBody.state).toBe('QC_PENDING')
-      expect(patchedStateBody.drive_url).toBe('https://drive.google.com/file/d/123/view')
+      expect(patchedStateBody).toBeNull()
     })
   })
 
@@ -969,4 +967,3 @@ describe('OrdersListPage', () => {
     expect(screen.getByText('Designer A')).toBeInTheDocument()
   })
 })
-

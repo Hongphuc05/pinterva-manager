@@ -1,8 +1,10 @@
 export class ApiError extends Error {
   status: number
-  constructor(status: number, message: string) {
+  detail: unknown
+  constructor(status: number, message: string, detail: unknown = message) {
     super(message)
     this.status = status
+    this.detail = detail
   }
 }
 
@@ -34,13 +36,19 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   }
   if (!resp.ok) {
     let message = resp.statusText
+    let detail: unknown = undefined
     try {
       const body = await resp.json()
-      message = body.detail ?? message
+      detail = body.detail
+      const detailMessage =
+        typeof detail === 'object' && detail !== null && 'message' in detail && typeof detail.message === 'string'
+          ? detail.message
+          : undefined
+      message = typeof detail === 'string' ? detail : detailMessage ?? message
     } catch {
       // response wasn't JSON — keep statusText
     }
-    throw new ApiError(resp.status, message)
+    throw new ApiError(resp.status, message, detail)
   }
   if (resp.status === 204) return undefined as T
   return resp.json() as Promise<T>

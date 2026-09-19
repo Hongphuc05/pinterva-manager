@@ -175,6 +175,11 @@ class Order(Base):
     deadline_tacahu: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # A Fix approved by Admin has a short, explicit designer deadline.  The
+    # notification timestamp is persisted so the periodic overdue scanner is
+    # idempotent rather than spamming Admin on every run.
+    fix_deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deadline_overdue_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     note_outsource: Mapped[str] = mapped_column(
         Text, nullable=False, default="", server_default=text("''")
     )
@@ -208,6 +213,7 @@ class Order(Base):
     template_missing_reported_by_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id"), nullable=True
     )
+    template_missing_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     order_note: Mapped[str] = mapped_column(
         Text, nullable=False, default="", server_default=text("''")
     )

@@ -16,6 +16,7 @@ from app.adapters.db.models import (
 )
 from app.adapters.google.drive_interface import DriveAdapter
 from app.application.operations import run_idempotent
+from app.application.concurrency import require_expected_order_version
 from app.application.order_transitions import apply_transition
 from app.application.sanitization import sanitize_order_detail_for_designer
 from app.domain.models import OrderState
@@ -129,6 +130,7 @@ def list_my_tasks(session: Session, designer_id: uuid.UUID) -> list[dict]:
         )
         order_dict = {
             "id": str(order.id),
+            "version": order.version,
             "external_order_id": order.external_order_id,
             "state": order.state,
             "product_name": order.product_name,
@@ -141,6 +143,7 @@ def list_my_tasks(session: Session, designer_id: uuid.UUID) -> list[dict]:
                 order.deadline_tacahu.isoformat() if order.deadline_tacahu else None
             ),
             "created_at": order.created_at.isoformat() if order.created_at else None,
+            "updated_at": order.updated_at.isoformat() if order.updated_at else None,
             "note_outsource": order.note_outsource,
             "fix_return_count": order.fix_return_count,
             "designer_note": order.designer_note,
@@ -171,9 +174,11 @@ def start_task(
     designer_id: uuid.UUID,
     idempotency_key: str,
     request_fingerprint: str,
+    expected_version: int | None = None,
 ) -> dict:
     def _do() -> dict:
         assignment, order = _owned_task(session, assignment_id, designer_id, lock=True)
+        require_expected_order_version(order, expected_version)
         if order.state == OrderState.REVISION.value:
             sub_status = "fixing"
         else:
@@ -184,7 +189,8 @@ def start_task(
         )
         assignment.sub_status = sub_status
         session.add(assignment)
-        return {"assignment_id": str(assignment.id), "state": order.state, "sub_status": sub_status}
+        session.flush()
+        return {"assignment_id": str(assignment.id), "state": order.state, "sub_status": sub_status, "version": order.version}
 
     return run_idempotent(
         session, idempotency_key, "start_task", _do, request_fingerprint=request_fingerprint
@@ -198,15 +204,17 @@ def update_sub_status(
     sub_status: str,
     idempotency_key: str,
     request_fingerprint: str,
+    expected_version: int | None = None,
 ) -> dict:
     if sub_status not in SUB_STATUSES:
         raise ValueError("sub_status must be one of doing, fixing, done")
 
     def _do() -> dict:
         assignment, order = _owned_task(session, assignment_id, designer_id, lock=True)
+        require_expected_order_version(order, expected_version)
         assignment.sub_status = sub_status
         session.add(assignment)
-        return {"assignment_id": str(assignment.id), "state": order.state, "sub_status": sub_status}
+        return {"assignment_id": str(assignment.id), "state": order.state, "sub_status": sub_status, "version": order.version}
 
     return run_idempotent(
         session, idempotency_key, "update_sub_status", _do, request_fingerprint=request_fingerprint
@@ -219,13 +227,16 @@ def flag_missing_template(
     designer_id: uuid.UUID,
     idempotency_key: str,
     request_fingerprint: str,
+    expected_version: int | None = None,
 ) -> dict:
     """Move an owned task to the internal waiting-for-template queue."""
     def _do() -> dict:
         assignment, order = _owned_task(session, assignment_id, designer_id, lock=True)
+        require_expected_order_version(order, expected_version)
         order.template_missing = True
         order.template_missing_reported_at = datetime.now(UTC)
         order.template_missing_reported_by_id = designer_id
+        order.template_missing_notified_at = datetime.now(UTC)
         assignment.sub_status = "waiting_template"
         session.add_all([order, assignment])
         session.add(WorkflowEvent(
@@ -239,7 +250,8 @@ def flag_missing_template(
                 "description": "Designer báo đơn thiếu temp và chờ Admin cập nhật.",
             },
         ))
-        return {"assignment_id": str(assignment.id), "state": order.state, "sub_status": assignment.sub_status}
+        session.flush()
+        return {"assignment_id": str(assignment.id), "order_id": str(order.id), "state": order.state, "sub_status": assignment.sub_status, "version": order.version}
 
     return run_idempotent(
         session, idempotency_key, "flag_missing_template", _do,
@@ -272,9 +284,11 @@ def submit_result(
     drive_url: str,
     idempotency_key: str,
     request_fingerprint: str,
+    expected_version: int | None = None,
 ) -> dict:
     def _do() -> dict:
         assignment, order = _owned_task(session, assignment_id, designer_id, lock=True)
+        require_expected_order_version(order, expected_version)
         if order.state not in (OrderState.IN_PROGRESS.value, OrderState.WAITING.value, OrderState.REVISION.value):
             raise ValueError(f"Task must be in progress, waiting, or revision to submit (current state: {order.state})")
         _verify_drive(drive_adapter, drive_url)
@@ -304,13 +318,17 @@ def submit_result(
             },
             commit=False,
         )
+        order.fix_deadline_at = None
+        order.deadline_overdue_notified_at = None
         assignment.sub_status = "done"
         session.add(assignment)
+        session.flush()
         return {
             "assignment_id": str(assignment.id),
             "result_version_id": str(result_version.id),
             "version_marker": result_version.version_marker,
             "state": order.state,
+            "version": order.version,
         }
 
     return run_idempotent(

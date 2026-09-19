@@ -47,6 +47,7 @@ import {
 
 export type OrderSummary = {
   id: string
+  version: number
   external_order_id: string
   state: string
   work_domain: string
@@ -70,6 +71,7 @@ export type OrderSummary = {
   platform_status?: string | null
   platform_assignment_lifecycle?: string | null
   created_at: string
+  updated_at: string
   status_changed_at?: string | null
   note_outsource?: string | null
   previous_note_outsource?: string | null
@@ -427,6 +429,12 @@ export function OrdersListPage() {
         method: 'POST',
         body: JSON.stringify({
           order_ids: selectedOrderIds,
+          expected_versions: Object.fromEntries(
+            selectedOrderIds.flatMap((id) => {
+              const order = orders.find((item) => item.id === id)
+              return order ? [[id, order.version]] : []
+            }),
+          ),
           designer_id: bulkDesignerId,
           printerval_designer: platformDes,
           printerval_status: 'Doing',
@@ -533,7 +541,12 @@ export function OrdersListPage() {
     try {
       const res = await apiFetch<{ message: string; revoked_count: number }>('/assignments/revoke', {
         method: 'POST',
-        body: JSON.stringify({ order_ids: [orderId] }),
+        body: JSON.stringify({
+          order_ids: [orderId],
+          ...(typeof assigningOrder.version === 'number'
+            ? { expected_versions: { [orderId]: assigningOrder.version } }
+            : {}),
+        }),
       })
       showToast(res.message || `Đã hủy phân công cho đơn ${orderCode}.`, 'success')
       setAssigningOrder(null)
@@ -728,7 +741,7 @@ export function OrdersListPage() {
     try {
       await apiFetch(`/assignments/${order.assignment_id}/flag-missing-template`, {
         method: 'POST',
-        body: JSON.stringify({ request_id: crypto.randomUUID() }),
+        body: JSON.stringify({ request_id: crypto.randomUUID(), expected_version: order.version }),
       })
       setFlash(`Đã báo thiếu temp cho đơn ${order.external_order_id}. Đơn đã chuyển sang Chờ cập nhật.`)
       await loadOrders()
@@ -761,6 +774,7 @@ export function OrdersListPage() {
 
     setIsSubmittingInline((prev) => ({ ...prev, [order.id]: true }))
     try {
+      let submittedByAssignment = false
       if (order.assignment_id) {
         try {
           await apiFetch(`/assignments/${order.assignment_id}/results`, {
@@ -768,21 +782,26 @@ export function OrdersListPage() {
             body: JSON.stringify({
               drive_url: trimmed,
               request_id: crypto.randomUUID(),
+              expected_version: order.version,
             }),
           })
+          submittedByAssignment = true
         } catch (assignErr) {
           console.warn('Ghi nhận assignment result:', assignErr)
         }
       }
 
-      await apiFetch(`/orders/${order.id}/state`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          state: 'QC_PENDING',
-          drive_url: trimmed,
-          note_outsource: trimmed,
-        }),
-      })
+      if (!submittedByAssignment) {
+        await apiFetch(`/orders/${order.id}/state`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            state: 'QC_PENDING',
+            drive_url: trimmed,
+            note_outsource: trimmed,
+            expected_version: order.version,
+          }),
+        })
+      }
 
       showToast(`Đã nộp bài thiết kế thành công cho đơn: ${order.product_name || order.external_order_id}`, 'success')
       markTabMoved(order.id)
@@ -1227,6 +1246,7 @@ export function OrdersListPage() {
           designer_id: acceptFixDesignerId || undefined,
           designer_note: acceptFixDesignerNote,
           note_outsource: acceptFixOutsourceNote,
+          expected_version: acceptFixOrder.version,
         }),
       })
       showToast(`Đã chấp nhận Fix và giao bài cho Designer đơn ${acceptFixOrder.external_order_id}.`, 'success')
@@ -1254,6 +1274,7 @@ export function OrdersListPage() {
         method: 'POST',
         body: JSON.stringify({
           note_outsource: rejectFixOutsourceNote,
+          expected_version: rejectFixOrder.version,
         }),
       })
       showToast(`Đã từ chối Fix và gửi lại Review trên Web mẹ cho đơn ${rejectFixOrder.external_order_id}.`, 'success')
@@ -2678,6 +2699,7 @@ export function OrdersListPage() {
                           <td className="py-2.5 px-4" onClick={(e) => e.stopPropagation()}>
                             <StatusDropdown
                               orderId={o.id}
+                              orderVersion={o.version}
                               externalOrderId={o.external_order_id}
                               currentState={o.state}
                               disabled={Boolean(o.template_missing)}

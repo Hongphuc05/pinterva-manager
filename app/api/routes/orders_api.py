@@ -2,7 +2,7 @@ import base64
 import math
 import re
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -34,6 +34,7 @@ from app.adapters.printerval.api_client import (
     PrintervalApiError,
 )
 from app.adapters.printerval.interface import ALL_JOB_TYPES
+from app.api.concurrency import OrderCommandPayload
 from app.api.deps import (
     DEFAULT_PLATFORM_ID,
     get_current_platform_id,
@@ -47,6 +48,7 @@ from app.application.assignment_commands import (
     revoke_assignment_command,
 )
 from app.application.crawl import DiscoverFailedError, refresh_order_detail, scan_orders_fast
+from app.application.concurrency import lock_order_for_command
 from app.application.order_queries import (
     FIX_STATES,
     get_order_detail_for_user,
@@ -83,6 +85,7 @@ router = APIRouter()
 class OrderSummaryOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
+    version: int
     external_order_id: str
     state: str
     work_domain: str = "standard"
@@ -98,6 +101,7 @@ class OrderSummaryOut(BaseModel):
     deadline_at_ext: datetime | None = None
     deadline_tacahu: datetime | None = None
     created_at: datetime
+    updated_at: datetime
     # Read-only mirror of Printerval's own site status — never written back to the
     # site from here (see app/application/status_sync.py).
     printerval_status: str | None = None
@@ -628,6 +632,7 @@ class ResultVersionOut(BaseModel):
 class OrderDetailOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
+    version: int
     external_order_id: str
     state: str
     work_domain: str = "standard"
@@ -670,6 +675,7 @@ class OrderDetailOut(BaseModel):
     platform_status: str | None = None
     status_changed_at: datetime | None = None
     created_at: datetime
+    updated_at: datetime
 
 
 
@@ -1814,7 +1820,7 @@ def api_update_printerval_credentials(
     }
 
 
-class UpdateOrderStateRequest(BaseModel):
+class UpdateOrderStateRequest(OrderCommandPayload):
     state: str
     drive_url: str | None = None
     note_outsource: str | None = None
@@ -1830,6 +1836,24 @@ def _get_order_by_identifier(db: Session, order_id: str) -> Order | None:
     except ValueError:
         order = None
     return order or db.query(Order).filter(Order.external_order_id == order_id).first()
+
+
+def _lock_order_by_identifier(
+    db: Session,
+    order_id: str,
+    *,
+    expected_version: int | None,
+    platform_id: uuid.UUID | None = None,
+) -> Order | None:
+    current = _get_order_by_identifier(db, order_id)
+    if current is None:
+        return None
+    return lock_order_for_command(
+        db,
+        order_id=current.id,
+        expected_version=expected_version,
+        platform_id=platform_id,
+    )
 
 
 @router.put("/orders/{order_id}/designer-note")
@@ -1905,14 +1929,12 @@ def api_update_order_state(
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
-    order = None
-    try:
-        order_uuid = uuid.UUID(order_id)
-        order = db.get(Order, order_uuid)
-    except ValueError:
-        pass
-    if order is None:
-        order = db.query(Order).filter(Order.external_order_id == order_id).first()
+    order = _lock_order_by_identifier(
+        db,
+        order_id,
+        expected_version=payload.expected_version,
+        platform_id=platform_id,
+    )
 
     if order is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
@@ -1962,6 +1984,7 @@ def api_update_order_state(
                 Assignment.designer_id == user.id,
                 Assignment.status != "cancelled",
             )
+            .with_for_update()
             .first()
             is not None
         )
@@ -1991,6 +2014,7 @@ def api_update_order_state(
     curr_assignment = (
         db.query(Assignment)
         .filter(Assignment.order_id == order.id, Assignment.status != "cancelled")
+        .with_for_update()
         .first()
     )
     if curr_assignment and curr_assignment.designer_id:
@@ -2013,6 +2037,7 @@ def api_update_order_state(
         db.add(rv)
 
     actor_disp = f"{'Designer ' if user.role in (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO) else ('Admin ' if user.role == ROLE_ADMIN else '')}{actor_name}"
+    sync_review_to_printerval = False
     if target_state == OrderState.IN_PROGRESS:
         if old_state in (OrderState.QC_PENDING.value, "REVIEW"):
             action_type = "REVERT_TO_DOING"
@@ -2023,24 +2048,15 @@ def api_update_order_state(
     elif target_state == OrderState.QC_PENDING:
         order.fix_approved_by_admin = False
         order.fix_rejected_by_admin = False
+        order.fix_deadline_at = None
+        order.deadline_overdue_notified_at = None
         if old_state in (OrderState.REVISION.value, "FIX", "REVISION_REQUESTED"):
             action_type = "RESUBMIT_FIX"
             desc = f"{actor_disp} nộp lại bài sau khi fix"
         else:
             action_type = "SUBMIT_REVIEW"
             desc = f"{actor_disp} nộp bài sang Review"
-        # Sync Review status & Note outsource to Printerval
-        try:
-            from app.workers.assignment_sync_tasks import sync_order_review_to_printerval_task
-            sync_order_review_to_printerval_task.delay(
-                str(order.id),
-                order.note_outsource,
-                "Review",
-                expected_state=OrderState.QC_PENDING.value,
-                expected_fix_approved=False,
-            )
-        except Exception:
-            pass
+        sync_review_to_printerval = True
     elif target_state == OrderState.REVISION:
         action_type = "REQUEST_FIX"
         desc = f"{actor_disp} yêu cầu sửa bài (Fix)"
@@ -2082,17 +2098,32 @@ def api_update_order_state(
     db.commit()
     db.refresh(order)
 
+    if sync_review_to_printerval:
+        try:
+            from app.workers.assignment_sync_tasks import sync_order_review_to_printerval_task
+
+            sync_order_review_to_printerval_task.delay(
+                str(order.id),
+                order.note_outsource,
+                "Review",
+                expected_state=OrderState.QC_PENDING.value,
+                expected_fix_approved=False,
+            )
+        except Exception:
+            pass
+
     return {
         "ok": True,
         "order_id": str(order.id),
         "external_order_id": order.external_order_id,
         "state": order.state,
+        "version": order.version,
         "note_outsource": order.note_outsource,
         "message": f"Đã chuyển trạng thái đơn {order.external_order_id} sang {target_state.value}",
     }
 
 
-class ApproveFixRequest(BaseModel):
+class ApproveFixRequest(OrderCommandPayload):
     designer_id: uuid.UUID | None = None
     designer_note: str | None = None
     note_outsource: str | None = None
@@ -2105,14 +2136,7 @@ def api_approve_fix(
     user: User = Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ):
-    order = None
-    try:
-        order_uuid = uuid.UUID(order_id)
-        order = db.get(Order, order_uuid)
-    except ValueError:
-        pass
-    if order is None:
-        order = db.query(Order).filter(Order.external_order_id == order_id).first()
+    order = _lock_order_by_identifier(db, order_id, expected_version=payload.expected_version)
 
     if order is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
@@ -2132,6 +2156,7 @@ def api_approve_fix(
             curr_assignment = (
                 db.query(Assignment)
                 .filter(Assignment.order_id == order.id, Assignment.status != "cancelled")
+                .with_for_update()
                 .first()
             )
             if curr_assignment:
@@ -2143,6 +2168,7 @@ def api_approve_fix(
         curr_assignment = (
             db.query(Assignment)
             .filter(Assignment.order_id == order.id, Assignment.status != "cancelled")
+            .with_for_update()
             .first()
         )
         if curr_assignment and curr_assignment.designer_id:
@@ -2153,6 +2179,8 @@ def api_approve_fix(
 
     order.state = OrderState.REVISION.value
     order.fix_approved_by_admin = True
+    order.fix_deadline_at = datetime.now(UTC) + timedelta(hours=1)
+    order.deadline_overdue_notified_at = None
     order.status_changed_at = datetime.now(UTC)
 
     admin_name = user.full_name or user.username
@@ -2193,13 +2221,14 @@ def api_approve_fix(
         "order_id": str(order.id),
         "external_order_id": order.external_order_id,
         "fix_approved_by_admin": True,
+        "version": order.version,
         "designer_note": order.designer_note,
         "note_outsource": order.note_outsource,
         "message": "Đã chấp nhận Fix và giao bài cho Designer.",
     }
 
 
-class RejectFixRequest(BaseModel):
+class RejectFixRequest(OrderCommandPayload):
     note_outsource: str | None = None
 
 
@@ -2210,14 +2239,7 @@ def api_reject_fix_to_review(
     user: User = Depends(require_role("admin")),
     db: Session = Depends(get_db),
 ):
-    order = None
-    try:
-        order_uuid = uuid.UUID(order_id)
-        order = db.get(Order, order_uuid)
-    except ValueError:
-        pass
-    if order is None:
-        order = db.query(Order).filter(Order.external_order_id == order_id).first()
+    order = _lock_order_by_identifier(db, order_id, expected_version=payload.expected_version)
 
     if order is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
@@ -2273,6 +2295,7 @@ def api_reject_fix_to_review(
         "note_outsource": order.note_outsource,
         "fix_approved_by_admin": order.fix_approved_by_admin,
         "fix_rejected_by_admin": order.fix_rejected_by_admin,
+        "version": order.version,
         "message": "Đã hủy Fix, cập nhật note outsource và chuyển lại trạng thái Review trên Printerval.",
     }
 
@@ -2368,6 +2391,7 @@ def api_sync_printerval_status(
 
 class DesignerWorkloadOrderOut(BaseModel):
     id: str
+    version: int
     external_order_id: str
     state: str
     thumbnail_url: str | None = None
@@ -2479,6 +2503,7 @@ def api_designers_workload(
                 orders=[
                     DesignerWorkloadOrderOut(
                         id=str(o.id),
+                        version=o.version,
                         external_order_id=o.external_order_id,
                         state=o.state,
                         thumbnail_url=o.thumbnail_url,

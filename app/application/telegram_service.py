@@ -6,16 +6,26 @@ import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 from sqlalchemy.orm import Session
 
-from app.adapters.db.models import Order, Platform, TelegramActionLog, User
+from app.adapters.db.models import Assignment, Order, Platform, TelegramActionLog, User
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
 TELEGRAM_API_BASE = "https://api.telegram.org"
+VIETNAM_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+
+
+def format_vietnam_time(value: datetime | None) -> str:
+    if value is None:
+        return "Không có"
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(VIETNAM_TZ).strftime("%d/%m/%Y %H:%M")
 
 
 def is_telegram_configured() -> bool:
@@ -200,10 +210,10 @@ def notify_designer_new_order(
 
     p_name = html.escape(order.product_name or "Sản phẩm")
     order_id_code = html.escape(order.external_order_id)
-    deadline_str = order.deadline_tacahu.strftime("%d/%m/%Y %H:%M") if order.deadline_tacahu else "Không có"
+    deadline_str = format_vietnam_time(order.deadline_tacahu)
 
     text = (
-        f"🎨 <b>BẠN CÓ ĐƠN HÀNG MỚI (DOING)!</b>\n"
+        f"🎨 <b>BẠN CÓ ĐƠN HÀNG MỚI (ĐANG LÀM)!</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"📦 <b>Mã đơn:</b> <code>{order_id_code}</code>\n"
         f"👕 <b>Sản phẩm:</b> {p_name}\n"
@@ -247,6 +257,7 @@ def notify_designer_urgent_fix(
         f"📦 <b>Mã đơn:</b> <code>{order_id_code}</code>\n"
         f"👕 <b>Sản phẩm:</b> {p_name}\n"
         f"🔄 <b>Lần fix thứ:</b> #{fix_cnt}\n"
+        f"⏰ <b>Hạn sửa:</b> {format_vietnam_time(order.fix_deadline_at)}\n"
         f"💬 <b>Yêu cầu của khách/QC:</b> {qc_note}\n"
         f"📌 <b>Hướng dẫn từ Admin:</b> {adm_note}\n"
         f"⚡ <i>Vui lòng vào tab <b>Cần sửa gấp</b> trên web để xử lý ngay!</i>"
@@ -405,6 +416,51 @@ def notify_admin_review_submitted(
         f"👤 <b>Designer:</b> {html.escape(designer_name)}\n"
         f"🔗 <b>Link nộp:</b> {link}\n"
         f"⏱ <i>Hệ thống đang tự động đồng bộ Review lên Platform.</i>"
+    )
+    for cid in chat_ids:
+        send_message(cid, text)
+    return True
+
+
+def notify_admin_deadline_overdue(session: Session, order_id: uuid.UUID) -> bool:
+    order = session.get(Order, order_id)
+    if order is None:
+        return False
+    chat_ids = _get_admin_chat_ids(session, order.platform_id)
+    if not chat_ids:
+        return False
+    assignment = session.query(Assignment).filter(
+        Assignment.order_id == order.id, Assignment.status == "approved"
+    ).first()
+    designer = session.get(User, assignment.designer_id) if assignment and assignment.designer_id else None
+    deadline = order.fix_deadline_at or order.deadline_tacahu
+    kind = "hạn Fix" if order.fix_deadline_at else "hạn đơn"
+    text = (
+        f"⏰ <b>DESIGNER QUÁ HẠN {kind.upper()}!</b>\n"
+        f"📦 <b>Mã đơn:</b> <code>{html.escape(order.external_order_id)}</code>\n"
+        f"👤 <b>Designer:</b> {html.escape((designer.full_name or designer.username) if designer else order.printerval_designer or 'Chưa rõ')}\n"
+        f"🕒 <b>Hạn:</b> {format_vietnam_time(deadline)}\n"
+        "👉 Admin kiểm tra và xử lý đơn trên Tacahu."
+    )
+    for cid in chat_ids:
+        send_message(cid, text)
+    return True
+
+
+def notify_admin_missing_template(session: Session, order_id: uuid.UUID, designer_id: uuid.UUID) -> bool:
+    order = session.get(Order, order_id)
+    designer = session.get(User, designer_id)
+    if order is None or designer is None:
+        return False
+    chat_ids = _get_admin_chat_ids(session, order.platform_id)
+    if not chat_ids:
+        return False
+    text = (
+        "🚩 <b>DESIGNER BÁO THIẾU TEMP!</b>\n"
+        f"📦 <b>Mã đơn:</b> <code>{html.escape(order.external_order_id)}</code>\n"
+        f"👤 <b>Designer:</b> {html.escape(designer.full_name or designer.username)}\n"
+        f"🕒 <b>Deadline:</b> {format_vietnam_time(order.deadline_tacahu)}\n"
+        "👉 Admin bổ sung temp/ghi chú để Designer tiếp tục làm."
     )
     for cid in chat_ids:
         send_message(cid, text)

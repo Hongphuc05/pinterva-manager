@@ -528,12 +528,14 @@ def move_duplicate_order(
 def _card(order: Order, assignee: User | None) -> dict:
     return {
         "id": str(order.id),
+        "version": order.version,
         "external_order_id": order.external_order_id,
         "product_name": order.product_name,
         "thumbnail_url": encode_proxy_url(order.thumbnail_url),
         "deadline_tacahu": order.deadline_tacahu.isoformat() if order.deadline_tacahu else None,
         "order_created_at_ext": order.order_created_at_ext.isoformat() if order.order_created_at_ext else None,
         "created_at": order.created_at.isoformat() if order.created_at else None,
+        "updated_at": order.updated_at.isoformat() if order.updated_at else None,
         "status_changed_at": order.status_changed_at.isoformat() if order.status_changed_at else None,
         "paid_at": order.paid_at.isoformat() if order.paid_at else None,
         "is_paid": bool(order.is_paid),

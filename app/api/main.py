@@ -5,8 +5,9 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.orm.exc import StaleDataError
 
 from app.api.routes import assignments_api as assignments_api_routes
 from app.api.routes import auth as auth_routes
@@ -21,6 +22,8 @@ from app.api.routes import sync_jobs_api as sync_jobs_api_routes
 from app.api.routes import telegram_api as telegram_api_routes
 from app.api.routes import users_api as users_api_routes
 from app.application.auth import read_session_token
+from app.application.concurrency import OrderVersionConflictError
+from app.api.concurrency import stale_order_detail
 from app.config import get_settings
 
 FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
@@ -91,6 +94,7 @@ def create_app() -> FastAPI:
             allow_methods=["*"],
             allow_headers=["*"],
         )
+
     elif allowed_origins:
         app.add_middleware(
             CORSMiddleware,
@@ -99,6 +103,19 @@ def create_app() -> FastAPI:
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"],
+        )
+
+    @app.exception_handler(OrderVersionConflictError)
+    async def order_version_conflict_handler(_request: Request, exc: OrderVersionConflictError):
+        return JSONResponse(status_code=status.HTTP_409_CONFLICT, content={"detail": exc.detail()})
+
+    @app.exception_handler(StaleDataError)
+    async def stale_data_handler(_request: Request, _exc: StaleDataError):
+        # Later command migrations have the locked Order available and can return
+        # its revision. This fallback still prevents an ORM error leaking as a 500.
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"detail": stale_order_detail()},
         )
 
     @app.middleware("http")

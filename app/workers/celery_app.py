@@ -49,6 +49,10 @@ def build_beat_schedule(settings):
             "task": "app.workers.status_sync_tasks.sync_order_statuses",
             "schedule": settings.status_sync_interval_seconds,
         },
+        "check-designer-deadlines": {
+            "task": "app.workers.telegram_tasks.check_designer_deadlines",
+            "schedule": 60.0,
+        },
     }
     if settings.order_sheet_backup_enabled:
         schedule["export-order-sheet-backup"] = {
