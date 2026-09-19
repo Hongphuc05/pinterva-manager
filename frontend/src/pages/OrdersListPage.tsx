@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, useCallback } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { apiFetch, ApiError, resolveAssetUrl } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { usePlatform } from '../auth/PlatformContext'
@@ -15,6 +15,7 @@ import { LinkifiedText, OpenExternalLinkButton } from '../components/LinkifiedTe
 import { useToast } from '../context/ToastContext'
 import { useGallerySync } from '../context/GallerySyncContext'
 import { useSyncStatus } from '../hooks/useSyncStatus'
+import { readViewState, writeViewState } from '../utils/viewState'
 import {
   Package,
   Search,
@@ -176,11 +177,32 @@ function writeOrdersCache(key: string, orders: OrderSummary[]) {
 export function OrdersListPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
+  const location = useLocation()
   const { user } = useAuth()
   const { activePlatform } = usePlatform()
   const isAdmin = user?.role === 'admin'
   const isSupport = user?.role === 'support'
   const isManager = isAdmin || isSupport
+  const [restoredViewState] = useState(() => readViewState('orders-list', user?.role, {
+    adminTab: 'waiting',
+    supportTab: 'all',
+    designerTab: 'doing',
+    adminDoingSubFilter: 'all',
+    adminFixSubFilter: 'all',
+    statusFilter: '',
+    platformStatusFilter: '',
+    designerFilter: '',
+    batchFilter: '',
+    searchQuery: '',
+    syncedImagesFilter: false,
+    dateFilterType: 'status_changed_at',
+    dateFrom: '',
+    dateTo: '',
+    datePreset: '',
+    dateSortField: 'status_changed_at',
+    dateSortDirection: 'desc',
+    currentPage: 1,
+  }))
 
   const [orders, setOrders] = useState<OrderSummary[]>(() => readOrdersCache(getOrdersCacheKey(undefined, '')) ?? [])
   const [ordersLoading, setOrdersLoading] = useState(() => readOrdersCache(getOrdersCacheKey(undefined, '')) === null)
@@ -191,7 +213,9 @@ export function OrdersListPage() {
     if (activeTabParam && ['waiting', 'doing', 'review', 'fix', 'done'].includes(activeTabParam)) {
       return activeTabParam
     }
-    return 'waiting'
+    return restoredViewState.adminTab === 'doing' || restoredViewState.adminTab === 'review' || restoredViewState.adminTab === 'fix' || restoredViewState.adminTab === 'done'
+      ? restoredViewState.adminTab
+      : 'waiting'
   })
 
   // Support 3 Sub-Tabs State ('all' | 'duplicate' | 'non_duplicate')
@@ -200,37 +224,60 @@ export function OrdersListPage() {
     if (supportTabParam && ['all', 'duplicate', 'non_duplicate'].includes(supportTabParam)) {
       return supportTabParam
     }
-    return 'all'
+    return restoredViewState.supportTab === 'duplicate' || restoredViewState.supportTab === 'non_duplicate'
+      ? restoredViewState.supportTab
+      : 'all'
   })
   const [updatingDuplicateStatus, setUpdatingDuplicateStatus] = useState(false)
 
   // Designer Tab State (Doing, Fix, Review, Waiting Update, Paid)
-  const [activeDesignerTab, setActiveDesignerTab] = useState<'doing' | 'fix' | 'review' | 'waiting_update' | 'paid'>('doing')
-  const [adminDoingSubFilter, setAdminDoingSubFilter] = useState<'all' | 'missing' | 'normal'>('all')
-  const [adminFixSubFilter, setAdminFixSubFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all')
+  const [activeDesignerTab, setActiveDesignerTab] = useState<'doing' | 'fix' | 'review' | 'waiting_update' | 'paid'>(
+    ['doing', 'fix', 'review', 'waiting_update', 'paid'].includes(String(restoredViewState.designerTab))
+      ? restoredViewState.designerTab as 'doing' | 'fix' | 'review' | 'waiting_update' | 'paid'
+      : 'doing',
+  )
+  const [adminDoingSubFilter, setAdminDoingSubFilter] = useState<'all' | 'missing' | 'normal'>(
+    ['all', 'missing', 'normal'].includes(String(restoredViewState.adminDoingSubFilter))
+      ? restoredViewState.adminDoingSubFilter as 'all' | 'missing' | 'normal'
+      : 'all',
+  )
+  const [adminFixSubFilter, setAdminFixSubFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>(
+    ['all', 'pending', 'approved', 'rejected'].includes(String(restoredViewState.adminFixSubFilter))
+      ? restoredViewState.adminFixSubFilter as 'all' | 'pending' | 'approved' | 'rejected'
+      : 'all',
+  )
 
   // Search & Filter State
   const { showToast } = useToast()
   const { syncStatusMap } = useGallerySync()
-  const [statusFilter, setStatusFilter] = useState('')
-  const [platformStatusFilter, setPlatformStatusFilter] = useState('')
-  const [designerFilter, setDesignerFilter] = useState('')
-  const [batchFilter, setBatchFilter] = useState('')
-  const [searchQuery, setSearchQuery] = useState('')
-  const [syncedImagesFilter, setSyncedImagesFilter] = useState(false)
+  const [statusFilter, setStatusFilter] = useState(String(restoredViewState.statusFilter || ''))
+  const [platformStatusFilter, setPlatformStatusFilter] = useState(String(restoredViewState.platformStatusFilter || ''))
+  const [designerFilter, setDesignerFilter] = useState(String(restoredViewState.designerFilter || ''))
+  const [batchFilter, setBatchFilter] = useState(String(restoredViewState.batchFilter || ''))
+  const [searchQuery, setSearchQuery] = useState(String(restoredViewState.searchQuery || ''))
+  const [syncedImagesFilter, setSyncedImagesFilter] = useState(restoredViewState.syncedImagesFilter === true)
 
   // Date Filter State (3 Modes: status_changed_at, order_created_at_ext, created_at)
-  const [dateFilterType, setDateFilterType] = useState<'status_changed_at' | 'order_created_at_ext' | 'created_at'>('status_changed_at')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
-  const [datePreset, setDatePreset] = useState<string>('')
+  const [dateFilterType, setDateFilterType] = useState<'status_changed_at' | 'order_created_at_ext' | 'created_at'>(
+    ['status_changed_at', 'order_created_at_ext', 'created_at'].includes(String(restoredViewState.dateFilterType))
+      ? restoredViewState.dateFilterType as 'status_changed_at' | 'order_created_at_ext' | 'created_at'
+      : 'status_changed_at',
+  )
+  const [dateFrom, setDateFrom] = useState(String(restoredViewState.dateFrom || ''))
+  const [dateTo, setDateTo] = useState(String(restoredViewState.dateTo || ''))
+  const [datePreset, setDatePreset] = useState<string>(String(restoredViewState.datePreset || ''))
 
   const setFlash = (msg: string | null) => { if (msg) showToast(msg, 'success') }
   const setError = (err: string | null) => { if (err) showToast(err, 'error') }
-  const [dateSort, setDateSort] = useState<{ field: 'order_created_at_ext' | 'created_at' | 'status_changed_at'; direction: 'asc' | 'desc' }>({ field: 'status_changed_at', direction: 'desc' })
+  const [dateSort, setDateSort] = useState<{ field: 'order_created_at_ext' | 'created_at' | 'status_changed_at'; direction: 'asc' | 'desc' }>({
+    field: ['order_created_at_ext', 'created_at', 'status_changed_at'].includes(String(restoredViewState.dateSortField))
+      ? restoredViewState.dateSortField as 'order_created_at_ext' | 'created_at' | 'status_changed_at'
+      : 'status_changed_at',
+    direction: restoredViewState.dateSortDirection === 'asc' ? 'asc' : 'desc',
+  })
   const { status: syncStatus, triggerRun, isTriggering } = useSyncStatus()
   const [currentPage, setCurrentPage] = useState(() => {
-    const parsed = Number(searchParams.get('page') || '1')
+    const parsed = Number(searchParams.get('page') || restoredViewState.currentPage || '1')
     return Number.isInteger(parsed) && parsed > 0 ? parsed : 1
   })
 
@@ -289,6 +336,30 @@ export function OrdersListPage() {
   // Inline submission state for Designer
   const [inlineSubmissionLinks, setInlineSubmissionLinks] = useState<Record<string, string>>({})
   const [isSubmittingInline, setIsSubmittingInline] = useState<Record<string, boolean>>({})
+  const didInitializeTabSort = useRef(false)
+
+  useEffect(() => {
+    writeViewState('orders-list', user?.role, {
+      adminTab,
+      supportTab,
+      designerTab: activeDesignerTab,
+      adminDoingSubFilter,
+      adminFixSubFilter,
+      statusFilter,
+      platformStatusFilter,
+      designerFilter,
+      batchFilter,
+      searchQuery,
+      syncedImagesFilter,
+      dateFilterType,
+      dateFrom,
+      dateTo,
+      datePreset,
+      dateSortField: dateSort.field,
+      dateSortDirection: dateSort.direction,
+      currentPage,
+    })
+  }, [user?.role, adminTab, supportTab, activeDesignerTab, adminDoingSubFilter, adminFixSubFilter, statusFilter, platformStatusFilter, designerFilter, batchFilter, searchQuery, syncedImagesFilter, dateFilterType, dateFrom, dateTo, datePreset, dateSort, currentPage])
 
   const regularDesigners = usersList.filter((candidate) => candidate.role === 'designer')
 
@@ -1169,6 +1240,10 @@ export function OrdersListPage() {
 
   // Reset sort to newest status_changed_at when tab changes
   useEffect(() => {
+    if (!didInitializeTabSort.current) {
+      didInitializeTabSort.current = true
+      return
+    }
     setDateSort({ field: 'status_changed_at', direction: 'desc' })
   }, [adminTab, activeDesignerTab])
 
@@ -2374,7 +2449,9 @@ export function OrdersListPage() {
                       onClick={() => {
                         dismissHighlight(o.id)
                         if (isAdmin) {
-                          navigate(`/orders/${o.id}`)
+                          navigate(`/orders/${o.id}`, {
+                            state: { returnTo: `${location.pathname}${location.search}` },
+                          })
                         } else {
                           setQuickViewOrderId(o.id)
                         }
@@ -2882,6 +2959,7 @@ export function OrdersListPage() {
                               {/* Order Details Link */}
                               <Link
                                 to={`/orders/${o.id}`}
+                                state={{ returnTo: `${location.pathname}${location.search}` }}
                                 className="inline-flex items-center gap-0.5 text-xs font-semibold text-[#0052CC] hover:text-[#003D99] hover:bg-blue-50 px-2.5 py-1 rounded-md transition-colors"
                               >
                                 <span>Chi tiết</span>
@@ -2929,8 +3007,9 @@ export function OrdersListPage() {
 
                               {/* Badges and Quick details link */}
                               <div className="flex items-center gap-2 pt-0.5 flex-wrap" onClick={(e) => e.stopPropagation()}>
-                                <Link
-                                  to={`/orders/${o.id}`}
+                              <Link
+                                to={`/orders/${o.id}`}
+                                state={{ returnTo: `${location.pathname}${location.search}` }}
                                   onClick={() => dismissHighlight(o.id)}
                                   className="inline-flex items-center gap-1 text-[11px] font-bold text-[#0052CC] hover:text-[#003D99] hover:underline bg-blue-50/80 border border-blue-100 px-2 py-0.5 rounded transition-colors"
                                   title="Xem toàn bộ thông tin chi tiết của đơn hàng"

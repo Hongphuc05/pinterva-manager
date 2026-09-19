@@ -44,6 +44,10 @@ export function AdminFixActionModal({
   if (!isOpen) return null
 
   async function handleConfirm() {
+    if (isApprove && !adminNote.trim()) {
+      setError('Cần nhập Ghi chú Admin cho Designer trước khi duyệt Fix.')
+      return
+    }
     setLoading(true)
     setError(null)
     try {
@@ -135,9 +139,8 @@ export function AdminFixActionModal({
                 <span>Quy trình gửi bài sửa cho Designer:</span>
               </div>
               <p className="text-[11px] text-emerald-800 leading-relaxed">
-                • <strong>Nếu để trống ô Note Admin:</strong> Designer sẽ nhận nội dung từ ô Note Outsource.<br />
-                • <strong>Nếu nhập ô Note Admin:</strong> Designer sẽ chỉ nhận nội dung ô Note Admin.<br />
-                <em>Designer sẽ không thấy ô Note Outsource gốc.</em>
+                • <strong>Ghi chú Admin là bắt buộc:</strong> đây là nội dung duy nhất Designer nhận được.<br />
+                • Note Outsource chỉ phục vụ Admin kiểm tra và không được gửi sang Designer.
               </p>
             </div>
           ) : (
@@ -155,14 +158,14 @@ export function AdminFixActionModal({
           {isApprove && (
             <div className="space-y-1.5">
               <label className="font-semibold text-slate-800 block text-xs flex items-center justify-between">
-                <span>Ghi chú của Admin cho Designer (Tùy chọn):</span>
-                <span className="text-[11px] font-normal text-slate-500">Ưu tiên gửi cho Des</span>
+                <span>Ghi chú của Admin cho Designer <span className="text-rose-600">*</span></span>
+                <span className="text-[11px] font-normal text-slate-500">Bắt buộc gửi cho Des</span>
               </label>
               <textarea
                 rows={3}
                 value={adminNote}
                 onChange={(e) => setAdminNote(e.target.value)}
-                placeholder="Nhập hướng dẫn/ghi chú riêng của Admin cho Des (Nếu điền, Des sẽ nhận nội dung này)..."
+                placeholder="Nhập hướng dẫn đã kiểm tra để gửi cho Des..."
                 className="w-full p-3 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0052CC] font-mono leading-relaxed bg-white"
               />
             </div>
@@ -171,7 +174,7 @@ export function AdminFixActionModal({
           <div className="space-y-1.5">
             <label className="font-semibold text-slate-800 block text-xs flex items-center justify-between">
               <span>{isApprove ? 'Nội dung Note Outsource (QC từ Print):' : 'Nội dung Note outsource gửi lên Print:'}</span>
-              {isApprove && <span className="text-[11px] font-normal text-slate-500">Dùng nếu Note Admin trống</span>}
+              {isApprove && <span className="text-[11px] font-normal text-slate-500">Chỉ Admin xem</span>}
             </label>
             <textarea
               rows={isApprove ? 4 : 6}

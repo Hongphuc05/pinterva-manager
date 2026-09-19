@@ -209,8 +209,9 @@ def sync_selected_order_statuses(
                                     order.note_outsource = note
                                 order.fix_approved_by_admin = False
                                 order.fix_rejected_by_admin = False
-                                # Khi Platform trả Fix, note_outsource là hướng dẫn Fix → Designer cần thấy, reset flag.
-                                order.suppress_note_outsource_for_designer = False
+                                order.designer_note = ""
+                                order.designer_note_released_for_fix = False
+                                order.suppress_note_outsource_for_designer = True
                                 session.add(
                                     WorkflowEvent(
                                         order_id=order.id,
@@ -252,8 +253,16 @@ def sync_selected_order_statuses(
                                 )
                                 changed = True
                             elif note and norm_status == "FIX" and note != order.note_outsource:
+                                # A changed upstream Fix note invalidates any
+                                # previously approved local release. Admin must
+                                # review it and explicitly write a new note.
                                 order.previous_note_outsource = order.note_outsource
                                 order.note_outsource = note
+                                order.fix_approved_by_admin = False
+                                order.fix_rejected_by_admin = False
+                                order.designer_note = ""
+                                order.designer_note_released_for_fix = False
+                                order.suppress_note_outsource_for_designer = True
                                 changed = True
 
                         if found_status and found_status.lower() != (order.printerval_status or "").lower():
@@ -365,8 +374,9 @@ def sync_platform_order_statuses(
                         order.note_outsource = found_note
                     order.fix_approved_by_admin = False
                     order.fix_rejected_by_admin = False
-                    # Khi Platform trả Fix, note_outsource là hướng dẫn Fix → Designer cần thấy, reset flag.
-                    order.suppress_note_outsource_for_designer = False
+                    order.designer_note = ""
+                    order.designer_note_released_for_fix = False
+                    order.suppress_note_outsource_for_designer = True
                     notify_admin_fix = True
                     order_changed = True
                 elif (

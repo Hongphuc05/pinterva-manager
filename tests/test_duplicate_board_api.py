@@ -230,6 +230,50 @@ def test_move_card_between_orders_missing_form_designer_and_done(client, db_sess
         del client.app.dependency_overrides[get_current_platform_id]
 
 
+def test_admin_can_reorder_cards_within_the_same_designer_column(client, db_session):
+    platform = _platform(db_session)
+    _admin, headers = _login(client, db_session, "admin", "admin-reorder-designer", platform.id)
+    designer = User(
+        username="trello-reorder-designer",
+        full_name="Trello Reorder",
+        role="designer-trello",
+        password_hash="hash",
+        platform_id=platform.id,
+    )
+    first = Order(external_order_id="DUP-REORDER-1", platform_id=platform.id, work_domain="duplicate", state="IN_PROGRESS", duplicate_board_position=0)
+    second = Order(external_order_id="DUP-REORDER-2", platform_id=platform.id, work_domain="duplicate", state="IN_PROGRESS", duplicate_board_position=1)
+    third = Order(external_order_id="DUP-REORDER-3", platform_id=platform.id, work_domain="duplicate", state="IN_PROGRESS", duplicate_board_position=2)
+    db_session.add_all([designer, first, second, third])
+    db_session.flush()
+    db_session.add_all([
+        Assignment(order_id=first.id, designer_id=designer.id, status="approved"),
+        Assignment(order_id=second.id, designer_id=designer.id, status="approved"),
+        Assignment(order_id=third.id, designer_id=designer.id, status="approved"),
+    ])
+    db_session.commit()
+    client.app.dependency_overrides[get_current_platform_id] = lambda: platform.id
+
+    try:
+        response = client.post(
+            "/api/duplicate-board/move",
+            json={
+                "order_id": str(third.id),
+                "target_designer_id": str(designer.id),
+                "before_order_id": str(first.id),
+                "reorder": True,
+            },
+            headers=headers,
+        )
+        board = client.get("/api/duplicate-board", headers=headers)
+    finally:
+        del client.app.dependency_overrides[get_current_platform_id]
+
+    assert response.status_code == 200
+    assert board.status_code == 200
+    designer_column = next(column for column in board.json()["columns"] if column["id"] == str(designer.id))
+    assert [card["id"] for card in designer_column["cards"]] == [str(third.id), str(first.id), str(second.id)]
+
+
 def test_trello_designer_can_claim_self_but_cannot_assign_another_user(client, db_session):
     platform = _platform(db_session)
     actor, headers = _login(client, db_session, "designer-trello", "trello-actor", platform.id)

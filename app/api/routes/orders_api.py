@@ -116,6 +116,7 @@ class OrderSummaryOut(BaseModel):
     fix_rejected_by_admin: bool = False
     fix_return_count: int = 0
     designer_note: str = ""
+    designer_note_released_for_fix: bool = False
     template_missing: bool = False
     suppress_note_outsource_for_designer: bool = False
     duplicate_check_status: str = "uncheck"
@@ -669,6 +670,7 @@ class OrderDetailOut(BaseModel):
     fix_rejected_by_admin: bool = False
     fix_return_count: int = 0
     designer_note: str = ""
+    designer_note_released_for_fix: bool = False
     template_missing: bool = False
     suppress_note_outsource_for_designer: bool = False
     duplicate_check_status: str = "uncheck"
@@ -1454,7 +1456,9 @@ def api_order_detail(
     is_admin = user.role == ROLE_ADMIN
     if not is_admin:
         order_out = sanitize_order_detail_for_designer(order_out)
-        history_out = [sanitize_workflow_event_for_designer(ev) for ev in history_out]
+        # Audit history belongs to Admin operations. Do not return it to
+        # Designers, including through DevTools/network inspection.
+        history_out = []
 
     return OrderDetailResponse(
         order=order_out,
@@ -1910,6 +1914,10 @@ def api_update_designer_note(
     if order is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
     order.designer_note = payload.designer_note.strip()
+    order.designer_note_released_for_fix = bool(order.designer_note) and (
+        (order.state or "").upper() in ("REVISION", "REVISION_REQUESTED", "FIX")
+        and bool(order.fix_approved_by_admin)
+    )
     db.add(WorkflowEvent(
         order_id=order.id, from_state=order.state, to_state=order.state, actor_id=user.id,
         evidence={"action": "UPDATE_DESIGNER_NOTE", "actor_role": "admin", "actor_name": user.full_name or user.username,
@@ -1947,12 +1955,13 @@ def api_resolve_missing_template(
 
     old_state = order.state
     order.designer_note = payload.designer_note.strip()
+    order.designer_note_released_for_fix = False
     order.template_missing = False
     order.template_missing_reported_at = None
     order.template_missing_reported_by_id = None
-    # Ẩn note_outsource (của Printerval) khỏi Designer trong chu kỳ resolve này.
-    # Chỉ cập nhật note của Admin (designer_note) xuống cho Des thấy.
-    # Flag sẽ được reset khi đơn sync lại từ Platform hoặc Admin cập nhật note_outsource thông thường.
+    # Upstream notes are never exposed to Designers. This resolution note is
+    # administrative only; a Designer receives a note only through an approved
+    # Fix release.
     order.suppress_note_outsource_for_designer = True
     assignment.sub_status = "todo"
     if order.state != OrderState.IN_PROGRESS.value:
@@ -2105,6 +2114,7 @@ def api_update_order_state(
     elif target_state == OrderState.QC_PENDING:
         order.fix_approved_by_admin = False
         order.fix_rejected_by_admin = False
+        order.designer_note_released_for_fix = False
         order.fix_deadline_at = None
         order.deadline_overdue_notified_at = None
         if curr_assignment:
@@ -2121,6 +2131,12 @@ def api_update_order_state(
         desc = f"{actor_disp} yêu cầu sửa bài (Fix)"
         order.fix_approved_by_admin = False
         order.fix_rejected_by_admin = False
+        # A direct state update must follow the same privacy boundary as a
+        # Platform-originated Fix: no old instruction is reusable by a
+        # Designer until Admin explicitly releases a new note.
+        order.designer_note = ""
+        order.designer_note_released_for_fix = False
+        order.suppress_note_outsource_for_designer = True
     elif target_state == OrderState.DONE:
         action_type = "APPROVE_DONE"
         desc = f"{actor_disp} duyệt hoàn thành đơn hàng (Done)"
@@ -2201,18 +2217,15 @@ def api_approve_fix(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
 
     admin_designer_note = (payload.designer_note or "").strip()
-    outsource_note = (
-        payload.note_outsource.strip()
-        if payload.note_outsource is not None
-        else (order.note_outsource or "").strip()
-    )
-
-    if admin_designer_note:
-        # TH2: Admin nhập nội dung vào ô note của admin -> gửi thẳng nội dung này cho des, bỏ qua note outsource
-        order.designer_note = admin_designer_note
-    else:
-        # TH1: Admin để trống ô note của admin -> nội dung fix mà des nhận được là nội dung ở ô note outsource
-        order.designer_note = outsource_note
+    if not admin_designer_note:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Cần nhập Ghi chú Admin cho Designer trước khi duyệt Fix.",
+        )
+    # The released instruction must be intentionally written by an Admin; do
+    # not fall back to the upstream QC note.
+    order.designer_note = admin_designer_note
+    order.designer_note_released_for_fix = True
 
     if payload.note_outsource is not None:
         order.note_outsource = payload.note_outsource.strip()
@@ -2619,6 +2632,14 @@ def api_get_orders_history(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    # The route is admin-only in the UI, but an authenticated Designer could
+    # still call it manually. Keep the audit trail completely unavailable to
+    # both Designer roles at the API boundary as well.
+    if user.role in (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO):
+        return OrderHistoryListResponse(
+            items=[], total=0, page=page, page_size=page_size, total_pages=1
+        )
+
     query = (
         db.query(WorkflowEvent, Order)
         .join(Order, Order.id == WorkflowEvent.order_id)
@@ -2773,6 +2794,10 @@ def api_get_single_order_history(
     if user.role in (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO):
         if get_order_detail_for_user(db, user, str(order.id)) is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
+        # Designers do not have an audit-trail view. Returning an empty list
+        # here also prevents historical notes and submitted links from being
+        # recovered through the dedicated API in DevTools.
+        return []
 
     history = get_order_history(db, str(order.id))
     actor_ids = {e.actor_id for e in history if e.actor_id}

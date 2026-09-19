@@ -4,9 +4,10 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from app.adapters.db.models import Order, Platform, TelegramActionLog, User
+from app.adapters.db.models import Assignment, Order, Platform, TelegramActionLog, User
 from app.application.auth import create_session_token, hash_password
 from app.application.telegram_service import (
+    notify_admin_new_fix,
     notify_designer_new_order,
     notify_designer_payment,
     notify_designer_urgent_fix,
@@ -137,10 +138,119 @@ def test_telegram_admin_fix_callbacks(client: TestClient, db_session):
         assert resp.status_code == 200
 
     db_session.refresh(order)
-    assert order.fix_approved_by_admin is True
+    # The first click now asks Admin which note should be released; it must not
+    # dispatch the Fix before that explicit choice.
+    assert order.fix_approved_by_admin is False
     assert order.state == OrderState.REVISION.value
     db_session.refresh(action_log)
     assert action_log.status == "executed"
+
+    source_action = (
+        db_session.query(TelegramActionLog)
+        .filter(TelegramActionLog.action_type == "APPROVE_FIX_USE_OUTSOURCE")
+        .one()
+    )
+    order.note_outsource = "Sửa lại màu áo theo QC"
+    db_session.commit()
+
+    with patch("app.application.telegram_service.send_telegram_request") as mock_send:
+        mock_send.return_value = {"ok": True}
+        resp = client.post(
+            "/api/telegram/webhook",
+            json={
+                "callback_query": {
+                    "id": "cb2",
+                    "data": f"appfixsource:{source_action.callback_token}",
+                    "from": {"id": 111222333},
+                }
+            },
+        )
+        assert resp.status_code == 200
+
+    db_session.refresh(order)
+    assert order.fix_approved_by_admin is True
+    assert order.designer_note == "Sửa lại màu áo theo QC"
+    assert order.designer_note_released_for_fix is True
+    sibling_write_choice = db_session.query(TelegramActionLog).filter(
+        TelegramActionLog.action_type == "APPROVE_FIX_WRITE_NOTE"
+    ).one()
+    assert sibling_write_choice.status == "superseded"
+
+
+def test_telegram_admin_fix_notification_uses_tacahu_designer_name(db_session):
+    platform = Platform(name="Plat designer name", account_username="admin@print.com", is_active=True)
+    admin = User(
+        username="admin-for-fix-notice", full_name="Admin", role="admin",
+        password_hash=hash_password("pass"), telegram_chat_id="111", active=True,
+    )
+    designer = User(
+        username="tacahu-designer", full_name="Tên Designer Tacahu", role="designer",
+        password_hash=hash_password("pass"), active=True,
+    )
+    order = Order(
+        external_order_id="DJ-TG-DES-NAME", platform_id=platform.id,
+        state=OrderState.REVISION.value, product_name="Poster", printerval_designer="Tên Trên Print",
+    )
+    db_session.add_all([platform, admin, designer, order])
+    db_session.flush()
+    db_session.add(Assignment(order_id=order.id, designer_id=designer.id, status="approved"))
+    db_session.commit()
+
+    with patch("app.application.telegram_service.send_telegram_request") as send:
+        send.return_value = {"ok": True}
+        assert notify_admin_new_fix(db_session, order.id) is True
+
+    payload = send.call_args.args[1]
+    message = payload.get("caption") or payload["text"]
+    assert "Tên Designer Tacahu" in message
+    assert "Tên Trên Print" not in message
+
+
+def test_telegram_admin_can_write_note_before_fix_is_released(client: TestClient, db_session):
+    platform = Platform(name="Plat custom note", account_username="admin@print.com", is_active=True)
+    admin = User(
+        username="admin-custom-note", full_name="Admin Custom", role="admin",
+        password_hash=hash_password("pass"), telegram_chat_id="222", active=True,
+    )
+    order = Order(
+        external_order_id="DJ-TG-CUSTOM-NOTE", platform_id=platform.id,
+        state=OrderState.REVISION.value, product_name="Canvas", note_outsource="Raw QC note",
+    )
+    db_session.add_all([platform, admin, order])
+    db_session.flush()
+    original_action = TelegramActionLog(
+        order_id=order.id, action_type="APPROVE_FIX", callback_token="approve-custom-note",
+        payload={"order_id": str(order.id)},
+    )
+    db_session.add(original_action)
+    db_session.commit()
+
+    with patch("app.application.telegram_service.send_telegram_request") as send:
+        send.return_value = {"ok": True}
+        response = client.post(
+            "/api/telegram/webhook",
+            json={"callback_query": {"id": "custom-1", "data": "appfix:approve-custom-note", "from": {"id": 222}}},
+        )
+        assert response.status_code == 200
+        write_note_token = db_session.query(TelegramActionLog.callback_token).filter(
+            TelegramActionLog.action_type == "APPROVE_FIX_WRITE_NOTE"
+        ).scalar()
+        response = client.post(
+            "/api/telegram/webhook",
+            json={"callback_query": {"id": "custom-2", "data": f"appfixnote:{write_note_token}", "from": {"id": 222}}},
+        )
+        assert response.status_code == 200
+
+        response = client.post(
+            "/api/telegram/webhook",
+            json={"message": {"chat": {"id": 222}, "text": "Đổi font và căn giữa logo.", "from": {"id": 222}}},
+        )
+        assert response.status_code == 200
+
+    db_session.refresh(order)
+    assert order.fix_approved_by_admin is True
+    assert order.designer_note == "Đổi font và căn giữa logo."
+    assert order.designer_note_released_for_fix is True
 
 
 def test_telegram_notification_formatters(db_session):
@@ -177,6 +287,10 @@ def test_telegram_notification_formatters(db_session):
         # Urgent fix
         res2 = notify_designer_urgent_fix(db_session, order.id, user.id, "Please fix font size")
         assert res2 is True
+        urgent_payload = mock_send.call_args.args[1]
+        urgent_message = urgent_payload.get("caption") or urgent_payload["text"]
+        assert "Mã đơn" not in urgent_message
+        assert "DJ-FMT-111" not in urgent_message
 
         # Payment
         res3 = notify_designer_payment(db_session, user.id, 10, 400000)

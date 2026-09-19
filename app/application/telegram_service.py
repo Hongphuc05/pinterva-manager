@@ -209,13 +209,11 @@ def notify_designer_new_order(
         return False
 
     p_name = html.escape(order.product_name or "Sản phẩm")
-    order_id_code = html.escape(order.external_order_id)
     deadline_str = format_vietnam_time(order.deadline_tacahu)
 
     text = (
         f"🎨 <b>BẠN CÓ ĐƠN HÀNG MỚI (ĐANG LÀM)!</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📦 <b>Mã đơn:</b> <code>{order_id_code}</code>\n"
         f"👕 <b>Sản phẩm:</b> {p_name}\n"
         f"⏰ <b>Hạn chót:</b> {deadline_str}\n"
     )
@@ -245,7 +243,6 @@ def notify_designer_urgent_fix(
     if not order:
         return False
 
-    order_id_code = html.escape(order.external_order_id)
     p_name = html.escape(order.product_name or "Sản phẩm")
     fix_cnt = order.fix_return_count or 1
     adm_note = html.escape(admin_note or order.designer_note or "Sửa theo yêu cầu của khách")
@@ -253,7 +250,6 @@ def notify_designer_urgent_fix(
     text = (
         f"🚨 <b>CẢNH BÁO: ĐƠN CẦN SỬA GẤP (FIX)!</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📦 <b>Mã đơn:</b> <code>{order_id_code}</code>\n"
         f"👕 <b>Sản phẩm:</b> {p_name}\n"
         f"🔄 <b>Lần fix thứ:</b> #{fix_cnt}\n"
         f"⏰ <b>Hạn sửa:</b> {format_vietnam_time(order.fix_deadline_at)}\n"
@@ -330,7 +326,20 @@ def notify_admin_new_fix(session: Session, order_id: uuid.UUID) -> bool:
     p_name = html.escape(order.product_name or "Sản phẩm")
     fix_cnt = order.fix_return_count or 1
     qc_note = html.escape(order.note_outsource or "Không có ghi chú")
-    des_name = html.escape(order.printerval_designer or "Chưa rõ")
+    assignment = (
+        session.query(Assignment)
+        .filter(Assignment.order_id == order.id, Assignment.status != "cancelled")
+        .order_by(Assignment.created_at.desc())
+        .first()
+    )
+    assigned_designer = session.get(User, assignment.designer_id) if assignment and assignment.designer_id else None
+    # This is the Tacahu account that owns the assignment, not the display
+    # name scraped from Printerval.
+    des_name = html.escape(
+        (assigned_designer.full_name or assigned_designer.username)
+        if assigned_designer
+        else "Chưa được phân công trên Tacahu"
+    )
 
     # Generate callback tokens for Approve / Reject buttons
     approve_token = secrets.token_urlsafe(16)

@@ -107,6 +107,7 @@ class DesignerOrderSummaryOut(BaseModel):
     fix_rejected_by_admin: bool = False
     fix_return_count: int = 0
     designer_note: str = ""
+    designer_note_released_for_fix: bool = False
     template_missing: bool = False
     duplicate_check_status: str = "uncheck"
     sku_image_url: str | None = None
@@ -145,6 +146,7 @@ class DesignerOrderDetailOut(BaseModel):
     fix_rejected_by_admin: bool = False
     fix_return_count: int = 0
     designer_note: str = ""
+    designer_note_released_for_fix: bool = False
     template_missing: bool = False
     duplicate_check_status: str = "uncheck"
     custom_config: dict | None = None
@@ -157,6 +159,28 @@ class DesignerOrderDetailOut(BaseModel):
     thumbnail_url: str | None = None
     source_files: list[dict] | None = None
     product_image_urls: list[str] | None = None
+
+
+def _apply_designer_note_policy(item_dict: dict[str, Any]) -> None:
+    """Enforce the Designer-facing note boundary.
+
+    Upstream note_outsource and submitted-result links are operational records for
+    Admin. Designers receive only an explicit Admin instruction for an approved
+    Fix. The release flag gives old rows a safe default: hidden.
+    """
+    state = str(item_dict.get("state") or "").upper()
+    has_released_fix_note = (
+        state in {"REVISION", "REVISION_REQUESTED", "FIX"}
+        and bool(item_dict.get("fix_approved_by_admin"))
+        and bool(item_dict.pop("designer_note_released_for_fix", False))
+        and bool(str(item_dict.get("designer_note") or "").strip())
+    )
+    item_dict.pop("suppress_note_outsource_for_designer", None)
+    item_dict["note_outsource"] = ""
+    item_dict["previous_note_outsource"] = None
+    item_dict["result_versions"] = []
+    if not has_released_fix_note:
+        item_dict["designer_note"] = ""
 
 
 def sanitize_order_summary_for_designer(item: Any) -> Any:
@@ -189,18 +213,7 @@ def sanitize_order_summary_for_designer(item: Any) -> Any:
         ]
     if item_dict.get("source_files"):
         item_dict["source_files"] = sanitize_source_files(item_dict["source_files"])
-    if item_dict.pop("suppress_note_outsource_for_designer", False):
-        # Admin đã resolve thiếu temp — ẩn note outsource của Printerval khỏi Designer
-        # trong chu kỳ này; Des chỉ thấy designer_note mà Admin nhập.
-        item_dict["note_outsource"] = ""
-        item_dict["previous_note_outsource"] = None
-    else:
-        if item_dict.get("note_outsource"):
-            item_dict["note_outsource"] = sanitize_text(item_dict["note_outsource"], "Web mẹ")
-        if item_dict.get("previous_note_outsource"):
-            item_dict["previous_note_outsource"] = sanitize_text(
-                item_dict["previous_note_outsource"], "Web mẹ"
-            )
+    _apply_designer_note_policy(item_dict)
     return DesignerOrderSummaryOut(**item_dict)
 
 
@@ -233,23 +246,19 @@ def sanitize_order_detail_for_designer(item: Any) -> Any:
         item_dict["source_files"] = sanitize_source_files(item_dict["source_files"])
     if item_dict.get("custom_config"):
         item_dict["custom_config"] = sanitize_custom_config(item_dict["custom_config"])
-    if item_dict.pop("suppress_note_outsource_for_designer", False):
-        # Admin đã resolve thiếu temp — ẩn note outsource của Printerval khỏi Designer
-        # trong chu kỳ này; Des chỉ thấy designer_note mà Admin nhập.
-        item_dict["note_outsource"] = ""
-        item_dict["previous_note_outsource"] = None
-    else:
-        if item_dict.get("note_outsource"):
-            item_dict["note_outsource"] = sanitize_text(item_dict["note_outsource"], "Web mẹ")
-        if item_dict.get("previous_note_outsource"):
-            item_dict["previous_note_outsource"] = sanitize_text(
-                item_dict["previous_note_outsource"], "Web mẹ"
-            )
+    _apply_designer_note_policy(item_dict)
     return DesignerOrderDetailOut(**item_dict)
 
 
 def sanitize_workflow_event_for_designer(event: Any) -> Any:
     """Sanitizes a WorkflowEventOut instance or dict for designer view."""
+    private_evidence_keys = {
+        "note_outsource",
+        "previous_note_outsource",
+        "drive_url",
+        "designer_note",
+        "description",
+    }
     if isinstance(event, BaseModel):
         if event.actor_name and "printerval" in event.actor_name.lower():
             event.actor_name = "Hệ thống mẹ"
@@ -258,7 +267,7 @@ def sanitize_workflow_event_for_designer(event: Any) -> Any:
         if event.evidence and isinstance(event.evidence, dict):
             clean_ev = {}
             for k, v in event.evidence.items():
-                if "printerval" in str(k).lower():
+                if "printerval" in str(k).lower() or str(k) in private_evidence_keys:
                     continue
                 if isinstance(v, str):
                     if "printerval" in v.lower():
@@ -273,7 +282,7 @@ def sanitize_workflow_event_for_designer(event: Any) -> Any:
         if event.get("evidence") and isinstance(event["evidence"], dict):
             clean_ev = {}
             for k, v in event["evidence"].items():
-                if "printerval" in str(k).lower():
+                if "printerval" in str(k).lower() or str(k) in private_evidence_keys:
                     continue
                 if isinstance(v, str):
                     if "printerval" in v.lower():

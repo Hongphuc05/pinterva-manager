@@ -229,6 +229,12 @@ class Order(Base):
     suppress_note_outsource_for_designer: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
+    # Explicit provenance for the only note a Designer may see: an Admin-written
+    # instruction released with an approved Fix. Existing notes intentionally
+    # default to hidden until an Admin releases a new Fix instruction.
+    designer_note_released_for_fix: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     order_note: Mapped[str] = mapped_column(
         Text, nullable=False, default="", server_default=text("''")
     )

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type DragEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import {
   AlertCircle,
   ArrowDownUp,
@@ -26,6 +26,7 @@ import { AdminFixActionModal } from '../components/AdminFixActionModal'
 import { CopyableOrderCode } from '../components/CopyableOrderCode'
 import { useSyncStatus } from '../hooks/useSyncStatus'
 import { useToast } from '../context/ToastContext'
+import { readViewState, writeViewState } from '../utils/viewState'
 
 type DuplicateCard = {
   id: string
@@ -132,8 +133,19 @@ function sortedCards(cards: DuplicateCard[], statusSortEnabled: boolean) {
 
 export function DuplicateBoardPage() {
   const { user } = useAuth()
+  const location = useLocation()
   const { showToast } = useToast()
   const { status: syncStatus, triggerRun, isTriggering } = useSyncStatus()
+  const [restoredViewState] = useState(() => readViewState('duplicate-board', user?.role, {
+    designerTabs: {} as Record<string, DesignerBoardTab>,
+    statusSortColumns: [] as string[],
+    searchQuery: '',
+    globalStateFilter: 'all',
+    globalDesignerFilter: 'all',
+    doneDesignerFilter: 'all',
+    donePaymentFilter: 'all',
+    doneTimeFilter: 'all',
+  }))
   const [columns, setColumns] = useState<DuplicateColumn[]>([])
   const [crossDesignerDragEnabled, setCrossDesignerDragEnabled] = useState(true)
   const [loading, setLoading] = useState(true)
@@ -141,22 +153,40 @@ export function DuplicateBoardPage() {
   const [draggedCard, setDraggedCard] = useState<DuplicateCard | null>(null)
   const [dropTarget, setDropTarget] = useState<string | null>(null)
   const [dropInsertion, setDropInsertion] = useState<{ columnId: string; beforeCardId: string | null } | null>(null)
-  const [designerTabs, setDesignerTabs] = useState<Record<string, DesignerBoardTab>>({})
+  const [designerTabs, setDesignerTabs] = useState<Record<string, DesignerBoardTab>>(
+    () => restoredViewState.designerTabs && typeof restoredViewState.designerTabs === 'object'
+      ? restoredViewState.designerTabs as Record<string, DesignerBoardTab>
+      : {},
+  )
   const [movingCardId, setMovingCardId] = useState<string | null>(null)
-  const [statusSortColumns, setStatusSortColumns] = useState<Set<string>>(() => new Set())
+  const [statusSortColumns, setStatusSortColumns] = useState<Set<string>>(
+    () => new Set(Array.isArray(restoredViewState.statusSortColumns) ? restoredViewState.statusSortColumns : []),
+  )
   const [savingSettings, setSavingSettings] = useState(false)
   const [syncRequested, setSyncRequested] = useState(false)
   const [fixAction, setFixAction] = useState<FixAction | null>(null)
 
   // Global board search and filters
-  const [searchQuery, setSearchQuery] = useState('')
-  const [globalStateFilter, setGlobalStateFilter] = useState<'all' | 'doing' | 'review' | 'fix' | 'done' | 'missing'>('all')
-  const [globalDesignerFilter, setGlobalDesignerFilter] = useState<string>('all')
+  const [searchQuery, setSearchQuery] = useState(String(restoredViewState.searchQuery || ''))
+  const [globalStateFilter, setGlobalStateFilter] = useState<'all' | 'doing' | 'review' | 'fix' | 'done' | 'missing'>(
+    ['all', 'doing', 'review', 'fix', 'done', 'missing'].includes(String(restoredViewState.globalStateFilter))
+      ? restoredViewState.globalStateFilter as 'all' | 'doing' | 'review' | 'fix' | 'done' | 'missing'
+      : 'all',
+  )
+  const [globalDesignerFilter, setGlobalDesignerFilter] = useState<string>(String(restoredViewState.globalDesignerFilter || 'all'))
 
   // Done column filters
-  const [doneDesignerFilter, setDoneDesignerFilter] = useState<string>('all')
-  const [donePaymentFilter, setDonePaymentFilter] = useState<'all' | 'unpaid' | 'paid'>('all')
-  const [doneTimeFilter, setDoneTimeFilter] = useState<'all' | 'today' | '7days' | '30days'>('all')
+  const [doneDesignerFilter, setDoneDesignerFilter] = useState<string>(String(restoredViewState.doneDesignerFilter || 'all'))
+  const [donePaymentFilter, setDonePaymentFilter] = useState<'all' | 'unpaid' | 'paid'>(
+    ['all', 'unpaid', 'paid'].includes(String(restoredViewState.donePaymentFilter))
+      ? restoredViewState.donePaymentFilter as 'all' | 'unpaid' | 'paid'
+      : 'all',
+  )
+  const [doneTimeFilter, setDoneTimeFilter] = useState<'all' | 'today' | '7days' | '30days'>(
+    ['all', 'today', '7days', '30days'].includes(String(restoredViewState.doneTimeFilter))
+      ? restoredViewState.doneTimeFilter as 'all' | 'today' | '7days' | '30days'
+      : 'all',
+  )
 
   // Custom column order (stored in localStorage)
   const [customColumnOrder, setCustomColumnOrder] = useState<string[]>(() => {
@@ -171,6 +201,19 @@ export function DuplicateBoardPage() {
 
   const isAdmin = user?.role === 'admin'
   const isSupport = user?.role === 'support'
+
+  useEffect(() => {
+    writeViewState('duplicate-board', user?.role, {
+      designerTabs,
+      statusSortColumns: Array.from(statusSortColumns),
+      searchQuery,
+      globalStateFilter,
+      globalDesignerFilter,
+      doneDesignerFilter,
+      donePaymentFilter,
+      doneTimeFilter,
+    })
+  }, [user?.role, designerTabs, statusSortColumns, searchQuery, globalStateFilter, globalDesignerFilter, doneDesignerFilter, donePaymentFilter, doneTimeFilter])
 
   function getDesignerTab(columnId: string): DesignerBoardTab {
     return designerTabs[columnId] || 'doing'
@@ -516,10 +559,7 @@ export function DuplicateBoardPage() {
       onDragEnd()
       return
     }
-    if (isDesigner && draggedCard.assignee_id === column.id && draggedCard.state !== 'DONE') {
-      onDragEnd()
-      return
-    }
+    const isReorderingInSameDesignerColumn = isDesigner && draggedCard.assignee_id === column.id
 
     let insertionBeforeCardId = beforeCardId
     if (isDesigner && insertionBeforeCardId === null && getDesignerTab(column.id) === 'doing') {
@@ -542,8 +582,12 @@ export function DuplicateBoardPage() {
       })
       await loadBoard()
       if (isDesigner) {
-        setDesignerTab(column.id, 'doing')
-        showToast(`Đã phân công đơn ${movedOrderCode} cho ${column.title} và chuyển sang Doing.`, 'success')
+        if (isReorderingInSameDesignerColumn) {
+          showToast(`Đã cập nhật thứ tự đơn ${movedOrderCode} trong cột ${column.title}.`, 'success')
+        } else {
+          setDesignerTab(column.id, 'doing')
+          showToast(`Đã phân công đơn ${movedOrderCode} cho ${column.title} và chuyển sang Doing.`, 'success')
+        }
       } else if (isDone) {
         showToast(`Đã chuyển đơn ${movedOrderCode} sang Done.`, 'success')
       } else if (isMissing) {
@@ -998,13 +1042,8 @@ export function DuplicateBoardPage() {
                         </div>
 
                         <div className="min-w-0 px-1 pt-2">
-                          {column.id === 'orders' && (isAdmin || isSupport || user?.role === 'designer-trello') && (
-                            <button type="button" draggable={false} onClick={() => void removeFromDuplicateBacklog(card)} className="absolute right-3 top-3 z-20 rounded bg-rose-50 px-1.5 py-1 text-[10px] font-bold text-rose-700 hover:bg-rose-100">
-                              Bỏ trùng
-                            </button>
-                          )}
                           <CopyableOrderCode code={card.external_order_id} />
-                          <Link to={`/orders/${card.id}`} className="block hover:underline">
+                          <Link to={`/orders/${card.id}`} state={{ returnTo: `${location.pathname}${location.search}` }} className="block hover:underline">
                             <p className="mt-1 line-clamp-4 text-[12px] font-medium leading-relaxed text-slate-700">
                               {card.product_name || 'Đơn chưa có tên sản phẩm'}
                             </p>
@@ -1045,6 +1084,16 @@ export function DuplicateBoardPage() {
                               <span className="font-medium text-slate-400">
                                 {new Date(card.deadline_tacahu).toLocaleDateString('vi-VN')}
                               </span>
+                            )}
+                            {column.id === 'orders' && (isAdmin || isSupport || user?.role === 'designer-trello') && (
+                              <button
+                                type="button"
+                                draggable={false}
+                                onClick={() => void removeFromDuplicateBacklog(card)}
+                                className="rounded bg-rose-50 px-1.5 py-1 text-[10px] font-bold text-rose-700 hover:bg-rose-100"
+                              >
+                                Bỏ trùng
+                              </button>
                             )}
                           </div>
                         </div>

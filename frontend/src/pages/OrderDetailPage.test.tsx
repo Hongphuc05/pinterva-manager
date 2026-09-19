@@ -52,7 +52,20 @@ describe('OrderDetailPage', () => {
                 product_image_urls: [],
                 created_at: '2026-01-01T00:00:00',
               },
-              history: [],
+              history: [
+                {
+                  id: 'event-1',
+                  created_at: '2026-01-01T01:00:00',
+                  from_state: 'IN_PROGRESS',
+                  to_state: 'QC_PENDING',
+                  actor_id: 'des1',
+                  actor_name: 'Designer 1',
+                  actor_role: 'designer',
+                  action: 'SUBMIT_REVIEW',
+                  description: 'Designer 1 nộp bài sang Review',
+                  evidence: { drive_link: 'https://drive.google.com/test-file' },
+                },
+              ],
             }),
           })
         }
@@ -152,7 +165,7 @@ describe('OrderDetailPage', () => {
     expect(screen.queryByText('DJ1_SECRET_CODE')).not.toBeInTheDocument()
   })
 
-  it('safely renders submitted version history items without creating broken relative links for plain notes', async () => {
+  it('does not render submitted version history for a designer', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn((url: string) => {
@@ -201,7 +214,20 @@ describe('OrderDetailPage', () => {
                   { id: 'v2', drive_url: 'https://drive.google.com/test-file', version_marker: 2, submitted_at: '2026-01-01T01:00:00', qc_feedback: null }
                 ]
               },
-              history: [],
+              history: [
+                {
+                  id: 'event-1',
+                  created_at: '2026-01-01T01:00:00',
+                  from_state: 'IN_PROGRESS',
+                  to_state: 'QC_PENDING',
+                  actor_id: 'des1',
+                  actor_name: 'Designer 1',
+                  actor_role: 'designer',
+                  action: 'SUBMIT_REVIEW',
+                  description: 'Designer 1 nộp bài sang Review',
+                  evidence: { drive_link: 'https://drive.google.com/test-file' },
+                },
+              ],
             }),
           })
         }
@@ -223,19 +249,12 @@ describe('OrderDetailPage', () => {
       </AuthProvider>
     )
 
-    await waitFor(() => expect(screen.getByText('Lịch sử các bản đã nộp (2)')).toBeInTheDocument())
-
-    // v1 was text "1", so it must NOT be a link with href="1"
-    const v1Text = screen.getByText('Bản v1')
-    expect(v1Text.closest('a')).toBeNull()
-    expect(screen.getByText('1')).toBeInTheDocument()
-
-    // v2 was a valid drive url, so it MUST be a link with href="https://drive.google.com/test-file"
-    const v2Text = screen.getByText('Bản v2')
-    const v2Link = v2Text.closest('a')
-    expect(v2Link).not.toBeNull()
-    expect(v2Link).toHaveAttribute('href', 'https://drive.google.com/test-file')
-    expect(v2Link).toHaveAttribute('target', '_blank')
+    await waitFor(() => expect(screen.getByText('Custom Mug')).toBeInTheDocument())
+    expect(screen.queryByText('Lịch sử các bản đã nộp (2)')).not.toBeInTheDocument()
+    expect(screen.queryByText('Bản v1')).not.toBeInTheDocument()
+    expect(screen.queryByText('Bản v2')).not.toBeInTheDocument()
+    expect(screen.queryByText('https://drive.google.com/test-file')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Lịch Sử Tiến Độ & Hoạt Động/i)).not.toBeInTheDocument()
   })
 
   it('renders single Order At card and header variants (Type, Size) for designer while hiding SKU card', async () => {

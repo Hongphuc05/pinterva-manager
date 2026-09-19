@@ -648,20 +648,21 @@ def test_resolve_missing_template_returns_assigned_order_to_doing(client, db_ses
     assert order.suppress_note_outsource_for_designer is True
     assert assignment.sub_status == "todo"
 
-    # Verify Designer view: note_outsource is suppressed (""), designer_note is visible
+    # Template-resolution notes are Admin operational notes. Designer notes are
+    # only released through an approved Fix.
     _login(client, db_session, "designer", username="missing-designer")
     detail_res = client.get(f"/api/orders/{order.id}")
     assert detail_res.status_code == 200
     detail_data = detail_res.json()["order"]
     assert detail_data["note_outsource"] == ""
-    assert detail_data["designer_note"] == "Temp: https://example.com/template"
+    assert detail_data["designer_note"] == ""
 
     list_res = client.get("/api/orders")
     assert list_res.status_code == 200
     matching = [o for o in list_res.json()["orders"] if o["id"] == str(order.id)]
     assert len(matching) == 1
     assert matching[0]["note_outsource"] == ""
-    assert matching[0]["designer_note"] == "Temp: https://example.com/template"
+    assert matching[0]["designer_note"] == ""
 
     # Verify Admin view: note_outsource is preserved
     _login(client, db_session, "admin", username="missing-template-admin-2")
@@ -745,7 +746,10 @@ def test_api_approve_and_reject_fix_flow(client, db_session, monkeypatch):
     client.post("/api/login", json={"username": "admin_fix_test", "password": "s3cret!"})
     resp = client.post(
         f"/api/orders/{order.id}/approve-fix",
-        json={"note_outsource": "fix https://prnt.sc/test1234 lech mau áo - admin verified"},
+        json={
+            "note_outsource": "fix https://prnt.sc/test1234 lech mau áo - admin verified",
+            "designer_note": "Sửa lại màu áo theo góp ý đã được Admin kiểm tra.",
+        },
     )
     assert resp.status_code == 200
     data = resp.json()
@@ -871,4 +875,3 @@ def test_designer_submit_review_does_not_notify_admin_telegram(client, db_sessio
     assert order.state == OrderState.QC_PENDING.value
     # Must NOT dispatch any notification to admin for submitted review
     assert len(admin_review_calls) == 0
-

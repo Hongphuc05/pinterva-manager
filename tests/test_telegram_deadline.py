@@ -38,3 +38,5 @@ def test_new_order_notification_uses_tacahu_deadline(db_session):
     # Vietnam time rather than silently showing UTC.
     assert "22/09/2026 16:30" in message
     assert "23/09/2026 16:00" not in message
+    assert "Mã đơn" not in message
+    assert "DJ-DEADLINE-111" not in message

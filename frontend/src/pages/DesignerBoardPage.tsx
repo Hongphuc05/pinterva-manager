@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { apiFetch, resolveAssetUrl } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { DashboardLayout } from '../components/DashboardLayout'
@@ -18,12 +18,14 @@ import {
   ChevronRight,
   CheckCheck,
   History,
-  RefreshCw
+  RefreshCw,
+  Trash2,
 } from 'lucide-react'
 import { OrderHistoryTimelineModal } from '../components/OrderHistoryTimelineModal'
 import { AdminFixActionModal } from '../components/AdminFixActionModal'
 import { ProductQuickViewModal } from '../components/ProductQuickViewModal'
 import { LinkifiedText } from '../components/LinkifiedText'
+import { readViewState, writeViewState } from '../utils/viewState'
 
 type DesignerOrder = {
   id: string
@@ -57,15 +59,28 @@ type DesignerWorkload = {
 
 export function DesignerBoardPage() {
   const { user } = useAuth()
+  const location = useLocation()
   const isAdmin = user?.role === 'admin'
+  const [restoredViewState] = useState(() => readViewState('designer-board', user?.role, {
+    searchQuery: '',
+    filterMode: 'all',
+    showDoneColumn: true,
+    expandedDesignerIds: [] as string[],
+  }))
   const [designers, setDesigners] = useState<DesignerWorkload[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [filterMode, setFilterMode] = useState<'all' | 'needs_review' | 'has_fix' | 'active'>('all')
+  const [searchQuery, setSearchQuery] = useState(String(restoredViewState.searchQuery || ''))
+  const [filterMode, setFilterMode] = useState<'all' | 'needs_review' | 'has_fix' | 'active'>(
+    ['all', 'needs_review', 'has_fix', 'active'].includes(String(restoredViewState.filterMode))
+      ? restoredViewState.filterMode as 'all' | 'needs_review' | 'has_fix' | 'active'
+      : 'all',
+  )
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
-  const [showDoneColumn, setShowDoneColumn] = useState(true)
-  const [expandedDesignerIds, setExpandedDesignerIds] = useState<Set<string>>(() => new Set())
+  const [showDoneColumn, setShowDoneColumn] = useState(restoredViewState.showDoneColumn !== false)
+  const [expandedDesignerIds, setExpandedDesignerIds] = useState<Set<string>>(
+    () => new Set(Array.isArray(restoredViewState.expandedDesignerIds) ? restoredViewState.expandedDesignerIds : []),
+  )
   const [syncingPlatform, setSyncingPlatform] = useState(false)
   const [fixActionModal, setFixActionModal] = useState<{
     isOpen: boolean
@@ -82,6 +97,16 @@ export function DesignerBoardPage() {
     product_name?: string | null
   } | null>(null)
   const [quickViewOrderId, setQuickViewOrderId] = useState<string | null>(null)
+  const [removingOrderId, setRemovingOrderId] = useState<string | null>(null)
+
+  useEffect(() => {
+    writeViewState('designer-board', user?.role, {
+      searchQuery,
+      filterMode,
+      showDoneColumn,
+      expandedDesignerIds: Array.from(expandedDesignerIds),
+    })
+  }, [user?.role, searchQuery, filterMode, showDoneColumn, expandedDesignerIds])
 
   useEffect(() => {
     loadWorkload()
@@ -133,6 +158,31 @@ export function DesignerBoardPage() {
     }
   }
 
+  async function handleRemoveFromDesigner(order: DesignerOrder) {
+    if (!window.confirm(
+      `Gỡ đơn ${order.external_order_id} khỏi giao diện Designer? Đơn sẽ được hủy phân công và trả về Waiting.`,
+    )) return
+
+    setRemovingOrderId(order.id)
+    try {
+      const result = await apiFetch<{ message: string }>('/assignments/revoke', {
+        method: 'POST',
+        body: JSON.stringify({
+          order_ids: [order.id],
+          expected_versions: { [order.id]: order.version },
+        }),
+      })
+      await loadWorkload()
+      window.dispatchEvent(new CustomEvent('orders-updated'))
+      setError(null)
+      alert(result.message || `Đã gỡ đơn ${order.external_order_id} khỏi Designer.`)
+    } catch (err: any) {
+      setError(err.message || `Không thể gỡ đơn ${order.external_order_id} khỏi Designer.`)
+    } finally {
+      setRemovingOrderId(null)
+    }
+  }
+
   // Aggregate stats across all designers
   const totalDesigners = designers.length
   const totalAllOrders = designers.reduce((sum, d) => sum + d.total_orders, 0)
@@ -177,6 +227,13 @@ export function DesignerBoardPage() {
 
   function expandAllDesigners() {
     setExpandedDesignerIds(new Set(filteredDesigners.map((designer) => designer.id)))
+  }
+
+  function selectFilter(mode: 'all' | 'needs_review' | 'has_fix' | 'active') {
+    setFilterMode(mode)
+    // The filter is applied to the whole team immediately, not merely styled
+    // as selected. Expanding the matched people makes the result visible.
+    setExpandedDesignerIds(new Set())
   }
 
   // Listen for Topbar sync button click
@@ -313,9 +370,15 @@ export function DesignerBoardPage() {
             />
           </div>
 
+          <p aria-live="polite" className="w-full text-[11px] font-medium text-slate-500 sm:hidden">
+            Đang hiển thị {filteredDesigners.length}/{totalDesigners} Designer
+          </p>
+
           <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
             <button
-              onClick={() => setFilterMode('all')}
+              type="button"
+              onClick={() => selectFilter('all')}
+              aria-pressed={filterMode === 'all'}
               className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer ${
                 filterMode === 'all'
                   ? 'bg-slate-900 text-white border-slate-900 shadow-2xs'
@@ -325,7 +388,9 @@ export function DesignerBoardPage() {
               Tất Cả ({totalDesigners})
             </button>
             <button
-              onClick={() => setFilterMode('needs_review')}
+              type="button"
+              onClick={() => selectFilter('needs_review')}
+              aria-pressed={filterMode === 'needs_review'}
               className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer flex items-center gap-1.5 ${
                 filterMode === 'needs_review'
                   ? 'bg-purple-600 text-white border-purple-600 shadow-2xs'
@@ -338,7 +403,9 @@ export function DesignerBoardPage() {
               </span>
             </button>
             <button
-              onClick={() => setFilterMode('has_fix')}
+              type="button"
+              onClick={() => selectFilter('has_fix')}
+              aria-pressed={filterMode === 'has_fix'}
               className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer flex items-center gap-1.5 ${
                 filterMode === 'has_fix'
                   ? 'bg-orange-600 text-white border-orange-600 shadow-2xs'
@@ -351,7 +418,9 @@ export function DesignerBoardPage() {
               </span>
             </button>
             <button
-              onClick={() => setFilterMode('active')}
+              type="button"
+              onClick={() => selectFilter('active')}
+              aria-pressed={filterMode === 'active'}
               className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer ${
                 filterMode === 'active'
                   ? 'bg-[#0052CC] text-white border-[#0052CC] shadow-2xs'
@@ -364,7 +433,9 @@ export function DesignerBoardPage() {
             <div className="h-4 w-px bg-slate-200 mx-1 hidden sm:block" />
 
             <button
-              onClick={() => setShowDoneColumn(!showDoneColumn)}
+              type="button"
+              onClick={() => setShowDoneColumn((current) => !current)}
+              aria-pressed={!showDoneColumn}
               className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
                 showDoneColumn
                   ? 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200'
@@ -394,6 +465,10 @@ export function DesignerBoardPage() {
             </button>
           </div>
         </div>
+
+        <p aria-live="polite" className="-mt-3 hidden text-right text-[11px] font-medium text-slate-500 sm:block">
+          Đang hiển thị {filteredDesigners.length}/{totalDesigners} Designer
+        </p>
 
         {/* Designers Workload List */}
         {loading && designers.length === 0 ? (
@@ -568,6 +643,7 @@ export function DesignerBoardPage() {
                                       <div className="mt-0.5 flex items-center gap-1.5">
                                         <Link
                                           to={`/orders/${o.id}`}
+                                          state={{ returnTo: `${location.pathname}${location.search}` }}
                                           className="min-w-0 truncate text-xs font-bold text-slate-800 hover:text-[#0052CC] hover:underline"
                                         >
                                           {o.product_name || 'Đơn 2D Custom'}
@@ -589,6 +665,19 @@ export function DesignerBoardPage() {
                                       currentState={o.state}
                                     />
                                     <div className="flex items-center gap-1.5">
+                                      {isAdmin && (
+                                        <button
+                                          type="button"
+                                          disabled={removingOrderId === o.id}
+                                          onClick={() => void handleRemoveFromDesigner(o)}
+                                          className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                          title="Hủy phân công và trả đơn về Waiting"
+                                          aria-label={`Gỡ đơn ${o.external_order_id} khỏi Designer`}
+                                        >
+                                          <Trash2 className="h-3 w-3" />
+                                          <span>{removingOrderId === o.id ? 'Đang gỡ' : 'Gỡ'}</span>
+                                        </button>
+                                      )}
                                       <button
                                         type="button"
                                         onClick={() =>
@@ -605,6 +694,7 @@ export function DesignerBoardPage() {
                                       </button>
                                       <Link
                                         to={`/orders/${o.id}`}
+                                        state={{ returnTo: `${location.pathname}${location.search}` }}
                                         className="text-[10px] text-[#0052CC] font-semibold hover:underline flex items-center gap-0.5"
                                       >
                                         <span>Xem</span>
@@ -692,6 +782,7 @@ export function DesignerBoardPage() {
                                       <div className="mt-0.5 flex items-center gap-1.5">
                                         <Link
                                           to={`/orders/${o.id}`}
+                                          state={{ returnTo: `${location.pathname}${location.search}` }}
                                           className="min-w-0 truncate text-xs font-bold text-slate-800 hover:text-[#0052CC] hover:underline"
                                         >
                                           {o.product_name || 'Đơn 2D Custom'}
@@ -813,6 +904,7 @@ export function DesignerBoardPage() {
                                           <div className="flex min-w-0 items-center gap-1.5">
                                             <Link
                                               to={`/orders/${o.id}`}
+                                              state={{ returnTo: `${location.pathname}${location.search}` }}
                                               className="min-w-0 truncate text-xs font-bold text-slate-800 hover:text-[#0052CC] hover:underline"
                                             >
                                               {o.product_name || 'Đơn 2D Custom'}
@@ -984,6 +1076,7 @@ export function DesignerBoardPage() {
                                         <div className="mt-0.5 flex items-center gap-1.5">
                                           <Link
                                             to={`/orders/${o.id}`}
+                                            state={{ returnTo: `${location.pathname}${location.search}` }}
                                             className="min-w-0 truncate text-xs font-bold text-emerald-800 hover:underline"
                                           >
                                             {o.product_name || 'Đơn 2D Custom'}
@@ -1013,6 +1106,7 @@ export function DesignerBoardPage() {
                                         </button>
                                         <Link
                                           to={`/orders/${o.id}`}
+                                          state={{ returnTo: `${location.pathname}${location.search}` }}
                                           className="text-[10px] text-slate-400 hover:text-slate-700 font-semibold hover:underline"
                                         >
                                           Chi tiết

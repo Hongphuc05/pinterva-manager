@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useLocation, useParams } from 'react-router-dom'
 import { apiFetch, ApiError, resolveAssetUrl } from '../api/client'
 import { deduplicateGalleryUrls } from '../utils/galleryHelper'
 import { useAuth } from '../auth/AuthContext'
@@ -106,6 +106,7 @@ type LoadState = 'loading' | 'loaded' | 'not-found' | 'error'
 
 export function OrderDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const location = useLocation()
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
   const [order, setOrder] = useState<OrderDetail | null>(null)
@@ -130,6 +131,10 @@ export function OrderDetailPage() {
     isOpen: boolean
     mode: 'approve' | 'reject'
   } | null>(null)
+  const returnTo = typeof (location.state as { returnTo?: unknown } | null)?.returnTo === 'string'
+    && (location.state as { returnTo: string }).returnTo.startsWith('/orders')
+    ? (location.state as { returnTo: string }).returnTo
+    : '/orders'
 
   async function loadOrderDetail(preserveDrafts = false) {
     if (!id) return
@@ -315,7 +320,7 @@ export function OrderDetailPage() {
         <div className="p-8 text-center bg-white rounded-xl border border-slate-200 shadow-xs text-slate-500">
           <AlertCircle className="h-10 w-10 mx-auto text-amber-500 mb-2" />
           <h2 className="text-base font-bold text-slate-800">Không Tìm Thấy Đơn Hàng</h2>
-          <Link to="/orders" className="text-xs font-semibold text-[#0052CC] hover:underline mt-2 inline-block">
+          <Link to={returnTo} className="text-xs font-semibold text-[#0052CC] hover:underline mt-2 inline-block">
             ← Quay lại danh sách đơn hàng
           </Link>
         </div>
@@ -482,7 +487,7 @@ export function OrderDetailPage() {
       {/* Back button */}
       <div>
         <Link
-          to="/orders"
+          to={returnTo}
           className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-[#0052CC] transition-colors"
         >
           <ArrowLeft className="h-4 w-4" />
@@ -804,7 +809,9 @@ export function OrderDetailPage() {
                 </div>
 
                 <div className="whitespace-pre-wrap break-all leading-relaxed font-sans text-slate-800 bg-white/90 p-3 rounded-lg border border-orange-200/80">
-                  {order.note_outsource ? <LinkifiedText text={order.note_outsource} /> : 'Chưa có ghi chú cụ thể từ QC.'}
+                  {isAdmin
+                    ? (order.note_outsource ? <LinkifiedText text={order.note_outsource} /> : 'Chưa có ghi chú cụ thể từ QC.')
+                    : (order.designer_note || 'Admin chưa gửi hướng dẫn Fix.')}
                 </div>
               </div>
             )}
@@ -959,7 +966,7 @@ export function OrderDetailPage() {
             )}
 
             {/* History of Submitted Versions */}
-            {order.result_versions && order.result_versions.length > 0 && (
+            {isAdmin && order.result_versions && order.result_versions.length > 0 && (
               <div className="pt-3 border-t border-blue-100 space-y-2">
                 <h4 className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
                   <History className="h-3.5 w-3.5 text-slate-500" />
@@ -1070,13 +1077,13 @@ export function OrderDetailPage() {
         )}
 
         {/* Notes */}
-        {(order.note_outsource || order.designer_note || isAdmin) && (
+        {(isAdmin || order.designer_note) && (
           <div className="p-4 rounded-xl bg-blue-50/50 border border-blue-100 text-xs space-y-2">
             <h3 className="font-bold text-slate-800 flex items-center gap-1.5">
               <FileText className="h-4 w-4 text-[#0052CC]" />
               <span>Ghi Chú & Hướng Dẫn</span>
             </h3>
-            {order.note_outsource && (
+            {isAdmin && order.note_outsource && (
               <p className="text-slate-700 font-mono text-[11px] whitespace-pre-wrap"><strong className="text-slate-900">Note Outsource:</strong> <LinkifiedText text={order.note_outsource} /></p>
             )}
             {order.designer_note && !isAdmin && (
@@ -1156,8 +1163,8 @@ export function OrderDetailPage() {
           isAdmin={isAdmin}
         />
 
-        {/* Workflow History Audit Table */}
-        <div className="space-y-4 pt-4 border-t border-slate-100">
+        {/* Workflow History Audit Table — Admin only */}
+        {isAdmin && <div className="space-y-4 pt-4 border-t border-slate-100">
           <div className="flex items-center justify-between">
             <h3 className="text-xs font-bold text-slate-800 flex items-center gap-1.5 uppercase tracking-wider">
               <History className="h-4 w-4 text-[#0052CC]" />
@@ -1270,7 +1277,7 @@ export function OrderDetailPage() {
               </div>
             )}
           </div>
-        </div>
+        </div>}
       </div>
       {fixActionModal && order && (
         <AdminFixActionModal

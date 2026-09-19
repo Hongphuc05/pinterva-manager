@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { apiFetch, ApiError, resolveAssetUrl } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { useToast } from '../context/ToastContext'
@@ -9,6 +9,7 @@ import { ImageModal } from '../components/ImageModal'
 import { CopyableOrderCode } from '../components/CopyableOrderCode'
 import { OrderHistoryTimelineModal } from '../components/OrderHistoryTimelineModal'
 import { getStatusInfo, resolveExternalUrl } from '../utils/statusTranslation'
+import { readViewState, writeViewState } from '../utils/viewState'
 import {
   Coins,
   CheckCircle2,
@@ -156,14 +157,34 @@ const COMPLETED_TASK_STATES = new Set(['DONE', 'COMPLETED', 'SKIPPED'])
 
 export function FinancePage() {
   const { user } = useAuth()
+  const location = useLocation()
   const { showToast } = useToast()
   const isAdmin = user?.role === 'admin'
+  const [restoredViewState] = useState(() => readViewState('finance', user?.role, {
+    activeMainTab: 'finance',
+    paymentSubTab: 'unpaid',
+    selectedDesigner: '',
+    searchQuery: '',
+    stateFilter: '',
+    startDate: '',
+    endDate: '',
+    datePreset: '',
+    currentPage: 1,
+    notesSearch: '',
+    notesTargetFilter: 'all',
+    notesDesignerFilter: '',
+    notesPage: 1,
+  }))
 
   // Top sub-tabs: 'finance' (Stats & Payment Management) vs 'notes' (Admin Notes)
-  const [activeMainTab, setActiveMainTab] = useState<'finance' | 'notes'>('finance')
+  const [activeMainTab, setActiveMainTab] = useState<'finance' | 'notes'>(
+    restoredViewState.activeMainTab === 'notes' ? 'notes' : 'finance',
+  )
 
   // Payment status sub-tabs: 'unpaid' (Chưa thanh toán) vs 'paid' (Đã thanh toán)
-  const [paymentSubTab, setPaymentSubTab] = useState<'unpaid' | 'paid'>('unpaid')
+  const [paymentSubTab, setPaymentSubTab] = useState<'unpaid' | 'paid'>(
+    restoredViewState.paymentSubTab === 'paid' ? 'paid' : 'unpaid',
+  )
 
   // Data states
   const [loading, setLoading] = useState(true)
@@ -171,13 +192,13 @@ export function FinancePage() {
   const [data, setData] = useState<FinanceStatsResponse | null>(null)
 
   // Filters
-  const [selectedDesigner, setSelectedDesigner] = useState<string>('')
-  const [searchQuery, setSearchQuery] = useState('')
-  const [stateFilter, setStateFilter] = useState('')
-  const [startDate, setStartDate] = useState('')
-  const [endDate, setEndDate] = useState('')
-  const [datePreset, setDatePreset] = useState<string>('')
-  const [currentPage, setCurrentPage] = useState(1)
+  const [selectedDesigner, setSelectedDesigner] = useState<string>(String(restoredViewState.selectedDesigner || ''))
+  const [searchQuery, setSearchQuery] = useState(String(restoredViewState.searchQuery || ''))
+  const [stateFilter, setStateFilter] = useState(String(restoredViewState.stateFilter || ''))
+  const [startDate, setStartDate] = useState(String(restoredViewState.startDate || ''))
+  const [endDate, setEndDate] = useState(String(restoredViewState.endDate || ''))
+  const [datePreset, setDatePreset] = useState<string>(String(restoredViewState.datePreset || ''))
+  const [currentPage, setCurrentPage] = useState(Number.isInteger(restoredViewState.currentPage) && restoredViewState.currentPage > 0 ? restoredViewState.currentPage : 1)
 
   // Selection & Shift + Click
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([])
@@ -201,10 +222,14 @@ export function FinancePage() {
   // Notes state
   const [notesData, setNotesData] = useState<FinanceNoteListResponse | null>(null)
   const [notesLoading, setNotesLoading] = useState(false)
-  const [notesSearch, setNotesSearch] = useState('')
-  const [notesTargetFilter, setNotesTargetFilter] = useState<'all' | 'order' | 'designer'>('all')
-  const [notesDesignerFilter, setNotesDesignerFilter] = useState('')
-  const [notesPage, setNotesPage] = useState(1)
+  const [notesSearch, setNotesSearch] = useState(String(restoredViewState.notesSearch || ''))
+  const [notesTargetFilter, setNotesTargetFilter] = useState<'all' | 'order' | 'designer'>(
+    ['all', 'order', 'designer'].includes(String(restoredViewState.notesTargetFilter))
+      ? restoredViewState.notesTargetFilter as 'all' | 'order' | 'designer'
+      : 'all',
+  )
+  const [notesDesignerFilter, setNotesDesignerFilter] = useState(String(restoredViewState.notesDesignerFilter || ''))
+  const [notesPage, setNotesPage] = useState(Number.isInteger(restoredViewState.notesPage) && restoredViewState.notesPage > 0 ? restoredViewState.notesPage : 1)
 
   // Add/Edit Note Modal
   const [noteModalOpen, setNoteModalOpen] = useState(false)
@@ -235,6 +260,24 @@ export function FinancePage() {
   const [duplicateRate, setDuplicateRate] = useState<number>(40000)
   const [rateSettingsOpen, setRateSettingsOpen] = useState(false)
   const [savingRates, setSavingRates] = useState(false)
+
+  useEffect(() => {
+    writeViewState('finance', user?.role, {
+      activeMainTab,
+      paymentSubTab,
+      selectedDesigner,
+      searchQuery,
+      stateFilter,
+      startDate,
+      endDate,
+      datePreset,
+      currentPage,
+      notesSearch,
+      notesTargetFilter,
+      notesDesignerFilter,
+      notesPage,
+    })
+  }, [user?.role, activeMainTab, paymentSubTab, selectedDesigner, searchQuery, stateFilter, startDate, endDate, datePreset, currentPage, notesSearch, notesTargetFilter, notesDesignerFilter, notesPage])
 
   // Quick date presets
   function applyDatePreset(preset: 'today' | 'yesterday' | '7days' | 'this_month' | 'all') {
@@ -1543,6 +1586,7 @@ export function FinancePage() {
                                   <div className="flex items-center gap-1.5 flex-wrap">
                                     <Link
                                       to={`/orders/${task.order_id}`}
+                                      state={{ returnTo: `${location.pathname}${location.search}` }}
                                       className="text-xs font-bold text-[#0052CC] hover:underline line-clamp-2 block"
                                       title={task.product_name || 'Đơn thiết kế'}
                                     >
@@ -1709,6 +1753,7 @@ export function FinancePage() {
                                 {/* Detail Link */}
                                 <Link
                                   to={`/orders/${task.order_id}`}
+                                  state={{ returnTo: `${location.pathname}${location.search}` }}
                                   className="inline-flex items-center gap-1 text-xs font-semibold text-[#0052CC] hover:text-[#003D99] hover:bg-blue-50 px-2 py-1 rounded-md transition-colors"
                                   title="Xem trang chi tiết đơn hàng"
                                 >
@@ -2718,6 +2763,7 @@ export function FinancePage() {
 
                                   <Link
                                     to={`/orders/${task.order_id}`}
+                                    state={{ returnTo: `${location.pathname}${location.search}` }}
                                     className="inline-flex items-center gap-1 text-xs font-semibold text-[#0052CC] hover:text-[#003D99] hover:bg-blue-50 px-2 py-1 rounded-md transition-colors"
                                     title="Xem trang chi tiết đơn hàng"
                                   >

@@ -428,7 +428,7 @@ def move_duplicate_order(
                 before_order_id=before_order_id,
             )
         session.commit()
-        return _card(order, None)
+        return _card(order, None, hide_internal_notes=actor.role == ROLE_DESIGNER_TRELLO)
 
     # 2. Target: "missing_form" / "unassigned" (Missing template pool)
     if col_id in ("missing_form", "unassigned"):
@@ -453,7 +453,7 @@ def move_duplicate_order(
                 before_order_id=before_order_id,
             )
         session.commit()
-        return _card(order, None)
+        return _card(order, None, hide_internal_notes=actor.role == ROLE_DESIGNER_TRELLO)
 
     # 3. Target: "done" (Completed column)
     if col_id == "done":
@@ -485,7 +485,7 @@ def move_duplicate_order(
                 before_order_id=before_order_id,
             )
         session.commit()
-        return _card(order, assignee)
+        return _card(order, assignee, hide_internal_notes=actor.role == ROLE_DESIGNER_TRELLO)
 
     # 4. Target: Specific Designer column
     if designer_uuid:
@@ -503,7 +503,7 @@ def move_duplicate_order(
                     before_order_id=before_order_id,
                 )
             session.commit()
-            return _card(order, target)
+            return _card(order, target, hide_internal_notes=actor.role == ROLE_DESIGNER_TRELLO)
 
         _cancel_assignments(session, active_assignments, reason="duplicate_board_reassigned")
         assignment = Assignment(order_id=order.id, designer_id=target.id, status="approved")
@@ -553,12 +553,12 @@ def move_duplicate_order(
         except Exception:
             pass
 
-        return _card(order, target)
+        return _card(order, target, hide_internal_notes=actor.role == ROLE_DESIGNER_TRELLO)
 
     raise DuplicateBoardError("Cột đích không hợp lệ")
 
 
-def _card(order: Order, assignee: User | None) -> dict:
+def _card(order: Order, assignee: User | None, *, hide_internal_notes: bool = False) -> dict:
     return {
         "id": str(order.id),
         "version": order.version,
@@ -574,14 +574,8 @@ def _card(order: Order, assignee: User | None) -> dict:
         "is_paid": bool(order.is_paid),
         "template_missing": bool(order.template_missing),
         "state": order.state,
-        "note_outsource": (
-            "" if getattr(order, "suppress_note_outsource_for_designer", False)
-            else (sanitize_text(order.note_outsource, "Web mẹ") or "")
-        ),
-        "previous_note_outsource": (
-            None if getattr(order, "suppress_note_outsource_for_designer", False)
-            else sanitize_text(order.previous_note_outsource, "Web mẹ")
-        ),
+        "note_outsource": "" if hide_internal_notes else (sanitize_text(order.note_outsource, "Web mẹ") or ""),
+        "previous_note_outsource": None if hide_internal_notes else sanitize_text(order.previous_note_outsource, "Web mẹ"),
         "fix_approved_by_admin": order.fix_approved_by_admin,
         "fix_return_count": order.fix_return_count,
         "assignee_id": str(assignee.id) if assignee else None,
@@ -758,7 +752,11 @@ def list_duplicate_board(
 
     for order in orders:
         assignee = assignment_by_order.get(order.id)
-        card_data = _card(order, assignee)
+        card_data = _card(
+            order,
+            assignee,
+            hide_internal_notes=bool(viewer and viewer.role == ROLE_DESIGNER_TRELLO),
+        )
         norm_st = (order.state or "").upper()
 
         if norm_st in DONE_STATES or order.is_paid:

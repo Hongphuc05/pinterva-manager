@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -8,7 +9,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.adapters.db.models import Order, TelegramActionLog, User, WorkflowEvent
+from app.adapters.db.models import Assignment, Order, TelegramActionLog, User, WorkflowEvent
 from app.api.deps import get_current_user, get_db
 from app.application.telegram_service import (
     generate_telegram_link_code,
@@ -24,6 +25,100 @@ from app.domain.models import OrderState
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/telegram", tags=["telegram"])
+
+
+def _action_is_pending_and_valid(action_log: TelegramActionLog, action_type: str) -> bool:
+    return (
+        action_log.status == "pending"
+        and action_log.action_type == action_type
+        and (action_log.expires_at is None or action_log.expires_at >= datetime.now(UTC))
+    )
+
+
+def _supersede_sibling_fix_choices(db: Session, action_log: TelegramActionLog) -> None:
+    """Ensure only one of the two note choices can release a Fix."""
+    parent_action_id = str((action_log.payload or {}).get("parent_action_id") or "")
+    if not parent_action_id:
+        return
+    candidates = (
+        db.query(TelegramActionLog)
+        .filter(
+            TelegramActionLog.status == "pending",
+            TelegramActionLog.action_type.in_(("APPROVE_FIX_WRITE_NOTE", "APPROVE_FIX_USE_OUTSOURCE")),
+        )
+        .all()
+    )
+    for candidate in candidates:
+        if candidate.id != action_log.id and str((candidate.payload or {}).get("parent_action_id") or "") == parent_action_id:
+            candidate.status = "superseded"
+
+
+def _complete_telegram_fix_approval(
+    db: Session,
+    *,
+    order: Order,
+    action_log: TelegramActionLog,
+    admin_user: User,
+    designer_note: str,
+    note_mode: str,
+) -> str | None:
+    """Release a Fix only after its Designer-facing note is decided by Admin."""
+    note = designer_note.strip()
+    if not note:
+        raise ValueError("Ghi chú gửi Designer không được để trống.")
+
+    old_state = order.state
+    order.state = OrderState.REVISION.value
+    order.fix_approved_by_admin = True
+    order.fix_rejected_by_admin = False
+    order.designer_note = note
+    # Even when Admin chooses the verbatim QC text, it is copied into this
+    # Admin-release field. Designer APIs never expose note_outsource itself.
+    order.designer_note_released_for_fix = True
+    order.suppress_note_outsource_for_designer = True
+    order.fix_deadline_at = datetime.now(UTC) + timedelta(hours=1)
+    order.deadline_overdue_notified_at = None
+    order.status_changed_at = datetime.now(UTC)
+
+    action_log.status = "executed"
+    action_log.executed_at = datetime.now(UTC)
+    action_log.actor_id = admin_user.id
+    _supersede_sibling_fix_choices(db, action_log)
+
+    db.add(
+        WorkflowEvent(
+            order_id=order.id,
+            from_state=old_state,
+            to_state=OrderState.REVISION.value,
+            actor_id=admin_user.id,
+            evidence={
+                "action": "APPROVE_FIX_FOR_DESIGNER",
+                "actor_name": admin_user.full_name or admin_user.username,
+                "actor_role": "admin",
+                "source": "telegram_callback",
+                "note_mode": note_mode,
+                "description": f"Admin {admin_user.full_name or admin_user.username} đã chấp nhận Fix qua Telegram",
+            },
+        )
+    )
+
+    assignment = (
+        db.query(Assignment)
+        .filter(Assignment.order_id == order.id, Assignment.status != "cancelled")
+        .order_by(Assignment.created_at.desc())
+        .first()
+    )
+    designer_id = str(assignment.designer_id) if assignment and assignment.designer_id else None
+    db.commit()
+    return designer_id
+
+
+def _notify_telegram_fix_designer(order: Order, designer_id: str | None) -> None:
+    if not designer_id:
+        return
+    from app.workers.telegram_tasks import async_notify_designer_urgent_fix
+
+    async_notify_designer_urgent_fix.delay(str(order.id), designer_id, order.designer_note)
 
 
 class TelegramStatusResponse(BaseModel):
@@ -122,6 +217,71 @@ async def api_telegram_webhook(
                 )
             return {"ok": True}
 
+        # A note typed by an Admin after choosing “soạn ghi chú” is the final
+        # confirmation step for a Telegram Fix approval. Prefer a reply to the
+        # bot prompt; accepting a non-reply is safe only when that Admin has
+        # exactly one outstanding note request.
+        admin_user = (
+            db.query(User)
+            .filter(User.telegram_chat_id == chat_id, User.role == "admin", User.active.is_(True))
+            .first()
+        )
+        if admin_user and text and not text.startswith("/"):
+            pending_logs = (
+                db.query(TelegramActionLog)
+                .filter(
+                    TelegramActionLog.action_type == "AWAIT_ADMIN_FIX_NOTE",
+                    TelegramActionLog.status == "pending",
+                )
+                .order_by(TelegramActionLog.created_at.desc())
+                .all()
+            )
+            pending_logs = [
+                log for log in pending_logs
+                if str((log.payload or {}).get("chat_id")) == chat_id
+            ]
+            reply_message_id = (message.get("reply_to_message") or {}).get("message_id")
+            if reply_message_id is not None:
+                pending_logs = [
+                    log for log in pending_logs
+                    if (log.payload or {}).get("prompt_message_id") == reply_message_id
+                ]
+
+            if len(pending_logs) == 1:
+                note_log = pending_logs[0]
+                if not _action_is_pending_and_valid(note_log, "AWAIT_ADMIN_FIX_NOTE"):
+                    note_log.status = "expired"
+                    db.commit()
+                    send_message(chat_id, "⚠️ Yêu cầu nhập ghi chú Fix đã hết hạn. Vui lòng xử lý lại từ thông báo Fix.")
+                    return {"ok": True}
+                order = db.get(Order, note_log.order_id)
+                if order is None:
+                    note_log.status = "failed"
+                    db.commit()
+                    send_message(chat_id, "❌ Không tìm thấy đơn hàng cho yêu cầu ghi chú này.")
+                    return {"ok": True}
+                try:
+                    designer_id = _complete_telegram_fix_approval(
+                        db,
+                        order=order,
+                        action_log=note_log,
+                        admin_user=admin_user,
+                        designer_note=text,
+                        note_mode="admin_written",
+                    )
+                except ValueError as exc:
+                    send_message(chat_id, f"⚠️ {exc}")
+                    return {"ok": True}
+                _notify_telegram_fix_designer(order, designer_id)
+                send_message(
+                    chat_id,
+                    f"✅ Đã gửi Ghi chú Admin và giao Fix cho Designer của đơn <code>{order.external_order_id}</code>.",
+                )
+                return {"ok": True}
+            if len(pending_logs) > 1:
+                send_message(chat_id, "⚠️ Bạn có nhiều yêu cầu ghi chú Fix. Hãy trả lời trực tiếp vào đúng tin nhắn bot đã hỏi.")
+                return {"ok": True}
+
     # 2. Handle Inline Callback Query (Buttons clicked on Telegram)
     callback_query = body.get("callback_query")
     if callback_query:
@@ -139,15 +299,23 @@ async def api_telegram_webhook(
             logger.warning("Unauthorized callback from chat_id %s", user_chat_id)
             return {"ok": True}
 
-        # Parse callback: appfix:<token> or rejfix:<token>
-        if cb_data.startswith("appfix:") or cb_data.startswith("rejfix:"):
+        # Parse callback: first choose approve/reject, then (for approval)
+        # choose whether to write an Admin note or release the QC text verbatim.
+        valid_prefixes = {"appfix", "rejfix", "appfixnote", "appfixsource"}
+        if ":" in cb_data and cb_data.split(":", 1)[0] in valid_prefixes:
             prefix, token = cb_data.split(":", 1)
             action_log = (
                 db.query(TelegramActionLog)
                 .filter(TelegramActionLog.callback_token == token)
                 .first()
             )
-            if not action_log or action_log.status != "pending":
+            expected_action_types = {
+                "appfix": "APPROVE_FIX",
+                "rejfix": "REJECT_FIX",
+                "appfixnote": "APPROVE_FIX_WRITE_NOTE",
+                "appfixsource": "APPROVE_FIX_USE_OUTSOURCE",
+            }
+            if not action_log or not _action_is_pending_and_valid(action_log, expected_action_types[prefix]):
                 send_message(user_chat_id, "⚠️ Nút bấm này đã được xử lý trước đó hoặc đã hết hạn.")
                 return {"ok": True}
 
@@ -157,45 +325,100 @@ async def api_telegram_webhook(
                 return {"ok": True}
 
             if prefix == "appfix":
-                # Admin accepts fix
-                order.state = OrderState.REVISION.value
-                order.fix_approved_by_admin = True
-                order.fix_deadline_at = datetime.now(UTC) + timedelta(hours=1)
-                order.deadline_overdue_notified_at = None
-                order.status_changed_at = datetime.now(UTC)
+                # Do not release the Fix yet. Admin must first decide the only
+                # Designer-facing note that will be copied into Tacahu.
                 action_log.status = "executed"
                 action_log.executed_at = datetime.now(UTC)
                 action_log.actor_id = admin_user.id
-
-                # Workflow event
-                db.add(
-                    WorkflowEvent(
-                        order_id=order.id,
-                        from_state=OrderState.REVISION.value,
-                        to_state=OrderState.REVISION.value,
-                        actor_id=admin_user.id,
-                        evidence={
-                            "action": "APPROVE_FIX_FOR_DESIGNER",
-                            "actor_name": admin_user.full_name or admin_user.username,
-                            "actor_role": "admin",
-                            "source": "telegram_callback",
-                            "description": f"Admin {admin_user.full_name} đã chấp nhận Fix qua Telegram",
-                        },
-                    )
+                expires_at = min(
+                    action_log.expires_at or (datetime.now(UTC) + timedelta(minutes=30)),
+                    datetime.now(UTC) + timedelta(minutes=30),
                 )
+                write_note_token = secrets.token_urlsafe(16)
+                use_source_token = secrets.token_urlsafe(16)
+                common_payload = {
+                    "order_id": str(order.id),
+                    "external_order_id": order.external_order_id,
+                    "parent_action_id": str(action_log.id),
+                }
+                db.add_all([
+                    TelegramActionLog(
+                        order_id=order.id,
+                        action_type="APPROVE_FIX_WRITE_NOTE",
+                        callback_token=write_note_token,
+                        payload=common_payload,
+                        expires_at=expires_at,
+                    ),
+                    TelegramActionLog(
+                        order_id=order.id,
+                        action_type="APPROVE_FIX_USE_OUTSOURCE",
+                        callback_token=use_source_token,
+                        payload=common_payload,
+                        expires_at=expires_at,
+                    ),
+                ])
                 db.commit()
-
-                # Notify designer
-                from app.adapters.db.models import Assignment
-                asgn = db.query(Assignment).filter(Assignment.order_id == order.id, Assignment.status != "cancelled").first()
-                if asgn and asgn.designer_id:
-                    from app.workers.telegram_tasks import async_notify_designer_urgent_fix
-                    async_notify_designer_urgent_fix.delay(str(order.id), str(asgn.designer_id), order.designer_note)
-
                 send_message(
                     user_chat_id,
-                    f"✅ Đã chấp nhận Fix cho đơn <code>{order.external_order_id}</code> và chuyển tới mục Cần sửa gấp của Designer!",
+                    "📝 <b>Bạn có muốn gửi đè Note Outsource bằng Ghi chú Admin cho Designer không?</b>\n\n"
+                    "Nếu chọn <b>Có</b>, bot sẽ yêu cầu bạn soạn Ghi chú Admin. Nếu chọn <b>Không</b>, "
+                    "bot sẽ copy nguyên văn Note Outsource vào Ghi chú Admin để gửi Des.",
+                    reply_markup={
+                        "inline_keyboard": [
+                            [{"text": "✍️ Có, soạn Ghi chú Admin", "callback_data": f"appfixnote:{write_note_token}"}],
+                            [{"text": "➡️ Không, dùng nguyên văn Note Outsource", "callback_data": f"appfixsource:{use_source_token}"}],
+                        ]
+                    },
                 )
+
+            elif prefix == "appfixsource":
+                upstream_note = (order.note_outsource or "").strip()
+                if not upstream_note:
+                    action_log.status = "failed"
+                    action_log.executed_at = datetime.now(UTC)
+                    action_log.actor_id = admin_user.id
+                    db.commit()
+                    send_message(user_chat_id, "⚠️ Đơn này không có Note Outsource để gửi. Hãy chọn soạn Ghi chú Admin.")
+                    return {"ok": True}
+                designer_id = _complete_telegram_fix_approval(
+                    db,
+                    order=order,
+                    action_log=action_log,
+                    admin_user=admin_user,
+                    designer_note=upstream_note,
+                    note_mode="verbatim_upstream_approved_by_admin",
+                )
+                _notify_telegram_fix_designer(order, designer_id)
+                send_message(
+                    user_chat_id,
+                    f"✅ Đã copy Note Outsource vào Ghi chú Admin và giao Fix cho Designer của đơn <code>{order.external_order_id}</code>.",
+                )
+
+            elif prefix == "appfixnote":
+                action_log.status = "executed"
+                action_log.executed_at = datetime.now(UTC)
+                action_log.actor_id = admin_user.id
+                _supersede_sibling_fix_choices(db, action_log)
+                note_log = TelegramActionLog(
+                    order_id=order.id,
+                    action_type="AWAIT_ADMIN_FIX_NOTE",
+                    callback_token=secrets.token_urlsafe(16),
+                    payload={"order_id": str(order.id), "chat_id": user_chat_id},
+                    expires_at=min(
+                        action_log.expires_at or (datetime.now(UTC) + timedelta(minutes=30)),
+                        datetime.now(UTC) + timedelta(minutes=30),
+                    ),
+                )
+                db.add(note_log)
+                db.commit()
+                prompt = send_message(
+                    user_chat_id,
+                    f"✍️ Hãy <b>trả lời tin nhắn này</b> bằng Ghi chú Admin muốn gửi cho Designer của đơn <code>{order.external_order_id}</code>.",
+                    reply_markup={"force_reply": True, "input_field_placeholder": "Nhập Ghi chú Admin cho Designer"},
+                )
+                if isinstance(prompt, dict) and prompt.get("message_id") is not None:
+                    note_log.payload = {**(note_log.payload or {}), "prompt_message_id": prompt["message_id"]}
+                    db.commit()
 
             elif prefix == "rejfix":
                 # Admin rejects fix -> send back to Review
@@ -203,6 +426,9 @@ async def api_telegram_webhook(
                 order.state = OrderState.QC_PENDING.value
                 order.fix_approved_by_admin = False
                 order.fix_rejected_by_admin = True
+                order.designer_note = ""
+                order.designer_note_released_for_fix = False
+                order.suppress_note_outsource_for_designer = True
                 order.status_changed_at = datetime.now(UTC)
                 action_log.status = "executed"
                 action_log.executed_at = datetime.now(UTC)
