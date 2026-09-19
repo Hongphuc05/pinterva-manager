@@ -51,6 +51,33 @@ def test_list_my_tasks_only_returns_active_tasks_owned_by_designer(db_session):
     assert tasks[0]["order"]["external_order_id"] == order.external_order_id
 
 
+def test_fix_requires_admin_approval_before_designer_can_see_or_mutate_it(db_session):
+    designer, assignment, order = _seed_task(db_session, state=OrderState.REVISION.value)
+    order.fix_approved_by_admin = False
+    db_session.commit()
+
+    assert list_my_tasks(db_session, designer.id) == []
+    with pytest.raises(TaskNotFoundError):
+        start_task(db_session, assignment.id, designer.id, "start:unapproved-fix", str(assignment.id))
+    with pytest.raises(TaskNotFoundError):
+        update_sub_status(
+            db_session,
+            assignment.id,
+            designer.id,
+            "fixing",
+            "sub-status:unapproved-fix",
+            f"{assignment.id}:fixing",
+        )
+
+    order.fix_approved_by_admin = True
+    db_session.commit()
+
+    assert [task["assignment_id"] for task in list_my_tasks(db_session, designer.id)] == [str(assignment.id)]
+    result = start_task(db_session, assignment.id, designer.id, "start:approved-fix", str(assignment.id))
+    assert result["state"] == OrderState.IN_PROGRESS.value
+    assert result["sub_status"] == "fixing"
+
+
 def test_start_task_transitions_state_and_keeps_sub_status_display_separate(db_session):
     designer, assignment, order = _seed_task(db_session)
 

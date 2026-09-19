@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import func
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import (
@@ -23,8 +23,8 @@ from app.domain.models import OrderState
 ACTIVE_TASK_STATES = {
     OrderState.WAITING.value,
     OrderState.IN_PROGRESS.value,
-    OrderState.REVISION.value,
 }
+FIX_TASK_STATE = OrderState.REVISION.value
 SUB_STATUSES = {"todo", "doing", "fixing", "done", "waiting_template"}
 
 
@@ -38,6 +38,13 @@ class DriveValidationError(Exception):
 
 class DriveUnavailableError(Exception):
     """Drive could not be reached or authenticated, so no submission was recorded."""
+
+
+def _is_active_task_for_designer(order: Order) -> bool:
+    """A Printerval Fix must be explicitly released by Admin before work resumes."""
+    return order.state in ACTIVE_TASK_STATES or (
+        order.state == FIX_TASK_STATE and bool(order.fix_approved_by_admin)
+    )
 
 
 def _owned_task(
@@ -58,7 +65,7 @@ def _owned_task(
     if lock:
         order_query = order_query.with_for_update()
     order = order_query.one_or_none()
-    if order is None or order.state not in ACTIVE_TASK_STATES:
+    if order is None or not _is_active_task_for_designer(order):
         raise TaskNotFoundError()
     return assignment, order
 
@@ -70,7 +77,13 @@ def list_my_tasks(session: Session, designer_id: uuid.UUID) -> list[dict]:
         .filter(
             Assignment.designer_id == designer_id,
             Assignment.status == "approved",
-            Order.state.in_(ACTIVE_TASK_STATES),
+            or_(
+                Order.state.in_(ACTIVE_TASK_STATES),
+                and_(
+                    Order.state == FIX_TASK_STATE,
+                    Order.fix_approved_by_admin.is_(True),
+                ),
+            ),
         )
         .order_by(Order.deadline_at_ext.nullslast(), Order.created_at.desc())
         .all()

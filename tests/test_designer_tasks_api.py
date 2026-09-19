@@ -81,6 +81,23 @@ def test_my_tasks_accepts_trello_designer(client, db_session):
     assert response.json()["tasks"][0]["assignment_id"] == str(assignment.id)
 
 
+def test_unapproved_fix_is_hidden_and_cannot_be_submitted_by_designer(client, db_session):
+    designer = _login(client, db_session, "designer", "unapproved-fix-designer")
+    assignment, order = _seed_owned_task(db_session, designer, OrderState.REVISION.value)
+    order.fix_approved_by_admin = False
+    db_session.commit()
+
+    assert client.get("/api/my-tasks").json()["tasks"] == []
+    response = client.post(
+        f"/api/assignments/{assignment.id}/results",
+        json={
+            "drive_url": "https://drive.google.com/file/d/known-file/view",
+            "request_id": "unapproved-fix-submit",
+        },
+    )
+    assert response.status_code == 404
+
+
 def test_trello_designer_can_submit_result_for_owned_duplicate_order(client, db_session):
     trello_designer = _login(client, db_session, "designer-trello", "trello-submitter")
     assignment, order = _seed_owned_task(db_session, trello_designer, OrderState.IN_PROGRESS.value)
