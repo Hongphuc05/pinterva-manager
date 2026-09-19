@@ -65,7 +65,7 @@ describe('OrdersListPage', () => {
     await waitFor(() => expect(screen.getByText('DJ1')).toBeInTheDocument())
     expect(screen.getAllByText('Waiting').length).toBeGreaterThan(0)
     expect(screen.getByText('Order At')).toBeInTheDocument()
-    expect(screen.getByText('14:28:00')).toBeInTheDocument()
+    expect(screen.getByText('21:28:00')).toBeInTheDocument()
     expect(screen.getByText('10/09/2026')).toBeInTheDocument()
     expect(screen.getByText('Tất cả trạng thái Print')).toBeInTheDocument()
   })

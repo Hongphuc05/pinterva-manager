@@ -246,9 +246,7 @@ export function OrdersListPage() {
   const [usersList, setUsersList] = useState<UserOption[]>([])
   const [selectedUserId, setSelectedUserId] = useState('')
   const [platformDesigners, setPlatformDesigners] = useState<string[]>([])
-  const [platformStatuses, setPlatformStatuses] = useState<string[]>([])
   const [selectedPlatformDesigner, setSelectedPlatformDesigner] = useState(DEFAULT_PLATFORM_DES)
-  const [selectedPlatformStatus, setSelectedPlatformStatus] = useState('Doing')
   const [loadingPlatformOptions, setLoadingPlatformOptions] = useState(false)
   const [assigning, setAssigning] = useState(false)
 
@@ -275,7 +273,6 @@ export function OrdersListPage() {
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null)
   const [bulkDesignerId, setBulkDesignerId] = useState<string>('')
   const [bulkPlatformDesigner, setBulkPlatformDesigner] = useState(DEFAULT_PLATFORM_DES)
-  const [bulkPlatformStatus, setBulkPlatformStatus] = useState('Doing')
   const [bulkAssigning, setBulkAssigning] = useState<boolean>(false)
   const [movingToDuplicateDomain, setMovingToDuplicateDomain] = useState(false)
   const [deleteConfirmModalOpen, setDeleteConfirmModalOpen] = useState(false)
@@ -322,14 +319,12 @@ export function OrdersListPage() {
     })
     setSelectedUserId(matchingUser ? matchingUser.id : '')
     setSelectedPlatformDesigner(assigningOrder.platform_designer || DEFAULT_PLATFORM_DES)
-    setSelectedPlatformStatus(assigningOrder.platform_status || 'Doing')
     setLoadingPlatformOptions(true)
     apiFetch<{ designers: string[]; statuses: string[] }>(
       `/orders/${assigningOrder.id}/platform-options`
     )
       .then((result) => {
         setPlatformDesigners(result.designers)
-        setPlatformStatuses(result.statuses)
         if (assigningOrder.platform_designer && result.designers.includes(assigningOrder.platform_designer)) {
           setSelectedPlatformDesigner(assigningOrder.platform_designer)
         } else if (result.designers.includes(DEFAULT_PLATFORM_DES)) {
@@ -340,7 +335,6 @@ export function OrdersListPage() {
       })
       .catch((err) => {
         setPlatformDesigners([DEFAULT_PLATFORM_DES])
-        setPlatformStatuses(['Doing', 'Review', 'Fix', 'Done', 'Waiting'])
         setSelectedPlatformDesigner(assigningOrder.platform_designer || DEFAULT_PLATFORM_DES)
         setError(err instanceof ApiError ? err.message : 'Không tải được danh sách Designer Print.')
       })
@@ -360,7 +354,6 @@ export function OrdersListPage() {
     )
       .then((result) => {
         setPlatformDesigners(result.designers)
-        setPlatformStatuses(result.statuses)
         if (result.designers.includes(DEFAULT_PLATFORM_DES)) {
           setBulkPlatformDesigner(DEFAULT_PLATFORM_DES)
         } else if (result.designers.length > 0) {
@@ -369,7 +362,6 @@ export function OrdersListPage() {
       })
       .catch(() => {
         setPlatformDesigners([DEFAULT_PLATFORM_DES])
-        setPlatformStatuses(['Doing', 'Review', 'Fix', 'Done', 'Waiting'])
         setBulkPlatformDesigner(DEFAULT_PLATFORM_DES)
       })
       .finally(() => setLoadingPlatformOptions(false))
@@ -383,7 +375,6 @@ export function OrdersListPage() {
         { method: 'POST' }
       )
       setPlatformDesigners(result.designers)
-      setPlatformStatuses(result.statuses)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Không cập nhật được Designer Print.')
     } finally {
@@ -434,7 +425,7 @@ export function OrdersListPage() {
           order_ids: selectedOrderIds,
           designer_id: bulkDesignerId,
           printerval_designer: platformDes,
-          printerval_status: bulkPlatformStatus || 'Doing',
+          printerval_status: 'Doing',
         }),
       })
       setFlash(`Đã phân công ${res.queued_count} đơn sang Doing và xếp đồng bộ Print.`)
@@ -563,7 +554,7 @@ export function OrdersListPage() {
             order_ids: [assigningOrder.id],
             designer_id: selectedUserId,
             printerval_designer: selectedPlatformDesigner || DEFAULT_PLATFORM_DES,
-            printerval_status: selectedPlatformStatus || 'Doing',
+            printerval_status: 'Doing',
           }),
         }
       )
@@ -2040,18 +2031,6 @@ export function OrdersListPage() {
               ))}
             </select>
 
-            {/* Select Web mẹ Status */}
-            <select
-              value={bulkPlatformStatus}
-              onChange={(e) => setBulkPlatformStatus(e.target.value)}
-              disabled={loadingPlatformOptions}
-              className="bg-white text-slate-800 text-xs font-semibold px-3 py-1.5 rounded-lg border border-white/30 focus:outline-none shadow-xs disabled:opacity-60"
-            >
-              {(platformStatuses.length ? platformStatuses : ['Doing', 'Review', 'Fix', 'Done', 'Waiting']).map((status) => (
-                <option key={status} value={status}>{status}</option>
-              ))}
-            </select>
-
             <button
               onClick={handleBulkAssign}
               disabled={!bulkDesignerId || bulkAssigning || loadingPlatformOptions}
@@ -3256,23 +3235,6 @@ export function OrdersListPage() {
                   <option value={DEFAULT_PLATFORM_DES}>{DEFAULT_PLATFORM_DES} (Mặc định)</option>
                   {platformDesigners.filter((d) => d !== DEFAULT_PLATFORM_DES).map((designer) => (
                     <option key={designer} value={designer}>{designer}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700 block">
-                  Trạng thái trên Web mẹ <span className="text-red-500">*</span>
-                </label>
-                <select
-                  required
-                  value={selectedPlatformStatus}
-                  onChange={(e) => setSelectedPlatformStatus(e.target.value)}
-                  disabled={loadingPlatformOptions}
-                  className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-[#0052CC]/20 focus:border-[#0052CC] disabled:bg-slate-100"
-                >
-                  {(platformStatuses.length ? platformStatuses : ['Doing', 'Review', 'Fix', 'Done', 'Waiting']).map((status) => (
-                    <option key={status} value={status}>{status}</option>
                   ))}
                 </select>
               </div>
