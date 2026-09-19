@@ -2,7 +2,7 @@ import uuid
 
 import pytest
 
-from app.adapters.db.models import Batch, DeadLetter, Operation, Order, OrderAsset
+from app.adapters.db.models import Batch, DeadLetter, Operation, Order, OrderAsset, Platform
 from app.adapters.printerval.fake_adapter import FakePrintervalAdapter
 from app.adapters.printerval.models import OrderDetailResult
 from app.application.crawl import (
@@ -13,6 +13,7 @@ from app.application.crawl import (
     find_unclaimed_order_ids,
     import_claimed_orders,
     refresh_order_detail,
+    scan_orders_fast,
 )
 from app.domain.models import OrderState
 
@@ -27,6 +28,42 @@ def _seed_waiting_order(adapter, external_order_id, **overrides):
     defaults.update(overrides)
     adapter.add_order(**defaults)
 
+
+
+def test_fast_scan_records_initial_tab_entry_time(db_session):
+    """New list-only scans must populate the timestamp rendered as Thời Gian."""
+    adapter = FakePrintervalAdapter()
+    _seed_waiting_order(adapter, "DJ0000999")
+    platform = Platform(name="Test platform", account_username="test@example.com")
+    db_session.add(platform)
+    db_session.commit()
+
+    result = scan_orders_fast(db_session, adapter, platform_id=platform.id, status="Waiting")
+
+    order = db_session.query(Order).filter_by(external_order_id="DJ0000999").one()
+    assert result == {"scanned": 1, "added": 1, "updated": 0}
+    assert order.status_changed_at is not None
+    assert order.printerval_status == "waiting"
+
+
+def test_fast_scan_repairs_legacy_missing_tab_entry_time(db_session):
+    adapter = FakePrintervalAdapter()
+    _seed_waiting_order(adapter, "DJ0001000")
+    platform = Platform(name="Test platform", account_username="test@example.com")
+    db_session.add(platform)
+    db_session.commit()
+    legacy = Order(
+        external_order_id="DJ0001000",
+        platform_id=platform.id,
+        state=OrderState.OPEN.value,
+        printerval_status="waiting",
+    )
+    db_session.add(legacy)
+    db_session.commit()
+
+    scan_orders_fast(db_session, adapter, platform_id=platform.id, status="Waiting")
+
+    assert legacy.status_changed_at is not None
 
 def test_discover_waiting_orders_returns_only_new_ids(db_session):
     adapter = FakePrintervalAdapter()

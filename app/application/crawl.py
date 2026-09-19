@@ -193,6 +193,8 @@ def scan_orders_fast(
             if summary.external_order_id in seen:
                 continue
             seen.add(summary.external_order_id)
+            observed_at = datetime.now(UTC)
+            incoming_status = summary.status.lower()
             order = (
                 session.query(Order)
                 .filter(Order.external_order_id == summary.external_order_id, Order.platform_id == platform_id)
@@ -210,7 +212,10 @@ def scan_orders_fast(
                     product_skus=summary.product_skus,
                     printerval_designer=summary.designer,
                     printerval_designer_synced_at=datetime.now(UTC) if summary.designer else None,
-                    printerval_status=summary.status.lower(),
+                    printerval_status=incoming_status,
+                    # A freshly discovered order has just entered this dashboard tab.
+                    # This timestamp is distinct from the external Order At field.
+                    status_changed_at=observed_at,
                     product_image_urls=summary.product_image_urls,
                 )
                 session.add(order)
@@ -221,7 +226,16 @@ def scan_orders_fast(
                     order.printerval_designer_synced_at = datetime.now(UTC)
                 elif order.printerval_designer and "@" in order.printerval_designer:
                     order.printerval_designer = None
-                order.printerval_status = summary.status.lower()
+                if order.printerval_status != incoming_status:
+                    # The queue observed a new external status, so this is the best
+                    # authoritative time at which it entered its current dashboard tab.
+                    order.status_changed_at = observed_at
+                elif order.status_changed_at is None:
+                    # Old rows created before this field was populated cannot recover
+                    # their original transition instant.  Their import time is the
+                    # only honest fallback and is also applied by the backfill migration.
+                    order.status_changed_at = order.created_at or observed_at
+                order.printerval_status = incoming_status
                 order.thumbnail_url = summary.thumbnail_url or order.thumbnail_url
                 apply_crawled_product_gallery(order, summary.product_image_urls)
                 updated += 1
