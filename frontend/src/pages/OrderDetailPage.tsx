@@ -35,6 +35,7 @@ import {
   Flag
 } from 'lucide-react'
 import { AdminFixActionModal } from '../components/AdminFixActionModal'
+import { LinkifiedText, OpenExternalLinkButton } from '../components/LinkifiedText'
 
 type ResultVersion = {
   id: string
@@ -780,7 +781,7 @@ export function OrderDetailPage() {
                 </div>
 
                 <div className="whitespace-pre-wrap break-all leading-relaxed font-sans text-slate-800 bg-white/90 p-3 rounded-lg border border-orange-200/80">
-                  {order.note_outsource || 'Chưa có ghi chú cụ thể từ QC.'}
+                  {order.note_outsource ? <LinkifiedText text={order.note_outsource} /> : 'Chưa có ghi chú cụ thể từ QC.'}
                 </div>
               </div>
             )}
@@ -887,7 +888,7 @@ export function OrderDetailPage() {
                       className={`w-full px-3.5 py-2 text-xs rounded-xl border font-mono transition-all focus:outline-none ${
                         isReview
                           ? 'bg-slate-100 text-slate-500 border-slate-200 cursor-not-allowed pr-40'
-                          : 'bg-white text-slate-900 border-slate-300 focus:border-[#0052CC] focus:ring-1 focus:ring-[#0052CC]'
+                          : 'bg-white text-slate-900 border-slate-300 focus:border-[#0052CC] focus:ring-1 focus:ring-[#0052CC] pr-24'
                       }`}
                       placeholder={
                         isReview
@@ -897,6 +898,7 @@ export function OrderDetailPage() {
                       value={driveUrl}
                       onChange={(e) => setDriveUrl(e.target.value)}
                     />
+                    {!isReview && <span className="absolute right-1.5 top-1/2 -translate-y-1/2"><OpenExternalLinkButton url={driveUrl} label="Mở" /></span>}
                     {isReview && (
                       <span className="absolute right-2.5 top-1.5 text-[10px] font-bold text-purple-800 bg-purple-100 px-2 py-1 rounded-md border border-purple-200 flex items-center gap-1 shadow-2xs select-none">
                         <Lock className="h-3 w-3" />
@@ -1038,7 +1040,7 @@ export function OrderDetailPage() {
               <span>Ghi Chú & Hướng Dẫn</span>
             </h3>
             {order.note_outsource && (
-              <p className="text-slate-700 font-mono text-[11px] whitespace-pre-wrap"><strong className="text-slate-900">Note Outsource:</strong> {order.note_outsource}</p>
+              <p className="text-slate-700 font-mono text-[11px] whitespace-pre-wrap"><strong className="text-slate-900">Note Outsource:</strong> <LinkifiedText text={order.note_outsource} /></p>
             )}
             {order.designer_note && !isAdmin && (
               <p className="rounded bg-white/70 p-2 text-slate-700 whitespace-pre-wrap"><strong>Ghi chú Admin:</strong> {order.designer_note}</p>

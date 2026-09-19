@@ -23,6 +23,7 @@ import {
 import { OrderHistoryTimelineModal } from '../components/OrderHistoryTimelineModal'
 import { AdminFixActionModal } from '../components/AdminFixActionModal'
 import { ProductQuickViewModal } from '../components/ProductQuickViewModal'
+import { LinkifiedText } from '../components/LinkifiedText'
 
 type DesignerOrder = {
   id: string
@@ -841,7 +842,7 @@ export function DesignerBoardPage() {
                                       <span className="font-semibold text-orange-900 block mb-0.5 text-[10px]">
                                         Ghi chú QC Print:
                                       </span>
-                                      {o.note_outsource}
+                                      <LinkifiedText text={o.note_outsource} />
                                     </div>
                                   )}
 

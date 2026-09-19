@@ -10,6 +10,7 @@ import { Pagination, paginate } from '../components/Pagination'
 import { CopyableOrderCode } from '../components/CopyableOrderCode'
 import { CopyableProductName } from '../components/CopyableProductName'
 import { ProductQuickViewModal } from '../components/ProductQuickViewModal'
+import { LinkifiedText, OpenExternalLinkButton } from '../components/LinkifiedText'
 import { useToast } from '../context/ToastContext'
 import { useGallerySync } from '../context/GallerySyncContext'
 import { useSyncStatus } from '../hooks/useSyncStatus'
@@ -2591,7 +2592,7 @@ export function OrdersListPage() {
                                   <span>QC Acc Mẹ:</span>
                                 </div>
                                 <div className="whitespace-pre-wrap break-all leading-tight text-slate-800 line-clamp-2">
-                                  {o.note_outsource}
+                                  <LinkifiedText text={o.note_outsource} />
                                 </div>
                               </div>
                             )}
@@ -2876,7 +2877,7 @@ export function OrdersListPage() {
                                     <span>Ghi chú QC sửa lại:</span>
                                   </div>
                                   <div className="whitespace-pre-wrap break-all leading-tight text-slate-800 line-clamp-3">
-                                    {o.note_outsource}
+                                    <LinkifiedText text={o.note_outsource} />
                                   </div>
                                 </div>
                               )}
@@ -2934,6 +2935,7 @@ export function OrdersListPage() {
                                         disabled={isSubmitting || Boolean(o.template_missing)}
                                         className="flex-1 min-w-[200px] rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900 placeholder:text-slate-400 focus:border-[#0052CC] focus:ring-1 focus:ring-[#0052CC] shadow-2xs disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed"
                                       />
+                                      <OpenExternalLinkButton url={currentLink} label="Mở" />
                                       <button
                                         type="button"
                                         onClick={() => handleInlineSubmit(o, currentLink)}
