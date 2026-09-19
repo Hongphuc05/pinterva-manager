@@ -14,6 +14,7 @@ type QuickViewOrder = {
   created_at_ext?: string | null
   product_category: string | null
   product_variants: Variant[] | null
+  product_skus?: { variants?: Variant[] | null }[] | null
   custom_config: { original: ConfigEntry[]; translated_vn?: ConfigEntry[] } | null
   source_files: { name: string; url: string }[] | null
   product_image_urls?: string[] | null
@@ -78,7 +79,8 @@ export function ProductQuickViewModal({ orderId, onClose }: Props) {
 
   const variants = useMemo(() => {
     const result = new Map<string, Variant>()
-    for (const variant of order?.product_variants || []) {
+    const variantsFromAllSkus = (order?.product_skus || []).flatMap((sku) => sku.variants || [])
+    for (const variant of [...(order?.product_variants || []), ...variantsFromAllSkus]) {
       const name = cleanVariantName(variant.name)
       if (name && variant.value) result.set(`${name.toLowerCase()}-${variant.value.toLowerCase()}`, { name, value: variant.value })
     }

@@ -151,6 +151,57 @@ def test_selected_sync_turns_printerval_fix_into_the_existing_admin_fix_flow(db_
     assert order.fix_return_count == 1
 
 
+def test_selected_sync_reconciles_a_legacy_rejected_fix_when_printerval_is_review(db_session):
+    platform = Platform(name="P1", account_username="acc1@printerval.com", team_outsource="team-a")
+    db_session.add(platform)
+    db_session.flush()
+    order = Order(
+        external_order_id="DJ1004",
+        platform_id=platform.id,
+        state="REVISION",
+        printerval_status="review",
+        fix_rejected_by_admin=True,
+    )
+    db_session.add(order)
+    db_session.commit()
+
+    result = sync_selected_order_statuses(
+        db_session,
+        platform,
+        [order],
+        api_client=_mock_client({"DJ1004": {"id": 1004, "status": "review"}}),
+    )
+
+    db_session.refresh(order)
+    assert result == {"checked": 1, "updated": 1, "not_found": 0, "failed": 0}
+    assert order.state == "QC_PENDING"
+
+
+def test_scheduled_sync_reconciles_a_legacy_rejected_fix_when_printerval_is_review(db_session):
+    platform = Platform(name="P1", account_username="acc1@printerval.com", team_outsource="team-a")
+    db_session.add(platform)
+    db_session.flush()
+    order = Order(
+        external_order_id="DJ1005",
+        platform_id=platform.id,
+        state="REVISION",
+        printerval_status="review",
+        fix_rejected_by_admin=True,
+    )
+    db_session.add(order)
+    db_session.commit()
+
+    result = sync_platform_order_statuses(
+        db_session,
+        platform,
+        api_client=_mock_client({"DJ1005": {"id": 1005, "status": "review"}}),
+    )
+
+    db_session.refresh(order)
+    assert result["updated"] == 1
+    assert order.state == "QC_PENDING"
+
+
 def test_sync_platform_order_statuses_tries_the_last_known_status_first(db_session):
     """Regression test for the design this replaced: a live incident paged through
     every one of the 6 statuses in full for one platform (30+ pages of "done" alone)

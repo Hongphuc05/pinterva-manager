@@ -371,6 +371,9 @@ def test_support_can_set_duplicate_check_status_and_reversible(client, db_sessio
         assert request.designer_option == ""
         assert request.internal_designer_id == support.id
         assert delayed_requests == [str(request.id)]
+        board = client.get("/api/duplicate-board", headers=headers).json()
+        assert any(card["id"] == str(order.id) and card["state"] == "IN_PROGRESS" for card in board["columns"][0]["cards"])
+        assert board["columns"][0]["metrics"]["doing"] == 1
 
         # 2. Support marks order as non_duplicate (reversible flow)
         res2 = client.post(

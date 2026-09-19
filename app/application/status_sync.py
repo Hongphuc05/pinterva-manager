@@ -201,6 +201,30 @@ def sync_selected_order_statuses(
                                     )
                                 )
                                 changed = True
+                            elif (
+                                norm_status == "REVIEW"
+                                and order.state == "REVISION"
+                                and order.fix_rejected_by_admin
+                            ):
+                                # Reconcile legacy rows rejected before the local
+                                # transition was corrected. Printerval is already
+                                # Review, so the Tacahu card must leave Fix too.
+                                order.state = "QC_PENDING"
+                                order.status_changed_at = now_utc
+                                session.add(
+                                    WorkflowEvent(
+                                        order_id=order.id,
+                                        from_state=old_state,
+                                        to_state="QC_PENDING",
+                                        actor_id=actor_id,
+                                        evidence={
+                                            "action": "RECONCILE_REJECTED_FIX_TO_REVIEW",
+                                            "actor_name": "Printerval",
+                                            "description": "Đồng bộ xác nhận đơn đã được trả về Review sau khi Admin từ chối Fix",
+                                        },
+                                    )
+                                )
+                                changed = True
                             elif note and norm_status == "FIX" and note != order.note_outsource:
                                 order.previous_note_outsource = order.note_outsource
                                 order.note_outsource = note
@@ -306,6 +330,14 @@ def sync_platform_order_statuses(
                         order.note_outsource = found_note
                     order.fix_approved_by_admin = False
                     order.fix_rejected_by_admin = False
+                    updated += 1
+                elif (
+                    norm_st == "REVIEW"
+                    and order.state == "REVISION"
+                    and order.fix_rejected_by_admin
+                ):
+                    order.state = "QC_PENDING"
+                    order.status_changed_at = datetime.now(UTC)
                     updated += 1
                 elif norm_st == "DONE" and order.state != "DONE":
                     order.state = "DONE"

@@ -1,7 +1,14 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from app.adapters.db.models import Assignment, Order, Platform, PrintervalAssignmentRequest, User, WorkflowEvent
+from app.adapters.db.models import (
+    Assignment,
+    Order,
+    Platform,
+    PrintervalAssignmentRequest,
+    User,
+    WorkflowEvent,
+)
 from app.api.deps import DEFAULT_PLATFORM_ID, get_current_platform_id, get_db
 from app.api.main import create_app
 from app.application.auth import hash_password
@@ -719,6 +726,11 @@ def test_api_approve_and_reject_fix_flow(client, db_session):
     assert order.state == OrderState.QC_PENDING.value
     assert order.fix_approved_by_admin is False
     assert order.fix_rejected_by_admin is True
+
+    review_orders = client.get("/api/orders?status=REVIEW").json()["orders"]
+    fix_orders = client.get("/api/orders?status=FIX").json()["orders"]
+    assert any(item["id"] == str(order.id) for item in review_orders)
+    assert all(item["id"] != str(order.id) for item in fix_orders)
 
 
 def test_api_orders_list_returns_active_assignment_id_for_designer(client, db_session):

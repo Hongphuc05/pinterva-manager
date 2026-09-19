@@ -56,14 +56,14 @@ export function CrawlFilterModal({ isOpen, onClose, onSearch, loading, designers
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-700 block">Status</label>
-              <select value={status} onChange={(e) => setStatus(e.target.value)} className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300">
+              <label htmlFor="crawl-status" className="text-xs font-bold text-slate-700 block">Status</label>
+              <select id="crawl-status" value={status} onChange={(e) => setStatus(e.target.value)} className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300">
                 {STATUSES.map((item) => <option key={item.value || 'all'} value={item.value}>{item.label}</option>)}
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-700 block">Designer</label>
-              <select value={designer} onChange={(e) => setDesigner(e.target.value)} className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300">
+              <label htmlFor="crawl-designer" className="text-xs font-bold text-slate-700 block">Designer</label>
+              <select id="crawl-designer" value={designer} onChange={(e) => setDesigner(e.target.value)} className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300">
                 <option value="">Tất cả designer</option>
                 <option value="__unassigned__">Chưa chia cho ai</option>
                 {designers.map((item) => <option key={item} value={item}>{item}</option>)}
@@ -72,8 +72,9 @@ export function CrawlFilterModal({ isOpen, onClose, onSearch, loading, designers
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-bold text-slate-700 block">Loại design job</label>
+            <label htmlFor="crawl-job-type" className="text-xs font-bold text-slate-700 block">Loại design job</label>
             <select
+              id="crawl-job-type"
               value={jobType}
               onChange={(e) => setJobType(e.target.value)}
               className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#0052CC]/20 focus:border-[#0052CC]"
