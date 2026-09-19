@@ -158,10 +158,11 @@ def set_orders_work_domain(
         previous_domain = order.work_domain
         previous_state = order.state
         order.work_domain = work_domain
-        # A duplicate card enters the unassigned pool in Column 1 (Trello) with WAITING state.
-        # Moving card into a designer column later transitions it to DOING.
+        # A duplicate card enters the shared board pool already in Doing. The
+        # board itself owns assignment, so it must leave the standard Waiting queue.
         if work_domain == WORK_DOMAIN_DUPLICATE:
-            order.state = OrderState.WAITING.value
+            order.state = OrderState.IN_PROGRESS.value
+            order.status_changed_at = datetime.now(UTC)
             order.printerval_designer = None
             order.duplicate_check_status = DUPLICATE_CHECK_DUPLICATE
             order.template_missing = False
@@ -233,7 +234,8 @@ def set_orders_duplicate_status(
             target_domain = WORK_DOMAIN_DUPLICATE
             order.work_domain = target_domain
             order.duplicate_check_status = DUPLICATE_CHECK_DUPLICATE
-            order.state = OrderState.WAITING.value
+            order.state = OrderState.IN_PROGRESS.value
+            order.status_changed_at = datetime.now(UTC)
             order.printerval_designer = None
             order.template_missing = False
             order.fix_approved_by_admin = False
@@ -244,7 +246,7 @@ def set_orders_duplicate_status(
                 reason="moved_to_duplicate_domain",
             )
             cancelled_ids = [str(item.id) for item in active_assignments]
-            if prev_domain != WORK_DOMAIN_DUPLICATE:
+            if prev_domain != WORK_DOMAIN_DUPLICATE or prev_state != OrderState.IN_PROGRESS.value:
                 request_ids.append(
                     _create_duplicate_board_doing_request(
                         session,
@@ -525,6 +527,7 @@ def _card(order: Order, assignee: User | None) -> dict:
         "note_outsource": sanitize_text(order.note_outsource, "Web mẹ") or "",
         "previous_note_outsource": sanitize_text(order.previous_note_outsource, "Web mẹ"),
         "fix_approved_by_admin": order.fix_approved_by_admin,
+        "fix_return_count": order.fix_return_count,
         "assignee_id": str(assignee.id) if assignee else None,
         "assignee_name": (assignee.full_name or assignee.username) if assignee else None,
         "duplicate_board_position": order.duplicate_board_position,

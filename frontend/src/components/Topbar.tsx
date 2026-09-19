@@ -129,8 +129,8 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
         method: 'POST',
         body: JSON.stringify({
           job_type: jobType,
-          platform_status: status,
-          platform_designer: designer || undefined,
+          printerval_status: status,
+          printerval_designer: designer || undefined,
           date_from: dateFrom || undefined,
           date_to: dateTo || undefined,
         }),

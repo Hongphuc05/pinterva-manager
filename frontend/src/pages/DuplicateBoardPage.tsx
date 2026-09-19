@@ -44,6 +44,7 @@ type DuplicateCard = {
   note_outsource: string
   previous_note_outsource: string | null
   fix_approved_by_admin: boolean
+  fix_return_count?: number
   assignee_id: string | null
   assignee_name: string | null
 }
@@ -999,11 +1000,18 @@ export function DuplicateBoardPage() {
                           <span className={`rounded border px-1.5 py-0.5 font-bold ${stateClass(card.state)}`}>
                             {stateLabel(card.state)}
                           </span>
-                          {card.deadline_at_ext && (
-                            <span className="font-medium text-slate-400">
-                              {new Date(card.deadline_at_ext).toLocaleDateString('vi-VN')}
-                            </span>
-                          )}
+                          <div className="flex items-center gap-1.5">
+                            {(card.fix_return_count || 0) > 0 && (
+                              <span className="rounded border border-orange-200 bg-orange-50 px-1.5 py-0.5 font-bold text-orange-800" title="Số lần Printerval trả đơn về Fix">
+                                Fix × {card.fix_return_count}
+                              </span>
+                            )}
+                            {card.deadline_at_ext && (
+                              <span className="font-medium text-slate-400">
+                                {new Date(card.deadline_at_ext).toLocaleDateString('vi-VN')}
+                              </span>
+                            )}
+                          </div>
                         </div>
 
                         {isAdmin && card.state === 'REVISION' && !card.fix_approved_by_admin && (

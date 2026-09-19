@@ -173,6 +173,11 @@ class Order(Base):
     fix_rejected_by_admin: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=text("false"), nullable=False
     )
+    # Number of distinct transitions to Fix observed from Printerval. This is
+    # intentionally separate from internal admin/designer actions.
+    fix_return_count: Mapped[int] = mapped_column(
+        Integer, default=0, server_default=text("0"), nullable=False
+    )
     # Internal instruction from Admin to the assigned Designer.  This is kept
     # separate from `note_outsource`, which mirrors Printerval QC feedback.
     designer_note: Mapped[str] = mapped_column(

@@ -159,6 +159,15 @@ def discover_waiting_orders(
     return new_ids
 
 
+UNASSIGNED_DESIGNER_FILTER = "__unassigned__"
+
+
+def _is_unassigned_printerval_designer(designer: str | None) -> bool:
+    """Normalize Printerval's empty/select-placeholder designer values."""
+    normalized = (designer or "").strip().casefold()
+    return normalized in {"", "chưa chia cho ai", "choose designer", "unassigned"}
+
+
 def scan_orders_fast(
     session: Session,
     adapter: PrintervalAdapter,
@@ -188,7 +197,10 @@ def scan_orders_fast(
         if not result.success:
             raise DiscoverFailedError(result.error_class or "BUG")
         for summary in result.orders:
-            if designer and summary.designer != designer:
+            if designer == UNASSIGNED_DESIGNER_FILTER:
+                if not _is_unassigned_printerval_designer(summary.designer):
+                    continue
+            elif designer and summary.designer != designer:
                 continue
             if summary.external_order_id in seen:
                 continue

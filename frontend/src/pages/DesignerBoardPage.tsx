@@ -37,6 +37,7 @@ type DesignerOrder = {
   note_outsource?: string | null
   previous_note_outsource?: string | null
   fix_approved_by_admin?: boolean
+  fix_return_count?: number
   work_domain?: string
 }
 
@@ -553,6 +554,11 @@ export function DesignerBoardPage() {
                                           {o.work_domain === 'duplicate' && (
                                             <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
                                               Đơn trùng
+                                            </span>
+                                          )}
+                                          {(o.fix_return_count || 0) > 0 && (
+                                            <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-bold bg-orange-50 text-orange-800 border border-orange-200" title="Số lần Printerval trả đơn về Fix">
+                                              Fix × {o.fix_return_count}
                                             </span>
                                           )}
                                         </div>

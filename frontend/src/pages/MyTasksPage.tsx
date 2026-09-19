@@ -42,6 +42,7 @@ type Task = {
     product_skus: { sku?: string | null }[] | null
     deadline_at_ext: string | null
     note_outsource: string | null
+    fix_return_count?: number
     designer_note: string
     template_missing: boolean
     custom_config: Record<string, unknown> | null
@@ -263,6 +264,11 @@ export function MyTasksPage() {
                       {task.sub_status && subStatusLabels[task.sub_status] && (
                         <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-purple-50 text-purple-700 border border-purple-200">
                           {subStatusLabels[task.sub_status]}
+                        </span>
+                      )}
+                      {(task.order.fix_return_count || 0) > 0 && (
+                        <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-orange-50 text-orange-800 border border-orange-200" title="Số lần Printerval trả đơn về Fix">
+                          Fix × {task.order.fix_return_count}
                         </span>
                       )}
                     </div>

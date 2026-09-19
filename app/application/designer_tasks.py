@@ -125,6 +125,7 @@ def list_my_tasks(session: Session, designer_id: uuid.UUID) -> list[dict]:
             ),
             "created_at": order.created_at.isoformat() if order.created_at else None,
             "note_outsource": order.note_outsource,
+            "fix_return_count": order.fix_return_count,
             "designer_note": order.designer_note,
             "template_missing": order.template_missing,
             "custom_config": order.custom_config,

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import base64
-import json
 import re
 from typing import Any
+
 from pydantic import BaseModel
 
 
@@ -101,6 +101,7 @@ class DesignerOrderSummaryOut(BaseModel):
     previous_note_outsource: str | None = None
     fix_approved_by_admin: bool = False
     fix_rejected_by_admin: bool = False
+    fix_return_count: int = 0
     designer_note: str = ""
     template_missing: bool = False
     duplicate_check_status: str = "uncheck"
@@ -134,6 +135,7 @@ class DesignerOrderDetailOut(BaseModel):
     previous_note_outsource: str | None = None
     fix_approved_by_admin: bool = False
     fix_rejected_by_admin: bool = False
+    fix_return_count: int = 0
     designer_note: str = ""
     template_missing: bool = False
     duplicate_check_status: str = "uncheck"

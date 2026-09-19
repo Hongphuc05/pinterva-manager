@@ -180,10 +180,12 @@ def sync_selected_order_statuses(
                             elif norm_status == "FIX" and order.state != "REVISION":
                                 order.state = "REVISION"
                                 order.status_changed_at = now_utc
+                                order.fix_return_count += 1
                                 order.previous_note_outsource = order.note_outsource
                                 if note:
                                     order.note_outsource = note
                                 order.fix_approved_by_admin = False
+                                order.fix_rejected_by_admin = False
                                 session.add(
                                     WorkflowEvent(
                                         order_id=order.id,
@@ -296,12 +298,14 @@ def sync_platform_order_statuses(
                 norm_st = (found_status or "").upper()
                 if norm_st == "FIX" and order.state in ("QC_PENDING", "REVIEW", "IN_PROGRESS"):
                     order.state = "REVISION"
+                    order.fix_return_count += 1
                     order.previous_note_outsource = order.note_outsource
                     attrs = row.get("attributes") or {}
                     found_note = str(attrs.get("outsource_note") or row.get("note") or "").strip()
                     if found_note:
                         order.note_outsource = found_note
                     order.fix_approved_by_admin = False
+                    order.fix_rejected_by_admin = False
                     updated += 1
                 elif norm_st == "DONE" and order.state != "DONE":
                     order.state = "DONE"

@@ -63,6 +63,7 @@ type OrderDetail = {
   previous_note_outsource?: string | null
   fix_approved_by_admin?: boolean
   fix_rejected_by_admin?: boolean
+  fix_return_count?: number
   designer_note: string
   template_missing: boolean
   custom_config: {
@@ -595,6 +596,11 @@ export function OrderDetailPage() {
                   <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-blue-50 text-[#0052CC] text-xs font-semibold border border-blue-100">
                     <User className="h-3.5 w-3.5" />
                     <span>DES: {order.assigned_designer_name}</span>
+                  </span>
+                )}
+                {(order.fix_return_count || 0) > 0 && (
+                  <span className="inline-flex items-center px-2.5 py-1 rounded-md bg-orange-50 text-orange-800 text-xs font-bold border border-orange-200" title="Số lần Printerval trả đơn về Fix">
+                    Fix × {order.fix_return_count}
                   </span>
                 )}
                 {isAdmin && order.platform_designer && (

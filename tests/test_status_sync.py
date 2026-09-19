@@ -135,7 +135,20 @@ def test_selected_sync_turns_printerval_fix_into_the_existing_admin_fix_flow(db_
     assert order.previous_note_outsource == "Ghi chú cũ"
     assert order.note_outsource == "Sửa lại phần tay áo"
     assert order.fix_approved_by_admin is False
+    assert order.fix_return_count == 1
     assert event.evidence["action"] == "REQUEST_FIX"
+
+    # Re-reading the same Fix state is not another return from Printerval.
+    sync_selected_order_statuses(
+        db_session,
+        platform,
+        [order],
+        api_client=_mock_client({
+            "DJ1003": {"id": 1003, "status": "fix", "note": "Sửa lại phần tay áo"}
+        }),
+    )
+    db_session.refresh(order)
+    assert order.fix_return_count == 1
 
 
 def test_sync_platform_order_statuses_tries_the_last_known_status_first(db_session):

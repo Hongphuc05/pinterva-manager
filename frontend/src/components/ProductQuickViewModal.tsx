@@ -92,6 +92,7 @@ export function ProductQuickViewModal({ orderId, onClose }: Props) {
   const orderAt = order?.order_created_at_ext || order?.created_at_ext || '—'
   const size = variants.filter((variant) => variant.name.toLowerCase() === 'size').map((variant) => variant.value).join(', ') || '—'
   const type = variants.filter((variant) => variant.name.toLowerCase() === 'type').map((variant) => variant.value).join(', ') || '—'
+  const style = variants.filter((variant) => variant.name.toLowerCase() === 'style').map((variant) => variant.value).join(', ') || '—'
 
   function updateGalleryScrollState() {
     const viewport = galleryViewportRef.current
@@ -134,10 +135,11 @@ export function ProductQuickViewModal({ orderId, onClose }: Props) {
             <div className="space-y-5">
               <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
                 <Info label="Tên sản phẩm" value={order.product_name || '—'} />
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
                   <Info label="Category" value={order.product_category || '—'} />
                   <Info label="Type" value={type} />
                   <Info label="Size" value={size} />
+                  <Info label="Style" value={style} />
                 </div>
                 <Info label="Order at" value={orderAt} />
               </div>

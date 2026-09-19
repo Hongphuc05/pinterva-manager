@@ -70,6 +70,7 @@ export type OrderSummary = {
   previous_note_outsource?: string | null
   fix_approved_by_admin?: boolean
   fix_rejected_by_admin?: boolean
+  fix_return_count?: number
   designer_note?: string
   admin_note?: string | null
   drive_url?: string | null
@@ -2554,6 +2555,11 @@ export function OrdersListPage() {
                               {o.source_files && o.source_files.length > 0 && (
                                 <span className="text-[10px] font-bold text-slate-600 px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200">
                                   {o.source_files.length} file source
+                                </span>
+                              )}
+                              {(o.fix_return_count || 0) > 0 && (
+                                <span className="text-[10px] font-bold text-orange-800 px-1.5 py-0.5 rounded bg-orange-50 border border-orange-200" title="Số lần Printerval trả đơn về Fix">
+                                  Fix × {o.fix_return_count}
                                 </span>
                               )}
 

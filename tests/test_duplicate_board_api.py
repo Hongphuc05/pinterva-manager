@@ -106,7 +106,7 @@ def test_admin_can_put_orders_in_duplicate_domain_and_board_shows_missing_form(
     db_session.refresh(order)
     db_session.refresh(active_assignment)
     assert order.work_domain == "duplicate"
-    assert order.state == "WAITING"
+    assert order.state == "IN_PROGRESS"
     request = db_session.query(PrintervalAssignmentRequest).filter_by(order_id=order.id).one()
     assert request.target_status == "Doing"
     assert request.designer_option == ""
@@ -116,11 +116,11 @@ def test_admin_can_put_orders_in_duplicate_domain_and_board_shows_missing_form(
     assert db_session.query(WorkflowEvent).filter_by(order_id=order.id).count() == 1
     assert board.status_code == 200
     assert [column["title"] for column in board.json()["columns"]] == ["Đơn hàng", "Thiếu form", "Trello A", "Done"]
-    # New duplicate order starts in "Đơn hàng" column with WAITING state
+    # New duplicate order starts in the shared board's Doing queue.
     assert board.json()["columns"][0]["cards"][0]["id"] == str(order.id)
     assert board.json()["columns"][0]["metrics"] == {
         "total": 1,
-        "doing": 0,
+        "doing": 1,
         "review": 0,
         "fix": 0,
         "done": 0,
@@ -365,7 +365,7 @@ def test_support_can_set_duplicate_check_status_and_reversible(client, db_sessio
         db_session.refresh(order)
         assert order.work_domain == "duplicate"
         assert order.duplicate_check_status == "duplicate"
-        assert order.state == "WAITING"
+        assert order.state == "IN_PROGRESS"
         request = db_session.query(PrintervalAssignmentRequest).filter_by(order_id=order.id).one()
         assert request.target_status == "Doing"
         assert request.designer_option == ""

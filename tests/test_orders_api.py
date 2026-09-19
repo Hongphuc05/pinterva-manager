@@ -711,12 +711,12 @@ def test_api_approve_and_reject_fix_flow(client, db_session):
     )
     assert resp.status_code == 200
     data = resp.json()
-    assert data["state"] == "REVISION"
+    assert data["state"] == "QC_PENDING"
     assert data["fix_rejected_by_admin"] is True
     assert "mau da dung voi mockup" in data["note_outsource"]
 
     db_session.refresh(order)
-    assert order.state == OrderState.REVISION.value
+    assert order.state == OrderState.QC_PENDING.value
     assert order.fix_approved_by_admin is False
     assert order.fix_rejected_by_admin is True
 

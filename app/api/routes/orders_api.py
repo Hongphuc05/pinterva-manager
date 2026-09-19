@@ -105,6 +105,7 @@ class OrderSummaryOut(BaseModel):
     previous_note_outsource: str | None = None
     fix_approved_by_admin: bool = False
     fix_rejected_by_admin: bool = False
+    fix_return_count: int = 0
     designer_note: str = ""
     template_missing: bool = False
     duplicate_check_status: str = "uncheck"
@@ -642,6 +643,7 @@ class OrderDetailOut(BaseModel):
     previous_note_outsource: str | None = None
     fix_approved_by_admin: bool = False
     fix_rejected_by_admin: bool = False
+    fix_return_count: int = 0
     designer_note: str = ""
     template_missing: bool = False
     duplicate_check_status: str = "uncheck"
@@ -2147,7 +2149,9 @@ def api_reject_fix_to_review(
         order.note_outsource = payload.note_outsource.strip()
 
     old_state = order.state
-    order.state = OrderState.REVISION.value
+    # The admin rejected Printerval's Fix request. The card is therefore waiting
+    # for QC review locally too; retaining REVISION here stranded it in the Fix tab.
+    order.state = OrderState.QC_PENDING.value
     order.fix_approved_by_admin = False
     order.fix_rejected_by_admin = True
     order.status_changed_at = datetime.now(UTC)
@@ -2156,7 +2160,7 @@ def api_reject_fix_to_review(
     event = WorkflowEvent(
         order_id=order.id,
         from_state=old_state,
-        to_state=OrderState.REVISION.value,
+        to_state=OrderState.QC_PENDING.value,
         actor_id=user.id,
         evidence={
             "action": "REJECT_FIX_TO_REVIEW",
@@ -2288,6 +2292,7 @@ class DesignerWorkloadOrderOut(BaseModel):
     note_outsource: str = ""
     previous_note_outsource: str | None = None
     fix_approved_by_admin: bool = False
+    fix_return_count: int = 0
 
 
 class DesignerWorkloadOut(BaseModel):
@@ -2401,6 +2406,7 @@ def api_designers_workload(
                         note_outsource=o.note_outsource or "",
                         previous_note_outsource=o.previous_note_outsource,
                         fix_approved_by_admin=o.fix_approved_by_admin,
+                        fix_return_count=o.fix_return_count,
                     )
                     for o in des_orders
                 ],
