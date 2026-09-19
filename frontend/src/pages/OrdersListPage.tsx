@@ -101,10 +101,19 @@ const PLATFORM_STATUS_OPTIONS = ['Waiting', 'Doing', 'Review', 'Fix', 'Confirm',
 const DEFAULT_PLATFORM_DES = 'nguyễn thị thúy hường 2d'
 const ORDERS_CACHE_PREFIX = 'tacahu-orders-cache'
 
-function getUtc7DateStr(dateInput: string | null | undefined): string | null {
+function parseUtcDate(dateInput: string | null | undefined): Date | null {
   if (!dateInput) return null
-  const d = new Date(dateInput)
-  if (isNaN(d.getTime())) return null
+  let normalized = dateInput.trim()
+  if (normalized.includes('T') && !normalized.endsWith('Z') && !/[+-]\d{2}(:\d{2})?$/.test(normalized)) {
+    normalized += 'Z'
+  }
+  const d = new Date(normalized)
+  return isNaN(d.getTime()) ? null : d
+}
+
+function getUtc7DateStr(dateInput: string | null | undefined): string | null {
+  const d = parseUtcDate(dateInput)
+  if (!d) return null
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Ho_Chi_Minh',
     year: 'numeric',
@@ -113,12 +122,9 @@ function getUtc7DateStr(dateInput: string | null | undefined): string | null {
   }).format(d)
 }
 
-
-
 function formatUtc7Split(dateInput: string | null | undefined): { time: string; date: string } | null {
-  if (!dateInput) return null
-  const d = new Date(dateInput)
-  if (isNaN(d.getTime())) return null
+  const d = parseUtcDate(dateInput)
+  if (!d) return null
   const timeStr = new Intl.DateTimeFormat('vi-VN', {
     timeZone: 'Asia/Ho_Chi_Minh',
     hour: '2-digit',
@@ -1112,10 +1118,8 @@ export function OrdersListPage() {
     .sort((a, b) => {
       const aValue = a[dateSort.field] || (dateSort.field === 'status_changed_at' ? a.created_at : null)
       const bValue = b[dateSort.field] || (dateSort.field === 'status_changed_at' ? b.created_at : null)
-      if (!aValue) return bValue ? 1 : 0
-      if (!bValue) return -1
-      const aTime = new Date(aValue).getTime()
-      const bTime = new Date(bValue).getTime()
+      const aTime = parseUtcDate(aValue)?.getTime() ?? 0
+      const bTime = parseUtcDate(bValue)?.getTime() ?? 0
       return dateSort.direction === 'desc' ? bTime - aTime : aTime - bTime
     })
 

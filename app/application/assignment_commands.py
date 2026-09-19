@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -81,11 +82,13 @@ def queue_assignment_command(
         raise AssignmentCommandError("Một số đơn hàng không tồn tại hoặc không thuộc nền tảng này")
 
     requests: list[PrintervalAssignmentRequest] = []
+    now_utc = datetime.now(UTC)
     if designer_option:
         for order in orders:
             if designer is not None:
                 _upsert_internal_assignment(session, order, designer)
             order.state = target_state.value
+            order.status_changed_at = now_utc
             try:
                 requests.append(
                     create_request(
@@ -122,6 +125,7 @@ def queue_assignment_command(
         if designer is not None:
             _upsert_internal_assignment(session, order, designer)
         order.state = target_state.value
+        order.status_changed_at = now_utc
     session.commit()
 
     # Telegram notification for designer
@@ -215,6 +219,7 @@ def revoke_assignment_command(
 
         order.printerval_designer = None
         order.state = OrderState.WAITING.value
+        order.status_changed_at = datetime.now(UTC)
         session.add(
             WorkflowEvent(
                 order_id=order.id,

@@ -90,6 +90,16 @@ function stateClass(state: string) {
   return 'bg-slate-100 text-slate-600 border-slate-200'
 }
 
+function parseUtcDate(dateInput: string | null | undefined): Date | null {
+  if (!dateInput) return null
+  let normalized = dateInput.trim()
+  if (normalized.includes('T') && !normalized.endsWith('Z') && !/[+-]\d{2}(:\d{2})?$/.test(normalized)) {
+    normalized += 'Z'
+  }
+  const d = new Date(normalized)
+  return isNaN(d.getTime()) ? null : d
+}
+
 function isDesignerReviewCard(card: DuplicateCard) {
   return ['QC_PENDING', 'REVIEW', 'RESULT_SUBMITTED', 'SUBMITTING_TO_SITE'].includes((card.state || '').toUpperCase())
 }
@@ -281,7 +291,9 @@ export function DuplicateBoardPage() {
       if (doneTimeFilter !== 'all') {
         const timeStr = card.status_changed_at || card.paid_at || card.created_at
         if (!timeStr) return false
-        const cardDate = new Date(timeStr).getTime()
+        const parsed = parseUtcDate(timeStr)
+        if (!parsed) return false
+        const cardDate = parsed.getTime()
         const now = Date.now()
         if (doneTimeFilter === 'today') {
           const startOfToday = new Date()

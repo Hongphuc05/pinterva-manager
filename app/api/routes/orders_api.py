@@ -1575,6 +1575,7 @@ def api_assign_order(
 
     old_state = order.state
     order.state = OrderState.WAITING.value
+    order.status_changed_at = datetime.now(UTC)
 
     des_name = designer.full_name or designer.username
     admin_name = user.full_name or user.username
@@ -1661,6 +1662,7 @@ def api_bulk_assign_orders(
     updated_count = 0
     des_name = designer.full_name or designer.username
     admin_name = user.full_name or user.username
+    now_utc = datetime.now(UTC)
 
     for order in orders:
         existing_assignment = (
@@ -1686,6 +1688,7 @@ def api_bulk_assign_orders(
 
         old_state = order.state
         order.state = OrderState.WAITING.value
+        order.status_changed_at = now_utc
         updated_count += 1
 
         is_reassign = existing_assignment is not None and old_designer_name and old_designer_name != des_name

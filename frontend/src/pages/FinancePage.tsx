@@ -35,10 +35,19 @@ import {
   CreditCard
 } from 'lucide-react'
 
-function formatUtc7Split(dateInput: string | null | undefined): { time: string; date: string } | null {
+function parseUtcDate(dateInput: string | null | undefined): Date | null {
   if (!dateInput) return null
-  const d = new Date(dateInput)
-  if (isNaN(d.getTime())) return null
+  let normalized = dateInput.trim()
+  if (normalized.includes('T') && !normalized.endsWith('Z') && !/[+-]\d{2}(:\d{2})?$/.test(normalized)) {
+    normalized += 'Z'
+  }
+  const d = new Date(normalized)
+  return isNaN(d.getTime()) ? null : d
+}
+
+function formatUtc7Split(dateInput: string | null | undefined): { time: string; date: string } | null {
+  const d = parseUtcDate(dateInput)
+  if (!d) return null
   const timeStr = new Intl.DateTimeFormat('vi-VN', {
     timeZone: 'Asia/Ho_Chi_Minh',
     hour: '2-digit',
