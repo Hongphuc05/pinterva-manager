@@ -94,6 +94,20 @@ def require_processing_lease(order: Order, *, actor_id: uuid.UUID) -> None:
         raise ProcessingLeaseConflictError(order)
 
 
+def ensure_processing_lease(session: Session, order: Order, *, actor_id: uuid.UUID) -> datetime:
+    """Keep legacy one-click processing commands safe during the UI rollout.
+
+    The first real processing command obtains the lease; a live lease held by another
+    actor is still rejected. This lets an existing direct submit become the start of a
+    processing session without weakening exclusivity.
+    """
+    if _is_active(order, datetime.now(UTC)) and order.processing_lock_owner_id == actor_id:
+        return heartbeat_processing_lease(session, order, actor_id=actor_id)
+    if not _is_active(order, datetime.now(UTC)):
+        return acquire_processing_lease(session, order, actor_id=actor_id)
+    raise ProcessingLeaseConflictError(order)
+
+
 def release_processing_lease(session: Session, order: Order, *, actor_id: uuid.UUID, reason: str) -> None:
     if order.processing_lock_owner_id is None:
         return

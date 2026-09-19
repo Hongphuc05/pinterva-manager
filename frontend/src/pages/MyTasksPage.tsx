@@ -142,9 +142,13 @@ export function MyTasksPage() {
     if (!lockedTasks.length) return
     const heartbeat = () => {
       lockedTasks.forEach((task) => {
-        void apiFetch(`/assignments/${task.assignment_id}/processing-lease/heartbeat`, {
+        void apiFetch<{ version: number; processing_lock_expires_at: string }>(`/assignments/${task.assignment_id}/processing-lease/heartbeat`, {
           method: 'POST',
           body: JSON.stringify({ expected_version: task.order.version }),
+        }).then((result) => {
+          setTasks((current) => current.map((item) => item.assignment_id === task.assignment_id
+            ? { ...item, order: { ...item.order, version: result.version, processing_lock_expires_at: result.processing_lock_expires_at } }
+            : item))
         }).catch(() => { void loadTasks() })
       })
     }

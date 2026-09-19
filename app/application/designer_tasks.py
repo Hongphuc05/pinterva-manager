@@ -19,9 +19,9 @@ from app.application.operations import run_idempotent
 from app.application.concurrency import require_expected_order_version
 from app.application.processing_leases import (
     acquire_processing_lease,
+    ensure_processing_lease,
     heartbeat_processing_lease,
     release_processing_lease,
-    require_processing_lease,
 )
 from app.application.order_transitions import apply_transition
 from app.application.sanitization import sanitize_order_detail_for_designer
@@ -244,7 +244,7 @@ def update_sub_status(
     def _do() -> dict:
         assignment, order = _owned_task(session, assignment_id, designer_id, lock=True)
         require_expected_order_version(order, expected_version)
-        require_processing_lease(order, actor_id=designer_id)
+        ensure_processing_lease(session, order, actor_id=designer_id)
         assignment.sub_status = sub_status
         session.add(assignment)
         return {"assignment_id": str(assignment.id), "state": order.state, "sub_status": sub_status, "version": order.version}
@@ -322,7 +322,7 @@ def submit_result(
     def _do() -> dict:
         assignment, order = _owned_task(session, assignment_id, designer_id, lock=True)
         require_expected_order_version(order, expected_version)
-        require_processing_lease(order, actor_id=designer_id)
+        ensure_processing_lease(session, order, actor_id=designer_id)
         if order.state not in (OrderState.IN_PROGRESS.value, OrderState.WAITING.value, OrderState.REVISION.value):
             raise ValueError(f"Task must be in progress, waiting, or revision to submit (current state: {order.state})")
         effective_drive_url = (drive_url or "").strip()

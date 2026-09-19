@@ -98,6 +98,8 @@ class DesignerOrderSummaryOut(BaseModel):
     deadline_tacahu: Any | None = None
     created_at: Any | None = None
     updated_at: Any | None = None
+    processing_lock_owned_by_me: bool = False
+    processing_lock_expires_at: Any | None = None
     status_changed_at: Any | None = None
     note_outsource: str = ""
     previous_note_outsource: str | None = None
@@ -134,6 +136,8 @@ class DesignerOrderDetailOut(BaseModel):
     created_at_ext: Any | None = None
     created_at: Any | None = None
     updated_at: Any | None = None
+    processing_lock_owned_by_me: bool = False
+    processing_lock_expires_at: Any | None = None
     status_changed_at: Any | None = None
     note_outsource: str = ""
     previous_note_outsource: str | None = None

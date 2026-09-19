@@ -1,6 +1,6 @@
 # Order concurrency: design and implementation plan
 
-**Status:** Phase 4 complete; Phase 5 is optional and awaits approval
+**Status:** Phase 5 complete
 **Owner:** Tacahu Ops  
 **Scope:** Concurrent writes to an order, its active assignment, result submission,
 Fix/QC decisions, finance actions, duplicate board actions, and Printerval sync.
@@ -285,6 +285,19 @@ Only implement after evidence shows repeated simultaneous manual Fix/QC work.
 Use TTL, heartbeat, takeover reason and audit. Do not use it for ordinary view,
 note, assignment or browser-open actions; it supplements, never replaces,
 optimistic versioning.
+
+**Phase 5 implementation evidence (2026-09-20):** Orders now carry a short-lived
+15-minute processing lease: owner, acquisition, heartbeat and expiry timestamps.
+Designer start acquires/renews the lease; processing updates and result submission
+renew it and result submission releases it. Existing direct-submit workflows safely
+acquire a lease as their first processing command, while a live lease held by a
+different actor is rejected. A designer task page exposes “Bắt đầu xử lý” and sends
+heartbeats every five minutes; admins can take over a live lease only with a reason.
+Every acquire, heartbeat, takeover and release appends a `WorkflowEvent`. The lease
+never applies to reading, notes, ordinary assignment, or browser actions and remains
+supplementary to order-version validation. Added migration
+`c6d7e8f9a0b1_add_order_processing_leases.py`; focused backend tests (`17 passed`),
+focused frontend tests (`5 passed`) and production build passed.
 
 ## 9. Test matrix
 
