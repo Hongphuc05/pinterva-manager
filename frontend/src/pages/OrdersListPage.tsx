@@ -316,7 +316,7 @@ export function OrdersListPage() {
     })
     setSelectedUserId(matchingUser ? matchingUser.id : '')
     setSelectedPlatformDesigner(assigningOrder.platform_designer || DEFAULT_PLATFORM_DES)
-    setSelectedPlatformStatus(assigningOrder.platform_status || 'Doing')
+    setSelectedPlatformStatus('Doing')
     setLoadingPlatformOptions(true)
     apiFetch<{ designers: string[]; statuses: string[] }>(
       `/orders/${assigningOrder.id}/platform-options`
@@ -324,6 +324,7 @@ export function OrdersListPage() {
       .then((result) => {
         setPlatformDesigners(result.designers)
         setPlatformStatuses(result.statuses)
+        setSelectedPlatformStatus('Doing')
         if (assigningOrder.platform_designer && result.designers.includes(assigningOrder.platform_designer)) {
           setSelectedPlatformDesigner(assigningOrder.platform_designer)
         } else if (result.designers.includes(DEFAULT_PLATFORM_DES)) {
@@ -336,6 +337,7 @@ export function OrdersListPage() {
         setPlatformDesigners([DEFAULT_PLATFORM_DES])
         setPlatformStatuses(['Doing', 'Review', 'Fix', 'Done', 'Waiting'])
         setSelectedPlatformDesigner(assigningOrder.platform_designer || DEFAULT_PLATFORM_DES)
+        setSelectedPlatformStatus('Doing')
         setError(err instanceof ApiError ? err.message : 'Không tải được danh sách Designer Print.')
       })
       .finally(() => setLoadingPlatformOptions(false))
