@@ -17,6 +17,12 @@ from app.adapters.db.models import (
 from app.adapters.google.drive_interface import DriveAdapter
 from app.application.operations import run_idempotent
 from app.application.concurrency import require_expected_order_version
+from app.application.processing_leases import (
+    acquire_processing_lease,
+    heartbeat_processing_lease,
+    release_processing_lease,
+    require_processing_lease,
+)
 from app.application.order_transitions import apply_transition
 from app.application.sanitization import sanitize_order_detail_for_designer
 from app.domain.models import OrderState
@@ -144,6 +150,11 @@ def list_my_tasks(session: Session, designer_id: uuid.UUID) -> list[dict]:
             ),
             "created_at": order.created_at.isoformat() if order.created_at else None,
             "updated_at": order.updated_at.isoformat() if order.updated_at else None,
+            "processing_lock_owned_by_me": order.processing_lock_owner_id == designer_id,
+            "processing_lock_expires_at": (
+                order.processing_lock_expires_at.isoformat()
+                if order.processing_lock_expires_at else None
+            ),
             "note_outsource": order.note_outsource,
             "fix_return_count": order.fix_return_count,
             "designer_note": order.designer_note,
@@ -180,6 +191,7 @@ def start_task(
     def _do() -> dict:
         assignment, order = _owned_task(session, assignment_id, designer_id, lock=True)
         require_expected_order_version(order, expected_version)
+        lease_expires_at = acquire_processing_lease(session, order, actor_id=designer_id)
         if order.state == OrderState.REVISION.value:
             sub_status = "fixing"
         else:
@@ -191,11 +203,30 @@ def start_task(
         assignment.sub_status = sub_status
         session.add(assignment)
         session.flush()
-        return {"assignment_id": str(assignment.id), "state": order.state, "sub_status": sub_status, "version": order.version}
+        return {"assignment_id": str(assignment.id), "state": order.state, "sub_status": sub_status, "version": order.version, "processing_lock_expires_at": lease_expires_at.isoformat()}
 
     return run_idempotent(
         session, idempotency_key, "start_task", _do, request_fingerprint=request_fingerprint
     )
+
+
+def heartbeat_task(
+    session: Session,
+    assignment_id: uuid.UUID,
+    designer_id: uuid.UUID,
+    expected_version: int | None = None,
+) -> dict:
+    assignment, order = _owned_task(session, assignment_id, designer_id, lock=True)
+    require_expected_order_version(order, expected_version)
+    expires_at = heartbeat_processing_lease(session, order, actor_id=designer_id)
+    session.commit()
+    return {
+        "assignment_id": str(assignment.id),
+        "state": order.state,
+        "sub_status": assignment.sub_status,
+        "version": order.version,
+        "processing_lock_expires_at": expires_at.isoformat(),
+    }
 
 
 def update_sub_status(
@@ -213,6 +244,7 @@ def update_sub_status(
     def _do() -> dict:
         assignment, order = _owned_task(session, assignment_id, designer_id, lock=True)
         require_expected_order_version(order, expected_version)
+        require_processing_lease(order, actor_id=designer_id)
         assignment.sub_status = sub_status
         session.add(assignment)
         return {"assignment_id": str(assignment.id), "state": order.state, "sub_status": sub_status, "version": order.version}
@@ -290,9 +322,26 @@ def submit_result(
     def _do() -> dict:
         assignment, order = _owned_task(session, assignment_id, designer_id, lock=True)
         require_expected_order_version(order, expected_version)
+        require_processing_lease(order, actor_id=designer_id)
         if order.state not in (OrderState.IN_PROGRESS.value, OrderState.WAITING.value, OrderState.REVISION.value):
             raise ValueError(f"Task must be in progress, waiting, or revision to submit (current state: {order.state})")
-        _verify_drive(drive_adapter, drive_url)
+        effective_drive_url = (drive_url or "").strip()
+        if not effective_drive_url:
+            latest_rv = (
+                session.query(ResultVersion)
+                .filter(ResultVersion.assignment_id == assignment.id)
+                .order_by(ResultVersion.version_marker.desc())
+                .first()
+            )
+            if latest_rv and latest_rv.drive_url:
+                effective_drive_url = latest_rv.drive_url
+            elif order.drive_url:
+                effective_drive_url = order.drive_url
+
+        if not effective_drive_url:
+            raise DriveValidationError("Vui lòng cung cấp link thiết kế trước khi nộp bài.")
+
+        _verify_drive(drive_adapter, effective_drive_url)
         latest_marker = (
             session.query(func.max(ResultVersion.version_marker))
             .filter(ResultVersion.assignment_id == assignment.id)
@@ -300,7 +349,7 @@ def submit_result(
         )
         result_version = ResultVersion(
             assignment_id=assignment.id,
-            drive_url=drive_url,
+            drive_url=effective_drive_url,
             version_marker=(latest_marker or 0) + 1,
             validated=True,
             submitted_at=datetime.now(UTC),
@@ -323,6 +372,7 @@ def submit_result(
         order.deadline_overdue_notified_at = None
         assignment.sub_status = "done"
         session.add(assignment)
+        release_processing_lease(session, order, actor_id=designer_id, reason="result_submitted")
         session.flush()
         return {
             "assignment_id": str(assignment.id),

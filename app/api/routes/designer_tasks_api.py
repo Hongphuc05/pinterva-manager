@@ -17,11 +17,13 @@ from app.application.designer_tasks import (
     DriveValidationError,
     TaskNotFoundError,
     flag_missing_template,
+    heartbeat_task,
     list_my_tasks,
     start_task,
     submit_result,
     update_sub_status,
 )
+from app.application.processing_leases import ProcessingLeaseConflictError
 from app.application.operations import IdempotencyKeyReusedError, OperationInProgressError
 from app.domain.access import ROLE_DESIGNER, ROLE_DESIGNER_TRELLO
 
@@ -101,9 +103,20 @@ class TaskMutationResponse(BaseModel):
     result_version_id: str | None = None
     version_marker: int | None = None
     version: int | None = None
+    processing_lock_expires_at: str | None = None
 
 
 def _raise_task_error(exc: Exception) -> None:
+    if isinstance(exc, ProcessingLeaseConflictError):
+        raise HTTPException(
+            status.HTTP_423_LOCKED,
+            detail={
+                "code": "PROCESSING_LEASE_CONFLICT",
+                "message": "Đơn đang được xử lý trong một phiên khác hoặc lease đã hết hạn. Hãy tải lại trước khi tiếp tục.",
+                "order_id": str(exc.order_id),
+                "expires_at": exc.expires_at.isoformat() if exc.expires_at else None,
+            },
+        ) from exc
     if isinstance(exc, TaskNotFoundError):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Task not found") from exc
     if isinstance(exc, DriveValidationError):
@@ -143,6 +156,22 @@ def api_start_task(
             expected_version=payload.expected_version,
         )
     except Exception as exc:  # routed through stable HTTP errors above
+        _raise_task_error(exc)
+    return TaskMutationResponse(**result)
+
+
+@router.post("/assignments/{assignment_id}/processing-lease/heartbeat", response_model=TaskMutationResponse)
+def api_heartbeat_task_processing_lease(
+    assignment_id: uuid.UUID,
+    payload: OrderCommandPayload,
+    user: User = Depends(require_any_role(ROLE_DESIGNER, ROLE_DESIGNER_TRELLO)),
+    db: Session = Depends(get_db),
+):
+    try:
+        result = heartbeat_task(
+            db, assignment_id, user.id, expected_version=payload.expected_version,
+        )
+    except Exception as exc:
         _raise_task_error(exc)
     return TaskMutationResponse(**result)
 

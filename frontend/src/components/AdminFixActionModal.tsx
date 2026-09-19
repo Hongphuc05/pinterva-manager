@@ -10,6 +10,7 @@ interface AdminFixActionModalProps {
   externalOrderId: string
   currentNote: string
   previousNote?: string | null
+  currentDesignerNote?: string | null
   onClose: () => void
   onSuccess: (updatedNote: string) => void
 }
@@ -22,20 +23,23 @@ export function AdminFixActionModal({
   externalOrderId,
   currentNote,
   previousNote,
+  currentDesignerNote,
   onClose,
   onSuccess,
 }: AdminFixActionModalProps) {
   const isApprove = mode === 'approve'
-  const [noteText, setNoteText] = useState(currentNote || previousNote || '')
+  const [adminNote, setAdminNote] = useState(currentDesignerNote || '')
+  const [outsourceNote, setOutsourceNote] = useState(currentNote || previousNote || '')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (isOpen) {
-      setNoteText(currentNote || previousNote || '')
+      setAdminNote(currentDesignerNote || '')
+      setOutsourceNote(currentNote || previousNote || '')
       setError(null)
     }
-  }, [isOpen, mode, currentNote, previousNote])
+  }, [isOpen, mode, currentNote, previousNote, currentDesignerNote])
 
   if (!isOpen) return null
 
@@ -49,24 +53,25 @@ export function AdminFixActionModal({
           {
             method: 'POST',
             body: JSON.stringify({
-              note_outsource: noteText.trim(),
+              designer_note: adminNote.trim(),
+              note_outsource: outsourceNote.trim(),
               ...(typeof orderVersion === 'number' ? { expected_version: orderVersion } : {}),
             }),
           }
         )
-        onSuccess(res.note_outsource || noteText.trim())
+        onSuccess(res.note_outsource || outsourceNote.trim())
       } else {
         const res = await apiFetch<{ ok: boolean; note_outsource: string; message: string }>(
           `/orders/${orderId}/reject-fix-to-review`,
           {
             method: 'POST',
             body: JSON.stringify({
-              note_outsource: noteText.trim(),
+              note_outsource: outsourceNote.trim(),
               ...(typeof orderVersion === 'number' ? { expected_version: orderVersion } : {}),
             }),
           }
         )
-        onSuccess(res.note_outsource || noteText.trim())
+        onSuccess(res.note_outsource || outsourceNote.trim())
       }
       onClose()
     } catch (err: any) {
@@ -78,16 +83,16 @@ export function AdminFixActionModal({
 
   return (
     <div className="fixed inset-0 z-[999999] flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-in fade-in duration-150">
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden flex flex-col">
+      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
         {/* Header */}
         <div
-          className={`px-5 py-4 flex items-center justify-between border-b ${
+          className={`px-5 py-4 flex items-center justify-between border-b shrink-0 ${
             isApprove ? 'bg-emerald-50/75 border-emerald-100' : 'bg-orange-50/75 border-orange-100'
           }`}
         >
           <div className="flex items-center gap-2.5">
             <div
-              className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+              className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
                 isApprove ? 'bg-emerald-100 text-emerald-700' : 'bg-orange-100 text-orange-700'
               }`}
             >
@@ -96,12 +101,12 @@ export function AdminFixActionModal({
             <div>
               <h3 className="text-sm font-bold text-slate-900">
                 {isApprove
-                  ? `Check & Duyệt Đơn Fix (#${externalOrderId})`
+                  ? `Chấp Nhận Fix & Giao Designer (#${externalOrderId})`
                   : `Hủy Fix & Trả Về Review (#${externalOrderId})`}
               </h3>
               <p className="text-[11px] text-slate-500">
                 {isApprove
-                  ? 'Kiểm tra & chỉnh sửa Note outsource gửi cho Designer làm (Lưu ý: Không đẩy lên Print)'
+                  ? 'Giao bài sửa cho Designer làm (Lưu ý: Không đẩy lên Print)'
                   : 'Chỉnh sửa Note outsource và cập nhật ngược lại lên Print cùng trạng thái Review'}
               </p>
             </div>
@@ -115,7 +120,7 @@ export function AdminFixActionModal({
         </div>
 
         {/* Body */}
-        <div className="p-5 space-y-4 text-xs">
+        <div className="p-5 space-y-4 text-xs overflow-y-auto">
           {error && (
             <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs flex items-center gap-2">
               <AlertTriangle className="w-4 h-4 shrink-0 text-red-500" />
@@ -127,10 +132,12 @@ export function AdminFixActionModal({
             <div className="p-3 bg-emerald-50/80 border border-emerald-200 text-emerald-950 rounded-xl space-y-1">
               <div className="font-bold flex items-center gap-1.5 text-xs text-emerald-900">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>Quy trình duyệt gửi Designer:</span>
+                <span>Quy trình gửi bài sửa cho Designer:</span>
               </div>
               <p className="text-[11px] text-emerald-800 leading-relaxed">
-                Bạn có thể để nguyên Note từ Print hoặc chỉnh sửa thêm chỉ dẫn. Khi bấm <strong>Check & Duyệt</strong>, Note này sẽ hiển thị cho Designer xem tại Todo, <strong>tuyệt đối không đẩy ngược lại lên Print</strong>.
+                • <strong>Nếu để trống ô Note Admin:</strong> Designer sẽ nhận nội dung từ ô Note Outsource.<br />
+                • <strong>Nếu nhập ô Note Admin:</strong> Designer sẽ chỉ nhận nội dung ô Note Admin.<br />
+                <em>Designer sẽ không thấy ô Note Outsource gốc.</em>
               </p>
             </div>
           ) : (
@@ -145,14 +152,31 @@ export function AdminFixActionModal({
             </div>
           )}
 
+          {isApprove && (
+            <div className="space-y-1.5">
+              <label className="font-semibold text-slate-800 block text-xs flex items-center justify-between">
+                <span>Ghi chú của Admin cho Designer (Tùy chọn):</span>
+                <span className="text-[11px] font-normal text-slate-500">Ưu tiên gửi cho Des</span>
+              </label>
+              <textarea
+                rows={3}
+                value={adminNote}
+                onChange={(e) => setAdminNote(e.target.value)}
+                placeholder="Nhập hướng dẫn/ghi chú riêng của Admin cho Des (Nếu điền, Des sẽ nhận nội dung này)..."
+                className="w-full p-3 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0052CC] font-mono leading-relaxed bg-white"
+              />
+            </div>
+          )}
+
           <div className="space-y-1.5">
-            <label className="font-semibold text-slate-800 block text-xs">
-              {isApprove ? 'Nội dung Note outsource gửi cho Designer:' : 'Nội dung Note outsource gửi lên Print:'}
+            <label className="font-semibold text-slate-800 block text-xs flex items-center justify-between">
+              <span>{isApprove ? 'Nội dung Note Outsource (QC từ Print):' : 'Nội dung Note outsource gửi lên Print:'}</span>
+              {isApprove && <span className="text-[11px] font-normal text-slate-500">Dùng nếu Note Admin trống</span>}
             </label>
             <textarea
-              rows={6}
-              value={noteText}
-              onChange={(e) => setNoteText(e.target.value)}
+              rows={isApprove ? 4 : 6}
+              value={outsourceNote}
+              onChange={(e) => setOutsourceNote(e.target.value)}
               placeholder="Nhập nội dung note outsource, link drive, link ảnh mockup..."
               className="w-full p-3 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0052CC] font-mono leading-relaxed bg-white"
             />
@@ -160,7 +184,7 @@ export function AdminFixActionModal({
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2.5">
+        <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2.5 shrink-0">
           <button
             type="button"
             onClick={onClose}
@@ -182,7 +206,7 @@ export function AdminFixActionModal({
             {loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
             <span>
               {isApprove
-                ? 'Check & Duyệt'
+                ? 'Xác Nhận & Giao Des'
                 : 'Gửi & Cập nhật Print'}
             </span>
           </button>

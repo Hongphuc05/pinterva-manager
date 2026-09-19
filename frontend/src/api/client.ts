@@ -8,6 +8,28 @@ export class ApiError extends Error {
   }
 }
 
+type OrderVersionConflictDetail = {
+  code: 'ORDER_VERSION_CONFLICT'
+  message?: string
+  order_id?: string | null
+  expected_version?: number | null
+  current_version?: number | null
+  changed_fields?: string[]
+}
+
+function publishOrderVersionConflict(detail: unknown) {
+  if (typeof window === 'undefined' || !detail || typeof detail !== 'object') return
+  const conflict = detail as OrderVersionConflictDetail
+  if (conflict.code !== 'ORDER_VERSION_CONFLICT') return
+
+  const message = conflict.message || 'Đơn vừa được cập nhật bởi người khác. Dữ liệu mới đã được tải lại.'
+  window.dispatchEvent(new CustomEvent('order-version-conflict', { detail: conflict }))
+  window.dispatchEvent(new CustomEvent('orders-updated'))
+  window.dispatchEvent(new CustomEvent('app-toast', {
+    detail: { message, type: 'warning', duration: 7000 },
+  }))
+}
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const token = localStorage.getItem('token')
   const activePlatformId = localStorage.getItem('activePlatformId')
@@ -48,6 +70,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     } catch {
       // response wasn't JSON — keep statusText
     }
+    publishOrderVersionConflict(detail)
     throw new ApiError(resp.status, message, detail)
   }
   if (resp.status === 204) return undefined as T

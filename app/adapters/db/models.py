@@ -137,6 +137,14 @@ class Order(Base):
     )
     state: Mapped[str] = mapped_column(String(32), nullable=False, default="OPEN")
     version: Mapped[int] = mapped_column(nullable=False, default=1)
+    # Short-lived exclusive lease for active manual processing.  This supplements
+    # optimistic versioning; it is never acquired merely by viewing or editing notes.
+    processing_lock_owner_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    processing_lock_acquired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    processing_lock_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    processing_lock_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     external_observation: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     product_name: Mapped[str | None] = mapped_column(String(512), nullable=True)
     thumbnail_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)

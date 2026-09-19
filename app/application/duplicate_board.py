@@ -550,8 +550,14 @@ def _card(order: Order, assignee: User | None) -> dict:
         "is_paid": bool(order.is_paid),
         "template_missing": bool(order.template_missing),
         "state": order.state,
-        "note_outsource": sanitize_text(order.note_outsource, "Web mẹ") or "",
-        "previous_note_outsource": sanitize_text(order.previous_note_outsource, "Web mẹ"),
+        "note_outsource": (
+            "" if getattr(order, "suppress_note_outsource_for_designer", False)
+            else (sanitize_text(order.note_outsource, "Web mẹ") or "")
+        ),
+        "previous_note_outsource": (
+            None if getattr(order, "suppress_note_outsource_for_designer", False)
+            else sanitize_text(order.previous_note_outsource, "Web mẹ")
+        ),
         "fix_approved_by_admin": order.fix_approved_by_admin,
         "fix_return_count": order.fix_return_count,
         "assignee_id": str(assignee.id) if assignee else None,

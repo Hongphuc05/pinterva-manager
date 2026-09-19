@@ -8,7 +8,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -49,6 +49,7 @@ from app.application.assignment_commands import (
 )
 from app.application.crawl import DiscoverFailedError, refresh_order_detail, scan_orders_fast
 from app.application.concurrency import lock_order_for_command
+from app.application.processing_leases import acquire_processing_lease
 from app.application.order_queries import (
     FIX_STATES,
     get_order_detail_for_user,
@@ -1844,6 +1845,10 @@ class DesignerNoteRequest(OrderCommandPayload):
     designer_note: str = ""
 
 
+class ProcessingLeaseTakeoverRequest(OrderCommandPayload):
+    reason: str = Field(min_length=3, max_length=512)
+
+
 def _get_order_by_identifier(db: Session, order_id: str) -> Order | None:
     try:
         order = db.get(Order, uuid.UUID(order_id))
@@ -1868,6 +1873,27 @@ def _lock_order_by_identifier(
         expected_version=expected_version,
         platform_id=platform_id,
     )
+
+
+@router.post("/orders/{order_id}/processing-lease/takeover")
+def api_take_over_processing_lease(
+    order_id: str,
+    payload: ProcessingLeaseTakeoverRequest,
+    user: User = Depends(require_role("admin")),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    order = _lock_order_by_identifier(
+        db, order_id, expected_version=payload.expected_version, platform_id=platform_id
+    )
+    if order is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
+    expires_at = acquire_processing_lease(
+        db, order, actor_id=user.id, takeover_reason=payload.reason.strip()
+    )
+    db.commit()
+    db.refresh(order)
+    return {"ok": True, "order_id": str(order.id), "version": order.version, "processing_lock_expires_at": expires_at.isoformat()}
 
 
 @router.put("/orders/{order_id}/designer-note")
@@ -2064,6 +2090,12 @@ def api_update_order_state(
     actor_disp = f"{'Designer ' if user.role in (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO) else ('Admin ' if user.role == ROLE_ADMIN else '')}{actor_name}"
     sync_review_to_printerval = False
     if target_state == OrderState.IN_PROGRESS:
+        if curr_assignment:
+            curr_assignment.sub_status = (
+                "fixing"
+                if old_state in (OrderState.REVISION.value, "FIX", "REVISION_REQUESTED")
+                else "doing"
+            )
         if old_state in (OrderState.QC_PENDING.value, "REVIEW"):
             action_type = "REVERT_TO_DOING"
             desc = f"{actor_disp} chuyển lại về Doing để chỉnh sửa bài"
@@ -2075,6 +2107,8 @@ def api_update_order_state(
         order.fix_rejected_by_admin = False
         order.fix_deadline_at = None
         order.deadline_overdue_notified_at = None
+        if curr_assignment:
+            curr_assignment.sub_status = "done"
         if old_state in (OrderState.REVISION.value, "FIX", "REVISION_REQUESTED"):
             action_type = "RESUBMIT_FIX"
             desc = f"{actor_disp} nộp lại bài sau khi fix"
@@ -2166,10 +2200,25 @@ def api_approve_fix(
     if order is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
 
-    if payload.designer_note is not None:
-        order.designer_note = payload.designer_note.strip()
+    admin_designer_note = (payload.designer_note or "").strip()
+    outsource_note = (
+        payload.note_outsource.strip()
+        if payload.note_outsource is not None
+        else (order.note_outsource or "").strip()
+    )
+
+    if admin_designer_note:
+        # TH2: Admin nhập nội dung vào ô note của admin -> gửi thẳng nội dung này cho des, bỏ qua note outsource
+        order.designer_note = admin_designer_note
+    else:
+        # TH1: Admin để trống ô note của admin -> nội dung fix mà des nhận được là nội dung ở ô note outsource
+        order.designer_note = outsource_note
+
     if payload.note_outsource is not None:
         order.note_outsource = payload.note_outsource.strip()
+
+    # Ẩn note_outsource gốc khỏi Designer; Des chỉ thấy designer_note (Ghi chú từ Admin)
+    order.suppress_note_outsource_for_designer = True
 
     assigned_designer_name = None
     target_des_id = None

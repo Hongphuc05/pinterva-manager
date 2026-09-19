@@ -1,5 +1,6 @@
 import logging
 import re
+import time
 import uuid
 from pathlib import Path
 
@@ -106,7 +107,16 @@ def create_app() -> FastAPI:
         )
 
     @app.exception_handler(OrderVersionConflictError)
-    async def order_version_conflict_handler(_request: Request, exc: OrderVersionConflictError):
+    async def order_version_conflict_handler(request: Request, exc: OrderVersionConflictError):
+        logger.warning(
+            "order_command_conflict route=%s method=%s order_id=%s expected_version=%s current_version=%s request_id=%s",
+            request.url.path,
+            request.method,
+            exc.order_id,
+            exc.expected_version,
+            exc.current_version,
+            request.headers.get("x-request-id") or "none",
+        )
         return JSONResponse(status_code=status.HTTP_409_CONFLICT, content={"detail": exc.detail()})
 
     @app.exception_handler(StaleDataError)
@@ -121,6 +131,7 @@ def create_app() -> FastAPI:
     @app.middleware("http")
     async def attach_request_metadata(request: Request, call_next):
         request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
+        started_at = time.perf_counter()
         response = await call_next(request)
         response.headers["X-Request-Id"] = request_id
         path = request.url.path
@@ -132,6 +143,15 @@ def create_app() -> FastAPI:
                 request.method,
                 _request_actor_role(request) or "anonymous",
                 request.headers.get("x-platform-id") or "none",
+                request_id,
+            )
+        if request.method in {"POST", "PUT", "PATCH", "DELETE"} and path.startswith("/api/"):
+            logger.info(
+                "command_latency route=%s method=%s status_code=%s duration_ms=%.2f request_id=%s",
+                path,
+                request.method,
+                response.status_code,
+                (time.perf_counter() - started_at) * 1000,
                 request_id,
             )
         return response

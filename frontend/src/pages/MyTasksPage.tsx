@@ -43,6 +43,8 @@ type Task = {
     product_skus: { sku?: string | null }[] | null
     deadline_tacahu: string | null
     updated_at?: string | null
+    processing_lock_owned_by_me?: boolean
+    processing_lock_expires_at?: string | null
     note_outsource: string | null
     fix_return_count?: number
     designer_note: string
@@ -68,6 +70,7 @@ export function MyTasksPage() {
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
   const [flaggingAssignmentId, setFlaggingAssignmentId] = useState<string | null>(null)
+  const [startingAssignmentId, setStartingAssignmentId] = useState<string | null>(null)
   const [quickViewOrderId, setQuickViewOrderId] = useState<string | null>(null)
 
   const pendingTemplateTasks = tasks.filter((task) => task.order.template_missing)
@@ -91,6 +94,12 @@ export function MyTasksPage() {
   }, [])
 
   useEffect(() => {
+    const handleOrdersUpdated = () => { void loadTasks() }
+    window.addEventListener('orders-updated', handleOrdersUpdated)
+    return () => window.removeEventListener('orders-updated', handleOrdersUpdated)
+  }, [])
+
+  useEffect(() => {
     setCurrentPage(1)
   }, [tasks.length])
 
@@ -111,6 +120,37 @@ export function MyTasksPage() {
       setFlaggingAssignmentId(null)
     }
   }
+
+  async function startProcessing(task: Task) {
+    setStartingAssignmentId(task.assignment_id)
+    try {
+      await apiFetch(`/assignments/${task.assignment_id}/start`, {
+        method: 'POST',
+        body: JSON.stringify({ request_id: crypto.randomUUID(), expected_version: task.order.version }),
+      })
+      await loadTasks()
+      window.dispatchEvent(new CustomEvent('orders-updated'))
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'Không thể bắt đầu xử lý đơn.')
+    } finally {
+      setStartingAssignmentId(null)
+    }
+  }
+
+  useEffect(() => {
+    const lockedTasks = tasks.filter((task) => task.order.processing_lock_owned_by_me)
+    if (!lockedTasks.length) return
+    const heartbeat = () => {
+      lockedTasks.forEach((task) => {
+        void apiFetch(`/assignments/${task.assignment_id}/processing-lease/heartbeat`, {
+          method: 'POST',
+          body: JSON.stringify({ expected_version: task.order.version }),
+        }).catch(() => { void loadTasks() })
+      })
+    }
+    const interval = window.setInterval(heartbeat, 5 * 60 * 1000)
+    return () => window.clearInterval(interval)
+  }, [tasks])
 
   if (user?.role !== 'designer') {
     return (
@@ -271,6 +311,11 @@ export function MyTasksPage() {
                           {subStatusLabels[task.sub_status]}
                         </span>
                       )}
+                      {task.order.processing_lock_owned_by_me && task.order.processing_lock_expires_at && (
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          Đang giữ phiên đến {new Date(task.order.processing_lock_expires_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      )}
                       {(task.order.fix_return_count || 0) > 0 && (
                         <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-orange-50 text-orange-800 border border-orange-200" title="Số lần Printerval trả đơn về Fix">
                           Fix × {task.order.fix_return_count}
@@ -332,6 +377,16 @@ export function MyTasksPage() {
 
                 {/* Right Action Button */}
                 <div className="shrink-0 w-full sm:w-auto text-right border-t sm:border-t-0 pt-3 sm:pt-0 border-slate-100">
+                  {!task.order.processing_lock_owned_by_me && (
+                    <button
+                      type="button"
+                      onClick={() => startProcessing(task)}
+                      disabled={startingAssignmentId === task.assignment_id}
+                      className="mb-2 inline-flex w-full items-center justify-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-bold text-[#0052CC] hover:bg-blue-100 disabled:opacity-50"
+                    >
+                      <CheckSquare className="h-3.5 w-3.5" /> {startingAssignmentId === task.assignment_id ? 'Đang giữ phiên…' : 'Bắt đầu xử lý'}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => flagMissingTemplate(task)}

@@ -82,6 +82,8 @@ export type OrderSummary = {
   admin_note?: string | null
   drive_url?: string | null
   template_missing?: boolean
+  sub_status?: string | null
+  suppress_note_outsource_for_designer?: boolean
   duplicate_check_status?: string
   is_paid?: boolean
   paid_at?: string | null
@@ -778,12 +780,19 @@ export function OrdersListPage() {
 
   // Inline submit result link for Designer from outer list
   async function handleInlineSubmit(order: OrderSummary, linkValue: string) {
+    const isFixOrder = Boolean(
+      (order.fix_return_count && order.fix_return_count > 0) ||
+      order.fix_approved_by_admin ||
+      ['REVISION', 'REVISION_REQUESTED', 'FIX'].includes((order.state || '').toUpperCase()) ||
+      order.sub_status === 'fixing'
+    )
     const trimmed = (linkValue || '').trim()
-    if (!trimmed) {
+    if (!trimmed && !isFixOrder && !order.drive_url) {
       showToast('Vui lòng dán link kết quả thiết kế (Drive, Canva, DropBox...) trước khi nộp bài!', 'error')
       return
     }
 
+    const finalDriveUrl = trimmed || order.drive_url || ''
     setIsSubmittingInline((prev) => ({ ...prev, [order.id]: true }))
     try {
       let submittedByAssignment = false
@@ -792,7 +801,7 @@ export function OrdersListPage() {
           await apiFetch(`/assignments/${order.assignment_id}/results`, {
             method: 'POST',
             body: JSON.stringify({
-              drive_url: trimmed,
+              drive_url: finalDriveUrl,
               request_id: crypto.randomUUID(),
               expected_version: order.version,
             }),
@@ -808,8 +817,8 @@ export function OrdersListPage() {
           method: 'PATCH',
           body: JSON.stringify({
             state: 'QC_PENDING',
-            drive_url: trimmed,
-            note_outsource: trimmed,
+            drive_url: finalDriveUrl || undefined,
+            note_outsource: finalDriveUrl || undefined,
             expected_version: order.version,
           }),
         })
@@ -3019,6 +3028,12 @@ export function OrdersListPage() {
                                 const isCompleted = ['DONE', 'CLAIMED_IMPORTED', 'COMPLETED', 'SKIPPED'].includes(stateUpper)
                                 const isReview = ['QC_PENDING', 'RESULT_SUBMITTED', 'SUBMITTING_TO_SITE', 'REVIEW'].includes(stateUpper)
                                 const isDoingOrFix = ['IN_PROGRESS', 'DOING', 'ASSIGNED', 'REVISION', 'REVISION_REQUESTED', 'FIX', 'OPEN', 'PENDING'].includes(stateUpper)
+                                const isFixOrder = Boolean(
+                                  (o.fix_return_count && o.fix_return_count > 0) ||
+                                  o.fix_approved_by_admin ||
+                                  ['REVISION', 'REVISION_REQUESTED', 'FIX'].includes(stateUpper) ||
+                                  o.sub_status === 'fixing'
+                                )
                                 const currentLink = inlineSubmissionLinks[o.id] !== undefined ? inlineSubmissionLinks[o.id] : (o.drive_url || '')
                                 const isSubmitting = Boolean(isSubmittingInline[o.id])
 
@@ -3031,12 +3046,12 @@ export function OrdersListPage() {
                                         value={currentLink}
                                         onChange={(e) => setInlineSubmissionLinks((prev) => ({ ...prev, [o.id]: e.target.value }))}
                                         onKeyDown={(e) => {
-                                          if (e.key === 'Enter' && !isSubmitting && !o.template_missing && currentLink.trim()) {
+                                          if (e.key === 'Enter' && !isSubmitting && !o.template_missing && (isFixOrder || currentLink.trim())) {
                                             e.preventDefault()
                                             handleInlineSubmit(o, currentLink)
                                           }
                                         }}
-                                        placeholder="Dán link thiết kế (Drive, Canva, DropBox...)"
+                                        placeholder={isFixOrder ? 'Link thiết kế (Tùy chọn với đơn Fix)...' : 'Dán link thiết kế (Drive, Canva, DropBox...)'}
                                         disabled={isSubmitting || Boolean(o.template_missing)}
                                         className="flex-1 min-w-[200px] rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900 placeholder:text-slate-400 focus:border-[#0052CC] focus:ring-1 focus:ring-[#0052CC] shadow-2xs disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed"
                                       />
@@ -3044,9 +3059,11 @@ export function OrdersListPage() {
                                       <button
                                         type="button"
                                         onClick={() => handleInlineSubmit(o, currentLink)}
-                                        disabled={isSubmitting || Boolean(o.template_missing) || !currentLink.trim()}
-                                        className="inline-flex items-center gap-1 text-xs font-bold text-white bg-[#0052CC] hover:bg-[#0043A6] disabled:bg-slate-300 disabled:cursor-not-allowed px-3 py-1.5 rounded-lg transition-colors cursor-pointer shadow-2xs shrink-0"
-                                        title="Nộp bài và chuyển đơn sang Review chờ duyệt"
+                                        disabled={isSubmitting || Boolean(o.template_missing) || (!isFixOrder && !currentLink.trim())}
+                                        className={`inline-flex items-center gap-1 text-xs font-bold text-white disabled:bg-slate-300 disabled:cursor-not-allowed px-3 py-1.5 rounded-lg transition-colors cursor-pointer shadow-2xs shrink-0 ${
+                                          isFixOrder ? 'bg-amber-600 hover:bg-amber-700' : 'bg-[#0052CC] hover:bg-[#0043A6]'
+                                        }`}
+                                        title={isFixOrder ? 'Cập nhật đơn Fix và chuyển sang Review chờ duyệt' : 'Nộp bài và chuyển đơn sang Review chờ duyệt'}
                                       >
                                         {isSubmitting ? (
                                           <>
@@ -3056,7 +3073,7 @@ export function OrdersListPage() {
                                         ) : (
                                           <>
                                             <Send className="h-3.5 w-3.5" />
-                                            <span>Nộp bài</span>
+                                            <span>{isFixOrder ? 'Cập nhật đơn' : 'Nộp bài'}</span>
                                           </>
                                         )}
                                       </button>

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+import logging
 
 from sqlalchemy.exc import IntegrityError
 
@@ -13,6 +14,7 @@ from app.adapters.db.models import Operation
 # single shared transaction if/when a Phase 2 Celery-worker command actually needs
 # apply_transition + run_idempotent to commit/rollback as one unit.
 PENDING_LEASE = timedelta(minutes=5)
+logger = logging.getLogger(__name__)
 
 
 class OperationInProgressError(Exception):
@@ -69,6 +71,12 @@ def run_idempotent(
                 and stored != request_fingerprint
             ):
                 raise IdempotencyKeyReusedError(idempotency_key)
+            logger.info(
+                "idempotency_replay command_name=%s operation_id=%s retry_count=%s",
+                command_name,
+                existing.id,
+                existing.retry_count,
+            )
             return existing.result
         if existing.status == "pending" and not _lease_expired(existing):
             raise OperationInProgressError(idempotency_key)

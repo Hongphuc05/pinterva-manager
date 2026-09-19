@@ -110,6 +110,7 @@ export function OrderDetailPage() {
   const isAdmin = user?.role === 'admin'
   const [order, setOrder] = useState<OrderDetail | null>(null)
   const [history, setHistory] = useState<WorkflowEvent[]>([])
+  const [conflictMessage, setConflictMessage] = useState<string | null>(null)
   const [status, setStatus] = useState<LoadState>('loading')
 
   // Modal states
@@ -130,7 +131,7 @@ export function OrderDetailPage() {
     mode: 'approve' | 'reject'
   } | null>(null)
 
-  async function loadOrderDetail() {
+  async function loadOrderDetail(preserveDrafts = false) {
     if (!id) return
     apiFetch<{ order: any; history: WorkflowEvent[] }>(`/orders/${id}`)
       .then((data) => {
@@ -140,11 +141,11 @@ export function OrderDetailPage() {
           platform_status: data.order.platform_status || null,
         }
         setOrder(orderData)
-        setDesignerNoteInput(orderData.designer_note || '')
+        if (!preserveDrafts) setDesignerNoteInput(orderData.designer_note || '')
         setHistory(data.history)
         if (orderData.result_versions && orderData.result_versions.length > 0) {
           const latest = orderData.result_versions[orderData.result_versions.length - 1]
-          if (latest?.drive_url) {
+          if (!preserveDrafts && latest?.drive_url) {
             setDriveUrl(latest.drive_url)
           }
         }
@@ -196,6 +197,16 @@ export function OrderDetailPage() {
   useEffect(() => {
     setStatus('loading')
     loadOrderDetail()
+  }, [id])
+
+  useEffect(() => {
+    function handleOrderVersionConflict(event: Event) {
+      const detail = (event as CustomEvent<{ message?: string }>).detail
+      setConflictMessage(detail?.message || 'Đơn vừa được cập nhật. Bản nháp của mày vẫn được giữ lại để đối chiếu.')
+      void loadOrderDetail(true)
+    }
+    window.addEventListener('order-version-conflict', handleOrderVersionConflict)
+    return () => window.removeEventListener('order-version-conflict', handleOrderVersionConflict)
   }, [id])
 
   function handleInitiateReviewSubmit(e?: React.FormEvent) {
@@ -1070,6 +1081,18 @@ export function OrderDetailPage() {
             {isAdmin && (
               <div className="mt-3 space-y-2 border-t border-blue-100 pt-3">
                 <label className="block font-bold text-slate-700">Ghi chú gửi Designer</label>
+                {conflictMessage && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-amber-900">
+                    <p>{conflictMessage}</p>
+                    <p className="mt-1">Bản trên máy chủ: <span className="whitespace-pre-wrap font-medium">{order.designer_note || '(trống)'}</span></p>
+                    <button type="button" className="mt-1 font-bold underline" onClick={() => {
+                      setDesignerNoteInput(order.designer_note || '')
+                      setConflictMessage(null)
+                    }}>
+                      Dùng ghi chú mới nhất
+                    </button>
+                  </div>
+                )}
                 <textarea value={designerNoteInput} onChange={(e) => setDesignerNoteInput(e.target.value)} rows={3}
                   placeholder="Nhập hướng dẫn, link temp hoặc yêu cầu cho Designer..."
                   className="w-full rounded-lg border border-slate-200 bg-white p-2 text-xs focus:border-[#0052CC] focus:outline-none" />

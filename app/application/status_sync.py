@@ -279,6 +279,11 @@ def sync_selected_order_statuses(
                     break
                 except StaleDataError:
                     session.rollback()
+                    logger.info(
+                        "stale_sync_retry order_id=%s attempt=%s",
+                        order_id,
+                        attempt + 1,
+                    )
                     if attempt == 2:
                         failed += 1
                         logger.warning("Manual status sync exhausted concurrent-update retries for %s", order_id)
@@ -403,6 +408,7 @@ def sync_platform_order_statuses(
             except StaleDataError:
                 # Concurrent transaction modified this order; rollback this order and continue
                 session.rollback()
+                logger.info("stale_sync_skipped order_id=%s", order.id)
                 continue
             except Exception as e:
                 session.rollback()

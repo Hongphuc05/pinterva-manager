@@ -353,6 +353,15 @@ export function FinancePage() {
   }, [currentPage, selectedDesigner, stateFilter, startDate, endDate, paymentSubTab])
 
   useEffect(() => {
+    const handleOrdersUpdated = () => {
+      void loadData()
+      if (selectedDesignerForModal) void loadModalTasks()
+    }
+    window.addEventListener('orders-updated', handleOrdersUpdated)
+    return () => window.removeEventListener('orders-updated', handleOrdersUpdated)
+  }, [selectedDesignerForModal])
+
+  useEffect(() => {
     if (activeMainTab === 'notes') {
       loadNotes()
     }

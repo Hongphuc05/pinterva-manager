@@ -1,6 +1,6 @@
 # Order concurrency: design and implementation plan
 
-**Status:** Phase 3 complete; Phase 4 awaits approval
+**Status:** Phase 4 complete; Phase 5 is optional and awaits approval
 **Owner:** Tacahu Ops  
 **Scope:** Concurrent writes to an order, its active assignment, result submission,
 Fix/QC decisions, finance actions, duplicate board actions, and Printerval sync.
@@ -266,6 +266,18 @@ revision was corrected by its owning change before the backend suite ran.
    polling/reload proves insufficient.
 4. Add metrics: conflict count by command, stale sync retry, idempotency replay,
    command latency and external reconciliation outcome.
+
+**Phase 4 implementation evidence (2026-09-20):** The shared frontend client
+recognizes the canonical `ORDER_VERSION_CONFLICT` payload, shows one warning toast,
+and broadcasts a refresh event. Orders, Duplicate Board, Designer Board, Finance and
+My Tasks refresh their stale read models. Order detail preserves typed note and result
+drafts while loading the current server record, displays the server note for comparison,
+and lets the user explicitly replace the draft. Realtime transport was intentionally
+not added because refresh-after-conflict already provides a correct recovery path.
+Backend structured logs now emit `order_command_conflict`, `command_latency`,
+`idempotency_replay`, `stale_sync_retry` and `stale_sync_skipped` for log-based metrics
+and alerts. Focused backend tests (`31 passed`), focused frontend tests (`8 passed`) and
+the production frontend build passed.
 
 ### Phase 5 -- optional processing leases
 
