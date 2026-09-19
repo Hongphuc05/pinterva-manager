@@ -116,6 +116,7 @@ class OrderSummaryOut(BaseModel):
     fix_return_count: int = 0
     designer_note: str = ""
     template_missing: bool = False
+    suppress_note_outsource_for_designer: bool = False
     duplicate_check_status: str = "uncheck"
     sku_image_url: str | None = None
     external_order_url: str | None = None
@@ -145,6 +146,11 @@ def api_asset_proxy(u: str = Query(...)):
     raw_url = decode_proxy_url(u)
     if not raw_url:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid or expired asset token")
+    from urllib.parse import urlparse
+
+    host = (urlparse(raw_url).hostname or "").lower()
+    if host not in {"printerval.com", "www.printerval.com", "assets.printerval.com", "cdn.printerval.com", "printervalcdn.com", "gdn.printerval.com"}:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unsupported asset host")
     try:
         import httpx
 
@@ -155,13 +161,18 @@ def api_asset_proxy(u: str = Query(...)):
                 "User-Agent": (
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                )
+                ),
+                "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+                "Referer": "https://printerval.com/",
+                "Origin": "https://printerval.com",
             },
         ) as client:
             resp = client.get(raw_url)
             if resp.status_code != 200:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, "Asset not found")
             content_type = resp.headers.get("content-type", "image/jpeg")
+            if not content_type.lower().startswith("image/"):
+                raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Upstream did not return an image")
             return Response(
                 content=resp.content,
                 media_type=content_type,
@@ -430,7 +441,7 @@ def api_get_pending_galleries(
     return PendingGalleriesResponse(orders=result)
 
 
-class UpdateGalleryPayload(BaseModel):
+class UpdateGalleryPayload(OrderCommandPayload):
     image_urls: list[str]
     product_url: str | None = None
     designer_note: str | None = None
@@ -506,8 +517,10 @@ def api_update_order_gallery(
     db: Session = Depends(get_db),
 ):
     """Admin-only update of an order's product gallery images and notes."""
-    order = get_order_detail_for_user(db, user, order_id)
-    if order is None or order.platform_id != platform_id:
+    order = _lock_order_by_identifier(
+        db, order_id, expected_version=payload.expected_version, platform_id=platform_id
+    )
+    if order is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
 
     from app.application.gallery_helper import deduplicate_gallery_urls
@@ -656,6 +669,7 @@ class OrderDetailOut(BaseModel):
     fix_return_count: int = 0
     designer_note: str = ""
     template_missing: bool = False
+    suppress_note_outsource_for_designer: bool = False
     duplicate_check_status: str = "uncheck"
     custom_config: dict | None
     product_skus: list[dict] | None = None
@@ -1826,7 +1840,7 @@ class UpdateOrderStateRequest(OrderCommandPayload):
     note_outsource: str | None = None
 
 
-class DesignerNoteRequest(BaseModel):
+class DesignerNoteRequest(OrderCommandPayload):
     designer_note: str = ""
 
 
@@ -1861,9 +1875,12 @@ def api_update_designer_note(
     order_id: str,
     payload: DesignerNoteRequest,
     user: User = Depends(require_role("admin")),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
-    order = _get_order_by_identifier(db, order_id)
+    order = _lock_order_by_identifier(
+        db, order_id, expected_version=payload.expected_version, platform_id=platform_id
+    )
     if order is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
     order.designer_note = payload.designer_note.strip()
@@ -1881,9 +1898,12 @@ def api_resolve_missing_template(
     order_id: str,
     payload: DesignerNoteRequest,
     user: User = Depends(require_role("admin")),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
-    order = _get_order_by_identifier(db, order_id)
+    order = _lock_order_by_identifier(
+        db, order_id, expected_version=payload.expected_version, platform_id=platform_id
+    )
     if order is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
     if not order.template_missing:
@@ -1893,6 +1913,7 @@ def api_resolve_missing_template(
         db.query(Assignment)
         .filter(Assignment.order_id == order.id, Assignment.status == "approved")
         .order_by(Assignment.created_at.desc())
+        .with_for_update()
         .first()
     )
     if assignment is None:
@@ -1903,6 +1924,10 @@ def api_resolve_missing_template(
     order.template_missing = False
     order.template_missing_reported_at = None
     order.template_missing_reported_by_id = None
+    # Ẩn note_outsource (của Printerval) khỏi Designer trong chu kỳ resolve này.
+    # Chỉ cập nhật note của Admin (designer_note) xuống cho Des thấy.
+    # Flag sẽ được reset khi đơn sync lại từ Platform hoặc Admin cập nhật note_outsource thông thường.
+    order.suppress_note_outsource_for_designer = True
     assignment.sub_status = "todo"
     if order.state != OrderState.IN_PROGRESS.value:
         apply_transition(

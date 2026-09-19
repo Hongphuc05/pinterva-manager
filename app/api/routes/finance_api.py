@@ -20,6 +20,7 @@ from app.adapters.db.models import (
     WorkflowEvent,
 )
 from app.api.deps import DEFAULT_PLATFORM_ID, get_current_platform_id, get_current_user, get_db
+from app.application.concurrency import require_expected_order_version
 from app.application.sanitization import encode_proxy_url
 from app.domain.access import (
     ROLE_ADMIN,
@@ -145,6 +146,7 @@ class FinanceNoteListResponse(BaseModel):
 
 class MarkPaidPayload(BaseModel):
     order_ids: list[str]
+    expected_versions: dict[uuid.UUID, int] | None = None
 
 
 @router.get("/finance/rates", response_model=OrderRatesOut)
@@ -772,10 +774,12 @@ def mark_orders_paid(
     orders = (
         db.query(Order)
         .filter(Order.id.in_(parsed_ids), Order.platform_id == platform_id)
+        .order_by(Order.id)
         .with_for_update()
         .all()
     )
     for o in orders:
+        require_expected_order_version(o, (payload.expected_versions or {}).get(o.id))
         o.is_paid = True
         o.paid_at = now_utc
         o.paid_by_id = user.id
@@ -827,6 +831,7 @@ def mark_orders_paid(
 def unmark_orders_paid(
     payload: MarkPaidPayload,
     user: User = Depends(get_current_user),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
     if user.role != "admin":
@@ -845,8 +850,15 @@ def unmark_orders_paid(
     if not parsed_ids:
         return {"ok": True, "updated_count": 0}
 
-    orders = db.query(Order).filter(Order.id.in_(parsed_ids)).all()
+    orders = (
+        db.query(Order)
+        .filter(Order.id.in_(parsed_ids), Order.platform_id == platform_id)
+        .order_by(Order.id)
+        .with_for_update()
+        .all()
+    )
     for o in orders:
+        require_expected_order_version(o, (payload.expected_versions or {}).get(o.id))
         o.is_paid = False
         o.paid_at = None
         o.paid_by_id = None

@@ -162,7 +162,7 @@ export function OrderDetailPage() {
     try {
       await apiFetch(`/orders/${order.id}/${resolveMissingTemplate ? 'resolve-missing-template' : 'designer-note'}`, {
         method: resolveMissingTemplate ? 'POST' : 'PUT',
-        body: JSON.stringify({ designer_note: designerNoteInput }),
+        body: JSON.stringify({ designer_note: designerNoteInput, expected_version: order.version }),
       })
       setActionSuccess(resolveMissingTemplate ? 'Đã cập nhật temp và trả đơn về Doing.' : 'Đã gửi ghi chú xuống Designer.')
       await loadOrderDetail()
@@ -1108,6 +1108,7 @@ export function OrderDetailPage() {
         {(isAdmin || (order.product_image_urls && order.product_image_urls.length > 0)) && (
           <ProductGalleryCard
             orderId={order.id}
+            orderVersion={order.version}
             images={order.product_image_urls}
             orderTitle={order.product_name}
             isAdmin={isAdmin}

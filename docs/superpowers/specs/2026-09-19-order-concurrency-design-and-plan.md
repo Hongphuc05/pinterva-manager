@@ -1,6 +1,6 @@
 # Order concurrency: design and implementation plan
 
-**Status:** Phase 2 complete; Phase 3 awaits approval  
+**Status:** Phase 3 complete; Phase 4 awaits approval
 **Owner:** Tacahu Ops  
 **Scope:** Concurrent writes to an order, its active assignment, result submission,
 Fix/QC decisions, finance actions, duplicate board actions, and Printerval sync.
@@ -246,6 +246,17 @@ build passed.
 
 **Done when:** a sync cannot overwrite Tacahu data and one conflicting order
 does not fail an entire worker batch.
+
+**Phase 3 implementation evidence (2026-09-19):** Designer note, missing-template
+resolution and gallery updates now lock and validate `expected_version` before
+writing. Finance mark/unmark and duplicate-domain/check-status bulk commands
+lock orders in deterministic ID order and validate the corresponding revision;
+duplicate-board drag validates its card revision. The UI sends those revisions
+from the current row/card/task. Added regression cases for stale note and
+duplicate commands, and for retaining `deadline_tacahu` after a platform sync.
+Focused backend tests (`29 passed`), Python syntax compilation, focused frontend
+tests (`13 passed`) and production build passed. The temporary duplicate Alembic
+revision was corrected by its owning change before the backend suite ran.
 
 ### Phase 4 -- conflict UX and observability
 

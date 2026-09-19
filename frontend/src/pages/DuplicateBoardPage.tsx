@@ -533,6 +533,7 @@ export function DuplicateBoardPage() {
         method: 'POST',
         body: JSON.stringify({
           order_id: draggedCard.id,
+          expected_version: draggedCard.version,
           target_column_id: column.id,
           target_designer_id: isDesigner ? column.id : null,
           before_order_id: insertionBeforeCardId,

@@ -185,12 +185,18 @@ def sanitize_order_summary_for_designer(item: Any) -> Any:
         ]
     if item_dict.get("source_files"):
         item_dict["source_files"] = sanitize_source_files(item_dict["source_files"])
-    if item_dict.get("note_outsource"):
-        item_dict["note_outsource"] = sanitize_text(item_dict["note_outsource"], "Web mẹ")
-    if item_dict.get("previous_note_outsource"):
-        item_dict["previous_note_outsource"] = sanitize_text(
-            item_dict["previous_note_outsource"], "Web mẹ"
-        )
+    if item_dict.pop("suppress_note_outsource_for_designer", False):
+        # Admin đã resolve thiếu temp — ẩn note outsource của Printerval khỏi Designer
+        # trong chu kỳ này; Des chỉ thấy designer_note mà Admin nhập.
+        item_dict["note_outsource"] = ""
+        item_dict["previous_note_outsource"] = None
+    else:
+        if item_dict.get("note_outsource"):
+            item_dict["note_outsource"] = sanitize_text(item_dict["note_outsource"], "Web mẹ")
+        if item_dict.get("previous_note_outsource"):
+            item_dict["previous_note_outsource"] = sanitize_text(
+                item_dict["previous_note_outsource"], "Web mẹ"
+            )
     return DesignerOrderSummaryOut(**item_dict)
 
 
@@ -223,12 +229,18 @@ def sanitize_order_detail_for_designer(item: Any) -> Any:
         item_dict["source_files"] = sanitize_source_files(item_dict["source_files"])
     if item_dict.get("custom_config"):
         item_dict["custom_config"] = sanitize_custom_config(item_dict["custom_config"])
-    if item_dict.get("note_outsource"):
-        item_dict["note_outsource"] = sanitize_text(item_dict["note_outsource"], "Web mẹ")
-    if item_dict.get("previous_note_outsource"):
-        item_dict["previous_note_outsource"] = sanitize_text(
-            item_dict["previous_note_outsource"], "Web mẹ"
-        )
+    if item_dict.pop("suppress_note_outsource_for_designer", False):
+        # Admin đã resolve thiếu temp — ẩn note outsource của Printerval khỏi Designer
+        # trong chu kỳ này; Des chỉ thấy designer_note mà Admin nhập.
+        item_dict["note_outsource"] = ""
+        item_dict["previous_note_outsource"] = None
+    else:
+        if item_dict.get("note_outsource"):
+            item_dict["note_outsource"] = sanitize_text(item_dict["note_outsource"], "Web mẹ")
+        if item_dict.get("previous_note_outsource"):
+            item_dict["previous_note_outsource"] = sanitize_text(
+                item_dict["previous_note_outsource"], "Web mẹ"
+            )
     return DesignerOrderDetailOut(**item_dict)
 
 

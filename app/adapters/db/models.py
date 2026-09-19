@@ -214,6 +214,13 @@ class Order(Base):
         ForeignKey("users.id"), nullable=True
     )
     template_missing_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Set to True when Admin resolves a missing-template report so the Designer
+    # does not see the Printerval note_outsource during that resolution cycle.
+    # Cleared back to False when the order is next synced from the platform or
+    # when note_outsource is updated via normal admin flows.
+    suppress_note_outsource_for_designer: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     order_note: Mapped[str] = mapped_column(
         Text, nullable=False, default="", server_default=text("''")
     )

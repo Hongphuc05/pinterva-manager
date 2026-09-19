@@ -148,6 +148,7 @@ def list_my_tasks(session: Session, designer_id: uuid.UUID) -> list[dict]:
             "fix_return_count": order.fix_return_count,
             "designer_note": order.designer_note,
             "template_missing": order.template_missing,
+            "suppress_note_outsource_for_designer": order.suppress_note_outsource_for_designer,
             "custom_config": norm_config if norm_config is not None else order.custom_config,
             "sku_image_url": order.sku_image_url,
             "external_order_url": order.external_order_url,

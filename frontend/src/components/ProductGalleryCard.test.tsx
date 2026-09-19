@@ -13,6 +13,8 @@ describe('ProductGalleryCard', () => {
     )
 
     fireEvent.error(screen.getByAltText('Product view 2'))
+    expect(screen.getByAltText('Product view 2')).toBeInTheDocument()
+    fireEvent.error(screen.getByAltText('Product view 2'))
 
     expect(screen.getByAltText('Product view 1')).toBeInTheDocument()
     expect(screen.queryByAltText('Product view 2')).not.toBeInTheDocument()

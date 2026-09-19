@@ -209,6 +209,8 @@ def sync_selected_order_statuses(
                                     order.note_outsource = note
                                 order.fix_approved_by_admin = False
                                 order.fix_rejected_by_admin = False
+                                # Khi Platform trả Fix, note_outsource là hướng dẫn Fix → Designer cần thấy, reset flag.
+                                order.suppress_note_outsource_for_designer = False
                                 session.add(
                                     WorkflowEvent(
                                         order_id=order.id,
@@ -358,6 +360,8 @@ def sync_platform_order_statuses(
                         order.note_outsource = found_note
                     order.fix_approved_by_admin = False
                     order.fix_rejected_by_admin = False
+                    # Khi Platform trả Fix, note_outsource là hướng dẫn Fix → Designer cần thấy, reset flag.
+                    order.suppress_note_outsource_for_designer = False
                     notify_admin_fix = True
                     order_changed = True
                 elif (

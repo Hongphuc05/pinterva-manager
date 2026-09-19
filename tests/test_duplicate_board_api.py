@@ -128,6 +128,33 @@ def test_admin_can_put_orders_in_duplicate_domain_and_board_shows_missing_form(
     assert board.json()["cross_designer_drag_enabled"] is True
 
 
+def test_duplicate_domain_rejects_a_stale_order_revision(client, db_session):
+    platform = _platform(db_session)
+    _admin, headers = _login(client, db_session, "admin", "duplicate-version-admin", platform.id)
+    order = Order(external_order_id="DUP-VERSION", platform_id=platform.id)
+    db_session.add(order)
+    db_session.commit()
+    client.app.dependency_overrides[get_current_platform_id] = lambda: platform.id
+
+    try:
+        response = client.post(
+            "/api/orders/duplicate-domain",
+            json={
+                "order_ids": [str(order.id)],
+                "work_domain": "duplicate",
+                "expected_versions": {str(order.id): order.version + 1},
+            },
+            headers=headers,
+        )
+    finally:
+        del client.app.dependency_overrides[get_current_platform_id]
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "ORDER_VERSION_CONFLICT"
+    db_session.refresh(order)
+    assert order.work_domain == "standard"
+
+
 def test_move_card_between_orders_missing_form_designer_and_done(client, db_session):
     platform = _platform(db_session)
     admin, headers = _login(client, db_session, "admin", "admin-move-tester", platform.id)

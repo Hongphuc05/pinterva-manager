@@ -405,6 +405,14 @@ export function FinancePage() {
     }
   }
 
+  function expectedVersionsFor(orderIds: string[]) {
+    return Object.fromEntries(
+      [...(data?.tasks || []), ...modalTasks]
+        .filter((task) => orderIds.includes(task.order_id))
+        .map((task) => [task.order_id, task.order_version]),
+    )
+  }
+
   // Mark Orders as Paid (Admin)
   async function handleMarkPaid(orderIdsToMark?: string[]) {
     const ids = orderIdsToMark || selectedOrderIds
@@ -413,7 +421,7 @@ export function FinancePage() {
     try {
       const res = await apiFetch<{ ok: boolean; updated_count: number }>('/finance/mark-paid', {
         method: 'POST',
-        body: JSON.stringify({ order_ids: ids }),
+        body: JSON.stringify({ order_ids: ids, expected_versions: expectedVersionsFor(ids) }),
       })
       showToast(`Đã xác nhận thanh toán cho ${res.updated_count} đơn hàng!`, 'success')
       setSelectedOrderIds([])
@@ -437,7 +445,7 @@ export function FinancePage() {
     try {
       const res = await apiFetch<{ ok: boolean; updated_count: number }>('/finance/unmark-paid', {
         method: 'POST',
-        body: JSON.stringify({ order_ids: ids }),
+        body: JSON.stringify({ order_ids: ids, expected_versions: expectedVersionsFor(ids) }),
       })
       showToast(`Đã hủy thanh toán cho ${res.updated_count} đơn hàng!`, 'success')
       setSelectedOrderIds([])
@@ -540,7 +548,7 @@ export function FinancePage() {
     try {
       const res = await apiFetch<{ ok: boolean; updated_count: number }>('/finance/mark-paid', {
         method: 'POST',
-        body: JSON.stringify({ order_ids: ids }),
+        body: JSON.stringify({ order_ids: ids, expected_versions: expectedVersionsFor(ids) }),
       })
       showToast(`Đã xác nhận thanh toán cho ${res.updated_count} đơn hàng!`, 'success')
       setModalSelectedOrderIds([])
@@ -569,7 +577,7 @@ export function FinancePage() {
     try {
       const res = await apiFetch<{ ok: boolean; updated_count: number }>('/finance/unmark-paid', {
         method: 'POST',
-        body: JSON.stringify({ order_ids: ids }),
+        body: JSON.stringify({ order_ids: ids, expected_versions: expectedVersionsFor(ids) }),
       })
       showToast(`Đã hủy thanh toán cho ${res.updated_count} đơn hàng!`, 'success')
       setModalSelectedOrderIds([])

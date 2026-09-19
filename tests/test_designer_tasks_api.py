@@ -131,3 +131,19 @@ def test_result_api_verifies_drive_and_enters_qc_queue(client, db_session):
     assert first.json()["state"] == OrderState.QC_PENDING.value
     assert replay.status_code == 200
     assert replay.json() == first.json()
+
+
+def test_my_tasks_suppresses_note_outsource_when_flagged(client, db_session):
+    designer = _login(client, db_session, "designer", "suppressed-note-designer")
+    assignment, order = _seed_owned_task(db_session, designer)
+    order.note_outsource = "Secret Printerval outsource note"
+    order.designer_note = "Admin added template: https://example.com/template"
+    order.suppress_note_outsource_for_designer = True
+    db_session.commit()
+
+    response = client.get("/api/my-tasks")
+    assert response.status_code == 200
+    task_order = response.json()["tasks"][0]["order"]
+    assert task_order["note_outsource"] == ""
+    assert task_order["designer_note"] == "Admin added template: https://example.com/template"
+

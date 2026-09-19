@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import User
+from app.api.concurrency import OrderCommandPayload
 from app.api.deps import get_current_platform_id, get_db, require_any_role, require_role
 from app.application.duplicate_board import (
     DuplicateBoardError,
@@ -59,7 +60,7 @@ class DuplicateBoardResponse(BaseModel):
     cross_designer_drag_enabled: bool
 
 
-class MoveDuplicateCardRequest(BaseModel):
+class MoveDuplicateCardRequest(OrderCommandPayload):
     order_id: uuid.UUID
     target_column_id: str | None = None
     target_designer_id: uuid.UUID | None = None
@@ -70,11 +71,13 @@ class MoveDuplicateCardRequest(BaseModel):
 class SetWorkDomainRequest(BaseModel):
     order_ids: list[uuid.UUID] = Field(min_length=1, max_length=100)
     work_domain: str
+    expected_versions: dict[uuid.UUID, int] | None = None
 
 
 class SetDuplicateCheckStatusRequest(BaseModel):
     order_ids: list[uuid.UUID] = Field(min_length=1, max_length=100)
     status: str
+    expected_versions: dict[uuid.UUID, int] | None = None
 
 
 class DuplicateBoardSettingsRequest(BaseModel):
@@ -107,6 +110,7 @@ def api_move_duplicate_card(
                 actor=user,
                 platform_id=platform_id,
                 order_id=payload.order_id,
+                expected_version=payload.expected_version,
                 target_column_id=payload.target_column_id,
                 target_designer_id=payload.target_designer_id,
                 before_order_id=payload.before_order_id,
@@ -132,6 +136,7 @@ def api_set_orders_duplicate_domain(
             platform_id=platform_id,
             order_ids=payload.order_ids,
             work_domain=payload.work_domain,
+            expected_versions=payload.expected_versions,
         )
     except DuplicateBoardError as exc:
         db.rollback()
@@ -153,6 +158,7 @@ def api_set_orders_duplicate_check_status(
             platform_id=platform_id,
             order_ids=payload.order_ids,
             duplicate_status=payload.status,
+            expected_versions=payload.expected_versions,
         )
     except DuplicateBoardError as exc:
         db.rollback()

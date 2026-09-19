@@ -29,21 +29,24 @@ def client(db_session):
 
 
 def _login(client, db_session, role, username="user1", platform_id=None):
-    if role != "admin" and platform_id is None:
-        plat = db_session.query(Platform).first()
-        if not plat:
-            plat = _seed_platform(db_session)
-        platform_id = plat.id
+    existing = db_session.query(User).filter(User.username == username).first()
+    if not existing:
+        if role != "admin" and platform_id is None:
+            plat = db_session.query(Platform).first()
+            if not plat:
+                plat = _seed_platform(db_session)
+            platform_id = plat.id
 
-    user = User(
-        username=username, full_name=username, role=role,
-        password_hash=hash_password("s3cret!"),
-        platform_id=platform_id if role != "admin" else None,
-    )
-    db_session.add(user)
-    db_session.commit()
+        user = User(
+            username=username, full_name=username, role=role,
+            password_hash=hash_password("s3cret!"),
+            platform_id=platform_id if role != "admin" else None,
+        )
+        db_session.add(user)
+        db_session.commit()
+        existing = user
     client.post("/api/login", json={"username": username, "password": "s3cret!"})
-    return user
+    return existing
 
 
 def _seed_platform(db_session):
@@ -606,12 +609,14 @@ def test_api_update_order_state_flow(client, db_session):
 
 
 def test_resolve_missing_template_returns_assigned_order_to_doing(client, db_session):
-    platform = Platform(name="Missing template platform", account_username="missing@example.com")
+    import uuid
+    platform = Platform(id=uuid.uuid4(), name="Missing template platform", account_username="missing@example.com")
     designer = User(
         username="missing-designer",
         full_name="Missing Designer",
         role="designer",
         password_hash=hash_password("s3cret!"),
+        platform_id=platform.id,
     )
     db_session.add_all([platform, designer])
     db_session.flush()
@@ -620,6 +625,7 @@ def test_resolve_missing_template_returns_assigned_order_to_doing(client, db_ses
         platform_id=platform.id,
         state=OrderState.IN_PROGRESS.value,
         template_missing=True,
+        note_outsource="Printerval QC outsource note",
     )
     db_session.add(order)
     db_session.flush()
@@ -639,7 +645,30 @@ def test_resolve_missing_template_returns_assigned_order_to_doing(client, db_ses
     db_session.refresh(assignment)
     assert order.template_missing is False
     assert order.designer_note == "Temp: https://example.com/template"
+    assert order.suppress_note_outsource_for_designer is True
     assert assignment.sub_status == "todo"
+
+    # Verify Designer view: note_outsource is suppressed (""), designer_note is visible
+    _login(client, db_session, "designer", username="missing-designer")
+    detail_res = client.get(f"/api/orders/{order.id}")
+    assert detail_res.status_code == 200
+    detail_data = detail_res.json()["order"]
+    assert detail_data["note_outsource"] == ""
+    assert detail_data["designer_note"] == "Temp: https://example.com/template"
+
+    list_res = client.get("/api/orders")
+    assert list_res.status_code == 200
+    matching = [o for o in list_res.json()["orders"] if o["id"] == str(order.id)]
+    assert len(matching) == 1
+    assert matching[0]["note_outsource"] == ""
+    assert matching[0]["designer_note"] == "Temp: https://example.com/template"
+
+    # Verify Admin view: note_outsource is preserved
+    _login(client, db_session, "admin", username="missing-template-admin-2")
+    admin_detail_res = client.get(f"/api/orders/{order.id}")
+    assert admin_detail_res.status_code == 200
+    assert admin_detail_res.json()["order"]["note_outsource"] == "Printerval QC outsource note"
+    assert admin_detail_res.json()["order"]["designer_note"] == "Temp: https://example.com/template"
 
 
 def test_api_approve_and_reject_fix_flow(client, db_session, monkeypatch):

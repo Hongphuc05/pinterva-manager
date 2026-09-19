@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 import httpx
 
 import app.application.status_sync as status_sync_module
@@ -67,6 +69,29 @@ def test_sync_platform_order_statuses_updates_matching_orders_only(db_session):
     assert result["checked"] == 2
     assert result["updated"] == 2
     assert result["not_found"] == 1
+
+
+def test_platform_sync_does_not_overwrite_tacahu_deadline(db_session):
+    platform = Platform(name="P deadline", account_username="acc@printerval.com", team_outsource="team-a")
+    db_session.add(platform)
+    db_session.flush()
+    deadline_tacahu = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
+    order = Order(
+        external_order_id="DJ-DEADLINE-KEEP",
+        platform_id=platform.id,
+        deadline_tacahu=deadline_tacahu,
+    )
+    db_session.add(order)
+    db_session.commit()
+
+    sync_platform_order_statuses(
+        db_session,
+        platform,
+        api_client=_mock_client({"DJ-DEADLINE-KEEP": {"id": 1, "status": "doing"}}),
+    )
+
+    db_session.refresh(order)
+    assert order.deadline_tacahu == deadline_tacahu
 
 
 def test_sync_selected_order_statuses_only_updates_requested_orders(db_session):

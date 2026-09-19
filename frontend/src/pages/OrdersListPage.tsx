@@ -471,7 +471,13 @@ export function OrdersListPage() {
     try {
       const res = await apiFetch<{ changed_count: number; status: string }>('/orders/duplicate-check-status', {
         method: 'POST',
-        body: JSON.stringify({ order_ids: orderIds, status: targetStatus }),
+        body: JSON.stringify({
+          order_ids: orderIds,
+          status: targetStatus,
+          expected_versions: Object.fromEntries(
+            orders.filter((order) => orderIds.includes(order.id)).map((order) => [order.id, order.version]),
+          ),
+        }),
       })
       const statusLabel =
         targetStatus === 'duplicate'
@@ -496,7 +502,13 @@ export function OrdersListPage() {
     try {
       const result = await apiFetch<{ changed_count: number }>('/orders/duplicate-domain', {
         method: 'POST',
-        body: JSON.stringify({ order_ids: selectedOrderIds, work_domain: 'duplicate' }),
+        body: JSON.stringify({
+          order_ids: selectedOrderIds,
+          work_domain: 'duplicate',
+          expected_versions: Object.fromEntries(
+            orders.filter((order) => selectedOrderIds.includes(order.id)).map((order) => [order.id, order.version]),
+          ),
+        }),
       })
       setFlash(`Đã đưa ${result.changed_count} đơn vào domain Đơn trùng lặp.`)
       markTabMoved(selectedOrderIds)

@@ -526,6 +526,9 @@ def _apply_order_detail_result(order: Order, detail_result) -> None:
     order.order_created_at_ext = detail_result.order_created_at
     order.deadline_at_ext = detail_result.deadline_at
     order.note_outsource = detail_result.note_outsource
+    # Khi Platform cập nhật lại note_outsource, flag suppress được reset về False
+    # để Designer thấy note Printerval bình thường ở lần sync tiếp theo.
+    order.suppress_note_outsource_for_designer = False
     order.custom_config = (
         detail_result.custom_config.model_dump() if detail_result.custom_config else None
     )

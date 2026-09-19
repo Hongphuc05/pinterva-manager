@@ -87,3 +87,22 @@ def test_assignment_command_rejects_a_stale_order_revision(client, db_session):
     assert response.json()["detail"]["code"] == "ORDER_VERSION_CONFLICT"
     db_session.refresh(order)
     assert order.state == OrderState.WAITING.value
+
+
+def test_designer_note_rejects_a_stale_order_revision(client, db_session):
+    platform = _platform(db_session)
+    _login(client, db_session, "note-concurrency-admin", "admin", platform.id)
+    order = Order(platform_id=platform.id, external_order_id="DJ-NOTE-CONFLICT")
+    db_session.add(order)
+    db_session.commit()
+
+    response = client.put(
+        f"/api/orders/{order.id}/designer-note",
+        json={"designer_note": "Ghi chú mới", "expected_version": order.version + 1},
+        headers={"X-Platform-Id": str(platform.id)},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "ORDER_VERSION_CONFLICT"
+    db_session.refresh(order)
+    assert order.designer_note == ""

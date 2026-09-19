@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.models import Assignment, Order, Platform, User, WorkflowEvent
 from app.application.printerval_assignment_requests import create_request
+from app.application.concurrency import require_expected_order_version
 from app.application.sanitization import encode_proxy_url, sanitize_text
 from app.domain.access import (
     DUPLICATE_CHECK_DUPLICATE,
@@ -125,6 +126,7 @@ def set_orders_work_domain(
     platform_id: uuid.UUID,
     order_ids: list[uuid.UUID],
     work_domain: str,
+    expected_versions: dict[uuid.UUID, int] | None = None,
 ) -> int:
     """Move selected orders into/out of the duplicate workspace safely."""
     if actor.role not in (ROLE_ADMIN, ROLE_SUPPORT):
@@ -139,6 +141,7 @@ def set_orders_work_domain(
     orders = (
         session.query(Order)
         .filter(Order.id.in_(order_ids))
+        .order_by(Order.id)
         .with_for_update()
         .all()
     )
@@ -147,6 +150,7 @@ def set_orders_work_domain(
 
     request_ids: list[uuid.UUID] = []
     for order in orders:
+        require_expected_order_version(order, (expected_versions or {}).get(order.id))
         if order.work_domain == work_domain:
             continue
         active_assignments = _active_assignments(session, order.id, lock=True)
@@ -203,6 +207,7 @@ def set_orders_duplicate_status(
     platform_id: uuid.UUID,
     order_ids: list[uuid.UUID],
     duplicate_status: str,
+    expected_versions: dict[uuid.UUID, int] | None = None,
 ) -> int:
     """Update duplicate verification status for orders (by Admin or Support)."""
     if actor.role not in (ROLE_ADMIN, ROLE_SUPPORT):
@@ -217,6 +222,7 @@ def set_orders_duplicate_status(
     orders = (
         session.query(Order)
         .filter(Order.id.in_(order_ids))
+        .order_by(Order.id)
         .with_for_update()
         .all()
     )
@@ -225,6 +231,7 @@ def set_orders_duplicate_status(
 
     request_ids: list[uuid.UUID] = []
     for order in orders:
+        require_expected_order_version(order, (expected_versions or {}).get(order.id))
         prev_domain = order.work_domain
         prev_state = order.state
         prev_check_status = order.duplicate_check_status
@@ -303,6 +310,7 @@ def move_duplicate_order(
     actor: User,
     platform_id: uuid.UUID,
     order_id: uuid.UUID,
+    expected_version: int | None = None,
     target_column_id: str | None = None,
     target_designer_id: uuid.UUID | None = None,
     before_order_id: uuid.UUID | None = None,
@@ -324,6 +332,7 @@ def move_duplicate_order(
     )
     if order is None:
         raise DuplicateBoardError("Không tìm thấy đơn hàng trong platform đang chọn")
+    require_expected_order_version(order, expected_version)
     if order.work_domain != WORK_DOMAIN_DUPLICATE:
         raise DuplicateBoardError("Đơn chưa thuộc domain Đơn trùng lặp")
 

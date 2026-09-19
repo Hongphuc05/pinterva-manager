@@ -17,6 +17,7 @@ import { deduplicateGalleryUrls } from '../utils/galleryHelper'
 
 type ProductGalleryCardProps = {
   orderId?: string
+  orderVersion?: number
   images: string[] | null | undefined
   orderTitle?: string | null
   isAdmin?: boolean
@@ -26,6 +27,7 @@ type ProductGalleryCardProps = {
 
 export function ProductGalleryCard({
   orderId,
+  orderVersion,
   images,
   orderTitle,
   isAdmin = false,
@@ -38,6 +40,7 @@ export function ProductGalleryCard({
   const [isSaving, setIsSaving] = useState(false)
   const [saveSuccess, setSaveSuccess] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [retryTokens, setRetryTokens] = useState<Record<string, number>>({})
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   // Sync internal state when external images change
@@ -107,6 +110,10 @@ export function ProductGalleryCard({
   }
 
   function handleImageLoadError(failedUrl: string) {
+    if (!retryTokens[failedUrl]) {
+      setRetryTokens((prev) => ({ ...prev, [failedUrl]: 1 }))
+      return
+    }
     // Gallery imports can contain a URL that passes format validation but is no
     // longer available upstream. Do not leave a broken tile in the designer or
     // admin view; admin can persist this cleaned list with the existing update
@@ -130,7 +137,10 @@ export function ProductGalleryCard({
     try {
       const res = await apiFetch<{ ok: boolean; image_count: number }>(`/orders/${orderId}/gallery`, {
         method: 'PATCH',
-        body: JSON.stringify({ image_urls: galleryList }),
+        body: JSON.stringify({
+          image_urls: galleryList,
+          ...(typeof orderVersion === 'number' ? { expected_version: orderVersion } : {}),
+        }),
       })
 
       setSaveSuccess(true)
@@ -273,6 +283,7 @@ export function ProductGalleryCard({
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
           {galleryList.map((imgUrl, index) => {
             const resolved = resolveAssetUrl(imgUrl)
+            const retrySuffix = retryTokens[imgUrl] ? `${resolved.includes('?') ? '&' : '?'}retry=${retryTokens[imgUrl]}` : ''
             const isCopied = copiedIndex === index
 
             return (
@@ -284,7 +295,7 @@ export function ProductGalleryCard({
                 {/* Image box */}
                 <div className="aspect-square w-full bg-slate-100 flex items-center justify-center overflow-hidden">
                   <img
-                    src={resolved}
+                    src={`${resolved}${retrySuffix}`}
                     alt={`Product view ${index + 1}`}
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                     loading="lazy"
