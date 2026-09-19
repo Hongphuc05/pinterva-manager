@@ -22,13 +22,14 @@ import {
 } from 'lucide-react'
 import { OrderHistoryTimelineModal } from '../components/OrderHistoryTimelineModal'
 import { AdminFixActionModal } from '../components/AdminFixActionModal'
-import { ProductQuickViewButton, ProductQuickViewModal } from '../components/ProductQuickViewModal'
+import { ProductQuickViewModal } from '../components/ProductQuickViewModal'
 
 type DesignerOrder = {
   id: string
   external_order_id: string
   state: string
   thumbnail_url: string | null
+  product_image_urls?: string[] | null
   deadline_at_ext: string | null
   product_name: string | null
   platform_designer?: string | null
@@ -521,18 +522,29 @@ export function DesignerBoardPage() {
                                   className="p-3 rounded-xl border border-blue-100 bg-white hover:bg-blue-50/30 transition-all shadow-2xs space-y-2"
                                 >
                                   <div className="flex items-start gap-2.5">
-                                    {o.thumbnail_url ? (
-                                      <img
-                                        src={resolveAssetUrl(o.thumbnail_url)}
-                                        alt=""
-                                        onClick={() => setSelectedImage(o.thumbnail_url)}
-                                        className="h-10 w-10 rounded-lg object-cover border border-slate-200 shrink-0 cursor-pointer hover:scale-105 transition-transform"
-                                      />
-                                    ) : (
-                                      <div className="h-10 w-10 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 shrink-0">
-                                        <Package className="h-4 w-4" />
-                                      </div>
-                                    )}
+                                    {(() => {
+                                      const imgs = o.product_image_urls?.length ? o.product_image_urls : o.thumbnail_url ? [o.thumbnail_url] : []
+                                      const first = imgs[0]
+                                      return first ? (
+                                        <div className="relative shrink-0" onClick={(e) => e.stopPropagation()}>
+                                          <img
+                                            src={resolveAssetUrl(first)}
+                                            alt=""
+                                            onClick={() => setSelectedImage(first)}
+                                            className="h-10 w-10 rounded-lg object-cover border border-slate-200 cursor-pointer hover:scale-105 transition-transform"
+                                          />
+                                          {imgs.length > 1 && (
+                                            <span className="absolute -bottom-1 -right-1 bg-slate-700 text-white text-[8px] font-bold px-1 py-px rounded-full leading-none">
+                                              +{imgs.length - 1}
+                                            </span>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <div className="h-10 w-10 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 shrink-0">
+                                          <Package className="h-4 w-4" />
+                                        </div>
+                                      )
+                                    })()}
                                     <div className="flex-1 min-w-0">
                                       {isAdmin && (
                                         <div className="flex items-center gap-1.5 flex-wrap">
@@ -551,7 +563,6 @@ export function DesignerBoardPage() {
                                         >
                                           {o.product_name || 'Đơn 2D Custom'}
                                         </Link>
-                                        <ProductQuickViewButton onClick={() => setQuickViewOrderId(o.id)} />
                                       </div>
                                       {o.deadline_at_ext && (
                                         <p className="text-[10px] text-slate-400 font-mono mt-0.5 flex items-center gap-1">
@@ -634,18 +645,29 @@ export function DesignerBoardPage() {
                                   className="p-3 rounded-xl border border-purple-200 bg-purple-50/40 hover:bg-purple-50/80 transition-all shadow-2xs space-y-2.5"
                                 >
                                   <div className="flex items-start gap-2.5">
-                                    {o.thumbnail_url ? (
-                                      <img
-                                        src={resolveAssetUrl(o.thumbnail_url)}
-                                        alt=""
-                                        onClick={() => setSelectedImage(o.thumbnail_url)}
-                                        className="h-12 w-12 rounded-lg object-cover border border-slate-200 shrink-0 cursor-pointer hover:scale-105 transition-transform"
-                                      />
-                                    ) : (
-                                      <div className="h-12 w-12 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-400 shrink-0">
-                                        <Package className="h-5 w-5" />
-                                      </div>
-                                    )}
+                                    {(() => {
+                                      const imgs = o.product_image_urls?.length ? o.product_image_urls : o.thumbnail_url ? [o.thumbnail_url] : []
+                                      const first = imgs[0]
+                                      return first ? (
+                                        <div className="relative shrink-0" onClick={(e) => e.stopPropagation()}>
+                                          <img
+                                            src={resolveAssetUrl(first)}
+                                            alt=""
+                                            onClick={() => setSelectedImage(first)}
+                                            className="h-12 w-12 rounded-lg object-cover border border-slate-200 cursor-pointer hover:scale-105 transition-transform"
+                                          />
+                                          {imgs.length > 1 && (
+                                            <span className="absolute -bottom-1 -right-1 bg-slate-700 text-white text-[8px] font-bold px-1 py-px rounded-full leading-none">
+                                              +{imgs.length - 1}
+                                            </span>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <div className="h-12 w-12 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-400 shrink-0">
+                                          <Package className="h-5 w-5" />
+                                        </div>
+                                      )
+                                    })()}
                                     <div className="flex-1 min-w-0">
                                       {isAdmin && (
                                         <div className="flex items-center gap-1.5 flex-wrap">
@@ -664,7 +686,6 @@ export function DesignerBoardPage() {
                                         >
                                           {o.product_name || 'Đơn 2D Custom'}
                                         </Link>
-                                        <ProductQuickViewButton onClick={() => setQuickViewOrderId(o.id)} />
                                       </div>
                                       {o.deadline_at_ext && (
                                         <p className="text-[10px] text-slate-400 font-mono mt-0.5 flex items-center gap-1">
@@ -751,18 +772,29 @@ export function DesignerBoardPage() {
                                   className="p-3 rounded-xl border border-orange-200 bg-orange-50/40 hover:bg-orange-50/80 transition-all shadow-2xs space-y-2"
                                 >
                                   <div className="flex items-start gap-2.5">
-                                    {o.thumbnail_url ? (
-                                      <img
-                                        src={resolveAssetUrl(o.thumbnail_url)}
-                                        alt=""
-                                        onClick={() => setSelectedImage(o.thumbnail_url)}
-                                        className="h-10 w-10 rounded-lg object-cover border border-slate-200 shrink-0 cursor-pointer"
-                                      />
-                                    ) : (
-                                      <div className="h-10 w-10 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-400 shrink-0">
-                                        <Package className="h-4 w-4" />
-                                      </div>
-                                    )}
+                                    {(() => {
+                                      const imgs = o.product_image_urls?.length ? o.product_image_urls : o.thumbnail_url ? [o.thumbnail_url] : []
+                                      const first = imgs[0]
+                                      return first ? (
+                                        <div className="relative shrink-0" onClick={(e) => e.stopPropagation()}>
+                                          <img
+                                            src={resolveAssetUrl(first)}
+                                            alt=""
+                                            onClick={() => setSelectedImage(first)}
+                                            className="h-10 w-10 rounded-lg object-cover border border-slate-200 cursor-pointer hover:scale-105 transition-transform"
+                                          />
+                                          {imgs.length > 1 && (
+                                            <span className="absolute -bottom-1 -right-1 bg-slate-700 text-white text-[8px] font-bold px-1 py-px rounded-full leading-none">
+                                              +{imgs.length - 1}
+                                            </span>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <div className="h-10 w-10 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-400 shrink-0">
+                                          <Package className="h-4 w-4" />
+                                        </div>
+                                      )
+                                    })()}
                                     <div className="flex-1 min-w-0">
                                       <div className="flex items-center justify-between gap-1">
                                         {isAdmin ? (
@@ -775,7 +807,6 @@ export function DesignerBoardPage() {
                                             >
                                               {o.product_name || 'Đơn 2D Custom'}
                                             </Link>
-                                            <ProductQuickViewButton onClick={() => setQuickViewOrderId(o.id)} />
                                           </div>
                                         )}
                                         {o.fix_approved_by_admin ? (
@@ -793,7 +824,6 @@ export function DesignerBoardPage() {
                                           <p className="min-w-0 truncate text-[10px] text-slate-500">
                                             {o.product_name || 'Đơn 2D Custom'}
                                           </p>
-                                          <ProductQuickViewButton onClick={() => setQuickViewOrderId(o.id)} />
                                         </div>
                                       )}
                                       {o.deadline_at_ext && (
@@ -910,18 +940,29 @@ export function DesignerBoardPage() {
                                     className="p-3 rounded-xl border border-emerald-100 bg-white hover:bg-emerald-50/20 transition-all shadow-2xs space-y-2"
                                   >
                                     <div className="flex items-start gap-2.5">
-                                      {o.thumbnail_url ? (
-                                        <img
-                                          src={resolveAssetUrl(o.thumbnail_url)}
-                                          alt=""
-                                          onClick={() => setSelectedImage(o.thumbnail_url)}
-                                          className="h-10 w-10 rounded-lg object-cover border border-slate-200 shrink-0 cursor-pointer"
-                                        />
-                                      ) : (
-                                        <div className="h-10 w-10 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 shrink-0">
-                                          <Package className="h-4 w-4" />
-                                        </div>
-                                      )}
+                                      {(() => {
+                                        const imgs = o.product_image_urls?.length ? o.product_image_urls : o.thumbnail_url ? [o.thumbnail_url] : []
+                                        const first = imgs[0]
+                                        return first ? (
+                                          <div className="relative shrink-0" onClick={(e) => e.stopPropagation()}>
+                                            <img
+                                              src={resolveAssetUrl(first)}
+                                              alt=""
+                                              onClick={() => setSelectedImage(first)}
+                                              className="h-10 w-10 rounded-lg object-cover border border-slate-200 cursor-pointer hover:scale-105 transition-transform"
+                                            />
+                                            {imgs.length > 1 && (
+                                              <span className="absolute -bottom-1 -right-1 bg-slate-700 text-white text-[8px] font-bold px-1 py-px rounded-full leading-none">
+                                                +{imgs.length - 1}
+                                              </span>
+                                            )}
+                                          </div>
+                                        ) : (
+                                          <div className="h-10 w-10 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 shrink-0">
+                                            <Package className="h-4 w-4" />
+                                          </div>
+                                        )
+                                      })()}
                                       <div className="flex-1 min-w-0">
                                         {isAdmin && (
                                           <div>
@@ -935,7 +976,6 @@ export function DesignerBoardPage() {
                                           >
                                             {o.product_name || 'Đơn 2D Custom'}
                                           </Link>
-                                          <ProductQuickViewButton onClick={() => setQuickViewOrderId(o.id)} />
                                         </div>
                                       </div>
                                     </div>

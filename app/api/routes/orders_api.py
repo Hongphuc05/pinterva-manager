@@ -2279,6 +2279,7 @@ class DesignerWorkloadOrderOut(BaseModel):
     external_order_id: str
     state: str
     thumbnail_url: str | None = None
+    product_image_urls: list[str] | None = None
     deadline_at_ext: str | None = None
     product_name: str | None = None
     work_domain: str = "standard"
@@ -2387,6 +2388,11 @@ def api_designers_workload(
                         external_order_id=o.external_order_id,
                         state=o.state,
                         thumbnail_url=o.thumbnail_url,
+                        product_image_urls=(
+                            o.product_image_urls
+                            if o.product_image_urls
+                            else ([o.thumbnail_url] if o.thumbnail_url else None)
+                        ),
                         deadline_at_ext=str(o.deadline_at_ext) if o.deadline_at_ext else None,
                         product_name=o.product_name,
                         work_domain=o.work_domain or "standard",

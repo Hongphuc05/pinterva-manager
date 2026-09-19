@@ -7,7 +7,7 @@ import { ImageModal } from '../components/ImageModal'
 import { Pagination, paginate } from '../components/Pagination'
 import { CopyableProductName } from '../components/CopyableProductName'
 import { getStatusInfo } from '../utils/statusTranslation'
-import { ProductQuickViewButton, ProductQuickViewModal } from '../components/ProductQuickViewModal'
+import { ProductQuickViewModal } from '../components/ProductQuickViewModal'
 import { 
   CheckSquare, 
   Clock, 
@@ -201,7 +201,12 @@ export function MyTasksPage() {
             return (
               <article
                 key={task.assignment_id}
-                className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs hover:shadow-md transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
+                onClick={(event) => {
+                  if ((event.target as HTMLElement).closest('a,button,input,select,textarea')) return
+                  setQuickViewOrderId(task.order.id)
+                }}
+                title="Click vào dòng để xem nhanh sản phẩm"
+                className="cursor-pointer rounded-xl border border-slate-200 bg-white p-5 shadow-xs hover:shadow-md transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
               >
                 <div className="flex items-start gap-4 flex-1 min-w-0">
                   {/* Product Thumbnail */}
@@ -210,7 +215,10 @@ export function MyTasksPage() {
                       src={resolveAssetUrl(task.order.thumbnail_url)}
                       alt={task.order.product_name || 'Ảnh sản phẩm'}
                       title="Click để phóng to ảnh"
-                      onClick={() => setSelectedImage(resolveAssetUrl(task.order.thumbnail_url))}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        setSelectedImage(resolveAssetUrl(task.order.thumbnail_url))
+                      }}
                       className="h-16 w-16 rounded-xl object-cover border border-slate-200 shrink-0 cursor-pointer hover:scale-105 transition-transform"
                     />
                   ) : (
@@ -226,7 +234,6 @@ export function MyTasksPage() {
                         name={task.order.product_name || task.order.external_order_id}
                         textSize="text-sm font-bold"
                       />
-                      <ProductQuickViewButton onClick={() => setQuickViewOrderId(task.order.id)} />
                       <Link
                         to={`/orders/${task.order.id}`}
                         className="text-xs font-semibold text-[#0052CC] hover:underline"

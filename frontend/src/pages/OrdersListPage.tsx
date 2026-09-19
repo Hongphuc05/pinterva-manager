@@ -157,8 +157,8 @@ function writeOrdersCache(key: string, orders: OrderSummary[]) {
 }
 
 export function OrdersListPage() {
-  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
+  const navigate = useNavigate()
   const { user } = useAuth()
   const { activePlatform } = usePlatform()
   const isAdmin = user?.role === 'admin'
@@ -295,7 +295,7 @@ export function OrdersListPage() {
 
   useEffect(() => {
     if (isAdmin) {
-      apiFetch<UserOption[]>('/users').then(setUsersList).catch(() => {})
+      apiFetch<UserOption[]>('/users').then(setUsersList).catch(() => { })
     }
   }, [isAdmin])
 
@@ -464,8 +464,8 @@ export function OrdersListPage() {
         targetStatus === 'duplicate'
           ? 'Trùng lặp'
           : targetStatus === 'non_duplicate'
-          ? 'Không trùng lặp'
-          : 'Chưa kiểm tra'
+            ? 'Không trùng lặp'
+            : 'Chưa kiểm tra'
       showToast(`Đã chuyển ${res.changed_count} đơn sang trạng thái "${statusLabel}".`, 'success')
       markTabMoved(orderIds)
       setSelectedOrderIds((prev) => prev.filter((id) => !orderIds.includes(id)))
@@ -707,7 +707,7 @@ export function OrdersListPage() {
     })
 
     function handleOrdersUpdated() {
-      loadOrders().catch(() => {})
+      loadOrders().catch(() => { })
     }
     window.addEventListener('orders-updated', handleOrdersUpdated)
     return () => window.removeEventListener('orders-updated', handleOrdersUpdated)
@@ -792,7 +792,7 @@ export function OrdersListPage() {
 
   useEffect(() => {
     if (syncStatus && !syncStatus.is_running && syncStatus.last_finished_at) {
-      loadOrders().catch(() => {})
+      loadOrders().catch(() => { })
     }
   }, [syncStatus?.is_running, syncStatus?.last_finished_at])
 
@@ -946,32 +946,32 @@ export function OrdersListPage() {
       supportTab === 'all'
         ? supportUncheckedOrders
         : supportTab === 'duplicate'
-        ? supportDuplicateOrders
-        : supportNonDuplicateOrders
+          ? supportDuplicateOrders
+          : supportNonDuplicateOrders
   } else if (isAdmin) {
     baseOrders =
       adminTab === 'waiting'
         ? waitingOrders
         : adminTab === 'doing'
-        ? filteredDoingOrders
-        : adminTab === 'review'
-        ? reviewOrders
-        : adminTab === 'fix'
-        ? filteredFixOrders
-        : doneOrders
+          ? filteredDoingOrders
+          : adminTab === 'review'
+            ? reviewOrders
+            : adminTab === 'fix'
+              ? filteredFixOrders
+              : doneOrders
   } else {
     baseOrders =
       activeDesignerTab === 'doing'
         ? designerDoingOrders
         : activeDesignerTab === 'fix'
-        ? designerFixOrders
-        : activeDesignerTab === 'review'
-        ? designerReviewOrders
-        : activeDesignerTab === 'waiting_update'
-        ? waitingUpdateOrders
-        : activeDesignerTab === 'paid'
-        ? designerPaidOrders
-        : designerDoneOrders
+          ? designerFixOrders
+          : activeDesignerTab === 'review'
+            ? designerReviewOrders
+            : activeDesignerTab === 'waiting_update'
+              ? waitingUpdateOrders
+              : activeDesignerTab === 'paid'
+                ? designerPaidOrders
+                : designerDoneOrders
   }
 
   const isOrderGallerySynced = useCallback(
@@ -980,8 +980,8 @@ export function OrdersListPage() {
         o.product_image_urls && o.product_image_urls.length > 0
           ? o.product_image_urls.length
           : o.thumbnail_url
-          ? 1
-          : 0
+            ? 1
+            : 0
       const liveStatus = syncStatusMap[o.id]
       const imgCount =
         liveStatus?.status === 'success' && typeof liveStatus?.count === 'number'
@@ -1006,9 +1006,9 @@ export function OrdersListPage() {
         const q = searchQuery.toLowerCase().trim()
         const matches = isAdmin
           ? o.external_order_id.toLowerCase().includes(q) ||
-            (o.product_name && o.product_name.toLowerCase().includes(q)) ||
-            (o.assigned_designer_name && o.assigned_designer_name.toLowerCase().includes(q)) ||
-            (o.platform_designer && o.platform_designer.toLowerCase().includes(q))
+          (o.product_name && o.product_name.toLowerCase().includes(q)) ||
+          (o.assigned_designer_name && o.assigned_designer_name.toLowerCase().includes(q)) ||
+          (o.platform_designer && o.platform_designer.toLowerCase().includes(q))
           : (o.product_name && o.product_name.toLowerCase().includes(q))
         if (!matches) return false
       }
@@ -1246,23 +1246,23 @@ export function OrdersListPage() {
         ? activeDesignerTab === 'doing'
           ? designerDoingOrders
           : activeDesignerTab === 'fix'
-          ? designerFixOrders
-          : activeDesignerTab === 'review'
-          ? designerReviewOrders
-          : activeDesignerTab === 'waiting_update'
-          ? waitingUpdateOrders
-          : activeDesignerTab === 'paid'
-          ? designerPaidOrders
-          : designerDoneOrders
+            ? designerFixOrders
+            : activeDesignerTab === 'review'
+              ? designerReviewOrders
+              : activeDesignerTab === 'waiting_update'
+                ? waitingUpdateOrders
+                : activeDesignerTab === 'paid'
+                  ? designerPaidOrders
+                  : designerDoneOrders
         : adminTab === 'waiting'
-        ? waitingOrders
-        : adminTab === 'doing'
-        ? doingOrders
-        : adminTab === 'review'
-        ? reviewOrders
-        : adminTab === 'fix'
-        ? filteredFixOrders
-        : doneOrders
+          ? waitingOrders
+          : adminTab === 'doing'
+            ? doingOrders
+            : adminTab === 'review'
+              ? reviewOrders
+              : adminTab === 'fix'
+                ? filteredFixOrders
+                : doneOrders
 
       const targetIds = targetOrders.map((o) => o.id)
       handleSyncPlatformStatus(targetIds.length > 0 ? targetIds : undefined)
@@ -1296,18 +1296,16 @@ export function OrdersListPage() {
               <button
                 type="button"
                 onClick={() => handleSwitchAdminTab('waiting')}
-                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center sm:justify-start gap-2 border ${
-                  adminTab === 'waiting'
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center sm:justify-start gap-2 border ${adminTab === 'waiting'
                     ? 'bg-amber-500 text-white border-amber-500 shadow-xs ring-2 ring-amber-500/20'
                     : 'bg-amber-50/40 text-amber-900 border-amber-200/80 hover:bg-amber-100/60'
-                }`}
+                  }`}
               >
                 <Clock className="h-3.5 w-3.5" />
                 <span>Waiting (Chờ chia)</span>
                 <span
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
-                    adminTab === 'waiting' ? 'bg-white/25 text-white' : 'bg-amber-200/80 text-amber-900'
-                  }`}
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${adminTab === 'waiting' ? 'bg-white/25 text-white' : 'bg-amber-200/80 text-amber-900'
+                    }`}
                 >
                   {waitingOrders.length}
                 </span>
@@ -1317,18 +1315,16 @@ export function OrdersListPage() {
               <button
                 type="button"
                 onClick={() => handleSwitchAdminTab('doing')}
-                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center sm:justify-start gap-2 border ${
-                  adminTab === 'doing'
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center sm:justify-start gap-2 border ${adminTab === 'doing'
                     ? 'bg-[#0052CC] text-white border-[#0052CC] shadow-xs ring-2 ring-blue-500/20'
                     : 'bg-blue-50/40 text-blue-900 border-blue-200/80 hover:bg-blue-100/60'
-                }`}
+                  }`}
               >
                 <Layers className="h-3.5 w-3.5" />
                 <span>Doing (Đang làm)</span>
                 <span
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
-                    adminTab === 'doing' ? 'bg-white/25 text-white' : 'bg-blue-200/80 text-blue-900'
-                  }`}
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${adminTab === 'doing' ? 'bg-white/25 text-white' : 'bg-blue-200/80 text-blue-900'
+                    }`}
                 >
                   {doingOrders.length}
                 </span>
@@ -1338,18 +1334,16 @@ export function OrdersListPage() {
               <button
                 type="button"
                 onClick={() => handleSwitchAdminTab('review')}
-                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center sm:justify-start gap-2 border ${
-                  adminTab === 'review'
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center sm:justify-start gap-2 border ${adminTab === 'review'
                     ? 'bg-purple-600 text-white border-purple-600 shadow-xs ring-2 ring-purple-500/20'
                     : 'bg-purple-50/40 text-purple-900 border-purple-200/80 hover:bg-purple-100/60'
-                }`}
+                  }`}
               >
                 <Search className="h-3.5 w-3.5" />
                 <span>Review (Chờ duyệt)</span>
                 <span
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
-                    adminTab === 'review' ? 'bg-white/25 text-white' : 'bg-purple-200/80 text-purple-900'
-                  }`}
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${adminTab === 'review' ? 'bg-white/25 text-white' : 'bg-purple-200/80 text-purple-900'
+                    }`}
                 >
                   {reviewOrders.length}
                 </span>
@@ -1359,18 +1353,16 @@ export function OrdersListPage() {
               <button
                 type="button"
                 onClick={() => handleSwitchAdminTab('fix')}
-                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center sm:justify-start gap-2 border ${
-                  adminTab === 'fix'
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center sm:justify-start gap-2 border ${adminTab === 'fix'
                     ? 'bg-rose-600 text-white border-rose-600 shadow-xs ring-2 ring-rose-500/20'
                     : 'bg-rose-50/40 text-rose-900 border-rose-200/80 hover:bg-rose-100/60'
-                }`}
+                  }`}
               >
                 <AlertTriangle className="h-3.5 w-3.5" />
                 <span>Fix (Cần sửa)</span>
                 <span
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
-                    adminTab === 'fix' ? 'bg-white/25 text-white' : 'bg-rose-200/80 text-rose-900'
-                  }`}
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${adminTab === 'fix' ? 'bg-white/25 text-white' : 'bg-rose-200/80 text-rose-900'
+                    }`}
                 >
                   {fixOrders.length}
                 </span>
@@ -1380,18 +1372,16 @@ export function OrdersListPage() {
               <button
                 type="button"
                 onClick={() => handleSwitchAdminTab('done')}
-                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center sm:justify-start gap-2 border ${
-                  adminTab === 'done'
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center sm:justify-start gap-2 border ${adminTab === 'done'
                     ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs ring-2 ring-emerald-500/20'
                     : 'bg-emerald-50/40 text-emerald-900 border-emerald-200/80 hover:bg-emerald-100/60'
-                }`}
+                  }`}
               >
                 <CheckCircle2 className="h-3.5 w-3.5" />
                 <span>Done (Hoàn thành)</span>
                 <span
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
-                    adminTab === 'done' ? 'bg-white/25 text-white' : 'bg-emerald-200/80 text-emerald-900'
-                  }`}
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${adminTab === 'done' ? 'bg-white/25 text-white' : 'bg-emerald-200/80 text-emerald-900'
+                    }`}
                 >
                   {doneOrders.length}
                 </span>
@@ -1407,48 +1397,42 @@ export function OrdersListPage() {
                     <button
                       type="button"
                       onClick={() => setAdminDoingSubFilter('all')}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                        adminDoingSubFilter === 'all'
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${adminDoingSubFilter === 'all'
                           ? 'bg-white text-slate-900 shadow-2xs'
                           : 'text-slate-600 hover:text-slate-900'
-                      }`}
+                        }`}
                     >
                       <span>Tất cả</span>
-                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
-                        adminDoingSubFilter === 'all' ? 'bg-slate-200 text-slate-800' : 'bg-slate-200/80 text-slate-600'
-                      }`}>
+                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${adminDoingSubFilter === 'all' ? 'bg-slate-200 text-slate-800' : 'bg-slate-200/80 text-slate-600'
+                        }`}>
                         {doingOrders.length}
                       </span>
                     </button>
                     <button
                       type="button"
                       onClick={() => setAdminDoingSubFilter('missing')}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                        adminDoingSubFilter === 'missing'
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${adminDoingSubFilter === 'missing'
                           ? 'bg-amber-500 text-white shadow-2xs'
                           : 'text-amber-800 hover:text-amber-950'
-                      }`}
+                        }`}
                     >
                       <span>Thiếu Form / Term</span>
-                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
-                        adminDoingSubFilter === 'missing' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-900'
-                      }`}>
+                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${adminDoingSubFilter === 'missing' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-900'
+                        }`}>
                         {missingTemplateDoingOrders.length}
                       </span>
                     </button>
                     <button
                       type="button"
                       onClick={() => setAdminDoingSubFilter('normal')}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                        adminDoingSubFilter === 'normal'
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${adminDoingSubFilter === 'normal'
                           ? 'bg-blue-600 text-white shadow-2xs'
                           : 'text-blue-800 hover:text-blue-950'
-                      }`}
+                        }`}
                     >
                       <span>Đang làm bình thường</span>
-                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
-                        adminDoingSubFilter === 'normal' ? 'bg-white/20 text-white' : 'bg-blue-100 text-blue-900'
-                      }`}>
+                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${adminDoingSubFilter === 'normal' ? 'bg-white/20 text-white' : 'bg-blue-100 text-blue-900'
+                        }`}>
                         {normalDoingOrders.length}
                       </span>
                     </button>
@@ -1498,64 +1482,56 @@ export function OrdersListPage() {
                     <button
                       type="button"
                       onClick={() => setAdminFixSubFilter('all')}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                        adminFixSubFilter === 'all'
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${adminFixSubFilter === 'all'
                           ? 'bg-white text-slate-900 shadow-2xs'
                           : 'text-slate-600 hover:text-slate-900'
-                      }`}
+                        }`}
                     >
                       <span>Tất cả</span>
-                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
-                        adminFixSubFilter === 'all' ? 'bg-slate-200 text-slate-800' : 'bg-slate-200/80 text-slate-600'
-                      }`}>
+                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${adminFixSubFilter === 'all' ? 'bg-slate-200 text-slate-800' : 'bg-slate-200/80 text-slate-600'
+                        }`}>
                         {fixOrders.length}
                       </span>
                     </button>
                     <button
                       type="button"
                       onClick={() => setAdminFixSubFilter('pending')}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                        adminFixSubFilter === 'pending'
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${adminFixSubFilter === 'pending'
                           ? 'bg-amber-500 text-white shadow-2xs'
                           : 'text-amber-800 hover:text-amber-950'
-                      }`}
+                        }`}
                     >
                       <span>Chưa lựa chọn</span>
-                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
-                        adminFixSubFilter === 'pending' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-900'
-                      }`}>
+                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${adminFixSubFilter === 'pending' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-900'
+                        }`}>
                         {pendingFixOrders.length}
                       </span>
                     </button>
                     <button
                       type="button"
                       onClick={() => setAdminFixSubFilter('approved')}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                        adminFixSubFilter === 'approved'
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${adminFixSubFilter === 'approved'
                           ? 'bg-emerald-600 text-white shadow-2xs'
                           : 'text-emerald-800 hover:text-emerald-950'
-                      }`}
+                        }`}
                     >
                       <span>Đã chấp nhận Fix</span>
-                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
-                        adminFixSubFilter === 'approved' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-900'
-                      }`}>
+                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${adminFixSubFilter === 'approved' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-900'
+                        }`}>
                         {approvedFixOrders.length}
                       </span>
                     </button>
                     <button
                       type="button"
                       onClick={() => setAdminFixSubFilter('rejected')}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                        adminFixSubFilter === 'rejected'
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${adminFixSubFilter === 'rejected'
                           ? 'bg-purple-600 text-white shadow-2xs'
                           : 'text-purple-800 hover:text-purple-950'
-                      }`}
+                        }`}
                     >
                       <span>Đã từ chối Fix</span>
-                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
-                        adminFixSubFilter === 'rejected' ? 'bg-white/20 text-white' : 'bg-purple-100 text-purple-900'
-                      }`}>
+                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${adminFixSubFilter === 'rejected' ? 'bg-white/20 text-white' : 'bg-purple-100 text-purple-900'
+                        }`}>
                         {rejectedFixOrders.length}
                       </span>
                     </button>
@@ -1593,18 +1569,16 @@ export function OrdersListPage() {
               <button
                 type="button"
                 onClick={() => handleSwitchSupportTab('all')}
-                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center sm:justify-start gap-2 border ${
-                  supportTab === 'all'
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center sm:justify-start gap-2 border ${supportTab === 'all'
                     ? 'bg-amber-500 text-white border-amber-500 shadow-xs ring-2 ring-amber-500/20'
                     : 'bg-amber-50/40 text-amber-900 border-amber-200/80 hover:bg-amber-100/60'
-                }`}
+                  }`}
               >
                 <Clock className="h-3.5 w-3.5" />
                 <span>Chưa kiểm tra</span>
                 <span
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
-                    supportTab === 'all' ? 'bg-white/25 text-white' : 'bg-amber-200/80 text-amber-900'
-                  }`}
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${supportTab === 'all' ? 'bg-white/25 text-white' : 'bg-amber-200/80 text-amber-900'
+                    }`}
                 >
                   {supportUncheckedOrders.length}
                 </span>
@@ -1614,18 +1588,16 @@ export function OrdersListPage() {
               <button
                 type="button"
                 onClick={() => handleSwitchSupportTab('duplicate')}
-                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center sm:justify-start gap-2 border ${
-                  supportTab === 'duplicate'
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center sm:justify-start gap-2 border ${supportTab === 'duplicate'
                     ? 'bg-purple-600 text-white border-purple-600 shadow-xs ring-2 ring-purple-500/20'
                     : 'bg-purple-50/40 text-purple-900 border-purple-200/80 hover:bg-purple-100/60'
-                }`}
+                  }`}
               >
                 <Layers className="h-3.5 w-3.5" />
                 <span>Trùng lặp</span>
                 <span
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
-                    supportTab === 'duplicate' ? 'bg-white/25 text-white' : 'bg-purple-200/80 text-purple-900'
-                  }`}
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${supportTab === 'duplicate' ? 'bg-white/25 text-white' : 'bg-purple-200/80 text-purple-900'
+                    }`}
                 >
                   {supportDuplicateOrders.length}
                 </span>
@@ -1635,18 +1607,16 @@ export function OrdersListPage() {
               <button
                 type="button"
                 onClick={() => handleSwitchSupportTab('non_duplicate')}
-                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center sm:justify-start gap-2 border ${
-                  supportTab === 'non_duplicate'
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center sm:justify-start gap-2 border ${supportTab === 'non_duplicate'
                     ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs ring-2 ring-emerald-500/20'
                     : 'bg-emerald-50/40 text-emerald-900 border-emerald-200/80 hover:bg-emerald-100/60'
-                }`}
+                  }`}
               >
                 <CheckCircle2 className="h-3.5 w-3.5" />
                 <span>Không trùng lặp</span>
                 <span
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
-                    supportTab === 'non_duplicate' ? 'bg-white/25 text-white' : 'bg-emerald-200/80 text-emerald-900'
-                  }`}
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${supportTab === 'non_duplicate' ? 'bg-white/25 text-white' : 'bg-emerald-200/80 text-emerald-900'
+                    }`}
                 >
                   {supportNonDuplicateOrders.length}
                 </span>
@@ -1663,17 +1633,15 @@ export function OrdersListPage() {
             <button
               type="button"
               onClick={() => setActiveDesignerTab('doing')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
-                activeDesignerTab === 'doing'
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${activeDesignerTab === 'doing'
                   ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
                   : 'bg-blue-50/60 text-blue-900 border-blue-200 hover:bg-blue-100/70'
-              }`}
+                }`}
             >
               <span>Đang làm</span>
               <span
-                className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
-                  activeDesignerTab === 'doing' ? 'bg-white/20 text-white' : 'bg-blue-200/80 text-blue-900'
-                }`}
+                className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${activeDesignerTab === 'doing' ? 'bg-white/20 text-white' : 'bg-blue-200/80 text-blue-900'
+                  }`}
               >
                 {designerDoingOrders.length}
               </span>
@@ -1682,18 +1650,16 @@ export function OrdersListPage() {
             <button
               type="button"
               onClick={() => setActiveDesignerTab('fix')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
-                activeDesignerTab === 'fix'
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${activeDesignerTab === 'fix'
                   ? 'bg-rose-600 text-white border-rose-600 shadow-2xs'
                   : 'bg-rose-50/70 text-rose-800 border-rose-200 hover:bg-rose-100/70'
-              }`}
+                }`}
             >
               <AlertTriangle className="h-3.5 w-3.5 text-rose-500" />
               <span>Cần Sửa Gấp (Fix)</span>
               <span
-                className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
-                  activeDesignerTab === 'fix' ? 'bg-white/20 text-white' : 'bg-rose-200/80 text-rose-900'
-                }`}
+                className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${activeDesignerTab === 'fix' ? 'bg-white/20 text-white' : 'bg-rose-200/80 text-rose-900'
+                  }`}
               >
                 {designerFixOrders.length}
               </span>
@@ -1702,17 +1668,15 @@ export function OrdersListPage() {
             <button
               type="button"
               onClick={() => setActiveDesignerTab('review')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
-                activeDesignerTab === 'review'
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${activeDesignerTab === 'review'
                   ? 'bg-purple-600 text-white border-purple-600 shadow-2xs'
                   : 'bg-purple-50/60 text-purple-900 border-purple-200 hover:bg-purple-100/70'
-              }`}
+                }`}
             >
               <span>Chờ duyệt</span>
               <span
-                className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
-                  activeDesignerTab === 'review' ? 'bg-white/20 text-white' : 'bg-purple-200/80 text-purple-900'
-                }`}
+                className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${activeDesignerTab === 'review' ? 'bg-white/20 text-white' : 'bg-purple-200/80 text-purple-900'
+                  }`}
               >
                 {designerReviewOrders.length}
               </span>
@@ -1721,18 +1685,16 @@ export function OrdersListPage() {
             <button
               type="button"
               onClick={() => setActiveDesignerTab('waiting_update')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
-                activeDesignerTab === 'waiting_update'
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${activeDesignerTab === 'waiting_update'
                   ? 'bg-amber-600 text-white border-amber-600 shadow-2xs'
                   : 'bg-amber-50/60 text-amber-800 border-amber-200 hover:bg-amber-100/70'
-              }`}
+                }`}
             >
               <Flag className="h-3.5 w-3.5" />
               <span>Chờ Cập Nhật</span>
               <span
-                className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
-                  activeDesignerTab === 'waiting_update' ? 'bg-white/20 text-white' : 'bg-amber-200/80 text-amber-800'
-                }`}
+                className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${activeDesignerTab === 'waiting_update' ? 'bg-white/20 text-white' : 'bg-amber-200/80 text-amber-800'
+                  }`}
               >
                 {waitingUpdateOrders.length}
               </span>
@@ -1741,18 +1703,16 @@ export function OrdersListPage() {
             <button
               type="button"
               onClick={() => setActiveDesignerTab('paid')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
-                activeDesignerTab === 'paid'
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${activeDesignerTab === 'paid'
                   ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
                   : 'bg-emerald-50/60 text-emerald-900 border-emerald-200 hover:bg-emerald-100/70'
-              }`}
+                }`}
             >
               <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
               <span>Đã thanh toán</span>
               <span
-                className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
-                  activeDesignerTab === 'paid' ? 'bg-white/20 text-white' : 'bg-emerald-200/80 text-emerald-900'
-                }`}
+                className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${activeDesignerTab === 'paid' ? 'bg-white/20 text-white' : 'bg-emerald-200/80 text-emerald-900'
+                  }`}
               >
                 {designerPaidOrders.length}
               </span>
@@ -1852,22 +1812,20 @@ export function OrdersListPage() {
                 setSyncedImagesFilter((prev) => !prev)
                 setCurrentPage(1)
               }}
-              className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg border transition-all cursor-pointer ${
-                syncedImagesFilter
+              className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg border transition-all cursor-pointer ${syncedImagesFilter
                   ? 'bg-emerald-600 text-white border-emerald-700 shadow-2xs ring-2 ring-emerald-400/40'
                   : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-300'
-              }`}
+                }`}
               title="Lọc chỉ hiển thị các đơn đã đồng bộ đầy đủ ảnh để ưu tiên chia việc trước"
             >
               <Images className={`h-3.5 w-3.5 ${syncedImagesFilter ? 'text-white' : 'text-emerald-600'}`} />
               <span>Đơn đã đồng bộ ảnh</span>
               {syncedOrdersCount > 0 && (
                 <span
-                  className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
-                    syncedImagesFilter
+                  className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${syncedImagesFilter
                       ? 'bg-white text-emerald-800'
                       : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                  }`}
+                    }`}
                 >
                   {syncedOrdersCount}
                 </span>
@@ -1925,36 +1883,32 @@ export function OrdersListPage() {
               <button
                 type="button"
                 onClick={() => applyDatePreset('today')}
-                className={`px-2 py-1 text-[11px] font-semibold rounded-md transition-all cursor-pointer ${
-                  datePreset === 'today' ? 'bg-[#0052CC] text-white shadow-2xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
+                className={`px-2 py-1 text-[11px] font-semibold rounded-md transition-all cursor-pointer ${datePreset === 'today' ? 'bg-[#0052CC] text-white shadow-2xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
               >
                 Hôm nay
               </button>
               <button
                 type="button"
                 onClick={() => applyDatePreset('yesterday')}
-                className={`px-2 py-1 text-[11px] font-semibold rounded-md transition-all cursor-pointer ${
-                  datePreset === 'yesterday' ? 'bg-[#0052CC] text-white shadow-2xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
+                className={`px-2 py-1 text-[11px] font-semibold rounded-md transition-all cursor-pointer ${datePreset === 'yesterday' ? 'bg-[#0052CC] text-white shadow-2xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
               >
                 Hôm qua
               </button>
               <button
                 type="button"
                 onClick={() => applyDatePreset('7days')}
-                className={`px-2 py-1 text-[11px] font-semibold rounded-md transition-all cursor-pointer ${
-                  datePreset === '7days' ? 'bg-[#0052CC] text-white shadow-2xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
+                className={`px-2 py-1 text-[11px] font-semibold rounded-md transition-all cursor-pointer ${datePreset === '7days' ? 'bg-[#0052CC] text-white shadow-2xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
               >
                 7 ngày
               </button>
               <button
                 type="button"
                 onClick={() => applyDatePreset('this_month')}
-                className={`px-2 py-1 text-[11px] font-semibold rounded-md transition-all cursor-pointer ${
-                  datePreset === 'this_month' ? 'bg-[#0052CC] text-white shadow-2xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
+                className={`px-2 py-1 text-[11px] font-semibold rounded-md transition-all cursor-pointer ${datePreset === 'this_month' ? 'bg-[#0052CC] text-white shadow-2xs' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
               >
                 Tháng này
               </button>
@@ -2302,20 +2256,19 @@ export function OrdersListPage() {
                       key={o.id}
                       onClick={() => {
                         dismissHighlight(o.id)
-                        if (isAdmin || isSupport) {
+                        if (isAdmin) {
                           navigate(`/orders/${o.id}`)
                         } else {
                           setQuickViewOrderId(o.id)
                         }
                       }}
-                      className={`transition-all duration-150 cursor-pointer ${
-                        isHighlighted
+                      className={`transition-all duration-150 cursor-pointer ${isHighlighted
                           ? 'bg-emerald-50/80 border-l-4 border-l-emerald-500 shadow-xs'
                           : isSelected
                             ? 'bg-blue-50/80 font-medium'
                             : 'hover:bg-blue-50/60'
                         }`}
-                      title={isAdmin || isSupport ? 'Click vào dòng để xem chi tiết đơn hàng' : 'Click vào dòng để xem nhanh sản phẩm'}
+                      title={isAdmin ? 'Click vào dòng để xem chi tiết đơn hàng' : 'Click vào dòng để xem nhanh sản phẩm'}
                     >
                       {isSupport ? (
                         <>
@@ -2337,7 +2290,7 @@ export function OrdersListPage() {
                                   setLastSelectedIndex(idx)
                                 }
                               }}
-                              onChange={() => {}}
+                              onChange={() => { }}
                               className="rounded border-slate-300 text-[#0052CC] focus:ring-[#0052CC] h-3.5 w-3.5 cursor-pointer"
                             />
                           </td>
@@ -2385,8 +2338,8 @@ export function OrdersListPage() {
                                     o.product_image_urls && o.product_image_urls.length > 0
                                       ? o.product_image_urls.length
                                       : o.thumbnail_url
-                                      ? 1
-                                      : 0
+                                        ? 1
+                                        : 0
                                   const liveStatus = syncStatusMap[o.id]
                                   const imgCount =
                                     liveStatus?.status === 'success' && typeof liveStatus?.count === 'number'
@@ -2394,11 +2347,10 @@ export function OrdersListPage() {
                                       : dbCount
                                   return (
                                     <span
-                                      className={`inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md border shadow-2xs ${
-                                        imgCount > 1
+                                      className={`inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md border shadow-2xs ${imgCount > 1
                                           ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
                                           : 'text-amber-800 bg-amber-50 border-amber-200'
-                                      }`}
+                                        }`}
                                       title={`Bộ ảnh sản phẩm: ${imgCount} ảnh`}
                                     >
                                       <Images className="h-3 w-3" />
@@ -2512,7 +2464,7 @@ export function OrdersListPage() {
                                   setLastSelectedIndex(idx)
                                 }
                               }}
-                              onChange={() => {}}
+                              onChange={() => { }}
                               className="rounded border-slate-300 text-[#0052CC] focus:ring-[#0052CC] h-3.5 w-3.5 cursor-pointer"
                             />
                           </td>
@@ -2604,8 +2556,8 @@ export function OrdersListPage() {
                                   o.product_image_urls && o.product_image_urls.length > 0
                                     ? o.product_image_urls.length
                                     : o.thumbnail_url
-                                    ? 1
-                                    : 0
+                                      ? 1
+                                      : 0
                                 const liveStatus = syncStatusMap[o.id]
                                 const imgCount =
                                   liveStatus?.status === 'success' && typeof liveStatus?.count === 'number'
@@ -2711,7 +2663,7 @@ export function OrdersListPage() {
                           {/* Thời Gian (Vào Tab UTC+7) */}
                           <td className="py-2.5 px-4 whitespace-nowrap">
                             {(() => {
-                              const split = formatUtc7Split(o.status_changed_at || o.created_at)
+                              const split = formatUtc7Split(o.status_changed_at)
                               if (!split) return <span className="text-slate-300 font-mono text-xs">-</span>
                               return (
                                 <div className="flex flex-col leading-tight" title="Thời gian chuyển vào tab / trạng thái gần nhất (UTC+7)">
@@ -2942,7 +2894,7 @@ export function OrdersListPage() {
                           {/* 4. Thời Gian */}
                           <td className="py-3 px-4 whitespace-nowrap">
                             {(() => {
-                              const split = formatUtc7Split(o.status_changed_at || o.created_at)
+                              const split = formatUtc7Split(o.status_changed_at)
                               if (!split) return <span className="text-slate-300 font-mono text-xs">-</span>
                               return (
                                 <div className="flex flex-col leading-tight" title="Thời gian chuyển vào tab / cập nhật gần nhất (UTC+7)">
@@ -2956,112 +2908,112 @@ export function OrdersListPage() {
                           {/* 5. Nộp Link Bài Thiết Kế — chỉ hiển thị ở tab Đang làm */}
                           {activeDesignerTab === 'doing' && (
                             <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
-                            {(() => {
-                              const stateUpper = (o.state || '').toUpperCase()
-                              const isCompleted = ['DONE', 'CLAIMED_IMPORTED', 'COMPLETED', 'SKIPPED'].includes(stateUpper)
-                              const isReview = ['QC_PENDING', 'RESULT_SUBMITTED', 'SUBMITTING_TO_SITE', 'REVIEW'].includes(stateUpper)
-                              const isDoingOrFix = ['IN_PROGRESS', 'DOING', 'ASSIGNED', 'REVISION', 'REVISION_REQUESTED', 'FIX', 'OPEN', 'PENDING'].includes(stateUpper)
-                              const currentLink = inlineSubmissionLinks[o.id] !== undefined ? inlineSubmissionLinks[o.id] : (o.drive_url || '')
-                              const isSubmitting = Boolean(isSubmittingInline[o.id])
+                              {(() => {
+                                const stateUpper = (o.state || '').toUpperCase()
+                                const isCompleted = ['DONE', 'CLAIMED_IMPORTED', 'COMPLETED', 'SKIPPED'].includes(stateUpper)
+                                const isReview = ['QC_PENDING', 'RESULT_SUBMITTED', 'SUBMITTING_TO_SITE', 'REVIEW'].includes(stateUpper)
+                                const isDoingOrFix = ['IN_PROGRESS', 'DOING', 'ASSIGNED', 'REVISION', 'REVISION_REQUESTED', 'FIX', 'OPEN', 'PENDING'].includes(stateUpper)
+                                const currentLink = inlineSubmissionLinks[o.id] !== undefined ? inlineSubmissionLinks[o.id] : (o.drive_url || '')
+                                const isSubmitting = Boolean(isSubmittingInline[o.id])
 
-                              return (
-                                <div className="space-y-2">
-                                  {/* Input & Submit for direct submission without entering details */}
-                                  <div className="flex items-center gap-1.5">
-                                    <input
-                                      type="url"
-                                      value={currentLink}
-                                      onChange={(e) => setInlineSubmissionLinks((prev) => ({ ...prev, [o.id]: e.target.value }))}
-                                      onKeyDown={(e) => {
-                                        if (e.key === 'Enter' && !isSubmitting && !o.template_missing && currentLink.trim()) {
-                                          e.preventDefault()
-                                          handleInlineSubmit(o, currentLink)
-                                        }
-                                      }}
-                                      placeholder="Dán link thiết kế (Drive, Canva, DropBox...)"
-                                      disabled={isSubmitting || Boolean(o.template_missing)}
-                                      className="flex-1 min-w-[200px] rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900 placeholder:text-slate-400 focus:border-[#0052CC] focus:ring-1 focus:ring-[#0052CC] shadow-2xs disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed"
-                                    />
-                                    <button
-                                      type="button"
-                                      onClick={() => handleInlineSubmit(o, currentLink)}
-                                      disabled={isSubmitting || Boolean(o.template_missing) || !currentLink.trim()}
-                                      className="inline-flex items-center gap-1 text-xs font-bold text-white bg-[#0052CC] hover:bg-[#0043A6] disabled:bg-slate-300 disabled:cursor-not-allowed px-3 py-1.5 rounded-lg transition-colors cursor-pointer shadow-2xs shrink-0"
-                                      title="Nộp bài và chuyển đơn sang Review chờ duyệt"
-                                    >
-                                      {isSubmitting ? (
-                                        <>
-                                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                          <span>Đang nộp…</span>
-                                        </>
-                                      ) : (
-                                        <>
-                                          <Send className="h-3.5 w-3.5" />
-                                          <span>Nộp bài</span>
-                                        </>
-                                      )}
-                                    </button>
-                                  </div>
-
-                                  {/* Action row underneath: Báo thiếu temp / link preview / review status */}
-                                  <div className="flex items-center justify-between gap-2 pt-0.5">
-                                    {!o.template_missing && isDoingOrFix && (
+                                return (
+                                  <div className="space-y-2">
+                                    {/* Input & Submit for direct submission without entering details */}
+                                    <div className="flex items-center gap-1.5">
+                                      <input
+                                        type="url"
+                                        value={currentLink}
+                                        onChange={(e) => setInlineSubmissionLinks((prev) => ({ ...prev, [o.id]: e.target.value }))}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter' && !isSubmitting && !o.template_missing && currentLink.trim()) {
+                                            e.preventDefault()
+                                            handleInlineSubmit(o, currentLink)
+                                          }
+                                        }}
+                                        placeholder="Dán link thiết kế (Drive, Canva, DropBox...)"
+                                        disabled={isSubmitting || Boolean(o.template_missing)}
+                                        className="flex-1 min-w-[200px] rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900 placeholder:text-slate-400 focus:border-[#0052CC] focus:ring-1 focus:ring-[#0052CC] shadow-2xs disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed"
+                                      />
                                       <button
                                         type="button"
-                                        onClick={() => flagMissingTemplate(o)}
-                                        disabled={!o.assignment_id || flaggingMissingOrderId === o.id}
-                                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-700 hover:text-rose-800 hover:bg-rose-50 px-2 py-0.5 rounded transition-colors disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
-                                        title={!o.assignment_id ? 'Đơn chưa có assignment đang hoạt động' : 'Báo Admin rằng đơn này thiếu temp'}
+                                        onClick={() => handleInlineSubmit(o, currentLink)}
+                                        disabled={isSubmitting || Boolean(o.template_missing) || !currentLink.trim()}
+                                        className="inline-flex items-center gap-1 text-xs font-bold text-white bg-[#0052CC] hover:bg-[#0043A6] disabled:bg-slate-300 disabled:cursor-not-allowed px-3 py-1.5 rounded-lg transition-colors cursor-pointer shadow-2xs shrink-0"
+                                        title="Nộp bài và chuyển đơn sang Review chờ duyệt"
                                       >
-                                        {flaggingMissingOrderId === o.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Flag className="h-3 w-3" />}
-                                        <span>{flaggingMissingOrderId === o.id ? 'Đang báo…' : 'Báo thiếu temp'}</span>
+                                        {isSubmitting ? (
+                                          <>
+                                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                            <span>Đang nộp…</span>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <Send className="h-3.5 w-3.5" />
+                                            <span>Nộp bài</span>
+                                          </>
+                                        )}
                                       </button>
-                                    )}
+                                    </div>
 
-                                    {o.template_missing && (
-                                      <span className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
-                                        <Flag className="h-3 w-3 text-rose-600" />
-                                        <span>Đang chờ Admin bổ sung temp</span>
-                                      </span>
-                                    )}
+                                    {/* Action row underneath: Báo thiếu temp / link preview / review status */}
+                                    <div className="flex items-center justify-between gap-2 pt-0.5">
+                                      {!o.template_missing && isDoingOrFix && (
+                                        <button
+                                          type="button"
+                                          onClick={() => flagMissingTemplate(o)}
+                                          disabled={!o.assignment_id || flaggingMissingOrderId === o.id}
+                                          className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-700 hover:text-rose-800 hover:bg-rose-50 px-2 py-0.5 rounded transition-colors disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+                                          title={!o.assignment_id ? 'Đơn chưa có assignment đang hoạt động' : 'Báo Admin rằng đơn này thiếu temp'}
+                                        >
+                                          {flaggingMissingOrderId === o.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Flag className="h-3 w-3" />}
+                                          <span>{flaggingMissingOrderId === o.id ? 'Đang báo…' : 'Báo thiếu temp'}</span>
+                                        </button>
+                                      )}
 
-                                    {isReview && !o.template_missing && (
-                                      <span className="inline-flex items-center gap-1 text-[11px] font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
-                                        <Check className="h-3 w-3 text-purple-600" />
-                                        <span>Đã nộp bài (Chờ duyệt)</span>
-                                      </span>
-                                    )}
+                                      {o.template_missing && (
+                                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
+                                          <Flag className="h-3 w-3 text-rose-600" />
+                                          <span>Đang chờ Admin bổ sung temp</span>
+                                        </span>
+                                      )}
 
-                                    {isCompleted && (
-                                      <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                                        <Check className="h-3 w-3 text-emerald-600 stroke-[3]" />
-                                        <span>Đã hoàn thành</span>
-                                      </span>
-                                    )}
+                                      {isReview && !o.template_missing && (
+                                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
+                                          <Check className="h-3 w-3 text-purple-600" />
+                                          <span>Đã nộp bài (Chờ duyệt)</span>
+                                        </span>
+                                      )}
 
-                                    {o.drive_url && (
-                                      <a
-                                        href={o.drive_url}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="inline-flex items-center gap-1 text-[11px] font-bold text-[#0052CC] hover:underline ml-auto"
-                                        title="Mở link bài thiết kế đã nộp"
-                                      >
-                                        <span>Xem link đã nộp</span>
-                                        <ExternalLink className="h-2.5 w-2.5" />
-                                      </a>
-                                    )}
+                                      {isCompleted && (
+                                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                                          <Check className="h-3 w-3 text-emerald-600 stroke-[3]" />
+                                          <span>Đã hoàn thành</span>
+                                        </span>
+                                      )}
+
+                                      {o.drive_url && (
+                                        <a
+                                          href={o.drive_url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="inline-flex items-center gap-1 text-[11px] font-bold text-[#0052CC] hover:underline ml-auto"
+                                          title="Mở link bài thiết kế đã nộp"
+                                        >
+                                          <span>Xem link đã nộp</span>
+                                          <ExternalLink className="h-2.5 w-2.5" />
+                                        </a>
+                                      )}
+                                    </div>
                                   </div>
-                                </div>
-                              )
-                            })()}
+                                )
+                              })()}
                             </td>
                           )}
                         </>
                       )}
-                </tr>
-              )
-            })
+                    </tr>
+                  )
+                })
               )}
             </tbody>
           </table>

@@ -26,25 +26,6 @@ function cleanVariantName(name: string) {
   return name.trim().replace(/^[|•·\s]+|[|•·\s]+$/g, '').trim()
 }
 
-export function ProductQuickViewButton({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={(event) => {
-        event.preventDefault()
-        event.stopPropagation()
-        onClick()
-      }}
-      className="inline-flex shrink-0 items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-1.5 py-1 text-[10px] font-bold text-[#0052CC] transition-colors hover:bg-blue-100"
-      title="Xem nhanh thông tin sản phẩm"
-      aria-label="Xem nhanh thông tin sản phẩm"
-    >
-      <Eye className="h-3 w-3" />
-      Xem nhanh
-    </button>
-  )
-}
-
 export function ProductQuickViewModal({ orderId, onClose }: Props) {
   const [order, setOrder] = useState<QuickViewOrder | null>(null)
   const [loading, setLoading] = useState(true)
