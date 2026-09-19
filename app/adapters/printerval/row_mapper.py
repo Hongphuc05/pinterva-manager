@@ -89,7 +89,21 @@ def _parse_variants(sku_data: dict[str, Any] | None) -> list[ProductVariant]:
 
 def _is_internal_or_price_key(key: str, val: Any) -> bool:
     k = str(key).lower().strip()
-    if k in ("price_addtocart", "giá_thêm_vào_giỏ_hàng", "price", "prx_discount", "discount", "cart", "total", "subtotal"):
+    if k in (
+        "price_addtocart",
+        "giá_thêm_vào_giỏ_hàng",
+        "price",
+        "prx_discount",
+        "discount",
+        "cart",
+        "total",
+        "subtotal",
+        "disable_make_change",
+        "tat_tinh_nang_thay_doi",
+        "tắt_tính_năng_thay_đổi",
+        "template_id",
+        "canvas",
+    ):
         return True
     if k.startswith("price_") or k.startswith("giá_thêm_") or "addtocart" in k:
         return True
@@ -108,6 +122,9 @@ def _is_image_config_entry(key: str, val: Any) -> bool:
     k_lower = str(key).lower().strip()
     if k_lower in ("images", "layers", "canvas", "disable_make_change", "template_id"):
         return True
+    # Always keep preview URLs (e.g. url_xem_trước in Vietnamese translations)
+    if "xem_trước" in k_lower or "xem_truoc" in k_lower or "preview" in k_lower:
+        return False
     if isinstance(val, dict) and (val.get("type") == "image" or "maskPath" in val or "digit_image" in val):
         return True
     if isinstance(val, list):
@@ -251,6 +268,121 @@ def _parse_custom_config(sku_data: dict[str, Any] | None) -> CustomConfig | None
         return None
 
     return CustomConfig(original=original, translated_vn=translated)
+
+
+def normalize_order_custom_config_and_sources(
+    custom_config: dict[str, Any] | None,
+    source_files: list[dict[str, Any]] | None,
+    product_skus: list[dict[str, Any]] | None = None,
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]] | None]:
+    """Repair and normalize any stored custom_config and source_files.
+
+    Handles both clean structured configs and legacy double-encoded / unparsed
+    configurations (e.g. from previously crawled Customily orders).
+    """
+    def safe_parse_json(val: Any) -> Any:
+        if isinstance(val, str):
+            val_s = val.strip()
+            if (val_s.startswith("{") and val_s.endswith("}")) or (val_s.startswith("[") and val_s.endswith("]")):
+                try:
+                    return json.loads(val_s)
+                except (TypeError, ValueError):
+                    return val
+        return val
+
+    def normalize_url(raw_url: str) -> str:
+        u = str(raw_url).strip()
+        if u.startswith("//"):
+            return f"https:{u}"
+        if u.startswith("/"):
+            return f"https://assets.printerval.com{u}"
+        return u
+
+    def source_name(url: str, label: str | None = None) -> str:
+        if label and not label.startswith("http") and "/" not in label and len(label.strip()) <= 80:
+            return label.strip()
+        clean = url.split("?", 1)[0].rstrip("/")
+        fname = clean.split("/")[-1]
+        return fname or "source"
+
+    # Step 1: Check if custom_config has unparsed keys in `original` or `translated_vn`
+    norm_config: dict[str, Any] | None = None
+    extracted_images_from_config: list[dict[str, str]] = []
+
+    if isinstance(custom_config, dict):
+        raw_orig_list = custom_config.get("original")
+        raw_trans_list = custom_config.get("translated_vn")
+
+        if isinstance(raw_orig_list, list):
+            temp_dict: dict[str, Any] = {}
+            for item in raw_orig_list:
+                if isinstance(item, dict):
+                    k = item.get("key")
+                    v = item.get("value")
+                    if k:
+                        temp_dict[str(k)] = v
+
+            # If it has "images", extract source files
+            if "images" in temp_dict:
+                parsed_imgs = safe_parse_json(temp_dict["images"])
+                if isinstance(parsed_imgs, list):
+                    for img in parsed_imgs:
+                        if isinstance(img, dict):
+                            u = img.get("value") or img.get("src") or img.get("url")
+                            if u and isinstance(u, str):
+                                nu = normalize_url(u)
+                                extracted_images_from_config.append({"name": source_name(nu, img.get("name") or img.get("label")), "url": nu})
+                        elif isinstance(img, str) and img.strip():
+                            nu = normalize_url(img)
+                            extracted_images_from_config.append({"name": source_name(nu), "url": nu})
+
+            has_unparsed_structure = any(k in temp_dict for k in ("options", "images", "canvas", "disable_make_change", "texts"))
+            if has_unparsed_structure:
+                clean_orig_entries = _parse_custom_config_dict(temp_dict)
+            else:
+                clean_orig_entries = [
+                    CustomConfigEntry(key=item["key"], value=item["value"])
+                    for item in raw_orig_list
+                    if isinstance(item, dict) and item.get("key") and not _is_internal_or_price_key(item["key"], item.get("value", "")) and str(item["key"]).lower() not in ("disable_make_change", "images", "canvas", "texts", "options", "layers", "template_id")
+                ]
+
+            clean_trans_entries: list[CustomConfigEntry] = []
+            if isinstance(raw_trans_list, list):
+                temp_trans_dict: dict[str, Any] = {}
+                for item in raw_trans_list:
+                    if isinstance(item, dict):
+                        k = item.get("key")
+                        v = item.get("value")
+                        if k:
+                            temp_trans_dict[str(k)] = v
+                if any(k in temp_trans_dict for k in ("options", "texts", "tắt_tính_năng_thay_đổi")):
+                    clean_trans_entries = _parse_custom_config_dict(temp_trans_dict)
+                else:
+                    clean_trans_entries = [
+                        CustomConfigEntry(key=item["key"], value=item["value"])
+                        for item in raw_trans_list
+                        if isinstance(item, dict) and item.get("key") and not _is_internal_or_price_key(item["key"], item.get("value", "")) and str(item["key"]).lower() not in ("disable_make_change", "tắt_tính_năng_thay_đổi", "images", "canvas", "texts", "options", "layers", "template_id")
+                    ]
+
+            norm_config = {
+                "original": [e.model_dump() for e in clean_orig_entries],
+                "translated_vn": [e.model_dump() for e in clean_trans_entries],
+            }
+        else:
+            parsed = _parse_custom_config({"configurations": custom_config})
+            norm_config = parsed.model_dump() if parsed else None
+
+    # Step 2: Source Files Normalization
+    norm_sources = list(source_files) if isinstance(source_files, list) else []
+
+    if extracted_images_from_config and (not norm_sources or len(norm_sources) < len(extracted_images_from_config)):
+        norm_sources = extracted_images_from_config
+    elif not norm_sources and product_skus:
+        extracted = extract_source_files({"product_skus": product_skus})
+        if extracted:
+            norm_sources = extracted
+
+    return norm_config if (norm_config and (norm_config.get("original") or norm_config.get("translated_vn"))) else None, norm_sources if norm_sources else None
 
 
 def extract_product_skus(row: dict[str, Any]) -> list[ProductSku]:

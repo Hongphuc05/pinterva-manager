@@ -380,3 +380,61 @@ def test_parse_custom_config_customily_payload_cleanly():
         "Chọn Màu Nền": "Ảnh 1",
     }
 
+
+def test_normalize_order_custom_config_and_sources_repairs_legacy_db_row():
+    """Verifies that an existing order row stored in the database with unparsed
+    double-encoded custom_config and single source file is repaired dynamically
+    to have clean options, url_xem_trước, and all 16 source files."""
+    from app.adapters.printerval.row_mapper import normalize_order_custom_config_and_sources
+
+    customily_images = [
+        {"type": "image", "value": f"https://cdn.customily.com/product-images/img-{i}.jpg", "order": i}
+        for i in range(16)
+    ]
+    options = [
+        {"id": 16, "label": "Number Of Image", "value": 0, "value_name": "1"},
+        {"id": 1, "label": "Choose Background Color", "value": "Image 1", "value_name": "Image 1"},
+        {"id": 4, "label": "Upload Image 1", "value": "/customize/2026/09/14/user-upload-abc.png", "value_name": "Image 1"},
+    ]
+
+    stored_custom_config = {
+        "original": [
+            {"key": "disable_make_change", "value": "true"},
+            {"key": "images", "value": json.dumps(customily_images)},
+            {"key": "texts", "value": "[]"},
+            {"key": "options", "value": json.dumps(options)},
+            {"key": "canvas", "value": json.dumps({"width": 1000, "height": 1000})},
+        ],
+        "translated_vn": [
+            {"key": "tắt_tính_năng_thay_đổi", "value": "True"},
+            {"key": "url_xem_trước", "value": "https://assets.printerval.com/personalization-preview.jpg"},
+        ],
+    }
+    stored_source_files = [
+        {"name": "user-upload-abc.png", "url": "https://assets.printerval.com/customize/2026/09/14/user-upload-abc.png"}
+    ]
+
+    clean_config, clean_sources = normalize_order_custom_config_and_sources(
+        stored_custom_config, stored_source_files
+    )
+
+    assert clean_config is not None
+    orig_keys = {e["key"]: e["value"] for e in clean_config["original"]}
+    assert orig_keys == {
+        "Number Of Image": "1",
+        "Choose Background Color": "Image 1",
+        "Upload Image 1": "Image 1",
+    }
+    trans_keys = {e["key"]: e["value"] for e in clean_config["translated_vn"]}
+    assert trans_keys == {
+        "url_xem_trước": "/personalization-preview.jpg",
+    }
+    assert "tắt_tính_năng_thay_đổi" not in trans_keys
+
+    # Source files must be expanded to all 16 customily images
+    assert clean_sources is not None
+    assert len(clean_sources) == 16
+    for i in range(16):
+        assert clean_sources[i]["url"] == f"https://cdn.customily.com/product-images/img-{i}.jpg"
+
+

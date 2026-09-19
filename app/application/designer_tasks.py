@@ -123,6 +123,10 @@ def list_my_tasks(session: Session, designer_id: uuid.UUID) -> list[dict]:
                     "qc_feedback": decision.comment if decision else None,
                 }
             )
+        from app.adapters.printerval.row_mapper import normalize_order_custom_config_and_sources
+        norm_config, norm_sources = normalize_order_custom_config_and_sources(
+            order.custom_config, order.source_files, order.product_skus
+        )
         order_dict = {
             "id": str(order.id),
             "external_order_id": order.external_order_id,
@@ -141,10 +145,10 @@ def list_my_tasks(session: Session, designer_id: uuid.UUID) -> list[dict]:
             "fix_return_count": order.fix_return_count,
             "designer_note": order.designer_note,
             "template_missing": order.template_missing,
-            "custom_config": order.custom_config,
+            "custom_config": norm_config if norm_config is not None else order.custom_config,
             "sku_image_url": order.sku_image_url,
             "external_order_url": order.external_order_url,
-            "source_files": order.source_files,
+            "source_files": norm_sources if norm_sources is not None else order.source_files,
             "source_download_all_url": order.source_download_all_url,
             "design_tool_url": order.design_tool_url,
             "product_image_urls": order.product_image_urls or ([order.thumbnail_url] if order.thumbnail_url else []),

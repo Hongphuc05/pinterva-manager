@@ -1360,6 +1360,15 @@ def api_order_detail(
         .first()
     )
     order_out = OrderDetailOut.model_validate(order)
+    from app.adapters.printerval.row_mapper import normalize_order_custom_config_and_sources
+    norm_config, norm_sources = normalize_order_custom_config_and_sources(
+        order.custom_config, order.source_files, order.product_skus
+    )
+    if norm_config is not None:
+        order_out.custom_config = norm_config
+    if norm_sources is not None:
+        order_out.source_files = norm_sources
+
     if not order_out.product_image_urls and order.thumbnail_url:
         order_out.product_image_urls = [order.thumbnail_url]
     if assignment:
