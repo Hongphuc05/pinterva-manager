@@ -38,6 +38,7 @@ type DuplicateCard = {
   status_changed_at?: string | null
   paid_at?: string | null
   is_paid?: boolean
+  duplicate_board_position?: number | null
   template_missing?: boolean
   state: string
   note_outsource: string
@@ -115,6 +116,7 @@ export function DuplicateBoardPage() {
   const [error, setError] = useState<string | null>(null)
   const [draggedCard, setDraggedCard] = useState<DuplicateCard | null>(null)
   const [dropTarget, setDropTarget] = useState<string | null>(null)
+  const [dropInsertion, setDropInsertion] = useState<{ columnId: string; beforeCardId: string | null } | null>(null)
   const [movingCardId, setMovingCardId] = useState<string | null>(null)
   const [statusSortColumns, setStatusSortColumns] = useState<Set<string>>(() => new Set())
   const [savingSettings, setSavingSettings] = useState(false)
@@ -405,6 +407,7 @@ export function DuplicateBoardPage() {
 
   function onDragStart(event: DragEvent<HTMLDivElement>, card: DuplicateCard) {
     setDraggedCard(card)
+    setDropInsertion(null)
     event.dataTransfer.effectAllowed = 'move'
     event.dataTransfer.setData('text/plain', card.id)
   }
@@ -412,10 +415,51 @@ export function DuplicateBoardPage() {
   function onDragEnd() {
     setDraggedCard(null)
     setDropTarget(null)
+    setDropInsertion(null)
   }
 
-  async function onDrop(event: DragEvent<HTMLElement>, column: DuplicateColumn) {
+  function autoScrollWhileDragging(event: DragEvent<HTMLElement>) {
+    const edge = 96
+    const maxStep = 28
+    if (event.clientY < edge) {
+      window.scrollBy({ top: -maxStep, behavior: 'auto' })
+    } else if (event.clientY > window.innerHeight - edge) {
+      window.scrollBy({ top: maxStep, behavior: 'auto' })
+    }
+  }
+
+  function handleCardDragOver(
+    event: DragEvent<HTMLDivElement>,
+    column: DuplicateColumn,
+    card: DuplicateCard,
+    cardIndex: number,
+    cards: DuplicateCard[],
+  ) {
+    if (!draggedCard || !canDropTo(column)) return
     event.preventDefault()
+    event.stopPropagation()
+    event.dataTransfer.dropEffect = 'move'
+    autoScrollWhileDragging(event)
+
+    if (card.id === draggedCard.id) {
+      setDropInsertion(null)
+      return
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect()
+    const shouldInsertAfter = event.clientY >= rect.top + rect.height / 2
+    const nextCard = cards[cardIndex + (shouldInsertAfter ? 1 : 0)]
+    setDropTarget(column.id)
+    setDropInsertion({ columnId: column.id, beforeCardId: nextCard?.id ?? null })
+  }
+
+  async function onDrop(
+    event: DragEvent<HTMLElement>,
+    column: DuplicateColumn,
+    beforeCardId: string | null = null,
+  ) {
+    event.preventDefault()
+    event.stopPropagation()
     if (!draggedCard || !canDropTo(column)) return
 
     // Determine target identifiers
@@ -451,6 +495,8 @@ export function DuplicateBoardPage() {
           order_id: draggedCard.id,
           target_column_id: column.id,
           target_designer_id: isDesigner ? column.id : null,
+          before_order_id: beforeCardId,
+          reorder: true,
         }),
       })
       await loadBoard()
@@ -699,7 +745,9 @@ export function DuplicateBoardPage() {
                     if (draggedCard && canDrop) {
                       event.preventDefault()
                       event.dataTransfer.dropEffect = 'move'
+                      autoScrollWhileDragging(event)
                       setDropTarget(column.id)
+                      setDropInsertion({ columnId: column.id, beforeCardId: null })
                     } else if (draggedColumnId && draggedColumnId !== column.id) {
                       event.preventDefault()
                       setColumnDropTarget(column.id)
@@ -708,10 +756,15 @@ export function DuplicateBoardPage() {
                   onDragLeave={() => {
                     setDropTarget((current) => current === column.id ? null : current)
                     setColumnDropTarget((current) => current === column.id ? null : current)
+                    setDropInsertion((current) => current?.columnId === column.id ? null : current)
                   }}
                   onDrop={(event) => {
                     if (draggedCard) {
-                      void onDrop(event, column)
+                      void onDrop(
+                        event,
+                        column,
+                        dropInsertion?.columnId === column.id ? dropInsertion.beforeCardId : null,
+                      )
                     } else if (draggedColumnId) {
                       handleColumnDrop(event, column.id)
                     }
@@ -827,16 +880,21 @@ export function DuplicateBoardPage() {
 
                   {/* Cards container */}
                   <div className="min-h-28 space-y-2">
-                    {cards.map((card) => (
-                      <div
-                        key={card.id}
-                        draggable={!movingCardId && !isSupport}
-                        onDragStart={(event) => onDragStart(event, card)}
-                        onDragEnd={onDragEnd}
-                        className={`group rounded-lg border border-slate-200 bg-white p-3 shadow-2xs transition-all hover:shadow-md ${
-                          draggedCard?.id === card.id ? 'opacity-40 scale-95' : ''
-                        } ${movingCardId === card.id ? 'pointer-events-none opacity-60' : isSupport ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'}`}
-                      >
+                    {cards.map((card, cardIndex) => (
+                      <div key={card.id}>
+                        {dropInsertion?.columnId === column.id && dropInsertion.beforeCardId === card.id && (
+                          <div className="my-1 h-1 rounded-full bg-violet-500 shadow-sm" aria-label="Vị trí chèn đơn" />
+                        )}
+                        <div
+                          draggable={!movingCardId && !isSupport}
+                          onDragStart={(event) => onDragStart(event, card)}
+                          onDragOver={(event) => handleCardDragOver(event, column, card, cardIndex, cards)}
+                          onDrop={(event) => void onDrop(event, column, dropInsertion?.beforeCardId ?? null)}
+                          onDragEnd={onDragEnd}
+                          className={`group rounded-lg border border-slate-200 bg-white p-3 shadow-2xs transition-all hover:shadow-md ${
+                            draggedCard?.id === card.id ? 'opacity-40 scale-95' : ''
+                          } ${movingCardId === card.id ? 'pointer-events-none opacity-60' : isSupport ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'}`}
+                        >
                         <div className="flex gap-2.5">
                           <GripVertical className="mt-0.5 h-4 w-3 shrink-0 text-slate-300 group-hover:text-slate-500" />
                           {card.thumbnail_url ? (
@@ -918,6 +976,10 @@ export function DuplicateBoardPage() {
                               <RotateCcw className="h-3 w-3" /> Trả Review
                             </button>
                           </div>
+                        )}
+                        </div>
+                        {dropInsertion?.columnId === column.id && dropInsertion.beforeCardId === null && cardIndex === cards.length - 1 && (
+                          <div className="my-1 h-1 rounded-full bg-violet-500 shadow-sm" aria-label="Vị trí chèn cuối cột" />
                         )}
                       </div>
                     ))}

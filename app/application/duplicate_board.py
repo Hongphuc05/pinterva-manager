@@ -10,6 +10,8 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import Assignment, Order, Platform, User, WorkflowEvent
+from app.application.printerval_assignment_requests import create_request
+from app.application.sanitization import encode_proxy_url, sanitize_text
 from app.domain.access import (
     DUPLICATE_CHECK_DUPLICATE,
     DUPLICATE_CHECK_NON_DUPLICATE,
@@ -22,8 +24,6 @@ from app.domain.access import (
     WORK_DOMAINS,
 )
 from app.domain.models import OrderState
-from app.application.printerval_assignment_requests import create_request
-from app.application.sanitization import encode_proxy_url, sanitize_text
 
 DONE_STATES = ("DONE", "CLAIMED_IMPORTED", "COMPLETED", "SKIPPED")
 logger = logging.getLogger(__name__)
@@ -303,6 +303,8 @@ def move_duplicate_order(
     order_id: uuid.UUID,
     target_column_id: str | None = None,
     target_designer_id: uuid.UUID | None = None,
+    before_order_id: uuid.UUID | None = None,
+    reorder: bool = False,
 ) -> dict:
     """Claim, release, mark done or reassign a duplicate-domain card.
 
@@ -376,6 +378,14 @@ def move_duplicate_order(
             from_state=from_st,
             to_state=order.state,
         )
+        if reorder:
+            _reorder_duplicate_board(
+                session,
+                platform_id=platform_id,
+                moved_order_id=order.id,
+                target_column_id="orders",
+                before_order_id=before_order_id,
+            )
         session.commit()
         return _card(order, None)
 
@@ -393,6 +403,14 @@ def move_duplicate_order(
             from_state=from_st,
             to_state=order.state,
         )
+        if reorder:
+            _reorder_duplicate_board(
+                session,
+                platform_id=platform_id,
+                moved_order_id=order.id,
+                target_column_id="missing_form",
+                before_order_id=before_order_id,
+            )
         session.commit()
         return _card(order, None)
 
@@ -417,6 +435,14 @@ def move_duplicate_order(
             to_state="DONE",
             designer_id=str(assignee.id) if assignee else None,
         )
+        if reorder:
+            _reorder_duplicate_board(
+                session,
+                platform_id=platform_id,
+                moved_order_id=order.id,
+                target_column_id="done",
+                before_order_id=before_order_id,
+            )
         session.commit()
         return _card(order, assignee)
 
@@ -427,6 +453,14 @@ def move_duplicate_order(
         order.state = OrderState.IN_PROGRESS.value
 
         if current_assignment and current_assignment.designer_id == target.id:
+            if reorder:
+                _reorder_duplicate_board(
+                    session,
+                    platform_id=platform_id,
+                    moved_order_id=order.id,
+                    target_column_id=str(target.id),
+                    before_order_id=before_order_id,
+                )
             session.commit()
             return _card(order, target)
 
@@ -460,6 +494,14 @@ def move_duplicate_order(
         except Exception:
             pass
 
+        if reorder:
+            _reorder_duplicate_board(
+                session,
+                platform_id=platform_id,
+                moved_order_id=order.id,
+                target_column_id=str(target.id),
+                before_order_id=before_order_id,
+            )
         session.commit()
         return _card(order, target)
 
@@ -485,6 +527,7 @@ def _card(order: Order, assignee: User | None) -> dict:
         "fix_approved_by_admin": order.fix_approved_by_admin,
         "assignee_id": str(assignee.id) if assignee else None,
         "assignee_name": (assignee.full_name or assignee.username) if assignee else None,
+        "duplicate_board_position": order.duplicate_board_position,
     }
 
 
@@ -496,6 +539,95 @@ def _column_metrics(cards: list[dict]) -> dict[str, int]:
         "fix": sum(card["state"] == OrderState.REVISION.value for card in cards),
         "done": sum((card["state"] in DONE_STATES or card.get("is_paid", False)) for card in cards),
     }
+
+
+def _board_order_buckets(session: Session, *, platform_id: uuid.UUID) -> dict[str, list[Order]]:
+    """Return the current card order for every rendered duplicate-board column."""
+    orders = (
+        session.query(Order)
+        .filter(Order.platform_id == platform_id, Order.work_domain == WORK_DOMAIN_DUPLICATE)
+        .order_by(
+            Order.duplicate_board_position.asc().nullslast(),
+            Order.deadline_at_ext.nullslast(),
+            Order.created_at.desc(),
+        )
+        .all()
+    )
+    active_assignments = (
+        session.query(Assignment, User)
+        .join(User, User.id == Assignment.designer_id)
+        .filter(
+            Assignment.order_id.in_([order.id for order in orders]),
+            Assignment.status.in_(("approved", "draft")),
+            User.role == ROLE_DESIGNER_TRELLO,
+        )
+        .order_by(Assignment.created_at.desc())
+        .all()
+        if orders
+        else []
+    )
+    assignment_by_order: dict[uuid.UUID, User] = {}
+    for assignment, designer in active_assignments:
+        if assignment.order_id not in assignment_by_order:
+            assignment_by_order[assignment.order_id] = designer
+
+    buckets: dict[str, list[Order]] = {"orders": [], "missing_form": [], "done": []}
+    for order in orders:
+        assignee = assignment_by_order.get(order.id)
+        if (order.state or "").upper() in DONE_STATES or order.is_paid:
+            bucket_id = "done"
+        elif assignee:
+            bucket_id = str(assignee.id)
+        elif order.template_missing:
+            bucket_id = "missing_form"
+        else:
+            bucket_id = "orders"
+        buckets.setdefault(bucket_id, []).append(order)
+    return buckets
+
+
+def _reorder_duplicate_board(
+    session: Session,
+    *,
+    platform_id: uuid.UUID,
+    moved_order_id: uuid.UUID,
+    target_column_id: str,
+    before_order_id: uuid.UUID | None,
+) -> None:
+    """Insert a moved card before another card, or at the end when no target exists."""
+    buckets = _board_order_buckets(session, platform_id=platform_id)
+    moved_order: Order | None = None
+    target_bucket: list[Order] | None = buckets.get(target_column_id)
+    for bucket in buckets.values():
+        for order in bucket:
+            if order.id == moved_order_id:
+                moved_order = order
+            if before_order_id is not None and order.id == before_order_id:
+                target_bucket = bucket
+
+    if moved_order is None:
+        return
+    if before_order_id == moved_order_id:
+        return
+
+    for bucket in buckets.values():
+        bucket[:] = [order for order in bucket if order.id != moved_order_id]
+
+    if target_bucket is None:
+        return
+
+    if before_order_id is None:
+        target_bucket.append(moved_order)
+    else:
+        target_index = next(
+            (index for index, order in enumerate(target_bucket) if order.id == before_order_id),
+            len(target_bucket),
+        )
+        target_bucket.insert(target_index, moved_order)
+
+    for bucket in buckets.values():
+        for position, order in enumerate(bucket):
+            order.duplicate_board_position = position
 
 
 def list_duplicate_board(session: Session, *, platform_id: uuid.UUID) -> dict:
@@ -529,7 +661,11 @@ def list_duplicate_board(session: Session, *, platform_id: uuid.UUID) -> dict:
     orders = (
         session.query(Order)
         .filter(Order.platform_id == platform_id, Order.work_domain == WORK_DOMAIN_DUPLICATE)
-        .order_by(Order.deadline_at_ext.nullslast(), Order.created_at.desc())
+        .order_by(
+            Order.duplicate_board_position.asc().nullslast(),
+            Order.deadline_at_ext.nullslast(),
+            Order.created_at.desc(),
+        )
         .all()
     )
     active_assignments = (

@@ -41,6 +41,7 @@ class DuplicateCardOut(BaseModel):
     fix_approved_by_admin: bool
     assignee_id: str | None
     assignee_name: str | None
+    duplicate_board_position: int | None = None
 
 
 class DuplicateColumnOut(BaseModel):
@@ -60,6 +61,8 @@ class MoveDuplicateCardRequest(BaseModel):
     order_id: uuid.UUID
     target_column_id: str | None = None
     target_designer_id: uuid.UUID | None = None
+    before_order_id: uuid.UUID | None = None
+    reorder: bool = False
 
 
 class SetWorkDomainRequest(BaseModel):
@@ -104,6 +107,8 @@ def api_move_duplicate_card(
                 order_id=payload.order_id,
                 target_column_id=payload.target_column_id,
                 target_designer_id=payload.target_designer_id,
+                before_order_id=payload.before_order_id,
+                reorder=payload.reorder,
             )
         )
     except DuplicateBoardError as exc:

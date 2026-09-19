@@ -8,6 +8,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Integer,
     String,
     Text,
     UniqueConstraint,
@@ -224,6 +225,7 @@ class Order(Base):
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     custom_rate: Mapped[int | None] = mapped_column(nullable=True)
+    duplicate_board_position: Mapped[int | None] = mapped_column(Integer, nullable=True)
     review_submitted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
