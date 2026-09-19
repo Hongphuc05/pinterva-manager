@@ -170,8 +170,13 @@ def _is_unassigned_printerval_designer(designer: str | None) -> bool:
 
 
 def _is_choose_designer_printerval_designer(designer: str | None) -> bool:
-    """Match Printerval's visible default Designer select option exactly."""
-    return (designer or "").strip().casefold() == "choose designer"
+    """Match Printerval's default Designer selection in both UI and list API forms.
+
+    The edit form renders an unassigned selector as ``Choose Designer``. Its fast
+    list API represents that same selection as null/empty, so both forms must be
+    accepted by this explicit filter.
+    """
+    return (designer or "").strip().casefold() in {"", "choose designer"}
 
 
 def scan_orders_fast(

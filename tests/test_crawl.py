@@ -104,9 +104,11 @@ def test_fast_scan_can_filter_printerval_choose_designer_default(db_session):
         designer="__choose_designer__",
     )
 
-    assert result == {"scanned": 1, "added": 1, "updated": 0}
+    # Printerval's edit form displays "Choose Designer", while its list API
+    # returns null for the same default selection. Both must be crawlable.
+    assert result == {"scanned": 2, "added": 2, "updated": 0}
     assert db_session.query(Order).filter_by(external_order_id="DJ0001003").count() == 1
-    assert db_session.query(Order).filter_by(external_order_id="DJ0001004").count() == 0
+    assert db_session.query(Order).filter_by(external_order_id="DJ0001004").count() == 1
     assert db_session.query(Order).filter_by(external_order_id="DJ0001005").count() == 0
 
 
