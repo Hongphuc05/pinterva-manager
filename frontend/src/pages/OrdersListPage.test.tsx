@@ -891,4 +891,82 @@ describe('OrdersListPage', () => {
       expect(patchedStateBody.drive_url).toBe('https://drive.google.com/file/d/123/view')
     })
   })
+
+  it('renders Chia đơn nhanh button for admin on waiting tab and opens quick distribute modal', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) => {
+        if (url.includes('/api/me')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: 'u-admin',
+              username: 'admin1',
+              role: 'admin',
+              full_name: 'Super Admin',
+            }),
+          })
+        }
+        if (url.includes('/api/platforms')) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ platforms: [] }) })
+        }
+        if (url.includes('/api/users')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => [
+              { id: 'des-1', username: 'designer_a', full_name: 'Designer A', role: 'designer' },
+            ],
+          })
+        }
+        if (url.includes('/api/orders')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              orders: [
+                {
+                  id: 'ord-wait-1',
+                  external_order_id: 'DJ-W1',
+                  product_name: 'Summer Tee',
+                  state: 'WAITING',
+                  duplicate_check_status: 'uncheck',
+                  created_at: '2026-01-01T00:00:00',
+                },
+              ],
+            }),
+          })
+        }
+        return Promise.reject(new Error(`unexpected fetch: ${url}`))
+      })
+    )
+
+    render(
+      <BrowserRouter>
+        <AuthProvider>
+          <PlatformProvider>
+            <ToastProvider>
+              <GallerySyncProvider>
+                <OrdersListPage />
+              </GallerySyncProvider>
+            </ToastProvider>
+          </PlatformProvider>
+        </AuthProvider>
+      </BrowserRouter>
+    )
+
+    await waitFor(() => expect(screen.getByText('DJ-W1')).toBeInTheDocument())
+
+    // "Chia đơn nhanh" button should exist
+    const quickBtn = screen.getByRole('button', { name: /Chia đơn nhanh/i })
+    expect(quickBtn).toBeInTheDocument()
+
+    // Click it to open modal
+    fireEvent.click(quickBtn)
+
+    expect(screen.getByText('Chia Đơn Nhanh Cho Designer')).toBeInTheDocument()
+    expect(screen.getByText('Designer A')).toBeInTheDocument()
+  })
 })
+

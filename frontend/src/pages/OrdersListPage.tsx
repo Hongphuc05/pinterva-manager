@@ -10,6 +10,7 @@ import { Pagination, paginate } from '../components/Pagination'
 import { CopyableOrderCode } from '../components/CopyableOrderCode'
 import { CopyableProductName } from '../components/CopyableProductName'
 import { ProductQuickViewModal } from '../components/ProductQuickViewModal'
+import { QuickDistributeModal } from '../components/QuickDistributeModal'
 import { LinkifiedText, OpenExternalLinkButton } from '../components/LinkifiedText'
 import { useToast } from '../context/ToastContext'
 import { useGallerySync } from '../context/GallerySyncContext'
@@ -40,7 +41,8 @@ import {
   Undo2,
   Images,
   Trash2,
-  UserX
+  UserX,
+  Zap,
 } from 'lucide-react'
 
 export type OrderSummary = {
@@ -277,6 +279,7 @@ export function OrdersListPage() {
   const [movingToDuplicateDomain, setMovingToDuplicateDomain] = useState(false)
   const [deleteConfirmModalOpen, setDeleteConfirmModalOpen] = useState(false)
   const [isBulkDeleting, setIsBulkDeleting] = useState(false)
+  const [quickDistributeOpen, setQuickDistributeOpen] = useState(false)
 
   // Inline submission state for Designer
   const [inlineSubmissionLinks, setInlineSubmissionLinks] = useState<Record<string, string>>({})
@@ -2150,6 +2153,19 @@ export function OrdersListPage() {
             <span className="text-xs text-slate-500 font-medium">task</span>
           </div>
 
+          {/* Quick Distribute Button for Admin in Waiting tab */}
+          {isAdmin && adminTab === 'waiting' && waitingOrders.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setQuickDistributeOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-[#0052CC] hover:bg-[#0041A3] rounded-lg shadow-2xs transition-all cursor-pointer hover:shadow-xs"
+              title="Chia nhanh đơn từ trên xuống dưới cho Designer"
+            >
+              <Zap className="h-3.5 w-3.5 fill-current" />
+              <span>Chia đơn nhanh</span>
+            </button>
+          )}
+
           {(searchQuery || statusFilter || platformStatusFilter || designerFilter || batchFilter || dateFrom || dateTo || syncedImagesFilter) && (
             <div className="inline-flex items-center gap-1.5 text-xs text-slate-500 bg-slate-100/80 px-2.5 py-1 rounded-md border border-slate-200/60">
               <span className="text-slate-400">Đang lọc từ:</span>
@@ -3525,6 +3541,16 @@ export function OrdersListPage() {
           </div>
         </div>
       )}
+
+      {/* Quick Distribute Modal */}
+      <QuickDistributeModal
+        isOpen={quickDistributeOpen}
+        onClose={() => setQuickDistributeOpen(false)}
+        waitingOrders={waitingOrders}
+        designers={regularDesigners}
+        onSuccess={loadOrders}
+        setFlash={setFlash}
+      />
     </DashboardLayout>
   )
 }
