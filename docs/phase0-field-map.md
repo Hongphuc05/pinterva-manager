@@ -1,5 +1,8 @@
 # Phase 0.2/0.4 — Từ điển status & bản đồ trường dữ liệu website khách
 
+> **Historical field observation.** Không phải contract runtime; đối chiếu adapter,
+> schema và [Tacahu Ops Core](tacahu-ops-core/README.md) trước khi dùng lại selector/status.
+
 > Nguồn: khảo sát read-only `https://printerval.com/central/outsource/pod/design-job/admin`
 > (2026-09-02). Không có thao tác ghi nào được thực hiện khi khảo sát — chỉ đăng nhập, lọc/xem,
 > đọc DOM. Ví dụ trong tài liệu này đã được ẩn danh (không giữ tên khách/link đơn thật).

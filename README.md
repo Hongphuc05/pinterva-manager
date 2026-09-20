@@ -1,7 +1,9 @@
 # Tacahu Ops Dashboard
 
-Web dashboard nội bộ điều phối order 2D outsource — xem `claude.md` và
-`docs/superpowers/specs/2026-09-06-web-dashboard-design.md` để hiểu kiến trúc đầy đủ.
+> Tài liệu nghiệp vụ và vận hành hiện hành: [Tacahu Ops Core](docs/tacahu-ops-core/README.md).
+> Plan/spec trong `docs/superpowers/` là lịch sử, không phải source of truth.
+
+Web dashboard nội bộ điều phối order design trên Printerval/platform.
 
 ## Chạy local
 
@@ -38,5 +40,5 @@ ruff check .
 
 Production tự host cả React SPA lẫn API tại cùng domain, không phụ thuộc Vercel.
 `compose.production.yaml` chạy PostgreSQL, Redis, FastAPI, Celery workers, Celery Beat
-và Cloudflare Tunnel. Xem [docs/PRODUCTION_DOCKER.md](docs/PRODUCTION_DOCKER.md) trước
+và Cloudflare Tunnel. Xem [runbook hiện hành](docs/tacahu-ops-core/operations.md) trước
 khi triển khai; không dùng cấu hình này thay cho `compose.local.yaml` trên Mac.

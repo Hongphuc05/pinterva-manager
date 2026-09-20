@@ -1,5 +1,8 @@
 # Tóm tắt phiên làm việc — 2026-09-07 (Pinterval Ops Dashboard)
 
+> **Historical session summary.** Nhánh, worktree và phase trong file này có thể đã
+> thay đổi. Xem [Tacahu Ops Core](../tacahu-ops-core/README.md) cho hiện trạng.
+
 > File này tóm tắt lại **toàn bộ cuộc hội thoại** dẫn tới trạng thái hiện tại của repo, để
 > đọc lại/bàn giao. Danh sách việc còn phải làm nằm ở file riêng:
 > `docs/superpowers/REMAINING-WORK.md`.

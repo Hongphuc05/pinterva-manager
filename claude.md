@@ -1,5 +1,11 @@
 # Claude Code Project Instructions — Web Dashboard Vận Hành V1
 
+> **Current reference:** [Tacahu Ops Core](docs/tacahu-ops-core/README.md) mô tả hiện
+> trạng production. Nội dung V1/phase bên dưới được giữ làm ràng buộc thiết kế và lịch
+> sử quyết định; nếu mâu thuẫn với core docs, route, migration hoặc test hiện hành thì
+> không được coi nó là contract runtime. Telegram hiện là integration tùy cấu hình, không
+> phải workflow authority.
+
 ## 1. Sứ mệnh
 
 Implement **V1** cho hệ thống vận hành nội bộ xử lý order ảnh/sản phẩm: nhận đơn, chia

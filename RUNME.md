@@ -1,5 +1,8 @@
 # RUNME — chạy Tacahu Ops local bằng Docker
 
+> Runbook hiện hành: [Tacahu Ops Core](docs/tacahu-ops-core/operations.md). File này giữ
+> các lệnh Docker local chi tiết; không dùng cho production.
+
 Hướng dẫn này là cách chạy local chuẩn. Toàn bộ runtime nằm trong Docker; không
 cần chạy `npm run dev`, Uvicorn hay Celery thủ công.
 

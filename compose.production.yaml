@@ -15,6 +15,7 @@ x-backend: &backend
   volumes:
     - ${DATA_DIR:?Set DATA_DIR in .env.production}/crawled_assets:/app/crawled_assets
     - ${DATA_DIR:?Set DATA_DIR in .env.production}/order_assets:/app/order_assets
+    - ${DATA_DIR:?Set DATA_DIR in .env.production}/private_work_note_assets:/app/private_work_note_assets
     - ${DATA_DIR:?Set DATA_DIR in .env.production}/platform_data:/app/platform_data
     - ${DATA_DIR:?Set DATA_DIR in .env.production}/playwright_evidence:/app/playwright-evidence
     - ${DATA_DIR:?Set DATA_DIR in .env.production}/chrome_profiles:/app/chrome-profiles

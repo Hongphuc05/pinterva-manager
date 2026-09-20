@@ -185,6 +185,9 @@ buộc dừng hỏi user ở mục 4).
 
 ## 9. Tham chiếu
 
+- `docs/tacahu-ops-core/` — nguồn sự thật hiện hành cho nghiệp vụ, luồng order,
+  quyền truy cập, API và vận hành. Đọc trước `claude.md`/plan lịch sử khi cần
+  hiểu runtime hiện tại.
 - `claude.md` — spec sản phẩm (V1 Web Dashboard Vận Hành): bất biến nghiệp vụ,
   state machine, data model, business tool contract.
 - `roadmap.md` — trình tự các phase.

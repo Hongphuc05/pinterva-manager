@@ -86,6 +86,13 @@ if [[ ! -d "$DATA_DIR" ]]; then
   exit 2
 fi
 
+for directory in postgres redis crawled_assets order_assets private_work_note_assets platform_data playwright_evidence chrome_profiles; do
+  if [[ ! -d "$DATA_DIR/$directory" ]]; then
+    echo "Missing persistent data directory: $DATA_DIR/$directory" >&2
+    exit 2
+  fi
+done
+
 BACKUP_DIR="$(value BACKUP_DIR)"
 if [[ ! -d "$BACKUP_DIR" ]]; then
   echo "BACKUP_DIR does not exist: $BACKUP_DIR" >&2

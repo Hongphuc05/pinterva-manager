@@ -1,4 +1,7 @@
 # HƯỚNG DẪN THIẾT KẾ UI/UX (UI/UX DESIGN STYLE GUIDE)
+> **Legacy visual reference.** Không mô tả nghiệp vụ hoặc component contract hiện hành;
+> kiểm tra `frontend/src/` và [Tacahu Ops Core](docs/tacahu-ops-core/README.md) trước khi
+> áp dụng. Những ví dụ kiểu bệnh viện/vật tư bên dưới không thuộc Tacahu Ops.
 > **Tài liệu hướng dẫn dành cho AI Agent & Developer**  
 > *Mô tả chi tiết phong cách, hệ thống quy chuẩn UI/UX, bảng màu, typography, layout và các component mẫu để xây dựng giao diện ứng dụng quản lý doanh nghiệp / bệnh viện chuẩn hóa.*
 

@@ -2,12 +2,13 @@
 
 File [compose.local.yaml](../compose.local.yaml) là môi trường local độc lập. Nó
 chạy PostgreSQL, Redis, migration, API, React SPA, hai Celery worker và Celery Beat.
-Không dùng file này cho production; production tiếp tục dùng `compose.yaml` và Vercel.
+Không dùng file này cho production; production dùng `compose.production.yaml` và phục vụ
+SPA/API cùng origin. Xem [Tacahu Ops Core](tacahu-ops-core/operations.md).
 
 ## Khởi động
 
 ```bash
-cd /Users/hongphuc/Documents/01_congViec/pinterval-phase1
+cd /Users/hongphuc/Documents/01_congViec/pinterval
 docker compose -f compose.local.yaml up --build -d
 docker compose -f compose.local.yaml ps
 ```

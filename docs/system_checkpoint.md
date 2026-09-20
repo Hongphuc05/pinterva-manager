@@ -1,5 +1,8 @@
 # Pinterval System Checkpoint & Knowledge Persistent Summary
 
+> **Snapshot cũ.** Đọc [Tacahu Ops Core](tacahu-ops-core/README.md) cho hiện trạng;
+> checkpoint này không còn là source of truth.
+
 > **Document Type**: Persistent System Checkpoint for AI Agents & Developers  
 > **Last Updated**: 2026-09-08  
 > **Repository**: Hongphuc05/pinterva-manager (`pinterval`)

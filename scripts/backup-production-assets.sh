@@ -21,7 +21,7 @@ mkdir -p "$BACKUP_DIR"
 exec 9>"$BACKUP_DIR/.backup.lock"
 flock -n 9 || { echo "An asset backup is already running." >&2; exit 3; }
 
-sources=(crawled_assets order_assets platform_data playwright_evidence)
+sources=(crawled_assets order_assets private_work_note_assets platform_data playwright_evidence)
 if [[ "$(production_env_value "$ENV_FILE" BACKUP_INCLUDE_CHROME_PROFILES)" == "true" ]]; then
   sources+=(chrome_profiles)
 fi

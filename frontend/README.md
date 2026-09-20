@@ -1,7 +1,8 @@
 # Tacahu Ops Dashboard — frontend
 
 React + TypeScript + Vite SPA cho web dashboard vận hành nội bộ. Backend là FastAPI
-JSON API (`../app/api`), auth qua session cookie (không JWT/OAuth).
+JSON API (`../app/api`), auth qua session cookie hoặc bearer token của client.
+Nghiệp vụ/quyền/contract ở [Tacahu Ops Core](../docs/tacahu-ops-core/README.md).
 
 ## Dev
 

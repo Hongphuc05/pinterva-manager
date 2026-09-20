@@ -1,5 +1,8 @@
 # Việc còn lại — Pinterval Ops Dashboard (bàn giao 2026-09-07)
 
+> **Historical backlog snapshot.** Không dùng làm backlog/runtime hiện hành. Xem
+> [Tacahu Ops Core](../tacahu-ops-core/README.md) và issue/task hiện tại.
+
 > Đọc `docs/superpowers/SESSION-SUMMARY-2026-09-07.md` trước để biết bối cảnh đầy đủ.
 > File này chỉ liệt kê **việc cần làm**, theo đúng thứ tự ưu tiên.
 

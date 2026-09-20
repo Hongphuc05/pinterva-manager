@@ -1,5 +1,8 @@
 # Web Dashboard Vận Hành — Roadmap V1
 
+> **Historical roadmap.** Xem [Tacahu Ops Core](docs/tacahu-ops-core/README.md) để biết
+> hệ thống đang chạy gì; roadmap này giữ lại để truy vết phase và không phải backlog hiện hành.
+
 > **Phiên bản:** V1
 > **Mục tiêu:** Xây web dashboard nội bộ (admin + designer) làm giao diện chính điều phối
 > nhận đơn, chia đơn, sản xuất, duyệt và QC giữa website Printerval, Google Sheets/Drive.

@@ -1,5 +1,8 @@
 # API contract V1 — inventory và hướng rút gọn
 
+> **Historical baseline.** API surface hiện hành ở
+> [Tacahu Ops Core](tacahu-ops-core/api-surface.md). Route/schema code là contract cuối cùng.
+
 Tài liệu này là baseline cho Phase 1. `POST /orders/*` legacy chưa bị xóa chỉ vì
 đã có endpoint mới; mỗi endpoint chỉ được xóa sau khi không còn consumer trong UI,
 extension và telemetry vận hành.

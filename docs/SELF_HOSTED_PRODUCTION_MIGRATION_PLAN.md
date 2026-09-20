@@ -1,5 +1,9 @@
 # Kế hoạch chuyển backend production từ Render sang Ubuntu PC
 
+> **Historical migration plan.** Kiến trúc Render/Vercel/PC trong file này không phải
+> production hiện hành. Xem [Tacahu Ops Core](tacahu-ops-core/README.md) và
+> [PRODUCTION_DOCKER.md](PRODUCTION_DOCKER.md) trước khi vận hành/deploy.
+
 **Trạng thái:** Planning only — chưa triển khai.  
 **Ngày audit:** 2026-09-09  
 **Phạm vi:** Giữ React SPA trên Vercel; chuyển FastAPI, Celery và các dịch vụ vận hành sang một Ubuntu PC chạy 24/7, công bố API qua Cloudflare Tunnel.

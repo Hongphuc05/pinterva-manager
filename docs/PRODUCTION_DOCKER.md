@@ -1,5 +1,8 @@
 # Chạy Tacahu Ops production bằng Docker
 
+> Đọc cùng [Tacahu Ops Core](tacahu-ops-core/operations.md) để hiểu boundary dữ liệu,
+> migration, verify và workflow trước khi thao tác production.
+
 Tài liệu này dành cho VPS. Local Mac tiếp tục dùng [../RUNME.md](../RUNME.md) cùng
 `compose.local.yaml`.
 
@@ -29,6 +32,7 @@ Cloudflare Tunnel kết nối nội bộ đến `api:8000`.
     ├── redis/
     ├── crawled_assets/
     ├── order_assets/
+    ├── private_work_note_assets/
     ├── platform_data/
     ├── playwright_evidence/
     └── chrome_profiles/
@@ -53,7 +57,7 @@ git status --short                    # phải không in gì
 cp .env.production.example .env.production
 # sửa .env.production bằng editor trên VPS
 # đặt APP_VERSION bằng commit SHA hoặc tag đúng với HEAD hiện tại
-mkdir -p /srv/tacahu-ops/data/{postgres,redis,crawled_assets,order_assets,platform_data,playwright_evidence,chrome_profiles}
+mkdir -p /srv/tacahu-ops/data/{postgres,redis,crawled_assets,order_assets,private_work_note_assets,platform_data,playwright_evidence,chrome_profiles}
 mkdir -p /srv/tacahu-ops/backups/{postgres,assets}
 ./scripts/production-preflight.sh
 ```
@@ -79,6 +83,11 @@ Sau khi Cloudflare Tunnel đã được tạo và hostname `tacahu.fun` đã rou
 
 `--build` là bắt buộc để tránh build/rebuild tình cờ. Không chạy lệnh deploy này cho đến
 khi release commit và VPS configuration đã được kiểm tra.
+
+Ở lần deploy đầu tiên có mount `private_work_note_assets`, script kiểm tra API container cũ.
+Nếu container cũ chưa có mount nhưng còn screenshot Note làm việc, script copy chúng vào
+`$DATA_DIR/private_work_note_assets` **trước** khi recreate container. Nếu thư mục đích đã có
+file, script dừng thay vì ghi đè; đối soát/merge thủ công rồi deploy lại.
 
 ## Kiểm tra sau deploy
 
@@ -119,7 +128,8 @@ khi local backup thành công.
 ./scripts/backup-production-assets.sh
 ```
 
-Archive gồm crawl assets, order assets, platform data và Playwright evidence. Chrome
+Archive gồm crawl assets, order assets, private screenshot/attachment của Note làm việc,
+platform data và Playwright evidence. Chrome
 profiles không được đưa lên offsite mặc định vì có thể chứa session/cookie; chỉ bật
 `BACKUP_INCLUDE_CHROME_PROFILES=true` khi remote storage đã được bảo vệ phù hợp.
 
