@@ -57,6 +57,20 @@ def test_production_persists_private_work_note_attachments_and_backs_them_up():
     assert "private_work_note_assets" in backup_script
     assert "private_work_note_assets" in preflight
     assert "Preserving legacy private work-note attachments" in deploy_script
+    assert "docker stop" in deploy_script
     assert "docker cp" in deploy_script
+    assert 'mkdir -p "$work_note_assets_dir"' in deploy_script
+    assert "config --images" in deploy_script
+    assert "--entrypoint chown" in deploy_script
     assert "Preparing persistent work-note attachments" in workflow
-    assert "--entrypoint chown" in workflow
+    assert "--entrypoint chown" not in workflow
+
+    # The legacy copy must finish before the persistent host directory is made private
+    # to the unprivileged API user. A production image is then built before final chown,
+    # including clean installs where no previous API container exists.
+    assert deploy_script.index('docker cp "$existing_api_container') < deploy_script.rindex(
+        "-R 10001:10001 /assets"
+    )
+    assert deploy_script.index('"${compose[@]}" build') < deploy_script.rindex(
+        "-R 10001:10001 /assets"
+    )

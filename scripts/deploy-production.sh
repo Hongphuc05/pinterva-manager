@@ -36,27 +36,48 @@ fi
 
 data_dir="$(awk -F= '$1 == "DATA_DIR" { sub(/^[^=]*=/, ""); print; exit }' "$ENV_FILE")"
 work_note_assets_dir="$data_dir/private_work_note_assets"
+mkdir -p "$work_note_assets_dir"
 existing_api_container="$("${compose[@]}" ps -q api 2>/dev/null || true)"
+existing_api_image=""
+has_legacy_work_note_assets=false
 
 # Releases before private_work_note_assets was added kept pasted screenshots inside the API
-# container. Preserve them before Compose recreates that container. Refuse ambiguous merges
-# rather than overwrite attachment bytes that may already have been recovered manually.
+# container. Take a consistent snapshot before Compose recreates that container. Refuse
+# ambiguous merges rather than overwrite attachment bytes that may already have been
+# recovered manually.
 if [[ -n "$existing_api_container" ]]; then
   existing_assets_mount="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/app/private_work_note_assets"}}{{.Source}}{{end}}{{end}}' "$existing_api_container")"
-  if [[ -z "$existing_assets_mount" ]] \
-    && docker exec "$existing_api_container" test -d /app/private_work_note_assets \
-    && docker exec "$existing_api_container" sh -c 'find /app/private_work_note_assets -mindepth 1 -print -quit | grep -q .'; then
+  if [[ -z "$existing_assets_mount" ]] && docker exec "$existing_api_container" test -d /app/private_work_note_assets && docker exec "$existing_api_container" sh -c 'find /app/private_work_note_assets -mindepth 1 -print -quit | grep -q .'; then
+    existing_api_image="$(docker inspect -f '{{.Config.Image}}' "$existing_api_container")"
+
+    # A previous deploy may already have made this directory private to UID 10001.
+    # Give the deploy user temporary access so it can safely inspect/copy the legacy files.
+    docker run --rm --user 0:0 -v "$work_note_assets_dir:/assets" --entrypoint chown "$existing_api_image" -R "$(id -u):$(id -g)" /assets
+
     if find "$work_note_assets_dir" -mindepth 1 -print -quit | grep -q .; then
       echo "Refusing to merge legacy work-note attachments into non-empty $work_note_assets_dir." >&2
       echo "Verify or merge the files manually before deploying." >&2
       exit 1
     fi
-    echo "Preserving legacy private work-note attachments before API recreate..."
-    docker cp "$existing_api_container:/app/private_work_note_assets/." "$work_note_assets_dir"
+    has_legacy_work_note_assets=true
   fi
 fi
 
 "${compose[@]}" build
+
+if [[ "$has_legacy_work_note_assets" == true ]]; then
+  # Stop writes before copying, so screenshots created just before deployment are not lost.
+  docker stop "$existing_api_container" >/dev/null
+  echo "Preserving legacy private work-note attachments before API recreate..."
+  docker cp "$existing_api_container:/app/private_work_note_assets/." "$work_note_assets_dir"
+fi
+
+# The production image runs as UID/GID 10001. Do this after any docker cp so a new,
+# existing, or manually recovered directory is always writable by the API after recreate.
+api_image="$("${compose[@]}" config --images | awk '/^tacahu-ops:/ { print; exit }')"
+[[ -n "$api_image" ]] || { echo "Could not resolve the production API image." >&2; exit 1; }
+docker image inspect "$api_image" >/dev/null
+docker run --rm --user 0:0 -v "$work_note_assets_dir:/assets" --entrypoint chown "$api_image" -R 10001:10001 /assets
 "${compose[@]}" up -d postgres redis
 "${compose[@]}" --profile migration run --rm migrate
 "${compose[@]}" up -d --no-build api celery-general celery-assignment celery-beat
