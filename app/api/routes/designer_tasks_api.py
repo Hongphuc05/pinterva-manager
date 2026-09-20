@@ -33,6 +33,17 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+def _uses_order_concurrency(user: User) -> bool:
+    """Trello is the only Designer workflow that retains optimistic locking.
+
+    Regular Designers each work on their own assignment.  Background syncs and
+    Admin notes can legitimately change the parent Order while they are working,
+    so treating those revisions as a conflicting edit made normal submissions
+    fail unnecessarily.
+    """
+    return user.role == ROLE_DESIGNER_TRELLO
+
+
 def get_drive_adapter() -> DriveAdapter:
     try:
         return GoogleDriveAdapter()
@@ -156,7 +167,8 @@ def api_start_task(
         result = start_task(
             db, assignment_id, user.id, f"start:{user.id}:{payload.request_id}",
             request_fingerprint=str(assignment_id),
-            expected_version=payload.expected_version,
+            expected_version=payload.expected_version if _uses_order_concurrency(user) else None,
+            enforce_processing_lease=_uses_order_concurrency(user),
         )
     except Exception as exc:  # routed through stable HTTP errors above
         _raise_task_error(exc)
@@ -172,7 +184,11 @@ def api_heartbeat_task_processing_lease(
 ):
     try:
         result = heartbeat_task(
-            db, assignment_id, user.id, expected_version=payload.expected_version,
+            db,
+            assignment_id,
+            user.id,
+            expected_version=payload.expected_version if _uses_order_concurrency(user) else None,
+            enforce_processing_lease=_uses_order_concurrency(user),
         )
     except Exception as exc:
         _raise_task_error(exc)
@@ -191,7 +207,8 @@ def api_update_sub_status(
             db, assignment_id, user.id, payload.sub_status,
             f"sub-status:{user.id}:{payload.request_id}",
             request_fingerprint=f"{assignment_id}:{payload.sub_status}",
-            expected_version=payload.expected_version,
+            expected_version=payload.expected_version if _uses_order_concurrency(user) else None,
+            enforce_processing_lease=_uses_order_concurrency(user),
         )
     except Exception as exc:  # routed through stable HTTP errors above
         _raise_task_error(exc)
@@ -210,7 +227,7 @@ def api_flag_missing_template(
             db, assignment_id, user.id,
             f"flag-missing-template:{user.id}:{payload.request_id}",
             request_fingerprint=str(assignment_id),
-            expected_version=payload.expected_version,
+            expected_version=payload.expected_version if _uses_order_concurrency(user) else None,
         )
     except Exception as exc:
         _raise_task_error(exc)
@@ -238,7 +255,8 @@ def api_submit_result(
             db, drive_adapter, assignment_id, user.id, str(payload.drive_url),
             f"submit-result:{user.id}:{payload.request_id}",
             request_fingerprint=f"{assignment_id}:{payload.drive_url}",
-            expected_version=payload.expected_version,
+            expected_version=payload.expected_version if _uses_order_concurrency(user) else None,
+            enforce_processing_lease=_uses_order_concurrency(user),
         )
     except Exception as exc:  # routed through stable HTTP errors above
         _raise_task_error(exc)

@@ -190,11 +190,16 @@ def start_task(
     idempotency_key: str,
     request_fingerprint: str,
     expected_version: int | None = None,
+    enforce_processing_lease: bool = True,
 ) -> dict:
     def _do() -> dict:
         assignment, order = _owned_task(session, assignment_id, designer_id, lock=True)
         require_expected_order_version(order, expected_version)
-        lease_expires_at = acquire_processing_lease(session, order, actor_id=designer_id)
+        lease_expires_at = (
+            acquire_processing_lease(session, order, actor_id=designer_id)
+            if enforce_processing_lease
+            else None
+        )
         if order.state == OrderState.REVISION.value:
             sub_status = "fixing"
         else:
@@ -206,7 +211,7 @@ def start_task(
         assignment.sub_status = sub_status
         session.add(assignment)
         session.flush()
-        return {"assignment_id": str(assignment.id), "state": order.state, "sub_status": sub_status, "version": order.version, "processing_lock_expires_at": lease_expires_at.isoformat()}
+        return {"assignment_id": str(assignment.id), "state": order.state, "sub_status": sub_status, "version": order.version, "processing_lock_expires_at": lease_expires_at.isoformat() if lease_expires_at else None}
 
     return run_idempotent(
         session, idempotency_key, "start_task", _do, request_fingerprint=request_fingerprint
@@ -218,17 +223,22 @@ def heartbeat_task(
     assignment_id: uuid.UUID,
     designer_id: uuid.UUID,
     expected_version: int | None = None,
+    enforce_processing_lease: bool = True,
 ) -> dict:
     assignment, order = _owned_task(session, assignment_id, designer_id, lock=True)
     require_expected_order_version(order, expected_version)
-    expires_at = heartbeat_processing_lease(session, order, actor_id=designer_id)
+    expires_at = (
+        heartbeat_processing_lease(session, order, actor_id=designer_id)
+        if enforce_processing_lease
+        else None
+    )
     session.commit()
     return {
         "assignment_id": str(assignment.id),
         "state": order.state,
         "sub_status": assignment.sub_status,
         "version": order.version,
-        "processing_lock_expires_at": expires_at.isoformat(),
+        "processing_lock_expires_at": expires_at.isoformat() if expires_at else None,
     }
 
 
@@ -240,6 +250,7 @@ def update_sub_status(
     idempotency_key: str,
     request_fingerprint: str,
     expected_version: int | None = None,
+    enforce_processing_lease: bool = True,
 ) -> dict:
     if sub_status not in SUB_STATUSES:
         raise ValueError("sub_status must be one of doing, fixing, done")
@@ -247,7 +258,8 @@ def update_sub_status(
     def _do() -> dict:
         assignment, order = _owned_task(session, assignment_id, designer_id, lock=True)
         require_expected_order_version(order, expected_version)
-        ensure_processing_lease(session, order, actor_id=designer_id)
+        if enforce_processing_lease:
+            ensure_processing_lease(session, order, actor_id=designer_id)
         assignment.sub_status = sub_status
         session.add(assignment)
         return {"assignment_id": str(assignment.id), "state": order.state, "sub_status": sub_status, "version": order.version}
@@ -321,11 +333,13 @@ def submit_result(
     idempotency_key: str,
     request_fingerprint: str,
     expected_version: int | None = None,
+    enforce_processing_lease: bool = True,
 ) -> dict:
     def _do() -> dict:
         assignment, order = _owned_task(session, assignment_id, designer_id, lock=True)
         require_expected_order_version(order, expected_version)
-        ensure_processing_lease(session, order, actor_id=designer_id)
+        if enforce_processing_lease:
+            ensure_processing_lease(session, order, actor_id=designer_id)
         is_fix_resubmission = bool(
             (order.fix_return_count and order.fix_return_count > 0)
             or order.state == OrderState.REVISION.value
@@ -380,7 +394,8 @@ def submit_result(
         order.deadline_overdue_notified_at = None
         assignment.sub_status = "done"
         session.add(assignment)
-        release_processing_lease(session, order, actor_id=designer_id, reason="result_submitted")
+        if enforce_processing_lease:
+            release_processing_lease(session, order, actor_id=designer_id, reason="result_submitted")
         session.flush()
         return {
             "assignment_id": str(assignment.id),

@@ -119,6 +119,50 @@ def test_trello_designer_can_submit_result_for_owned_duplicate_order(client, db_
     assert response.json()["state"] == OrderState.QC_PENDING.value
 
 
+def test_regular_designer_submission_ignores_stale_parent_order_version(client, db_session, monkeypatch):
+    """A background/Admin order update must not block the normal Designer's work."""
+    designer = _login(client, db_session, "designer", "regular-stale-version")
+    assignment, order = _seed_owned_task(db_session, designer)
+    stale_version = order.version
+    order.designer_note = "Admin cập nhật hướng dẫn trong khi Designer đang làm"
+    db_session.commit()
+    assert order.version != stale_version
+
+    from app.workers import assignment_sync_tasks
+
+    monkeypatch.setattr(assignment_sync_tasks.sync_order_review_to_printerval_task, "delay", lambda *_args, **_kwargs: None)
+    response = client.post(
+        f"/api/assignments/{assignment.id}/results",
+        json={
+            "drive_url": "https://drive.google.com/file/d/known-file/view",
+            "request_id": "regular-stale-submit",
+            "expected_version": stale_version,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["state"] == OrderState.QC_PENDING.value
+
+
+def test_trello_designer_submission_keeps_optimistic_version_check(client, db_session):
+    trello_designer = _login(client, db_session, "designer-trello", "trello-stale-version")
+    assignment, order = _seed_owned_task(db_session, trello_designer)
+    order.work_domain = "duplicate"
+    db_session.commit()
+
+    response = client.post(
+        f"/api/assignments/{assignment.id}/results",
+        json={
+            "drive_url": "https://drive.google.com/file/d/known-file/view",
+            "request_id": "trello-stale-submit",
+            "expected_version": order.version + 1,
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "ORDER_VERSION_CONFLICT"
+
+
 def test_result_api_verifies_drive_enters_qc_queue_and_queues_printerval_review(client, db_session, monkeypatch):
     designer = _login(client, db_session, "designer", "submitter")
     assignment, order = _seed_owned_task(db_session, designer, OrderState.IN_PROGRESS.value)

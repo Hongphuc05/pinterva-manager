@@ -109,6 +109,7 @@ export function OrderDetailPage() {
   const location = useLocation()
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
+  const usesOrderConcurrency = isAdmin || user?.role === 'designer-trello'
   const [order, setOrder] = useState<OrderDetail | null>(null)
   const [history, setHistory] = useState<WorkflowEvent[]>([])
   const [conflictMessage, setConflictMessage] = useState<string | null>(null)
@@ -187,7 +188,10 @@ export function OrderDetailPage() {
     try {
       await apiFetch(`/assignments/${order.assignment_id}/flag-missing-template`, {
         method: 'POST',
-        body: JSON.stringify({ request_id: crypto.randomUUID(), expected_version: order.version }),
+        body: JSON.stringify({
+          request_id: crypto.randomUUID(),
+          ...(usesOrderConcurrency ? { expected_version: order.version } : {}),
+        }),
       })
       setActionSuccess('Đã báo thiếu temp. Đơn được chuyển sang mục Chờ cập nhật.')
       await loadOrderDetail()
@@ -244,7 +248,7 @@ export function OrderDetailPage() {
             body: JSON.stringify({
               drive_url: submittedText || 'Đã hoàn thành',
               request_id: crypto.randomUUID(),
-              expected_version: order.version,
+              ...(usesOrderConcurrency ? { expected_version: order.version } : {}),
             }),
           })
           submittedByAssignment = true
@@ -259,7 +263,7 @@ export function OrderDetailPage() {
             state: 'QC_PENDING',
             drive_url: hasFixTag ? undefined : (submittedText || undefined),
             note_outsource: hasFixTag ? undefined : (submittedText || undefined),
-            expected_version: order.version,
+            ...(usesOrderConcurrency ? { expected_version: order.version } : {}),
           }),
         })
       }
@@ -294,7 +298,10 @@ export function OrderDetailPage() {
     try {
       await apiFetch(`/orders/${order.id}/state`, {
         method: 'PATCH',
-        body: JSON.stringify({ state: newState, expected_version: order.version }),
+        body: JSON.stringify({
+          state: newState,
+          ...(usesOrderConcurrency ? { expected_version: order.version } : {}),
+        }),
       })
       const stateLabel =
         newState === 'IN_PROGRESS'

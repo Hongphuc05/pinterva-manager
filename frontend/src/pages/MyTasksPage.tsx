@@ -64,6 +64,7 @@ const subStatusLabels: Record<string, string> = { doing: 'Đang làm', fixing: '
 
 export function MyTasksPage() {
   const { user } = useAuth()
+  const usesOrderConcurrency = user?.role === 'designer-trello'
   const [tasks, setTasks] = useState<Task[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -110,7 +111,7 @@ export function MyTasksPage() {
         method: 'POST',
         body: JSON.stringify({
           request_id: crypto.randomUUID(),
-          expected_version: task.order.version,
+          ...(usesOrderConcurrency ? { expected_version: task.order.version } : {}),
         }),
       })
       await loadTasks()
@@ -126,7 +127,10 @@ export function MyTasksPage() {
     try {
       await apiFetch(`/assignments/${task.assignment_id}/start`, {
         method: 'POST',
-        body: JSON.stringify({ request_id: crypto.randomUUID(), expected_version: task.order.version }),
+        body: JSON.stringify({
+          request_id: crypto.randomUUID(),
+          ...(usesOrderConcurrency ? { expected_version: task.order.version } : {}),
+        }),
       })
       await loadTasks()
       window.dispatchEvent(new CustomEvent('orders-updated'))
@@ -138,6 +142,7 @@ export function MyTasksPage() {
   }
 
   useEffect(() => {
+    if (!usesOrderConcurrency) return
     const lockedTasks = tasks.filter((task) => task.order.processing_lock_owned_by_me)
     if (!lockedTasks.length) return
     const heartbeat = () => {
@@ -154,7 +159,7 @@ export function MyTasksPage() {
     }
     const interval = window.setInterval(heartbeat, 5 * 60 * 1000)
     return () => window.clearInterval(interval)
-  }, [tasks])
+  }, [tasks, usesOrderConcurrency])
 
   if (user?.role !== 'designer') {
     return (

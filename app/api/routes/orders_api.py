@@ -1999,10 +1999,18 @@ def api_update_order_state(
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
+    # Regular Designers are intentionally outside the optimistic-lock rollout.
+    # Their owned assignment and allowed state transitions remain enforced below;
+    # a harmless Admin note or external sync must not block a submission.
+    expected_version = (
+        payload.expected_version
+        if user.role in (ROLE_ADMIN, ROLE_DESIGNER_TRELLO)
+        else None
+    )
     order = _lock_order_by_identifier(
         db,
         order_id,
-        expected_version=payload.expected_version,
+        expected_version=expected_version,
         platform_id=platform_id,
     )
 
