@@ -311,6 +311,13 @@ def get_finance_stats(
         if asgn_by_id
         else []
     )
+    rv_by_asgn: dict[uuid.UUID, list[ResultVersion]] = {}
+    rv_by_order: dict[uuid.UUID, list[ResultVersion]] = {}
+    for rv in result_versions:
+        rv_by_asgn.setdefault(rv.assignment_id, []).append(rv)
+        asg = asgn_by_id.get(rv.assignment_id)
+        if asg:
+            rv_by_order.setdefault(asg.order_id, []).append(rv)
 
     # 6. Build submission records per (designer_key, order_id)
     submissions_by_key: dict[tuple[str, uuid.UUID], dict[str, Any]] = {}
@@ -362,7 +369,10 @@ def get_finance_stats(
         des_id_str = str(des_user.id) if des_user else None
 
         key = (des_key, order.id)
-        drive_link = ev_evidence.get("drive_link") or (order.note_outsource if ("drive.google" in (order.note_outsource or "") or "http" in (order.note_outsource or "")) else (order.note_outsource if (order.note_outsource or "").strip() else None))
+        raw_note = (order.note_outsource or "").strip()
+        has_note_url = ("http://" in raw_note or "https://" in raw_note or "drive.google" in raw_note or "docs.google" in raw_note)
+        order_rvs = rv_by_order.get(order.id, [])
+        drive_link = ev_evidence.get("drive_link") or (order_rvs[0].drive_url if order_rvs else (raw_note if has_note_url else None))
 
         time_anchor = order.status_changed_at or ev.created_at
         review_sub_time = order.review_submitted_at or order.status_changed_at or ev.created_at
@@ -371,6 +381,8 @@ def get_finance_stats(
         task_rate = order.custom_rate if order.custom_rate is not None else (
             duplicate_rate if task_domain == WORK_DOMAIN_DUPLICATE else standard_rate
         )
+
+        is_valid_url = bool(drive_link and ("http://" in str(drive_link) or "https://" in str(drive_link) or "drive.google" in str(drive_link) or "docs.google" in str(drive_link)))
 
         if key not in submissions_by_key:
             submissions_by_key[key] = {
@@ -385,8 +397,8 @@ def get_finance_stats(
                 "designer_key": des_key,
                 "current_state": order.state,
                 "printerval_status": order.printerval_status,
-                "drive_link": drive_link,
-                "placeholder_filled": bool(drive_link and str(drive_link).strip()),
+                "drive_link": drive_link if is_valid_url else None,
+                "placeholder_filled": is_valid_url,
                 "status_changed_at": time_anchor,
                 "review_submitted_at": review_sub_time,
                 "first_submitted_at": ev.created_at,
@@ -410,9 +422,9 @@ def get_finance_stats(
                 rec["first_submitted_at"] = ev.created_at
             if ev.created_at > rec["latest_submitted_at"]:
                 rec["latest_submitted_at"] = ev.created_at
-                if drive_link:
+                if is_valid_url:
                     rec["drive_link"] = drive_link
-                    rec["placeholder_filled"] = bool(drive_link and str(drive_link).strip())
+                    rec["placeholder_filled"] = True
 
     # Also incorporate ResultVersions
     for rv in result_versions:
@@ -424,27 +436,15 @@ def get_finance_stats(
             continue
 
         des_user = user_map_by_id.get(asg.designer_id) if asg.designer_id else None
-        des_key = str(des_user.id) if des_user else (str(des_id) if des_id else (str(order.printerval_designer) if order.printerval_designer else "unknown"))
-        des_display_name = (des_user.full_name or des_user.username) if des_user else (order.printerval_designer or "Chưa phân công")
+        des_key = str(des_user.id) if des_user else (order.printerval_designer or "Unknown Designer")
+        des_display_name = (des_user.full_name or des_user.username) if des_user else str(des_key)
         des_username = des_user.username if des_user else None
-        des_id_str = str(des_user.id) if des_user else (str(des_id) if des_id else None)
+        des_id_str = str(des_user.id) if des_user else None
 
         key = (des_key, order.id)
-        sub_time = ev.created_at
+        sub_time = rv.submitted_at or rv.created_at or order.created_at
 
-        # Find matching ResultVersion if available
-        asg_ids_for_order = [a.id for a in asgns_by_order.get(order.id, [])]
-        order_rvs = [rv for rv in result_versions if rv.assignment_id in asg_ids_for_order]
-        matched_rv = None
-        for rv in order_rvs:
-            rv_time = rv.submitted_at or rv.created_at
-            if abs((rv_time - sub_time).total_seconds()) < 120:
-                matched_rv = rv
-                break
-        if not matched_rv and order_rvs:
-            matched_rv = order_rvs[0]
-
-        drive_url_val = matched_rv.drive_url if matched_rv else None
+        drive_url_val = rv.drive_url
         if not drive_url_val:
             raw_note = (order.note_outsource or "").strip()
             if "http://" in raw_note or "https://" in raw_note or "drive.google" in raw_note or "docs.google" in raw_note:
@@ -499,10 +499,10 @@ def get_finance_stats(
             if sub_time > rec["latest_submitted_at"]:
                 rec["latest_submitted_at"] = sub_time
 
-    # Also check orders in QC_PENDING, REVIEW, REVISION, DONE that have an assigned designer
+    # Also check orders in QC_PENDING, REVIEW, REVISION, DONE or is_paid that have an assigned designer
     for order in orders:
         st_upper = (order.state or "").upper()
-        if st_upper in ("QC_PENDING", "REVIEW", "REVISION", "FIX", "DONE", "CLAIMED_IMPORTED"):
+        if st_upper in ("QC_PENDING", "REVIEW", "REVISION", "FIX", "DONE", "CLAIMED_IMPORTED") or order.is_paid:
             des_user = None
             if order.id in asgns_by_order:
                 for asg in asgns_by_order[order.id]:
