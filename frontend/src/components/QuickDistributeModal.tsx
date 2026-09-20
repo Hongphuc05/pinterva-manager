@@ -8,6 +8,7 @@ import {
   Equal,
   Loader2,
   CheckCircle2,
+  Search,
 } from 'lucide-react'
 import { apiFetch, ApiError } from '../api/client'
 import type { OrderSummary, UserOption } from '../pages/OrdersListPage'
@@ -35,6 +36,18 @@ export function QuickDistributeModal({
   const [submitting, setSubmitting] = useState(false)
   const [showWarning, setShowWarning] = useState(false)
   const [warningUncheckCount, setWarningUncheckCount] = useState(0)
+  const [searchQuery, setSearchQuery] = useState('')
+
+  const filteredDesigners = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase()
+    if (!q) return designers
+    return designers.filter(
+      (des) =>
+        (des.full_name || '').toLowerCase().includes(q) ||
+        (des.username || '').toLowerCase().includes(q) ||
+        (des.platform_designer_option || '').toLowerCase().includes(q)
+    )
+  }, [designers, searchQuery])
 
   const totalWaiting = waitingOrders.length
 
@@ -185,33 +198,59 @@ export function QuickDistributeModal({
           </div>
         </div>
 
-        {/* Quick Toolbar */}
-        <div className="flex items-center justify-between px-6 py-2.5 bg-white border-b border-slate-100">
-          <span className="text-xs font-semibold text-slate-600 flex items-center gap-1.5">
-            <Users className="h-3.5 w-3.5 text-slate-400" />
-            Danh sách Designer ({designers.length})
-          </span>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleDistributeEvenly}
-              disabled={submitting || designers.length === 0 || totalWaiting === 0}
-              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-[#0052CC] hover:bg-blue-50 rounded-lg border border-blue-200 transition-colors disabled:opacity-50"
-              title="Chia đều tổng số đơn cho các Designer"
-            >
-              <Equal className="h-3 w-3" />
-              <span>Chia đều</span>
-            </button>
-            <button
-              type="button"
-              onClick={handleClearAll}
-              disabled={submitting || totalAllocated === 0}
-              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors disabled:opacity-50"
-              title="Xóa tất cả số lượng đã nhập"
-            >
-              <RotateCcw className="h-3 w-3" />
-              <span>Xóa hết</span>
-            </button>
+        {/* Quick Toolbar & Filter Input */}
+        <div className="px-6 py-2.5 bg-white border-b border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Lọc Designer theo tên hoặc @username..."
+              className="w-full pl-9 pr-8 py-1.5 text-xs rounded-xl border border-slate-200 bg-slate-50/60 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:bg-white focus:border-[#0052CC] focus:ring-1 focus:ring-[#0052CC] transition-all"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 rounded-full p-0.5"
+                title="Xóa tìm kiếm"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0">
+            <span className="text-xs font-semibold text-slate-500 flex items-center gap-1">
+              <Users className="h-3.5 w-3.5 text-slate-400" />
+              <span>
+                {filteredDesigners.length}
+                {searchQuery.trim() ? ` / ${designers.length}` : ''}
+              </span>
+            </span>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={handleDistributeEvenly}
+                disabled={submitting || designers.length === 0 || totalWaiting === 0}
+                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-[#0052CC] hover:bg-blue-50 rounded-lg border border-blue-200 transition-colors disabled:opacity-50 cursor-pointer"
+                title="Chia đều tổng số đơn cho các Designer"
+              >
+                <Equal className="h-3 w-3" />
+                <span>Chia đều</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleClearAll}
+                disabled={submitting || totalAllocated === 0}
+                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors disabled:opacity-50 cursor-pointer"
+                title="Xóa tất cả số lượng đã nhập"
+              >
+                <RotateCcw className="h-3 w-3" />
+                <span>Xóa hết</span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -219,6 +258,17 @@ export function QuickDistributeModal({
         <div className="flex-1 overflow-y-auto px-6 py-3 max-h-[340px]">
           {designers.length === 0 ? (
             <div className="py-8 text-center text-xs text-slate-400">Không có Designer nào trong hệ thống.</div>
+          ) : filteredDesigners.length === 0 ? (
+            <div className="py-8 text-center text-xs text-slate-400 space-y-2">
+              <p>Không tìm thấy Designer nào khớp với từ khóa "{searchQuery}".</p>
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="text-[#0052CC] font-bold hover:underline cursor-pointer"
+              >
+                Xóa tìm kiếm
+              </button>
+            </div>
           ) : (
             <table className="w-full text-left text-xs">
               <thead>
@@ -228,7 +278,7 @@ export function QuickDistributeModal({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {designers.map((des) => {
+                {filteredDesigners.map((des) => {
                   const val = allocations[des.id] || 0
                   return (
                     <tr key={des.id} className="hover:bg-slate-50/60 transition-colors">
