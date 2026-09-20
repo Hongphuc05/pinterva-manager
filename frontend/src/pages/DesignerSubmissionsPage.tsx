@@ -18,6 +18,7 @@ import {
 import { Sidebar } from '../components/Sidebar'
 import { useAuth } from '../auth/AuthContext'
 import { usePlatform } from '../auth/PlatformContext'
+import { sortUsersByRoleAndName } from '../utils/userSorting'
 import { useToast } from '../context/ToastContext'
 import { apiFetch } from '../api/client'
 
@@ -98,7 +99,8 @@ export function DesignerSubmissionsPage() {
     try {
       const res = await apiFetch<UserItem[]>('/users')
       if (Array.isArray(res)) {
-        setDesigners(res.filter((u) => u.role === 'designer' || u.role === 'designer-trello'))
+        const filtered = res.filter((u) => u.role === 'designer' || u.role === 'designer-trello' || u.role === 'designer_trello')
+        setDesigners(sortUsersByRoleAndName(filtered))
       }
     } catch {
       // Ignore if user list is restricted

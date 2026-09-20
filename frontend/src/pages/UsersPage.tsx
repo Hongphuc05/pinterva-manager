@@ -15,6 +15,7 @@ import {
   KeyRound
 } from 'lucide-react'
 import { usePlatform } from '../auth/PlatformContext'
+import { sortUsersByRoleAndName } from '../utils/userSorting'
 
 type UserItem = {
   id: string
@@ -66,8 +67,8 @@ export function UsersPage() {
         apiFetch<UserItem[]>('/users'),
         apiFetch<UserItem[]>('/users/unassigned'),
       ])
-      setUsers(data)
-      setUnassignedUsers(unassigned)
+      setUsers(sortUsersByRoleAndName(data))
+      setUnassignedUsers(sortUsersByRoleAndName(unassigned))
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message)

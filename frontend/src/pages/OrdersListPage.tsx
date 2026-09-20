@@ -16,6 +16,7 @@ import { useToast } from '../context/ToastContext'
 import { useGallerySync } from '../context/GallerySyncContext'
 import { useSyncStatus } from '../hooks/useSyncStatus'
 import { readViewState, writeViewState } from '../utils/viewState'
+import { sortUsersByRoleAndName } from '../utils/userSorting'
 import {
   Package,
   Search,
@@ -361,7 +362,12 @@ export function OrdersListPage() {
     })
   }, [user?.role, adminTab, supportTab, activeDesignerTab, adminDoingSubFilter, adminFixSubFilter, statusFilter, platformStatusFilter, designerFilter, batchFilter, searchQuery, syncedImagesFilter, dateFilterType, dateFrom, dateTo, datePreset, dateSort, currentPage])
 
-  const regularDesigners = usersList.filter((candidate) => candidate.role === 'designer')
+  const regularDesigners = useMemo(() => {
+    const candidates = usersList.filter(
+      (candidate) => candidate.role === 'designer' || candidate.role === 'designer_trello' || candidate.role === 'designer-trello'
+    )
+    return sortUsersByRoleAndName(candidates)
+  }, [usersList])
 
   // Keep adminTab in sync with searchParams
   useEffect(() => {
