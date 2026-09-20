@@ -219,6 +219,11 @@ export function OrderDetailPage() {
     if (!order) return
     const norm = (order.state || '').toUpperCase()
     if (norm === 'QC_PENDING' || norm === 'REVIEW') return
+    const hasFix = (order.fix_return_count || 0) > 0 || norm === 'REVISION' || norm === 'FIX' || Boolean(order.fix_approved_by_admin)
+    if (hasFix) {
+      void handleConfirmSubmit()
+      return
+    }
     setActionError(null)
     setShowSubmitModal(true)
   }
@@ -252,8 +257,8 @@ export function OrderDetailPage() {
           method: 'PATCH',
           body: JSON.stringify({
             state: 'QC_PENDING',
-            drive_url: submittedText || undefined,
-            note_outsource: submittedText || undefined,
+            drive_url: hasFixTag ? undefined : (submittedText || undefined),
+            note_outsource: hasFixTag ? undefined : (submittedText || undefined),
             expected_version: order.version,
           }),
         })
@@ -272,9 +277,14 @@ export function OrderDetailPage() {
     if (!order) return
     const currentNorm = (order.state || '').toUpperCase()
 
-    // If clicking Review button and not currently in Review, trigger the submission modal
+    // If clicking Review button and not currently in Review, trigger submission or confirm
     if (newState === 'QC_PENDING' && currentNorm !== 'QC_PENDING' && currentNorm !== 'REVIEW') {
-      handleInitiateReviewSubmit()
+      const hasFix = (order.fix_return_count || 0) > 0 || currentNorm === 'REVISION' || currentNorm === 'FIX' || Boolean(order.fix_approved_by_admin)
+      if (hasFix) {
+        void handleConfirmSubmit()
+      } else {
+        handleInitiateReviewSubmit()
+      }
       return
     }
 
@@ -333,6 +343,7 @@ export function OrderDetailPage() {
   const isReview = normState === 'QC_PENDING' || normState === 'REVIEW' || normState === 'RESULT_SUBMITTED'
   const isFix = normState === 'REVISION' || normState === 'FIX' || normState === 'REVISION_REQUESTED'
   const isDone = normState === 'DONE' || normState === 'SKIPPED'
+  const hasFixTag = (order.fix_return_count || 0) > 0 || isFix || Boolean(order.fix_approved_by_admin) || order.sub_status === 'fixing'
 
   // Extract all variants to display at header (Type, Size, etc.)
   const variantsToDisplay = (() => {
@@ -910,36 +921,49 @@ export function OrderDetailPage() {
                 className="space-y-2 pt-3 border-t border-blue-100"
                 onSubmit={(event) => {
                   event.preventDefault()
-                  if (isFix) void handleConfirmSubmit()
+                  if (hasFixTag) void handleConfirmSubmit()
                   else handleInitiateReviewSubmit()
                 }}
               >
                 <div className="flex flex-col sm:flex-row gap-3">
-                  {!isFix && <div className="relative flex-1">
-                    <input
-                      type="text"
-                      disabled={isReview || busyAssignment}
-                      className={`w-full px-3.5 py-2 text-xs rounded-xl border font-mono transition-all focus:outline-none ${
-                        isReview
-                          ? 'bg-slate-100 text-slate-500 border-slate-200 cursor-not-allowed pr-40'
-                          : 'bg-white text-slate-900 border-slate-300 focus:border-[#0052CC] focus:ring-1 focus:ring-[#0052CC] pr-24'
-                      }`}
-                      placeholder={
-                        isReview
-                          ? 'Đã nộp bài - Đang ở Review (Bấm "Doing" ở trên nếu muốn sửa nộp lại)'
-                          : 'Nhập link Drive, link ảnh hoặc ghi chú hoàn thành (tùy chọn)...'
-                      }
-                      value={driveUrl}
-                      onChange={(e) => setDriveUrl(e.target.value)}
-                    />
-                    {!isReview && <span className="absolute right-1.5 top-1/2 -translate-y-1/2"><OpenExternalLinkButton url={driveUrl} label="Mở" /></span>}
-                    {isReview && (
-                      <span className="absolute right-2.5 top-1.5 text-[10px] font-bold text-purple-800 bg-purple-100 px-2 py-1 rounded-md border border-purple-200 flex items-center gap-1 shadow-2xs select-none">
-                        <Lock className="h-3 w-3" />
-                        <span>Đã khóa ở Review</span>
-                      </span>
-                    )}
-                  </div>}
+                  {!hasFixTag && (
+                    <div className="relative flex-1">
+                      <input
+                        type="text"
+                        disabled={isReview || busyAssignment}
+                        className={`w-full px-3.5 py-2 text-xs rounded-xl border font-mono transition-all focus:outline-none ${
+                          isReview
+                            ? 'bg-slate-100 text-slate-500 border-slate-200 cursor-not-allowed pr-40'
+                            : 'bg-white text-slate-900 border-slate-300 focus:border-[#0052CC] focus:ring-1 focus:ring-[#0052CC] pr-24'
+                        }`}
+                        placeholder={
+                          isReview
+                            ? 'Đã nộp bài - Đang ở Review (Bấm "Doing" ở trên nếu muốn sửa nộp lại)'
+                            : 'Nhập link Drive, link ảnh hoặc ghi chú hoàn thành (tùy chọn)...'
+                        }
+                        value={driveUrl}
+                        onChange={(e) => setDriveUrl(e.target.value)}
+                      />
+                      {!isReview && (
+                        <span className="absolute right-1.5 top-1/2 -translate-y-1/2">
+                          <OpenExternalLinkButton url={driveUrl} label="Mở" />
+                        </span>
+                      )}
+                      {isReview && (
+                        <span className="absolute right-2.5 top-1.5 text-[10px] font-bold text-purple-800 bg-purple-100 px-2 py-1 rounded-md border border-purple-200 flex items-center gap-1 shadow-2xs select-none">
+                          <Lock className="h-3 w-3" />
+                          <span>Đã khóa ở Review</span>
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {hasFixTag && !isReview && (
+                    <div className="flex-1 flex items-center gap-2 text-xs font-semibold text-orange-900 bg-orange-50 border border-orange-200/80 px-3.5 py-2 rounded-xl">
+                      <AlertCircle className="h-4 w-4 text-orange-600 shrink-0" />
+                      <span>Đơn có tag Fix (Fix × {order.fix_return_count || 1}). Bài nộp giữ nguyên link gốc từ kho lưu trữ. Bạn thực hiện sửa bài và bấm Cập nhật đơn để gửi Review.</span>
+                    </div>
+                  )}
 
                   <button
                     type="submit"
@@ -951,7 +975,7 @@ export function OrderDetailPage() {
                     }`}
                   >
                     <Send className="h-3.5 w-3.5" />
-                    <span>{isReview ? 'Đã Nộp (Chờ Review)' : isFix ? 'Cập nhật đơn' : 'Nộp Bài QC (Màu Xanh)'}</span>
+                    <span>{isReview ? 'Đã Nộp (Chờ Review)' : hasFixTag ? 'Cập nhật đơn' : 'Nộp Bài QC (Màu Xanh)'}</span>
                   </button>
                 </div>
 

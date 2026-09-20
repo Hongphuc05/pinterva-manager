@@ -326,19 +326,23 @@ def submit_result(
         assignment, order = _owned_task(session, assignment_id, designer_id, lock=True)
         require_expected_order_version(order, expected_version)
         ensure_processing_lease(session, order, actor_id=designer_id)
-        is_fix_resubmission = order.state == OrderState.REVISION.value
+        is_fix_resubmission = bool(
+            (order.fix_return_count and order.fix_return_count > 0)
+            or order.state == OrderState.REVISION.value
+            or order.fix_approved_by_admin
+        )
         if order.state not in (OrderState.IN_PROGRESS.value, OrderState.WAITING.value, OrderState.REVISION.value):
             raise ValueError(f"Task must be in progress, waiting, or revision to submit (current state: {order.state})")
         effective_drive_url = (drive_url or "").strip()
-        if not effective_drive_url:
-            latest_rv = (
+        if is_fix_resubmission or not effective_drive_url or effective_drive_url == "Đã hoàn thành":
+            first_rv = (
                 session.query(ResultVersion)
                 .filter(ResultVersion.assignment_id == assignment.id)
-                .order_by(ResultVersion.version_marker.desc())
+                .order_by(ResultVersion.version_marker.asc())
                 .first()
             )
-            if latest_rv and latest_rv.drive_url:
-                effective_drive_url = latest_rv.drive_url
+            if first_rv and first_rv.drive_url:
+                effective_drive_url = first_rv.drive_url
             elif order.drive_url:
                 effective_drive_url = order.drive_url
 

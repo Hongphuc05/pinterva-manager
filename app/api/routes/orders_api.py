@@ -2074,10 +2074,16 @@ def api_update_order_state(
 
     submitted_link = (payload.drive_url or "").strip()
     submitted_note = (payload.note_outsource or "").strip()
-    if submitted_link:
-        order.note_outsource = submitted_link
-    elif submitted_note:
-        order.note_outsource = submitted_note
+    is_fix_order = bool(
+        (order.fix_return_count and order.fix_return_count > 0)
+        or old_state in (OrderState.REVISION.value, "FIX", "REVISION_REQUESTED")
+        or order.fix_approved_by_admin
+    )
+    if not is_fix_order:
+        if submitted_link:
+            order.note_outsource = submitted_link
+        elif submitted_note:
+            order.note_outsource = submitted_note
 
     actor_name = user.full_name or user.username
     des_name = None
@@ -2094,8 +2100,8 @@ def api_update_order_state(
     if not des_name and order.printerval_designer:
         des_name = order.printerval_designer
 
-    # Record submitted version if drive link provided
-    if submitted_link and curr_assignment:
+    # Record submitted version if drive link provided and not fix order
+    if submitted_link and curr_assignment and not is_fix_order:
         v_count = db.query(ResultVersion).filter(ResultVersion.assignment_id == curr_assignment.id).count()
         rv = ResultVersion(
             assignment_id=curr_assignment.id,
@@ -2112,7 +2118,7 @@ def api_update_order_state(
         if curr_assignment:
             curr_assignment.sub_status = (
                 "fixing"
-                if old_state in (OrderState.REVISION.value, "FIX", "REVISION_REQUESTED")
+                if old_state in (OrderState.REVISION.value, "FIX", "REVISION_REQUESTED") or is_fix_order
                 else "doing"
             )
         if old_state in (OrderState.QC_PENDING.value, "REVIEW"):
@@ -2129,7 +2135,7 @@ def api_update_order_state(
         order.deadline_overdue_notified_at = None
         if curr_assignment:
             curr_assignment.sub_status = "done"
-        if old_state in (OrderState.REVISION.value, "FIX", "REVISION_REQUESTED"):
+        if old_state in (OrderState.REVISION.value, "FIX", "REVISION_REQUESTED") or is_fix_order:
             action_type = "RESUBMIT_FIX"
             desc = f"{actor_disp} nộp lại bài sau khi fix"
         else:
@@ -2189,10 +2195,10 @@ def api_update_order_state(
 
             sync_order_review_to_printerval_task.delay(
                 str(order.id),
-                order.note_outsource,
+                None if is_fix_order else order.note_outsource,
                 "Review",
                 expected_state=OrderState.QC_PENDING.value,
-                expected_fix_approved=False,
+                expected_fix_approved=is_fix_order,
             )
         except Exception:
             pass
