@@ -150,6 +150,10 @@ describe('DuplicateBoardPage', () => {
     expect(screen.getByText('Áo đang làm')).toBeInTheDocument()
     expect(screen.getByText('Áo đã xong chưa TT')).toBeInTheDocument()
     expect(screen.getByText('Áo đã xong đã TT')).toBeInTheDocument()
+
+    for (const columnTitle of ['Đơn hàng', 'Thiếu form', 'Trello Designer Phúc', 'Done']) {
+      expect(screen.getByLabelText(`Danh sách đơn của ${columnTitle}`)).toHaveClass('overflow-y-auto')
+    }
   })
 
   it('filters Done cards by payment status and designer', async () => {
