@@ -9,6 +9,7 @@ import { OrdersListPage } from './pages/OrdersListPage'
 import { OrderDetailPage } from './pages/OrderDetailPage'
 import { UsersPage } from './pages/UsersPage'
 import { DesignerBoardPage } from './pages/DesignerBoardPage'
+import { DesignerSubmissionsPage } from './pages/DesignerSubmissionsPage'
 import { OrderHistoryPage } from './pages/OrderHistoryPage'
 import { FinancePage } from './pages/FinancePage'
 import { DuplicateBoardPage } from './pages/DuplicateBoardPage'
@@ -52,6 +53,14 @@ function App() {
             element={
               <ProtectedRoute allowedRoles={['admin']}>
                 <DesignerBoardPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/designer-submissions"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'support']}>
+                <DesignerSubmissionsPage />
               </ProtectedRoute>
             }
           />

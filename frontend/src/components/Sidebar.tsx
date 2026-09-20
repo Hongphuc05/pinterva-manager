@@ -10,6 +10,7 @@ import {
   Coins,
   Columns3,
   Globe,
+  FolderGit2,
   X,
 } from 'lucide-react'
 
@@ -34,6 +35,7 @@ export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
       items: [
         { label: 'Đơn Hàng', path: '/orders', icon: ListOrdered },
         { label: 'Tiến Độ Team', path: '/designer-board', icon: UserCheck },
+        { label: 'Lưu Link Nộp Bài', path: '/designer-submissions', icon: FolderGit2 },
         { label: 'Board Đơn trùng lặp', path: '/kanban', icon: Columns3 },
         { label: 'Mở Hệ Thống Mẹ', path: '/platform-hub', icon: Globe },
       ],
@@ -56,6 +58,7 @@ export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
       label: 'Vận hành',
       items: [
         { label: 'Đơn Hàng', path: '/orders', icon: ListOrdered },
+        { label: 'Lưu Link Nộp Bài', path: '/designer-submissions', icon: FolderGit2 },
         { label: 'Board Đơn trùng lặp', path: '/kanban', icon: Columns3 },
       ],
     },

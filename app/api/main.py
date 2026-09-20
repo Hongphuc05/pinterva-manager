@@ -19,6 +19,7 @@ from app.api.routes import health as health_routes
 from app.api.routes import orders_api as orders_api_routes
 from app.api.routes import platforms_api as platforms_api_routes
 from app.api.routes import protected_example
+from app.api.routes import submissions_api as submissions_api_routes
 from app.api.routes import sync_jobs_api as sync_jobs_api_routes
 from app.api.routes import telegram_api as telegram_api_routes
 from app.api.routes import users_api as users_api_routes
@@ -161,6 +162,7 @@ def create_app() -> FastAPI:
     app.include_router(users_api_routes.router, prefix="/api")
     app.include_router(platforms_api_routes.router, prefix="/api")
     app.include_router(sync_jobs_api_routes.router, prefix="/api")
+    app.include_router(submissions_api_routes.router, prefix="/api")
     app.include_router(orders_api_routes.router, prefix="/api")
     app.include_router(finance_api_routes.router, prefix="/api")
     app.include_router(designer_tasks_api_routes.router, prefix="/api")

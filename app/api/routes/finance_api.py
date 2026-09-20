@@ -424,20 +424,41 @@ def get_finance_stats(
             continue
 
         des_user = user_map_by_id.get(asg.designer_id) if asg.designer_id else None
-        des_key = str(des_user.id) if des_user else (order.printerval_designer or "Unknown Designer")
-        des_display_name = (des_user.full_name or des_user.username) if des_user else str(des_key)
+        des_key = str(des_user.id) if des_user else (str(des_id) if des_id else (str(order.printerval_designer) if order.printerval_designer else "unknown"))
+        des_display_name = (des_user.full_name or des_user.username) if des_user else (order.printerval_designer or "Chưa phân công")
         des_username = des_user.username if des_user else None
-        des_id_str = str(des_user.id) if des_user else None
+        des_id_str = str(des_user.id) if des_user else (str(des_id) if des_id else None)
 
         key = (des_key, order.id)
-        sub_time = rv.submitted_at or rv.created_at
+        sub_time = ev.created_at
+
+        # Find matching ResultVersion if available
+        asg_ids_for_order = [a.id for a in asgns_by_order.get(order.id, [])]
+        order_rvs = [rv for rv in result_versions if rv.assignment_id in asg_ids_for_order]
+        matched_rv = None
+        for rv in order_rvs:
+            rv_time = rv.submitted_at or rv.created_at
+            if abs((rv_time - sub_time).total_seconds()) < 120:
+                matched_rv = rv
+                break
+        if not matched_rv and order_rvs:
+            matched_rv = order_rvs[0]
+
+        drive_url_val = matched_rv.drive_url if matched_rv else None
+        if not drive_url_val:
+            raw_note = (order.note_outsource or "").strip()
+            if "http://" in raw_note or "https://" in raw_note or "drive.google" in raw_note or "docs.google" in raw_note:
+                drive_url_val = raw_note
+
         time_anchor = order.status_changed_at or sub_time
-        review_sub_time = order.review_submitted_at or order.status_changed_at or sub_time
+        review_sub_time = order.review_submitted_at or sub_time
 
         task_domain = order.work_domain or "standard"
         task_rate = order.custom_rate if order.custom_rate is not None else (
             duplicate_rate if task_domain == WORK_DOMAIN_DUPLICATE else standard_rate
         )
+
+        is_valid_url = bool(drive_url_val and ("http://" in drive_url_val or "https://" in drive_url_val or "drive.google" in drive_url_val or "docs.google" in drive_url_val))
 
         if key not in submissions_by_key:
             submissions_by_key[key] = {
@@ -452,8 +473,8 @@ def get_finance_stats(
                 "designer_key": des_key,
                 "current_state": order.state,
                 "printerval_status": order.printerval_status,
-                "drive_link": rv.drive_url,
-                "placeholder_filled": bool(rv.drive_url and str(rv.drive_url).strip()),
+                "drive_link": drive_url_val if is_valid_url else None,
+                "placeholder_filled": is_valid_url,
                 "status_changed_at": time_anchor,
                 "review_submitted_at": review_sub_time,
                 "first_submitted_at": sub_time,
@@ -470,9 +491,9 @@ def get_finance_stats(
             }
         else:
             rec = submissions_by_key[key]
-            if not rec.get("drive_link") and rv.drive_url:
-                rec["drive_link"] = rv.drive_url
-                rec["placeholder_filled"] = bool(rv.drive_url and str(rv.drive_url).strip())
+            if not rec.get("placeholder_filled") and is_valid_url:
+                rec["drive_link"] = drive_url_val
+                rec["placeholder_filled"] = True
             if sub_time < rec["first_submitted_at"]:
                 rec["first_submitted_at"] = sub_time
             if sub_time > rec["latest_submitted_at"]:
@@ -495,11 +516,16 @@ def get_finance_stats(
             if des_user or order.printerval_designer:
                 des_key = str(des_user.id) if des_user else str(order.printerval_designer)
                 key = (des_key, order.id)
-                drive_val = (
-                    order.note_outsource
-                    if ("drive.google" in (order.note_outsource or "") or "http" in (order.note_outsource or ""))
-                    else (order.note_outsource if (order.note_outsource or "").strip() else None)
-                )
+
+                order_rvs = rv_by_order.get(order.id, [])
+                drive_val = order_rvs[0].drive_url if order_rvs else None
+                if not drive_val:
+                    raw_note = (order.note_outsource or "").strip()
+                    if "http://" in raw_note or "https://" in raw_note or "drive.google" in raw_note or "docs.google" in raw_note:
+                        drive_val = raw_note
+
+                is_valid_url = bool(drive_val and ("http://" in drive_val or "https://" in drive_val or "drive.google" in drive_val or "docs.google" in drive_val))
+
                 time_anchor = order.status_changed_at or order.updated_at or order.created_at
                 review_sub_time = order.review_submitted_at or order.status_changed_at or time_anchor
 
@@ -521,8 +547,8 @@ def get_finance_stats(
                         "designer_key": des_key,
                         "current_state": order.state,
                         "printerval_status": order.printerval_status,
-                        "drive_link": drive_val,
-                        "placeholder_filled": bool(drive_val and str(drive_val).strip()),
+                        "drive_link": drive_val if is_valid_url else None,
+                        "placeholder_filled": is_valid_url,
                         "status_changed_at": time_anchor,
                         "review_submitted_at": review_sub_time,
                         "first_submitted_at": order.updated_at or order.created_at,
