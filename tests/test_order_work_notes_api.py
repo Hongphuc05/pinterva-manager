@@ -148,6 +148,43 @@ def test_admin_and_assigned_designer_share_append_only_order_note(client, db_ses
     assert denied.status_code == 404
 
 
+def test_work_note_marks_another_operators_update_as_unread_once(client, db_session):
+    platform = Platform(id=uuid.uuid4(), name="Work note unread", account_username="unread@example.com")
+    db_session.add(platform)
+    db_session.commit()
+    admin = _login(client, db_session, "work-note-unread-admin", "admin", platform.id)
+    order = _seed_order(db_session, platform.id)
+    headers = {"X-Platform-Id": str(platform.id)}
+    owner = _login(client, db_session, "work-note-unread-designer", "designer", platform.id)
+    db_session.add(Assignment(order_id=order.id, designer_id=owner.id, status="approved"))
+    db_session.commit()
+    assert client.post("/api/login", json={"username": admin.username, "password": "s3cret!"}).status_code == 200
+
+    assert client.post(
+        f"/api/orders/{order.id}/work-notes",
+        data={"body": "Admin đã cập nhật temp", "request_id": "unread-admin-1"},
+        headers=headers,
+    ).status_code == 201
+
+    assert client.post("/api/login", json={"username": owner.username, "password": "s3cret!"}).status_code == 200
+    first_designer_open = client.get(f"/api/orders/{order.id}/work-notes")
+    assert first_designer_open.status_code == 200
+    assert first_designer_open.json()["has_unread_update"] is True
+    assert client.get(f"/api/orders/{order.id}/work-notes").json()["has_unread_update"] is False
+
+    assert client.post(
+        f"/api/orders/{order.id}/work-notes",
+        data={"body": "Designer đã xem và cập nhật", "request_id": "unread-designer-1"},
+    ).status_code == 201
+
+    # Switch back to the Admin session. The dot is returned once, then this open is recorded.
+    assert client.post("/api/login", json={"username": admin.username, "password": "s3cret!"}).status_code == 200
+    first_admin_open = client.get(f"/api/orders/{order.id}/work-notes", headers=headers)
+    assert first_admin_open.status_code == 200
+    assert first_admin_open.json()["has_unread_update"] is True
+    assert client.get(f"/api/orders/{order.id}/work-notes", headers=headers).json()["has_unread_update"] is False
+
+
 def test_work_note_rejects_non_raster_upload(client, db_session):
     platform = Platform(id=uuid.uuid4(), name="Work note validation", account_username="validation@example.com")
     db_session.add(platform)

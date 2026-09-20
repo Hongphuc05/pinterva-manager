@@ -27,6 +27,7 @@ type PendingImage = { file: File; preview: string }
 export function OrderWorkNotesCard({ orderId }: { orderId: string }) {
   const { user } = useAuth()
   const [notes, setNotes] = useState<WorkNote[]>([])
+  const [hasUnreadUpdate, setHasUnreadUpdate] = useState(false)
   const [body, setBody] = useState('')
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([])
   const [loading, setLoading] = useState(true)
@@ -40,8 +41,9 @@ export function OrderWorkNotesCard({ orderId }: { orderId: string }) {
 
   async function loadNotes() {
     try {
-      const data = await apiFetch<{ notes: WorkNote[] }>(`/orders/${orderId}/work-notes`)
+      const data = await apiFetch<{ notes: WorkNote[]; has_unread_update?: boolean }>(`/orders/${orderId}/work-notes`)
       setNotes(data.notes || [])
+      setHasUnreadUpdate(Boolean(data.has_unread_update))
       setError(null)
     } catch (caught: any) {
       setError(caught?.message || 'Không thể tải Note làm việc.')
@@ -126,6 +128,7 @@ export function OrderWorkNotesCard({ orderId }: { orderId: string }) {
       pendingImages.forEach(({ file }) => form.append('images', file, file.name || 'pasted-image.png'))
       const note = await apiFetch<WorkNote>(`/orders/${orderId}/work-notes`, { method: 'POST', body: form })
       setNotes((current) => [...current, note])
+      setHasUnreadUpdate(false)
       pendingImages.forEach((image) => URL.revokeObjectURL(image.preview))
       setPendingImages([])
       setBody('')
@@ -142,6 +145,7 @@ export function OrderWorkNotesCard({ orderId }: { orderId: string }) {
       <div className="flex items-center gap-1.5 font-bold text-slate-800">
         <FileText className="h-4 w-4 text-[#0052CC]" />
         <span>Note làm việc</span>
+        {hasUnreadUpdate && <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" title="Có cập nhật mới từ người còn lại" aria-label="Có cập nhật note mới" />}
       </div>
       <p className="text-[11px] text-slate-500">Ghi chú chung của đơn. Mọi cập nhật được giữ lại theo thời gian.</p>
 

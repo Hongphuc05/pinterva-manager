@@ -355,6 +355,22 @@ class OrderWorkNoteAttachment(Base):
     )
 
 
+class OrderWorkNoteRead(Base):
+    """The most recent work-note entry an operator has opened for an order."""
+
+    __tablename__ = "order_work_note_reads"
+    __table_args__ = (
+        UniqueConstraint("order_id", "user_id", name="uq_order_work_note_read_user"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    order_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("orders.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class Assignment(Base):
     __tablename__ = "assignments"
 

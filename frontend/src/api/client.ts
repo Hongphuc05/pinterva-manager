@@ -8,6 +8,20 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The API helpers own the `/api` prefix. Normalize a configured base URL so
+ * deployments may use either `https://example.com` or `https://example.com/api`
+ * without accidentally requesting `/api/api/...`.
+ */
+function getApiBaseUrl(): string {
+  const configured = (import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/+$/, '')
+  return configured.replace(/\/api$/, '')
+}
+
+function getApiUrl(path: string): string {
+  return `${getApiBaseUrl()}/api${path}`
+}
+
 type OrderVersionConflictDetail = {
   code: 'ORDER_VERSION_CONFLICT'
   message?: string
@@ -47,8 +61,8 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     headers['X-Platform-Id'] = activePlatformId
   }
 
-  const baseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
-  const resp = await fetch(`${baseUrl}/api${path}`, {
+  const baseUrl = getApiBaseUrl()
+  const resp = await fetch(getApiUrl(path), {
     ...init,
     credentials: baseUrl ? 'include' : 'same-origin',
     headers,
@@ -88,8 +102,8 @@ export async function apiFetchBlob(path: string): Promise<Blob> {
   if (token) headers.Authorization = `Bearer ${token}`
   if (activePlatformId) headers['X-Platform-Id'] = activePlatformId
 
-  const baseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
-  const resp = await fetch(`${baseUrl}/api${path}`, {
+  const baseUrl = getApiBaseUrl()
+  const resp = await fetch(getApiUrl(path), {
     credentials: baseUrl ? 'include' : 'same-origin',
     headers,
   })
@@ -104,7 +118,7 @@ export async function apiFetchBlob(path: string): Promise<Blob> {
 export function resolveAssetUrl(url: string | null | undefined): string {
   if (!url) return ''
   if (url.startsWith('/crawled_assets/') || url.startsWith('/order_assets/') || url.startsWith('/api/')) {
-    const baseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
+    const baseUrl = getApiBaseUrl()
     return baseUrl ? `${baseUrl}${url}` : url
   }
   return url

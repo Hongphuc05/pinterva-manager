@@ -1,9 +1,43 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, apiFetch } from './client'
+import { ApiError, apiFetch, apiFetchBlob, resolveAssetUrl } from './client'
 import { createOrderCommandBody, getOrderVersionConflict } from './orderCommand'
 
 describe('order command helpers', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+  })
+
+  it('normalizes an API-suffixed base URL for API requests', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'https://tacahu.fun/api')
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), {
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await apiFetch('/orders/order-1')
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://tacahu.fun/api/orders/order-1',
+      expect.objectContaining({ credentials: 'include' }),
+    )
+  })
+
+  it('uses the normalized URL when downloading a private attachment', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'https://tacahu.fun/api/')
+    const fetchMock = vi.fn().mockResolvedValue(new Response(new Blob(['image']), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await apiFetchBlob('/orders/order-1/work-notes/note-1/attachments/image-1')
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://tacahu.fun/api/orders/order-1/work-notes/note-1/attachments/image-1',
+      expect.objectContaining({ credentials: 'include' }),
+    )
+    expect(resolveAssetUrl('/api/orders/order-1/asset')).toBe('https://tacahu.fun/api/orders/order-1/asset')
+  })
+
   it('adds the current revision and a fresh idempotency key', () => {
     vi.stubGlobal('crypto', { randomUUID: () => 'command-key' })
 

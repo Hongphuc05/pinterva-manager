@@ -34,6 +34,7 @@ from app.adapters.db.models import (
     OrderAsset,
     OrderWorkNote,
     OrderWorkNoteAttachment,
+    OrderWorkNoteRead,
     Platform,
     PrintervalAssignmentRequest,
     ResultVersion,
@@ -1433,8 +1434,29 @@ def api_list_order_work_notes(
         .order_by(OrderWorkNote.created_at.asc())
         .all()
     )
+    read_state = (
+        db.query(OrderWorkNoteRead)
+        .filter(OrderWorkNoteRead.order_id == order.id, OrderWorkNoteRead.user_id == user.id)
+        .one_or_none()
+    )
+    has_unread_update = bool(
+        notes
+        and any(
+            note.author_id != user.id
+            and (read_state is None or note.created_at > read_state.last_seen_at)
+            for note in notes
+        )
+    )
+    if notes:
+        last_seen_at = notes[-1].created_at
+        if read_state is None:
+            db.add(OrderWorkNoteRead(order_id=order.id, user_id=user.id, last_seen_at=last_seen_at))
+        elif last_seen_at > read_state.last_seen_at:
+            read_state.last_seen_at = last_seen_at
+        db.commit()
+
     if not notes:
-        return {"notes": []}
+        return {"notes": [], "has_unread_update": False}
     author_ids = {note.author_id for note in notes}
     authors = {author.id: author for author in db.query(User).filter(User.id.in_(author_ids)).all()}
     note_ids = [note.id for note in notes]
@@ -1447,6 +1469,7 @@ def api_list_order_work_notes(
     ):
         attachments_by_note[attachment.note_id].append(attachment)
     return {
+        "has_unread_update": has_unread_update,
         "notes": [
             _work_note_out(note, authors[note.author_id], attachments_by_note[note.id])
             for note in notes
@@ -2068,10 +2091,9 @@ def api_update_designer_note(
     if order is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
     order.designer_note = payload.designer_note.strip()
-    order.designer_note_released_for_fix = bool(order.designer_note) and (
-        (order.state or "").upper() in ("REVISION", "REVISION_REQUESTED", "FIX")
-        and bool(order.fix_approved_by_admin)
-    )
+    state = (order.state or "").upper()
+    is_approved_fix = state in ("REVISION", "REVISION_REQUESTED", "FIX") and bool(order.fix_approved_by_admin)
+    order.designer_note_released_for_fix = bool(order.designer_note) and is_approved_fix
     db.add(WorkflowEvent(
         order_id=order.id, from_state=order.state, to_state=order.state, actor_id=user.id,
         evidence={"action": "UPDATE_DESIGNER_NOTE", "actor_role": "admin", "actor_name": user.full_name or user.username,
