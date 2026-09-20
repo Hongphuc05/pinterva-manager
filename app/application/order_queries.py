@@ -157,7 +157,11 @@ def list_orders_for_user(
 
 def get_order_detail_for_user(session: Session, user: User, order_id: str) -> Order | None:
     """Return Order detail for Admin or Designer in platform.
-    If user is a Designer, they can only view orders assigned to themselves.
+
+    A standard Designer can only view their own standard-domain orders. A
+    Trello Designer can view every duplicate-domain order because the
+    Duplicate Board is a shared workspace; the response is still sanitized at
+    the API boundary.
     Supports both internal UUID string and external_order_id string (e.g. DJ1475461).
     """
     order = None
@@ -198,17 +202,10 @@ def get_order_detail_for_user(session: Session, user: User, order_id: str) -> Or
     if user.role == ROLE_DESIGNER_TRELLO:
         if order.work_domain != WORK_DOMAIN_DUPLICATE:
             return None
-        assignment = (
-            session.query(Assignment)
-            .filter(
-                Assignment.order_id == order.id,
-                Assignment.designer_id == user.id,
-                Assignment.status != "cancelled",
-            )
-            .first()
-        )
-        if assignment is None:
-            return None
+        # Duplicate Board is intentionally a shared workspace: every active
+        # Trello Designer may inspect any duplicate card, not only their own
+        # assignment. The caller still receives the Designer-sanitized view.
+        # Unreleased Fix remains blocked by the guard above.
 
     return order
 

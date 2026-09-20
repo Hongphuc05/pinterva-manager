@@ -28,11 +28,14 @@ constraint `users.role`.
 **Produces:** `duplicate_board.py`, `/duplicate-board`, `/duplicate-board/move`,
 `/orders/duplicate-domain`.
 
-1. Viết read model có cột unassigned + user `designer-trello` active.
+1. Viết read model có cột unassigned + user `designer-trello` active; trả link
+   `ResultVersion` mới nhất trên mỗi card để cả nhóm xem bài đã nộp, không trả
+   note outsource/lịch sử version.
 2. Viết command chuyển domain, cancel assignment active và audit.
 3. Viết command move có lock, kiểm tra platform/role/policy và audit.
 4. Register router; cập nhật query visibility để `designer-trello` chỉ xem
-domain duplicate.
+domain duplicate nhưng được đọc mọi card/chi tiết an toàn trong shared board,
+không chỉ card tự nhận.
 5. Test authorization, platform scope, conversion, move và concurrent-safe
 reassignment behavior.
 
@@ -55,7 +58,8 @@ phân công Designer/Printerval.
 
 1. Vẽ cột cuộn ngang/card/drop-zone bằng native HTML5 drag and drop, không thêm
 dependency nặng.
-2. Phân biệt click mở order với thao tác drag; show loading/error/drop feedback.
+2. Phân biệt click mở order với thao tác drag; hiển thị link bài nộp mới nhất
+trên card và mở ở tab mới; show loading/error/drop feedback.
 3. Admin và Designer Trello đều vào board; role khác không có nav entry.
 4. Cập nhật UsersPage để tạo/hiển thị nhãn role mới.
 5. Build frontend và test tương tác cơ bản.

@@ -13,7 +13,7 @@ Hệ thống quản lý đơn hàng kết nối 2 chiều với Platform gốc (
 | **Admin** | `admin` | Toàn quyền hệ thống: crawl đơn, phân loại đơn trùng/không trùng, chia đơn cho designer, duyệt/từ chối fix, cấu hình hệ thống. |
 | **Support Team** | `support` | Hỗ trợ phân loại đơn trùng / không trùng, kiểm tra trạng thái đơn hàng. |
 | **Designer thường** | `designer` | Nhận đơn do Admin phân công vào tab **Doing**, làm mẫu thiết kế, nộp link Drive hoàn thành sang **Review**, nhận lại đơn sửa tại tab **Cần sửa gấp (Fix)** nếu Admin duyệt fix. |
-| **Designer Trello** | `designer_trello` | Hoạt động trên Board đơn trùng (Duplicate Board), tự chọn/kéo đơn về cột của mình, các bước làm bài, nộp link, sửa bài giống hệt Designer thường. |
+| **Designer Trello** | `designer_trello` | Hoạt động trên Board đơn trùng (Duplicate Board), tự chọn/kéo đơn về cột của mình, các bước làm bài, nộp link, sửa bài giống hệt Designer thường. Board là workspace chung: xem được toàn bộ thẻ của nhóm và link bài nộp mới nhất của từng thẻ. |
 
 ---
 
@@ -98,6 +98,7 @@ Admin hoặc Support Team kiểm tra danh sách đơn mới tại tab Chờ phâ
 > 1. **Gắn tag & đưa vào Board chung**: Đơn được gán nhãn `duplicate` và xuất hiện trên **Duplicate Board (Trello Board)** – một không gian làm việc mở dành cho nhóm Designer Trello.
 > 2. **Tự chọn đơn (Self-allocation)**: Thay vì Admin phải chia đơn thủ công cho từng người, các Designer Trello chủ động chọn đơn từ cột chờ nhận kéo về cột của mình.
 > 3. **Làm việc nhóm cùng nhau & Minh bạch (Collaboration & Visibility)**: Trong Board này, tất cả các Designer đều nhìn thấy toàn bộ đơn của nhau, biết rõ ai đang làm đơn nào, tiến độ ra sao và đã hoàn thành những đơn gì. Điều này giúp cả nhóm phối hợp nhịp nhàng, tối ưu hóa việc tái sử dụng template và tránh làm trùng công sức của nhau.
+> 4. **Link bài nộp dùng chung**: Mỗi thẻ có bài nộp hiển thị link `ResultVersion` mới nhất. Tất cả Designer Trello trong cùng platform đều mở được link này, kể cả thẻ do Designer Trello khác thực hiện hoặc đã nằm ở cột Done. Đây là ngoại lệ cộng tác có chủ đích của Duplicate Board; không áp dụng cho luồng Designer thường.
 
 - **Thao tác Admin / Support**: Chọn đơn trùng và bấm chuyển sang **Board Đơn Trùng**.
 - **Hành động hệ thống**:
@@ -107,6 +108,7 @@ Admin hoặc Support Team kiểm tra danh sách đơn mới tại tab Chờ phâ
   4. **Quyền của Designer Trello (`role = designer_trello`)**:
      - Des Trello truy cập vào Duplicate Board, xem danh sách đơn trùng đang chờ.
      - Des Trello tự chọn đơn và kéo (drag & drop) hoặc gán đơn về cột cá nhân của mình.
+     - Des Trello được xem chi tiết an toàn của mọi đơn `duplicate` trong Board và link bài nộp mới nhất trên mọi thẻ; không bị giới hạn bởi assignee của thẻ.
      - Sau khi nhận đơn, toàn bộ quy trình làm bài, nộp link, review, fix tiếp theo của Des Trello hoàn toàn giống hệt Designer thường.
 
 ---
@@ -265,9 +267,12 @@ Khi đơn rơi vào tab **Fix**, Admin mở đơn lên để đọc yêu cầu c
 2. **Kiểm soát luồng Fix chặt chẽ (Zero-Leakage Fix Gate)**:
    - Designer (cả Designer thường lẫn Designer Trello) **không bao giờ** nhìn thấy hoặc thao tác được trên đơn Fix khi Admin chưa bấm Chấp nhận Fix (`fix_approved_by_admin = False`).
    - Mọi API chi tiết đơn (`/orders/{id}`) và danh sách đơn (`/orders`, `/duplicate-board`) đều chặn hiển thị đơn Fix chưa duyệt đối với Designer.
-3. **Chống lỗi ghi đè bất đồng bộ (Async Race Condition Prevention)**:
+3. **Ngoại lệ cộng tác Duplicate Board (Shared Submission Visibility)**:
+   - Với `work_domain = "duplicate"`, mọi `designer-trello` cùng platform được đọc mọi card và chi tiết đơn đã được phép hiển thị trên Board, không chỉ card đang được assign cho chính họ.
+   - Board chỉ trả `submission_url`/`submission_version` của bản `ResultVersion` mới nhất để nhóm xem bài đã nộp. `note_outsource`, lịch sử audit, các version cũ và dữ liệu nội bộ vẫn không được trả cho Designer Trello.
+4. **Chống lỗi ghi đè bất đồng bộ (Async Race Condition Prevention)**:
    - Khi Designer nộp bài, job đẩy `Review` lên Platform được đưa vào hàng đợi Celery.
    - Trước khi thực hiện ghi dữ liệu lên Platform, worker luôn kiểm tra lại `is_still_expected()`: Nếu trạng thái trong DB đã thay đổi (ví dụ: Platform đã trả về Fix và Admin đã chấp nhận Fix), job cũ sẽ **tự động hủy (skip)** để tránh ghi đè làm mất trạng thái Fix trên Platform.
-4. **Cơ chế Đồng bộ lại Fix (Re-sync Fix)**:
+5. **Cơ chế Đồng bộ lại Fix (Re-sync Fix)**:
    - Admin có nút hỗ trợ gửi lại lệnh Fix lên Platform đối với các đơn đã được duyệt để sửa ngay lập tức mọi trường hợp lệch trạng thái giữa hệ thống và Platform.
-5. **Đồng bộ 2 chiều bảo đảm (Idempotent Sync)**: Mọi thao tác nộp bài từ Designer và từ chối Fix từ Admin đều tự động đẩy trạng thái `Review` và ghi chú `note_outsource` lên Platform qua background Celery tasks có cơ chế retry tự động.
+6. **Đồng bộ 2 chiều bảo đảm (Idempotent Sync)**: Mọi thao tác nộp bài từ Designer và từ chối Fix từ Admin đều tự động đẩy trạng thái `Review` và ghi chú `note_outsource` lên Platform qua background Celery tasks có cơ chế retry tự động.

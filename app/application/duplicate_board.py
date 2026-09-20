@@ -9,9 +9,9 @@ from datetime import UTC, datetime
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from app.adapters.db.models import Assignment, Order, Platform, User, WorkflowEvent
-from app.application.printerval_assignment_requests import create_request
+from app.adapters.db.models import Assignment, Order, Platform, ResultVersion, User, WorkflowEvent
 from app.application.concurrency import require_expected_order_version
+from app.application.printerval_assignment_requests import create_request
 from app.application.sanitization import encode_proxy_url, sanitize_text
 from app.domain.access import (
     DUPLICATE_CHECK_DUPLICATE,
@@ -547,7 +547,10 @@ def move_duplicate_order(
 
         # Telegram notification for designer
         try:
-            from app.workers.telegram_tasks import async_notify_designer_new_order, safe_dispatch_telegram_task
+            from app.workers.telegram_tasks import (
+                async_notify_designer_new_order,
+                safe_dispatch_telegram_task,
+            )
 
             safe_dispatch_telegram_task(async_notify_designer_new_order, str(order.id), str(target.id))
         except Exception:
@@ -558,7 +561,13 @@ def move_duplicate_order(
     raise DuplicateBoardError("Cột đích không hợp lệ")
 
 
-def _card(order: Order, assignee: User | None, *, hide_internal_notes: bool = False) -> dict:
+def _card(
+    order: Order,
+    assignee: User | None,
+    *,
+    hide_internal_notes: bool = False,
+    latest_submission: ResultVersion | None = None,
+) -> dict:
     return {
         "id": str(order.id),
         "version": order.version,
@@ -581,6 +590,11 @@ def _card(order: Order, assignee: User | None, *, hide_internal_notes: bool = Fa
         "assignee_id": str(assignee.id) if assignee else None,
         "assignee_name": (assignee.full_name or assignee.username) if assignee else None,
         "duplicate_board_position": order.duplicate_board_position,
+        # The shared Trello board is deliberately a collaboration surface. This
+        # is the only Designer-facing read model that exposes a submitted
+        # result link, and only for duplicate-domain orders.
+        "submission_url": latest_submission.drive_url if latest_submission else None,
+        "submission_version": latest_submission.version_marker if latest_submission else None,
     }
 
 
@@ -750,12 +764,31 @@ def list_duplicate_board(
         if assignment.order_id not in assignment_by_order:
             assignment_by_order[assignment.order_id] = designer
 
+    latest_submission_by_order: dict[uuid.UUID, ResultVersion] = {}
+    submission_rows = (
+        session.query(ResultVersion, Assignment.order_id)
+        .join(Assignment, Assignment.id == ResultVersion.assignment_id)
+        .filter(Assignment.order_id.in_([order.id for order in orders]))
+        .order_by(
+            Assignment.order_id,
+            ResultVersion.submitted_at.desc().nullslast(),
+            ResultVersion.version_marker.desc(),
+            ResultVersion.created_at.desc(),
+        )
+        .all()
+        if orders
+        else []
+    )
+    for result_version, order_id in submission_rows:
+        latest_submission_by_order.setdefault(order_id, result_version)
+
     for order in orders:
         assignee = assignment_by_order.get(order.id)
         card_data = _card(
             order,
             assignee,
             hide_internal_notes=bool(viewer and viewer.role == ROLE_DESIGNER_TRELLO),
+            latest_submission=latest_submission_by_order.get(order.id),
         )
         norm_st = (order.state or "").upper()
 

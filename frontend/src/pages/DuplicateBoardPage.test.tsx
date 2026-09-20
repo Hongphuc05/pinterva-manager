@@ -112,6 +112,8 @@ describe('DuplicateBoardPage', () => {
                       fix_approved_by_admin: false,
                       assignee_id: 'trello-2',
                       assignee_name: 'Trello Designer Hoàng',
+                      submission_url: 'https://drive.google.com/shared-submission',
+                      submission_version: 3,
                       is_paid: true,
                       template_missing: false,
                       status_changed_at: '2026-09-17T14:00:00',
@@ -222,5 +224,23 @@ describe('DuplicateBoardPage', () => {
     fireEvent.change(searchInput, { target: { value: '' } })
     expect(screen.getByText('DJ-DUP-1')).toBeInTheDocument()
     expect(screen.getByText('DJ-DUP-2')).toBeInTheDocument()
+  })
+
+  it('shows the latest submitted-result link on a shared board card', async () => {
+    render(
+      <BrowserRouter>
+        <AuthProvider>
+          <PlatformProvider>
+            <GallerySyncProvider>
+              <DuplicateBoardPage />
+            </GallerySyncProvider>
+          </PlatformProvider>
+        </AuthProvider>
+      </BrowserRouter>,
+    )
+
+    const submissionLink = await screen.findByRole('link', { name: 'Bài nộp v3' })
+    expect(submissionLink).toHaveAttribute('href', 'https://drive.google.com/shared-submission')
+    expect(submissionLink).toHaveAttribute('target', '_blank')
   })
 })

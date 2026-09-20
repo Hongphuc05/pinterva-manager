@@ -318,6 +318,43 @@ class OrderAsset(Base):
     )
 
 
+class OrderWorkNote(Base):
+    """An append-only, Tacahu-owned collaboration note for one order."""
+
+    __tablename__ = "order_work_notes"
+    __table_args__ = (
+        UniqueConstraint("order_id", "author_id", "idempotency_key", name="uq_order_work_note_request"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    order_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("orders.id", ondelete="CASCADE"), nullable=False, index=True)
+    author_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default=text("''"))
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class OrderWorkNoteAttachment(Base):
+    """Private image attached to an immutable work-note entry."""
+
+    __tablename__ = "order_work_note_attachments"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    note_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("order_work_notes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    storage_key: Mapped[str] = mapped_column(String(512), nullable=False, unique=True)
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    byte_size: Mapped[int] = mapped_column(nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class Assignment(Base):
     __tablename__ = "assignments"
 

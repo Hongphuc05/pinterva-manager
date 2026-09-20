@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -8,6 +9,7 @@ from app.adapters.db.models import (
     Order,
     Platform,
     PrintervalAssignmentRequest,
+    ResultVersion,
     User,
     WorkflowEvent,
 )
@@ -126,6 +128,58 @@ def test_admin_can_put_orders_in_duplicate_domain_and_board_shows_missing_form(
         "done": 0,
     }
     assert board.json()["cross_designer_drag_enabled"] is True
+
+
+def test_trello_designers_can_view_every_duplicate_card_and_latest_submission_link(client, db_session):
+    platform = _platform(db_session, "Shared Trello board")
+    viewer, headers = _login(client, db_session, "designer-trello", "trello-viewer", platform.id)
+    owner = User(
+        username="trello-owner",
+        full_name="Trello Owner",
+        role="designer-trello",
+        password_hash="hash",
+        platform_id=platform.id,
+    )
+    order = Order(
+        external_order_id="DUP-SHARED-RESULT",
+        platform_id=platform.id,
+        work_domain="duplicate",
+        state="DONE",
+        product_name="Shared result product",
+        note_outsource="PRIVATE UPSTREAM NOTE",
+    )
+    db_session.add_all([owner, order])
+    db_session.flush()
+    assignment = Assignment(order_id=order.id, designer_id=owner.id, status="approved")
+    db_session.add(assignment)
+    db_session.flush()
+    db_session.add(
+        ResultVersion(
+            assignment_id=assignment.id,
+            drive_url="https://drive.google.com/shared-result-v2",
+            version_marker=2,
+            validated=True,
+            submitted_at=datetime(2026, 9, 20, 1, 0, tzinfo=UTC),
+        )
+    )
+    db_session.commit()
+
+    board_response = client.get("/api/duplicate-board", headers=headers)
+    assert board_response.status_code == 200
+    cards = [card for column in board_response.json()["columns"] for card in column["cards"]]
+    shared_card = next(card for card in cards if card["id"] == str(order.id))
+    assert shared_card["assignee_id"] == str(owner.id)
+    assert shared_card["submission_url"] == "https://drive.google.com/shared-result-v2"
+    assert shared_card["submission_version"] == 2
+    assert shared_card["note_outsource"] == ""
+
+    # The shared-board visibility extends to product details, but the ordinary
+    # Designer sanitizer still strips internal notes and result history.
+    detail_response = client.get(f"/api/orders/{order.id}", headers=headers)
+    assert detail_response.status_code == 200
+    detail = detail_response.json()["order"]
+    assert detail["note_outsource"] == ""
+    assert detail["result_versions"] == []
 
 
 def test_duplicate_domain_rejects_a_stale_order_revision(client, db_session):

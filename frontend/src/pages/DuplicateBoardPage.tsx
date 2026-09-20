@@ -6,6 +6,7 @@ import {
   Check,
   CheckCircle2,
   Clock,
+  ExternalLink,
   Filter,
   GripHorizontal,
   GripVertical,
@@ -20,6 +21,7 @@ import {
   X,
 } from 'lucide-react'
 import { ApiError, apiFetch, resolveAssetUrl } from '../api/client'
+import { resolveExternalUrl } from '../utils/statusTranslation'
 import { useAuth } from '../auth/AuthContext'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { AdminFixActionModal } from '../components/AdminFixActionModal'
@@ -50,6 +52,8 @@ type DuplicateCard = {
   fix_return_count?: number
   assignee_id: string | null
   assignee_name: string | null
+  submission_url?: string | null
+  submission_version?: number | null
 }
 
 type ColumnMetrics = { total: number; doing: number; review: number; fix: number; done: number }
@@ -1059,6 +1063,26 @@ export function DuplicateBoardPage() {
                               {card.product_name || 'Đơn chưa có tên sản phẩm'}
                             </p>
                           </Link>
+                          {card.submission_url && (() => {
+                            const submissionLink = resolveExternalUrl(card.submission_url)
+                            if (!submissionLink) return null
+                            return (
+                              <a
+                                href={submissionLink}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                draggable={false}
+                                onClick={(event) => event.stopPropagation()}
+                                className="mt-2 inline-flex max-w-full items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-700 hover:bg-emerald-100"
+                                title="Mở link bài nộp mới nhất"
+                              >
+                                <ExternalLink className="h-3 w-3 shrink-0" />
+                                <span className="truncate">
+                                  {card.submission_version ? `Bài nộp v${card.submission_version}` : 'Mở bài nộp'}
+                                </span>
+                              </a>
+                            )
+                          })()}
                         </div>
 
                         {/* Extra card details in Done column */}

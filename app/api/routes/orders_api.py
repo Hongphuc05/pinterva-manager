@@ -7,7 +7,18 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
@@ -21,6 +32,8 @@ from app.adapters.db.models import (
     FinanceNote,
     Order,
     OrderAsset,
+    OrderWorkNote,
+    OrderWorkNoteAttachment,
     Platform,
     PrintervalAssignmentRequest,
     ResultVersion,
@@ -59,6 +72,7 @@ from app.application.order_queries import (
     list_orders_for_user,
 )
 from app.application.order_transitions import apply_transition
+from app.application.order_work_notes import PRIVATE_WORK_NOTE_ASSETS_DIR, create_work_note
 from app.application.printerval_assignment_requests import (
     PRINTERVAL_STATUSES,
     PrintervalAssignmentValidationError,
@@ -744,6 +758,38 @@ class OrderDetailResponse(BaseModel):
     history: list[WorkflowEventOut | Any]
 
 
+def _work_note_accessible_order(
+    db: Session,
+    user: User,
+    order_id: str,
+    platform_id: uuid.UUID,
+) -> Order:
+    order = get_order_detail_for_user(db, user, order_id)
+    if order is None or (order.platform_id is not None and order.platform_id != platform_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
+    return order
+
+
+def _work_note_out(note: OrderWorkNote, author: User, attachments: list[OrderWorkNoteAttachment]) -> dict:
+    return {
+        "id": str(note.id),
+        "body": note.body,
+        "author_name": author.full_name or author.username,
+        "author_role": author.role,
+        "created_at": note.created_at,
+        "attachments": [
+            {
+                "id": str(attachment.id),
+                "filename": attachment.original_filename,
+                "content_type": attachment.content_type,
+                "byte_size": attachment.byte_size,
+                "url": f"/api/orders/{note.order_id}/work-notes/{note.id}/attachments/{attachment.id}",
+            }
+            for attachment in attachments
+        ],
+    }
+
+
 class RefreshResponse(BaseModel):
     flash: str
     summary: dict | None = None
@@ -1371,6 +1417,106 @@ def format_event_description(
     if actor_display:
         return f"{actor_display}: {from_lbl} → {to_lbl}"
     return f"{from_lbl} → {to_lbl}"
+
+
+@router.get("/orders/{order_id}/work-notes")
+def api_list_order_work_notes(
+    order_id: str,
+    user: User = Depends(require_any_role(ROLE_ADMIN, ROLE_DESIGNER, ROLE_DESIGNER_TRELLO)),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    order = _work_note_accessible_order(db, user, order_id, platform_id)
+    notes = (
+        db.query(OrderWorkNote)
+        .filter(OrderWorkNote.order_id == order.id)
+        .order_by(OrderWorkNote.created_at.asc())
+        .all()
+    )
+    if not notes:
+        return {"notes": []}
+    author_ids = {note.author_id for note in notes}
+    authors = {author.id: author for author in db.query(User).filter(User.id.in_(author_ids)).all()}
+    note_ids = [note.id for note in notes]
+    attachments_by_note: dict[uuid.UUID, list[OrderWorkNoteAttachment]] = {note_id: [] for note_id in note_ids}
+    for attachment in (
+        db.query(OrderWorkNoteAttachment)
+        .filter(OrderWorkNoteAttachment.note_id.in_(note_ids))
+        .order_by(OrderWorkNoteAttachment.created_at.asc())
+        .all()
+    ):
+        attachments_by_note[attachment.note_id].append(attachment)
+    return {
+        "notes": [
+            _work_note_out(note, authors[note.author_id], attachments_by_note[note.id])
+            for note in notes
+            if note.author_id in authors
+        ]
+    }
+
+
+@router.post("/orders/{order_id}/work-notes", status_code=status.HTTP_201_CREATED)
+async def api_create_order_work_note(
+    order_id: str,
+    body: str = Form(default=""),
+    request_id: str = Form(min_length=1, max_length=128),
+    images: list[UploadFile] = File(default=[]),
+    user: User = Depends(require_any_role(ROLE_ADMIN, ROLE_DESIGNER, ROLE_DESIGNER_TRELLO)),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    order = _work_note_accessible_order(db, user, order_id, platform_id)
+    note = await create_work_note(
+        db,
+        order_id=order.id,
+        author=user,
+        body=body,
+        idempotency_key=request_id,
+        images=images,
+    )
+    attachments = (
+        db.query(OrderWorkNoteAttachment)
+        .filter(OrderWorkNoteAttachment.note_id == note.id)
+        .order_by(OrderWorkNoteAttachment.created_at.asc())
+        .all()
+    )
+    return _work_note_out(note, user, attachments)
+
+
+@router.get("/orders/{order_id}/work-notes/{note_id}/attachments/{attachment_id}")
+def api_download_order_work_note_attachment(
+    order_id: str,
+    note_id: uuid.UUID,
+    attachment_id: uuid.UUID,
+    user: User = Depends(require_any_role(ROLE_ADMIN, ROLE_DESIGNER, ROLE_DESIGNER_TRELLO)),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    order = _work_note_accessible_order(db, user, order_id, platform_id)
+    attachment = (
+        db.query(OrderWorkNoteAttachment)
+        .join(OrderWorkNote, OrderWorkNote.id == OrderWorkNoteAttachment.note_id)
+        .filter(
+            OrderWorkNoteAttachment.id == attachment_id,
+            OrderWorkNoteAttachment.note_id == note_id,
+            OrderWorkNote.order_id == order.id,
+        )
+        .one_or_none()
+    )
+    if attachment is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy ảnh ghi chú")
+    path = (PRIVATE_WORK_NOTE_ASSETS_DIR / attachment.storage_key).resolve()
+    if PRIVATE_WORK_NOTE_ASSETS_DIR.resolve() not in path.parents or not path.is_file():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy ảnh ghi chú")
+    from fastapi.responses import FileResponse
+
+    return FileResponse(
+        path,
+        media_type=attachment.content_type,
+        filename=attachment.original_filename,
+        content_disposition_type="inline",
+        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.get("/orders/{order_id}", response_model=OrderDetailResponse)

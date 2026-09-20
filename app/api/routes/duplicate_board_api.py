@@ -46,6 +46,8 @@ class DuplicateCardOut(BaseModel):
     assignee_id: str | None
     assignee_name: str | None
     duplicate_board_position: int | None = None
+    submission_url: str | None = None
+    submission_version: int | None = None
 
 
 class DuplicateColumnOut(BaseModel):

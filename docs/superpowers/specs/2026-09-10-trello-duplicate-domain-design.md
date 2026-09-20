@@ -30,6 +30,10 @@ audit trail.
    tự phân đơn cho người khác.
 7. Mọi thao tác ghi đều khoá row `Order`, kiểm tra optimistic version qua ORM,
    và tạo `WorkflowEvent` có evidence. Không dùng endpoint generic để set state.
+8. Duplicate Board là workspace cộng tác đọc chung: mọi `designer-trello` cùng
+   platform xem được mọi thẻ `duplicate`, chi tiết sản phẩm an toàn và link bài
+   nộp (`ResultVersion`) mới nhất, kể cả khi card thuộc Designer khác hoặc Done.
+   Đây không mở `note_outsource`, audit trail, lịch sử version hay dữ liệu nội bộ.
 
 ## API
 
@@ -48,8 +52,9 @@ Scope theo active platform. Trả về:
 }
 ```
 
-Thẻ gồm order ID, code, tên sản phẩm, ảnh, deadline, state và assignee hiện tại.
-Không trả đơn `standard`.
+Thẻ gồm order ID, code, tên sản phẩm, ảnh, deadline, state, assignee hiện tại và
+`submission_url`/`submission_version` của bài nộp mới nhất nếu có. Không trả đơn
+`standard`, note outsource hoặc các version cũ.
 
 ### `POST /api/duplicate-board/move`
 
@@ -82,8 +87,10 @@ Admin có entry **Board Đơn trùng lặp** ở sidebar.
 ### Designer Trello
 
 Sau đăng nhập, sidebar chỉ có **Board Đơn trùng lặp** và lịch sử. `/kanban` là
-board của role này. Card có thumbnail, mã đơn, tên sản phẩm, deadline và badge
-trạng thái. Một click mở chi tiết đơn; drag handle/drag thẻ thực hiện kéo thả.
+board của role này. Card có thumbnail, mã đơn, tên sản phẩm, deadline, badge
+trạng thái và link bài nộp mới nhất. Mọi Designer Trello có thể xem thẻ/chi tiết
+an toàn/link bài nộp của toàn nhóm; một click mở chi tiết đơn, còn drag handle/drag
+thẻ thực hiện kéo thả.
 
 Board theo bố cục Trello: nền trung tính, cột cuộn ngang, header cột cố định,
 counter, vùng drop rõ ràng, card trắng, feedback khi đang kéo, empty state. Cột

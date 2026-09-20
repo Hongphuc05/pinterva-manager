@@ -847,7 +847,7 @@ export function OrdersListPage() {
         method: 'POST',
         body: JSON.stringify({ request_id: crypto.randomUUID(), expected_version: order.version }),
       })
-      setFlash(`Đã báo thiếu temp cho đơn ${order.external_order_id}. Đơn đã chuyển sang Chờ cập nhật.`)
+      setFlash('Đã báo thiếu temp. Đơn đã chuyển sang Chờ cập nhật.')
       await loadOrders()
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : 'Không thể báo thiếu temp.')

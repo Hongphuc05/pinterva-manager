@@ -36,6 +36,7 @@ import {
 } from 'lucide-react'
 import { AdminFixActionModal } from '../components/AdminFixActionModal'
 import { LinkifiedText, OpenExternalLinkButton } from '../components/LinkifiedText'
+import { OrderWorkNotesCard } from '../components/OrderWorkNotesCard'
 
 type ResultVersion = {
   id: string
@@ -1148,6 +1149,8 @@ export function OrderDetailPage() {
             )}
           </div>
         )}
+
+        <OrderWorkNotesCard orderId={order.id} />
 
         {/* Custom configuration */}
         {order.custom_config && order.custom_config.original && order.custom_config.original.length > 0 && (

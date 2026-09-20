@@ -34,8 +34,11 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   const token = localStorage.getItem('token')
   const activePlatformId = localStorage.getItem('activePlatformId')
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
     ...(init?.headers as Record<string, string> ?? {}),
+  }
+  // The browser must provide the multipart boundary for clipboard/file uploads.
+  if (!(init?.body instanceof FormData)) {
+    headers['Content-Type'] = 'application/json'
   }
   if (token) {
     headers['Authorization'] = `Bearer ${token}`
@@ -77,9 +80,30 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   return resp.json() as Promise<T>
 }
 
+/** Fetch a private binary asset with the same bearer/platform credentials as API data. */
+export async function apiFetchBlob(path: string): Promise<Blob> {
+  const token = localStorage.getItem('token')
+  const activePlatformId = localStorage.getItem('activePlatformId')
+  const headers: Record<string, string> = {}
+  if (token) headers.Authorization = `Bearer ${token}`
+  if (activePlatformId) headers['X-Platform-Id'] = activePlatformId
+
+  const baseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
+  const resp = await fetch(`${baseUrl}/api${path}`, {
+    credentials: baseUrl ? 'include' : 'same-origin',
+    headers,
+  })
+  if (resp.status === 401) {
+    window.location.assign('/login')
+    return new Promise<Blob>(() => {})
+  }
+  if (!resp.ok) throw new ApiError(resp.status, resp.statusText)
+  return resp.blob()
+}
+
 export function resolveAssetUrl(url: string | null | undefined): string {
   if (!url) return ''
-  if (url.startsWith('/crawled_assets/') || url.startsWith('/order_assets/')) {
+  if (url.startsWith('/crawled_assets/') || url.startsWith('/order_assets/') || url.startsWith('/api/')) {
     const baseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
     return baseUrl ? `${baseUrl}${url}` : url
   }
