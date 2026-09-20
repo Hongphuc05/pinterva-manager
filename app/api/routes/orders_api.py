@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import (
@@ -23,6 +24,7 @@ from app.adapters.db.models import (
     Platform,
     PrintervalAssignmentRequest,
     ResultVersion,
+    TelegramActionLog,
     User,
     WorkflowEvent,
 )
@@ -47,9 +49,8 @@ from app.application.assignment_commands import (
     AssignmentCommandError,
     revoke_assignment_command,
 )
-from app.application.crawl import DiscoverFailedError, refresh_order_detail, scan_orders_fast
 from app.application.concurrency import lock_order_for_command
-from app.application.processing_leases import acquire_processing_lease
+from app.application.crawl import DiscoverFailedError, refresh_order_detail, scan_orders_fast
 from app.application.order_queries import (
     FIX_STATES,
     get_order_detail_for_user,
@@ -63,6 +64,7 @@ from app.application.printerval_assignment_requests import (
     PrintervalAssignmentValidationError,
     create_request,
 )
+from app.application.processing_leases import acquire_processing_lease
 from app.application.sanitization import (
     decode_proxy_url,
     sanitize_order_detail_for_designer,
@@ -1654,7 +1656,10 @@ def api_assign_order(
 
     # Telegram notification for designer
     try:
-        from app.workers.telegram_tasks import async_notify_designer_new_order, safe_dispatch_telegram_task
+        from app.workers.telegram_tasks import (
+            async_notify_designer_new_order,
+            safe_dispatch_telegram_task,
+        )
 
         safe_dispatch_telegram_task(async_notify_designer_new_order, str(order.id), str(designer.id))
     except Exception:
@@ -1767,7 +1772,10 @@ def api_bulk_assign_orders(
 
     # Telegram notification for designer
     try:
-        from app.workers.telegram_tasks import async_notify_designer_new_order, safe_dispatch_telegram_task
+        from app.workers.telegram_tasks import (
+            async_notify_designer_new_order,
+            safe_dispatch_telegram_task,
+        )
 
         for order in orders:
             safe_dispatch_telegram_task(async_notify_designer_new_order, str(order.id), str(designer.id))
@@ -1955,13 +1963,15 @@ def api_resolve_missing_template(
 
     old_state = order.state
     order.designer_note = payload.designer_note.strip()
-    order.designer_note_released_for_fix = False
+    # This is an explicit Admin release to the assigned Designer. The legacy
+    # column name is retained for schema compatibility, but now represents a
+    # note released to the active task (Fix or resolved missing template).
+    order.designer_note_released_for_fix = bool(order.designer_note)
     order.template_missing = False
     order.template_missing_reported_at = None
     order.template_missing_reported_by_id = None
-    # Upstream notes are never exposed to Designers. This resolution note is
-    # administrative only; a Designer receives a note only through an approved
-    # Fix release.
+    # Upstream notes are never exposed to Designers. Only designer_note above
+    # is released for this resolved task.
     order.suppress_note_outsource_for_designer = True
     assignment.sub_status = "todo"
     if order.state != OrderState.IN_PROGRESS.value:
@@ -2217,14 +2227,16 @@ def api_approve_fix(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
 
     admin_designer_note = (payload.designer_note or "").strip()
-    if not admin_designer_note:
+    outbound_designer_note = admin_designer_note or (payload.note_outsource or "").strip()
+    if not outbound_designer_note:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "Cần nhập Ghi chú Admin cho Designer trước khi duyệt Fix.",
+            "Cần có Ghi chú Admin hoặc Note Outsource trước khi duyệt Fix.",
         )
-    # The released instruction must be intentionally written by an Admin; do
-    # not fall back to the upstream QC note.
-    order.designer_note = admin_designer_note
+    # Designer only receives one safe, Tacahu-owned instruction. An explicit
+    # Admin note wins; otherwise the Admin-approved outsource note is copied
+    # into designer_note and the original source field remains private.
+    order.designer_note = outbound_designer_note
     order.designer_note_released_for_fix = True
 
     if payload.note_outsource is not None:
@@ -2297,7 +2309,10 @@ def api_approve_fix(
     # Telegram notification for designer
     if target_des_id:
         try:
-            from app.workers.telegram_tasks import async_notify_designer_urgent_fix, safe_dispatch_telegram_task
+            from app.workers.telegram_tasks import (
+                async_notify_designer_urgent_fix,
+                safe_dispatch_telegram_task,
+            )
 
             safe_dispatch_telegram_task(async_notify_designer_urgent_fix, str(order.id), str(target_des_id), order.designer_note)
         except Exception:
@@ -2876,57 +2891,65 @@ def api_bulk_delete_orders(
     if not valid_ids:
         return {"ok": True, "deleted_count": 0}
 
-    # 1. Delete FinanceNotes
-    db.query(FinanceNote).filter(FinanceNote.order_id.in_(valid_ids)).delete(synchronize_session=False)
+    try:
+        # 1. Delete rows with a direct FK to orders.  A Fix order has Telegram
+        # callback logs, so omitting TelegramActionLog here makes PostgreSQL reject
+        # the final orders DELETE with a foreign-key violation.
+        db.query(FinanceNote).filter(FinanceNote.order_id.in_(valid_ids)).delete(synchronize_session=False)
+        db.query(TelegramActionLog).filter(TelegramActionLog.order_id.in_(valid_ids)).delete(
+            synchronize_session=False
+        )
 
-    # 2. Gather assignments & result versions
-    assignments = db.query(Assignment).filter(Assignment.order_id.in_(valid_ids)).all()
-    asgn_ids = [a.id for a in assignments]
+        # 2. Gather assignments & result versions
+        assignments = db.query(Assignment).filter(Assignment.order_id.in_(valid_ids)).all()
+        asgn_ids = [a.id for a in assignments]
 
-    rv_ids = []
-    if asgn_ids:
-        result_versions = db.query(ResultVersion).filter(ResultVersion.assignment_id.in_(asgn_ids)).all()
-        rv_ids = [rv.id for rv in result_versions]
+        rv_ids = []
+        if asgn_ids:
+            result_versions = db.query(ResultVersion).filter(ResultVersion.assignment_id.in_(asgn_ids)).all()
+            rv_ids = [rv.id for rv in result_versions]
 
-    # 3. Delete ApprovalDecisions & ApprovalRequests linked to ResultVersions, Assignments, or Orders
-    approval_reqs_filter = []
-    if rv_ids:
-        approval_reqs_filter.append(ApprovalRequest.target_version_id.in_(rv_ids))
-    if asgn_ids:
-        approval_reqs_filter.append(ApprovalRequest.target_id.in_(asgn_ids))
-    approval_reqs_filter.append(ApprovalRequest.target_id.in_(valid_ids))
+        # 3. Delete ApprovalDecisions & ApprovalRequests linked to ResultVersions, Assignments, or Orders
+        approval_reqs_filter = []
+        if rv_ids:
+            approval_reqs_filter.append(ApprovalRequest.target_version_id.in_(rv_ids))
+        if asgn_ids:
+            approval_reqs_filter.append(ApprovalRequest.target_id.in_(asgn_ids))
+        approval_reqs_filter.append(ApprovalRequest.target_id.in_(valid_ids))
 
-    approval_reqs = db.query(ApprovalRequest).filter(or_(*approval_reqs_filter)).all()
-    ar_ids = [ar.id for ar in approval_reqs]
-    if ar_ids:
-        db.query(ApprovalDecision).filter(ApprovalDecision.approval_request_id.in_(ar_ids)).delete(synchronize_session=False)
-        db.query(ApprovalRequest).filter(ApprovalRequest.id.in_(ar_ids)).delete(synchronize_session=False)
+        approval_reqs = db.query(ApprovalRequest).filter(or_(*approval_reqs_filter)).all()
+        ar_ids = [ar.id for ar in approval_reqs]
+        if ar_ids:
+            db.query(ApprovalDecision).filter(ApprovalDecision.approval_request_id.in_(ar_ids)).delete(synchronize_session=False)
+            db.query(ApprovalRequest).filter(ApprovalRequest.id.in_(ar_ids)).delete(synchronize_session=False)
 
-    # 4. Delete ResultVersions
-    if rv_ids:
-        db.query(ResultVersion).filter(ResultVersion.id.in_(rv_ids)).delete(synchronize_session=False)
+        # 4. Delete ResultVersions
+        if rv_ids:
+            db.query(ResultVersion).filter(ResultVersion.id.in_(rv_ids)).delete(synchronize_session=False)
 
-    # 5. Delete Assignments (clear replacement_of_id self references first)
-    if asgn_ids:
-        db.query(Assignment).filter(Assignment.id.in_(asgn_ids)).update({"replacement_of_id": None}, synchronize_session=False)
-        db.query(Assignment).filter(Assignment.id.in_(asgn_ids)).delete(synchronize_session=False)
+        # 5. Delete Assignments (clear replacement_of_id self references first)
+        if asgn_ids:
+            db.query(Assignment).filter(Assignment.id.in_(asgn_ids)).update({"replacement_of_id": None}, synchronize_session=False)
+            db.query(Assignment).filter(Assignment.id.in_(asgn_ids)).delete(synchronize_session=False)
 
-    # 6. Delete WorkflowEvents
-    db.query(WorkflowEvent).filter(WorkflowEvent.order_id.in_(valid_ids)).delete(synchronize_session=False)
+        # 6. Delete remaining direct order children
+        db.query(WorkflowEvent).filter(WorkflowEvent.order_id.in_(valid_ids)).delete(synchronize_session=False)
+        db.query(ExternalObservation).filter(ExternalObservation.order_id.in_(valid_ids)).delete(synchronize_session=False)
+        db.query(OrderAsset).filter(OrderAsset.order_id.in_(valid_ids)).delete(synchronize_session=False)
+        db.query(PrintervalAssignmentRequest).filter(PrintervalAssignmentRequest.order_id.in_(valid_ids)).delete(
+            synchronize_session=False
+        )
 
-    # 7. Delete ExternalObservations
-    db.query(ExternalObservation).filter(ExternalObservation.order_id.in_(valid_ids)).delete(synchronize_session=False)
+        # 7. Delete Orders
+        db.query(Order).filter(Order.id.in_(valid_ids)).delete(synchronize_session=False)
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Không thể xóa đơn vì vẫn còn dữ liệu liên quan. Hãy thử lại hoặc liên hệ kỹ thuật.",
+        ) from exc
 
-    # 8. Delete OrderAssets
-    db.query(OrderAsset).filter(OrderAsset.order_id.in_(valid_ids)).delete(synchronize_session=False)
-
-    # 9. Delete PrintervalAssignmentRequests
-    db.query(PrintervalAssignmentRequest).filter(PrintervalAssignmentRequest.order_id.in_(valid_ids)).delete(synchronize_session=False)
-
-    # 10. Delete Orders
-    db.query(Order).filter(Order.id.in_(valid_ids)).delete(synchronize_session=False)
-
-    db.commit()
     return {"ok": True, "deleted_count": len(valid_ids)}
 
 

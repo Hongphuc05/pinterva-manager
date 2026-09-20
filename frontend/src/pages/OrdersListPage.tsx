@@ -499,16 +499,24 @@ export function OrdersListPage() {
     if (desUser?.role === 'designer' && duplicateCodes.length && !window.confirm(`Đơn ${duplicateCodes.join(', ')} là đơn trùng lặp. Bạn có thực sự muốn chia cho ${desUser.full_name || desUser.username} không?`)) return
     setBulkAssigning(true)
     try {
+      // The table may have rendered a session cache while the current network
+      // read was still in flight. Never use that cached version as the command
+      // precondition for a bulk assignment.
+      const currentOrders = await loadOrders()
+      const currentById = new Map(currentOrders.map((order) => [order.id, order]))
+      const noLongerVisible = selectedOrderIds.filter((id) => !currentById.has(id))
+      if (noLongerVisible.length > 0) {
+        setSelectedOrderIds([])
+        setError('Một số đơn đã thay đổi trạng thái. Danh sách đã được tải lại; hãy chọn lại đơn trước khi chia.')
+        return
+      }
       const platformDes = bulkPlatformDesigner || desUser?.platform_designer_option || DEFAULT_PLATFORM_DES
       const res = await apiFetch<{ queued_count: number }>('/assignments', {
         method: 'POST',
         body: JSON.stringify({
           order_ids: selectedOrderIds,
           expected_versions: Object.fromEntries(
-            selectedOrderIds.flatMap((id) => {
-              const order = orders.find((item) => item.id === id)
-              return order ? [[id, order.version]] : []
-            }),
+            selectedOrderIds.map((id) => [id, currentById.get(id)!.version]),
           ),
           designer_id: bulkDesignerId,
           printerval_designer: platformDes,
@@ -791,6 +799,7 @@ export function OrdersListPage() {
         return data.orders
       })
       writeOrdersCache(getOrdersCacheKey(activePlatform?.id, qs), data.orders)
+      return data.orders
     } finally {
       setOrdersLoading(false)
     }
@@ -3682,7 +3691,7 @@ export function OrdersListPage() {
         onClose={() => setQuickDistributeOpen(false)}
         waitingOrders={waitingOrders}
         designers={regularDesigners}
-        onSuccess={loadOrders}
+        onSuccess={async () => { await loadOrders() }}
         setFlash={setFlash}
       />
     </DashboardLayout>

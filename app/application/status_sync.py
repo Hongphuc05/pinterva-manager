@@ -278,7 +278,11 @@ def sync_selected_order_statuses(
                             order.printerval_designer_synced_at = now_utc
                             changed = True
 
-                        order.printerval_status_synced_at = now_utc
+                        # Do not turn a read-only observation into a business
+                        # revision.  Updating this timestamp on every scan used
+                        # to invalidate an operator's just-read order version.
+                        if changed:
+                            order.printerval_status_synced_at = now_utc
 
                     session.commit()
                     if notify_admin_fix:
@@ -400,17 +404,16 @@ def sync_platform_order_statuses(
                     order.printerval_designer = None
                     order.printerval_designer_synced_at = datetime.now(UTC)
                     order_changed = True
-                order.printerval_status_synced_at = datetime.now(UTC)
-
                 # Re-apply full detail metadata (source files, SKU data, custom config, notes, deadlines).
                 detail_result = parse_order_detail_from_row(
                     row, order.external_order_id, platform_id=str(platform.id), download_images=False
                 )
                 if detail_result.success:
                     _apply_order_detail_result(order, detail_result)
-                    order_changed = True
+                    order_changed = order_changed or session.is_modified(order, include_collections=False)
 
                 if order_changed:
+                    order.printerval_status_synced_at = datetime.now(UTC)
                     updated += 1
                 session.commit()
                 if notify_admin_fix:

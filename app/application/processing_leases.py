@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import Order, WorkflowEvent
@@ -81,12 +82,23 @@ def heartbeat_processing_lease(session: Session, order: Order, *, actor_id: uuid
     now = datetime.now(UTC)
     if not _is_active(order, now) or order.processing_lock_owner_id != actor_id:
         raise ProcessingLeaseConflictError(order)
-    order.processing_lock_heartbeat_at = now
-    order.processing_lock_expires_at = now + PROCESSING_LEASE_TTL
+    expires_at = now + PROCESSING_LEASE_TTL
+    # A lease heartbeat is liveness metadata, not a business revision. Updating
+    # the ORM-mapped Order here would increment Order.version every five minutes
+    # and make unrelated admin notes/assignment commands falsely conflict.
+    session.execute(
+        update(Order)
+        .where(Order.id == order.id)
+        .values(
+            processing_lock_heartbeat_at=now,
+            processing_lock_expires_at=expires_at,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    session.expire(order, ["processing_lock_heartbeat_at", "processing_lock_expires_at"])
     _event(session, order, actor_id, "HEARTBEAT")
-    session.add(order)
     session.flush()
-    return order.processing_lock_expires_at
+    return expires_at
 
 
 def require_processing_lease(order: Order, *, actor_id: uuid.UUID) -> None:

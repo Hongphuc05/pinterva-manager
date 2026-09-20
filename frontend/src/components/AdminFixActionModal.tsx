@@ -44,8 +44,8 @@ export function AdminFixActionModal({
   if (!isOpen) return null
 
   async function handleConfirm() {
-    if (isApprove && !adminNote.trim()) {
-      setError('Cần nhập Ghi chú Admin cho Designer trước khi duyệt Fix.')
+    if (isApprove && !adminNote.trim() && !outsourceNote.trim()) {
+      setError('Cần có Ghi chú Admin hoặc Note Outsource trước khi duyệt Fix.')
       return
     }
     setLoading(true)
@@ -139,8 +139,8 @@ export function AdminFixActionModal({
                 <span>Quy trình gửi bài sửa cho Designer:</span>
               </div>
               <p className="text-[11px] text-emerald-800 leading-relaxed">
-                • <strong>Ghi chú Admin là bắt buộc:</strong> đây là nội dung duy nhất Designer nhận được.<br />
-                • Note Outsource chỉ phục vụ Admin kiểm tra và không được gửi sang Designer.
+                • Nếu có <strong>Ghi chú Admin</strong>, Designer chỉ nhận nội dung này.<br />
+                • Nếu để trống Ghi chú Admin, Designer nhận bản sao Note Outsource đã được Admin duyệt; trường nguồn vẫn không hiển thị cho Designer.
               </p>
             </div>
           ) : (
@@ -158,8 +158,8 @@ export function AdminFixActionModal({
           {isApprove && (
             <div className="space-y-1.5">
               <label className="font-semibold text-slate-800 block text-xs flex items-center justify-between">
-                <span>Ghi chú của Admin cho Designer <span className="text-rose-600">*</span></span>
-                <span className="text-[11px] font-normal text-slate-500">Bắt buộc gửi cho Des</span>
+                <span>Ghi chú của Admin cho Designer</span>
+                <span className="text-[11px] font-normal text-slate-500">Ưu tiên gửi cho Des</span>
               </label>
               <textarea
                 rows={3}

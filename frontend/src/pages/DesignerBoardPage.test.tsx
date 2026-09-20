@@ -34,6 +34,13 @@ describe('DesignerBoardPage', () => {
                 deadline_tacahu: null, product_name: 'Đơn cần gỡ', work_domain: 'standard',
               }],
             },
+            {
+              id: 'designer-review', username: 'review', full_name: 'Designer Chỉ Review', total_orders: 1, doing_count: 0, review_count: 1, fix_count: 0, done_count: 0,
+              orders: [{
+                id: 'order-review-1', version: 3, external_order_id: 'DJ-REVIEW-1', state: 'QC_PENDING', thumbnail_url: null,
+                deadline_tacahu: null, product_name: 'Đơn đang chờ duyệt', work_domain: 'standard',
+              }],
+            },
             { id: 'designer-idle', username: 'idle', full_name: 'Designer Rảnh', total_orders: 0, doing_count: 0, review_count: 0, fix_count: 0, done_count: 0, orders: [] },
           ],
         })
@@ -70,6 +77,22 @@ describe('DesignerBoardPage', () => {
       expect(state.filterMode).toBe('has_fix')
       expect(state.showDoneColumn).toBe(false)
     })
+  })
+
+  it('shows only Designers with Doing orders when filtering currently working', async () => {
+    render(
+      <BrowserRouter>
+        <AuthProvider><PlatformProvider><ToastProvider><GallerySyncProvider><DesignerBoardPage /></GallerySyncProvider></ToastProvider></PlatformProvider></AuthProvider>
+      </BrowserRouter>,
+    )
+
+    await screen.findByText('Designer Có Fix')
+    fireEvent.click(screen.getByRole('button', { name: 'Đang có việc' }))
+
+    expect(screen.getByRole('button', { name: 'Đang có việc' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByText('Designer Có Fix')).toBeInTheDocument()
+    expect(screen.queryByText('Designer Chỉ Review')).not.toBeInTheDocument()
+    expect(screen.queryByText('Designer Rảnh')).not.toBeInTheDocument()
   })
 
   it('lets an admin revoke a Doing order from the designer board', async () => {

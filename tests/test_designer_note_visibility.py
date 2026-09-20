@@ -43,3 +43,30 @@ def test_designer_detail_only_exposes_explicit_admin_note_for_released_fix():
     assert result["previous_note_outsource"] is None
     assert result["designer_note"] == "Sửa lại logo theo mockup Admin đã kiểm tra."
     assert result["result_versions"] == []
+
+
+def test_designer_detail_keeps_an_explicitly_released_note_visible_while_fix_is_doing():
+    result = sanitize_order_detail_for_designer(
+        _summary(
+            state="IN_PROGRESS",
+            designer_note="Sửa phần tay áo theo bản mockup Admin đã duyệt.",
+            designer_note_released_for_fix=True,
+        )
+    ).model_dump()
+
+    assert result["note_outsource"] == ""
+    assert result["designer_note"] == "Sửa phần tay áo theo bản mockup Admin đã duyệt."
+
+
+def test_designer_detail_exposes_template_note_only_after_admin_resolves_task():
+    result = sanitize_order_detail_for_designer(
+        _summary(
+            state="IN_PROGRESS",
+            template_missing=False,
+            designer_note="Temp: https://example.com/template",
+            designer_note_released_for_fix=True,
+        )
+    ).model_dump()
+
+    assert result["note_outsource"] == ""
+    assert result["designer_note"] == "Temp: https://example.com/template"

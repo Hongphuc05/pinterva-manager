@@ -191,7 +191,9 @@ export function DesignerBoardPage() {
   const totalFix = designers.reduce((sum, d) => sum + d.fix_count, 0)
   const totalDone = designers.reduce((sum, d) => sum + d.done_count, 0)
 
-  // Filter designers based on search and active state filter
+  // Filter designers based on search and workload state. Review and Fix have
+  // dedicated filters above; “Đang có việc” means the Designer is actively
+  // working on at least one Doing task, not merely waiting for a review/fix.
   const filteredDesigners = designers.filter((des) => {
     const desOpt = des.platform_designer_option
     const matchesSearch =
@@ -203,7 +205,7 @@ export function DesignerBoardPage() {
 
     if (filterMode === 'needs_review') return des.review_count > 0
     if (filterMode === 'has_fix') return des.fix_count > 0
-    if (filterMode === 'active') return des.doing_count > 0 || des.review_count > 0 || des.fix_count > 0
+    if (filterMode === 'active') return des.doing_count > 0
     return true
   })
 

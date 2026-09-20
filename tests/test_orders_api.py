@@ -6,6 +6,7 @@ from app.adapters.db.models import (
     Order,
     Platform,
     PrintervalAssignmentRequest,
+    TelegramActionLog,
     User,
     WorkflowEvent,
 )
@@ -150,6 +151,33 @@ def test_api_bulk_assign_orders(client, db_session):
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
     assert resp.json()["assigned_count"] == 2
+
+
+def test_api_bulk_delete_removes_telegram_fix_callback_logs(client, db_session):
+    """A Fix order creates Telegram callback logs that must not block permanent deletion."""
+    _seed_platform(db_session)
+    _login(client, db_session, "admin", "delete_fix_admin")
+    order = Order(
+        external_order_id="DJ4006431",
+        platform_id=DEFAULT_PLATFORM_ID,
+        state=OrderState.REVISION.value,
+    )
+    db_session.add(order)
+    db_session.flush()
+    callback = TelegramActionLog(
+        order_id=order.id,
+        action_type="APPROVE_FIX_USE_OUTSOURCE",
+        callback_token="delete_fix_callback_token",
+    )
+    db_session.add(callback)
+    db_session.commit()
+
+    resp = client.post("/api/orders/bulk-delete", json={"order_ids": [str(order.id)]})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True, "deleted_count": 1}
+    assert db_session.get(Order, order.id) is None
+    assert db_session.get(TelegramActionLog, callback.id) is None
 
 
 def test_api_assign_order_skips_printerval_sync_when_designer_not_registered(client, db_session, monkeypatch):
@@ -648,21 +676,27 @@ def test_resolve_missing_template_returns_assigned_order_to_doing(client, db_ses
     assert order.suppress_note_outsource_for_designer is True
     assert assignment.sub_status == "todo"
 
-    # Template-resolution notes are Admin operational notes. Designer notes are
-    # only released through an approved Fix.
+    # The resolved template note is explicitly released to the assigned
+    # Designer, while the upstream source note remains private.
     _login(client, db_session, "designer", username="missing-designer")
     detail_res = client.get(f"/api/orders/{order.id}")
     assert detail_res.status_code == 200
     detail_data = detail_res.json()["order"]
     assert detail_data["note_outsource"] == ""
-    assert detail_data["designer_note"] == ""
+    assert detail_data["designer_note"] == "Temp: https://example.com/template"
 
     list_res = client.get("/api/orders")
     assert list_res.status_code == 200
     matching = [o for o in list_res.json()["orders"] if o["id"] == str(order.id)]
     assert len(matching) == 1
     assert matching[0]["note_outsource"] == ""
-    assert matching[0]["designer_note"] == ""
+    assert matching[0]["designer_note"] == "Temp: https://example.com/template"
+
+    my_tasks_res = client.get("/api/my-tasks")
+    assert my_tasks_res.status_code == 200
+    designer_task = next(task for task in my_tasks_res.json()["tasks"] if task["order"]["id"] == str(order.id))
+    assert designer_task["order"]["note_outsource"] == ""
+    assert designer_task["order"]["designer_note"] == "Temp: https://example.com/template"
 
     # Verify Admin view: note_outsource is preserved
     _login(client, db_session, "admin", username="missing-template-admin-2")
@@ -785,6 +819,33 @@ def test_api_approve_and_reject_fix_flow(client, db_session, monkeypatch):
     fix_orders = client.get("/api/orders?status=FIX").json()["orders"]
     assert any(item["id"] == str(order.id) for item in review_orders)
     assert all(item["id"] != str(order.id) for item in fix_orders)
+
+
+def test_approve_fix_uses_admin_approved_outsource_note_when_admin_note_is_empty(client, db_session):
+    platform = _seed_platform(db_session)
+    _login(client, db_session, "admin", "fallback-fix-admin")
+    designer = _login(client, db_session, "designer", "fallback-fix-designer", platform.id)
+    order = Order(
+        external_order_id="DJ-FIX-FALLBACK",
+        platform_id=platform.id,
+        state=OrderState.REVISION.value,
+        note_outsource="QC source note must remain private",
+    )
+    db_session.add(order)
+    db_session.flush()
+    db_session.add(Assignment(order_id=order.id, designer_id=designer.id, status="approved"))
+    db_session.commit()
+
+    response = client.post(
+        f"/api/orders/{order.id}/approve-fix",
+        json={"note_outsource": "Admin approved instruction copied for Designer"},
+    )
+
+    assert response.status_code == 200
+    db_session.refresh(order)
+    assert order.designer_note == "Admin approved instruction copied for Designer"
+    assert order.note_outsource == "Admin approved instruction copied for Designer"
+    assert order.designer_note_released_for_fix is True
 
 
 def test_api_orders_list_returns_active_assignment_id_for_designer(client, db_session):

@@ -129,6 +129,31 @@ def test_sync_selected_order_statuses_only_updates_requested_orders(db_session):
     assert untouched.printerval_status == "doing"
 
 
+def test_selected_sync_with_unchanged_observation_keeps_order_version(db_session):
+    platform = Platform(name="P unchanged", account_username="acc@example.com", team_outsource="team-a")
+    order = Order(
+        external_order_id="DJ-UNCHANGED",
+        platform=platform,
+        state="IN_PROGRESS",
+        printerval_status="doing",
+    )
+    db_session.add(order)
+    db_session.commit()
+    version_before_sync = order.version
+
+    result = sync_selected_order_statuses(
+        db_session,
+        platform,
+        [order],
+        api_client=_mock_client({"DJ-UNCHANGED": {"id": 1, "status": "doing"}}),
+    )
+
+    db_session.refresh(order)
+    assert result == {"checked": 1, "updated": 0, "not_found": 0, "failed": 0}
+    assert order.version == version_before_sync
+    assert order.printerval_status_synced_at is None
+
+
 def test_selected_sync_turns_printerval_fix_into_the_existing_admin_fix_flow(db_session, monkeypatch):
     notifications = []
     monkeypatch.setattr(

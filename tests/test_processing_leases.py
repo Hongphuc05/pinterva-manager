@@ -58,3 +58,20 @@ def test_heartbeat_renews_and_release_clears_processing_lease(db_session):
     assert renewed > datetime.now(UTC)
     assert order.processing_lock_owner_id is None
     assert order.processing_lock_expires_at is None
+
+
+def test_heartbeat_does_not_increment_the_business_order_version(db_session):
+    owner = _user(db_session, "lease-version-owner")
+    order = Order(external_order_id="LEASE-VERSION")
+    db_session.add(order)
+    db_session.commit()
+
+    acquire_processing_lease(db_session, order, actor_id=owner.id)
+    db_session.commit()
+    version_before_heartbeat = order.version
+
+    heartbeat_processing_lease(db_session, order, actor_id=owner.id)
+    db_session.commit()
+    db_session.refresh(order)
+
+    assert order.version == version_before_heartbeat

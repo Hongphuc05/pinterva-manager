@@ -165,21 +165,28 @@ def _apply_designer_note_policy(item_dict: dict[str, Any]) -> None:
     """Enforce the Designer-facing note boundary.
 
     Upstream note_outsource and submitted-result links are operational records for
-    Admin. Designers receive only an explicit Admin instruction for an approved
-    Fix. The release flag gives old rows a safe default: hidden.
+    Admin. Designers receive only an explicit Admin instruction released for their
+    active task. The release flag gives old rows a safe default: hidden.
     """
     state = str(item_dict.get("state") or "").upper()
-    has_released_fix_note = (
-        state in {"REVISION", "REVISION_REQUESTED", "FIX"}
-        and bool(item_dict.get("fix_approved_by_admin"))
-        and bool(item_dict.pop("designer_note_released_for_fix", False))
+    note_released_for_task = bool(item_dict.pop("designer_note_released_for_fix", False))
+    has_released_designer_note = (
+        note_released_for_task
         and bool(str(item_dict.get("designer_note") or "").strip())
+        and (
+            # An approved Fix note stays visible after the Designer starts it
+            # and the internal state changes from REVISION to IN_PROGRESS.
+            (state in {"REVISION", "REVISION_REQUESTED", "FIX"} and bool(item_dict.get("fix_approved_by_admin")))
+            # A missing-template resolution is an explicit Admin release back
+            # to an active task, not an upstream note leak.
+            or (state in {"WAITING", "ASSIGNED", "IN_PROGRESS", "PENDING"} and not bool(item_dict.get("template_missing")))
+        )
     )
     item_dict.pop("suppress_note_outsource_for_designer", None)
     item_dict["note_outsource"] = ""
     item_dict["previous_note_outsource"] = None
     item_dict["result_versions"] = []
-    if not has_released_fix_note:
+    if not has_released_designer_note:
         item_dict["designer_note"] = ""
 
 
