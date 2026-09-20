@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { usePlatform } from '../auth/PlatformContext'
 import { useAuth } from '../auth/AuthContext'
 
@@ -11,6 +11,15 @@ export const PlatformSwitcher: React.FC = () => {
   const [accountUsername, setAccountUsername] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+
+  useEffect(() => {
+    if (!isModalOpen) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsModalOpen(false)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isModalOpen])
 
   if (!isAdmin) return null
 

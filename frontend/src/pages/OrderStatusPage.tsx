@@ -63,6 +63,15 @@ export function OrderStatusPage() {
   const [editPlatformStatus, setEditPlatformStatus] = useState('Doing')
   const [applying, setApplying] = useState(false)
 
+  useEffect(() => {
+    if (!editingOrder) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !applying) setEditingOrder(null)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [editingOrder, applying])
+
   // Track per-row in-flight state purely client-side
   const [refreshingDetailIds, setRefreshingDetailIds] = useState<Set<string>>(new Set())
 

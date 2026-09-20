@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { X, KeyRound, Check, AlertCircle, Loader2, ArrowRightLeft, Plus, CheckCircle2, HelpCircle } from 'lucide-react'
 import { apiFetch } from '../api/client'
 import { usePlatform } from '../auth/PlatformContext'
@@ -21,6 +21,15 @@ export function PlatformSettingsModal({ isOpen, onClose }: PlatformSettingsModal
   const [successMsg, setSuccessMsg] = useState('')
   const [showTeamOutsourceHelp, setShowTeamOutsourceHelp] = useState(false)
   const [showCookieHelp, setShowCookieHelp] = useState(false)
+
+  useEffect(() => {
+    if (!isOpen) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isOpen, onClose])
 
   if (!isOpen) return null
 

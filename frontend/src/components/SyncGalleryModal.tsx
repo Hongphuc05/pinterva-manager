@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import {
   X,
   Images,
@@ -35,6 +35,15 @@ export function SyncGalleryModal() {
   const [searchQuery, setSearchQuery] = useState('')
   const [filterMode, setFilterMode] = useState<'all' | 'pending' | 'synced' | 'error'>('all')
   const [loadingList, setLoadingList] = useState(false)
+
+  useEffect(() => {
+    if (!isModalOpen) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeModal()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isModalOpen, closeModal])
 
   const getOrderEffectiveCount = (o: { id: string; image_count: number }) => {
     const live = syncStatusMap[o.id]

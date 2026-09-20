@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import {
   X,
   Zap,
@@ -37,6 +37,15 @@ export function QuickDistributeModal({
   const [showWarning, setShowWarning] = useState(false)
   const [warningUncheckCount, setWarningUncheckCount] = useState(0)
   const [searchQuery, setSearchQuery] = useState('')
+
+  useEffect(() => {
+    if (!isOpen) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isOpen, onClose])
 
   const filteredDesigners = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()

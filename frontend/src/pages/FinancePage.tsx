@@ -765,6 +765,19 @@ export function FinancePage() {
     (data?.tasks?.length ?? 0) > 0 &&
     data?.tasks?.every((t) => selectedOrderIds.includes(t.order_id))
 
+  // ESC key handler for FinancePage modals
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (exportModalOpen) setExportModalOpen(false)
+        else if (noteModalOpen) setNoteModalOpen(false)
+        else if (selectedDesignerForModal) setSelectedDesignerForModal(null)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [exportModalOpen, noteModalOpen, selectedDesignerForModal])
+
   return (
     <DashboardLayout>
       {/* Image Zoom Modal */}
@@ -2269,11 +2282,11 @@ export function FinancePage() {
       )}
 
       {/* ========================================================================= */}
-      {/* MODAL: DESIGNER DETAIL TASKS & FINANCE (ADMIN)                            */}
-      {/* ========================================================================= */}
-      {selectedDesignerForModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4 animate-in fade-in duration-150">
-          <div className="w-full max-w-6xl max-h-[92vh] flex flex-col rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
+  {/* MODAL: DESIGNER DETAIL TASKS & FINANCE (ADMIN)                            */}
+  {/* ========================================================================= */}
+  {selectedDesignerForModal && (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+      <div className="w-full max-w-6xl h-[88vh] min-h-[550px] max-h-[92vh] flex flex-col rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
             {/* Modal Header */}
             <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between flex-wrap gap-3">
               <div className="flex items-center gap-3">

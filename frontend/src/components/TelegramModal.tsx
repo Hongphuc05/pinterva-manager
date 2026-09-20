@@ -39,6 +39,15 @@ export function TelegramModal({ isOpen, onClose }: TelegramModalProps) {
     }
   }, [isOpen])
 
+  useEffect(() => {
+    if (!isOpen) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isOpen, onClose])
+
   async function loadStatus() {
     setLoading(true)
     try {

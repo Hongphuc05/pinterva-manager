@@ -59,6 +59,19 @@ export function UsersPage() {
     loadUsers()
   }, [])
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (showAddModal && !submitting) setShowAddModal(false)
+        else if (deletingUser && !deleting) setDeletingUser(null)
+        else if (passwordUser) setPasswordUser(null)
+        else if (changingPasswordUser && !savingPassword) setChangingPasswordUser(null)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [showAddModal, submitting, deletingUser, deleting, passwordUser, changingPasswordUser, savingPassword])
+
   async function loadUsers() {
     setLoading(true)
     setError('')

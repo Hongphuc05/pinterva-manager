@@ -180,9 +180,17 @@ export function OrderHistoryTimelineModal({
     return {
       icon: Clock,
       color: 'text-slate-700 bg-slate-100 border-slate-300',
-      dot: 'bg-slate-400',
     }
   }
+
+  useEffect(() => {
+    if (!isOpen) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isOpen, onClose])
 
   return (
     <div

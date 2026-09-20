@@ -196,6 +196,7 @@ export function OrdersListPage() {
     batchFilter: '',
     searchQuery: '',
     syncedImagesFilter: false,
+    fixReturnedFilter: false,
     dateFilterType: 'status_changed_at',
     dateFrom: '',
     dateTo: '',
@@ -256,7 +257,9 @@ export function OrdersListPage() {
   const [designerFilter, setDesignerFilter] = useState(String(restoredViewState.designerFilter || ''))
   const [batchFilter, setBatchFilter] = useState(String(restoredViewState.batchFilter || ''))
   const [searchQuery, setSearchQuery] = useState(String(restoredViewState.searchQuery || ''))
+  const lastAutoSwitchedQueryRef = useRef<string>('')
   const [syncedImagesFilter, setSyncedImagesFilter] = useState(restoredViewState.syncedImagesFilter === true)
+  const [fixReturnedFilter, setFixReturnedFilter] = useState(restoredViewState.fixReturnedFilter === true)
 
   // Date Filter State (3 Modes: status_changed_at, order_created_at_ext, created_at)
   const [dateFilterType, setDateFilterType] = useState<'status_changed_at' | 'order_created_at_ext' | 'created_at'>(
@@ -339,6 +342,29 @@ export function OrdersListPage() {
   const [isSubmittingInline, setIsSubmittingInline] = useState<Record<string, boolean>>({})
   const didInitializeTabSort = useRef(false)
 
+  // ESC key handler for OrdersListPage inline modals
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (platformStatusTarget && !updatingPlatformStatus) setPlatformStatusTarget(null)
+        else if (assigningOrder && !assigning) setAssigningOrder(null)
+        else if (acceptFixOrder && !acceptFixSubmitting) setAcceptFixOrder(null)
+        else if (rejectFixOrder && !rejectFixSubmitting) setRejectFixOrder(null)
+        else if (deleteConfirmModalOpen && !isBulkDeleting) setDeleteConfirmModalOpen(false)
+        else if (quickDistributeOpen) setQuickDistributeOpen(false)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [
+    platformStatusTarget, updatingPlatformStatus,
+    assigningOrder, assigning,
+    acceptFixOrder, acceptFixSubmitting,
+    rejectFixOrder, rejectFixSubmitting,
+    deleteConfirmModalOpen, isBulkDeleting,
+    quickDistributeOpen,
+  ])
+
   useEffect(() => {
     writeViewState('orders-list', user?.role, {
       adminTab,
@@ -352,6 +378,7 @@ export function OrdersListPage() {
       batchFilter,
       searchQuery,
       syncedImagesFilter,
+      fixReturnedFilter,
       dateFilterType,
       dateFrom,
       dateTo,
@@ -360,7 +387,7 @@ export function OrdersListPage() {
       dateSortDirection: dateSort.direction,
       currentPage,
     })
-  }, [user?.role, adminTab, supportTab, activeDesignerTab, adminDoingSubFilter, adminFixSubFilter, statusFilter, platformStatusFilter, designerFilter, batchFilter, searchQuery, syncedImagesFilter, dateFilterType, dateFrom, dateTo, datePreset, dateSort, currentPage])
+  }, [user?.role, adminTab, supportTab, activeDesignerTab, adminDoingSubFilter, adminFixSubFilter, statusFilter, platformStatusFilter, designerFilter, batchFilter, searchQuery, syncedImagesFilter, fixReturnedFilter, dateFilterType, dateFrom, dateTo, datePreset, dateSort, currentPage])
 
   const regularDesigners = useMemo(() => {
     const candidates = usersList.filter(
@@ -1075,15 +1102,53 @@ export function OrdersListPage() {
     !o.is_paid && ['DONE', 'CLAIMED_IMPORTED', 'COMPLETED', 'SKIPPED'].includes(o.state.toUpperCase())
   )
 
-  // Admin search must search across every status tab. Without a search query,
-  // keep the existing tab-scoped list and rendering behavior.
-  const isAdminGlobalSearch = isAdmin && searchQuery.trim().length > 0
+  // Auto-switch admin tab when user types a search query if matching order exists in another tab
+  useEffect(() => {
+    const q = searchQuery.trim().toLowerCase()
+    if (!isAdmin || !q) {
+      lastAutoSwitchedQueryRef.current = ''
+      return
+    }
+    if (lastAutoSwitchedQueryRef.current === q) return
+    lastAutoSwitchedQueryRef.current = q
+
+    const matchesOrder = (o: OrderSummary) =>
+      (o.external_order_id && o.external_order_id.toLowerCase().includes(q)) ||
+      (o.product_name && o.product_name.toLowerCase().includes(q)) ||
+      (o.assigned_designer_name && o.assigned_designer_name.toLowerCase().includes(q)) ||
+      (o.platform_designer && o.platform_designer.toLowerCase().includes(q))
+
+    const currentTabOrders =
+      adminTab === 'waiting'
+        ? waitingOrders
+        : adminTab === 'doing'
+          ? filteredDoingOrders
+          : adminTab === 'review'
+            ? reviewOrders
+            : adminTab === 'fix'
+              ? filteredFixOrders
+              : doneOrders
+
+    if (currentTabOrders.some(matchesOrder)) {
+      return
+    }
+
+    if (reviewOrders.some(matchesOrder)) {
+      setAdminTab('review')
+    } else if (filteredFixOrders.some(matchesOrder)) {
+      setAdminTab('fix')
+    } else if (filteredDoingOrders.some(matchesOrder)) {
+      setAdminTab('doing')
+    } else if (waitingOrders.some(matchesOrder)) {
+      setAdminTab('waiting')
+    } else if (doneOrders.some(matchesOrder)) {
+      setAdminTab('done')
+    }
+  }, [searchQuery, isAdmin, adminTab, waitingOrders, filteredDoingOrders, reviewOrders, filteredFixOrders, doneOrders])
 
   // Base list of orders depending on role and active tab
   let baseOrders: OrderSummary[] = orders
-  if (isAdminGlobalSearch) {
-    baseOrders = orders
-  } else if (isSupport) {
+  if (isSupport) {
     baseOrders =
       supportTab === 'all'
         ? supportUncheckedOrders
@@ -1138,10 +1203,17 @@ export function OrdersListPage() {
     return baseOrders.filter(isOrderGallerySynced).length
   }, [baseOrders, isOrderGallerySynced])
 
+  const fixReturnedOrdersCount = useMemo(() => {
+    return baseOrders.filter((order) => (order.fix_return_count || 0) > 0).length
+  }, [baseOrders])
+
   // Filter client-side order list & sort newest first
   const filteredOrders = baseOrders
     .filter((o) => {
       if (syncedImagesFilter && !isOrderGallerySynced(o)) {
+        return false
+      }
+      if (isAdmin && fixReturnedFilter && (o.fix_return_count || 0) === 0) {
         return false
       }
       if (searchQuery) {
@@ -1251,7 +1323,7 @@ export function OrdersListPage() {
     const next = new URLSearchParams(searchParams)
     next.delete('page')
     setSearchParams(next, { replace: true })
-  }, [statusFilter, platformStatusFilter, designerFilter, batchFilter, searchQuery, dateFilterType, dateFrom, dateTo, activeDesignerTab, adminTab, dateSort, syncedImagesFilter])
+  }, [statusFilter, platformStatusFilter, designerFilter, batchFilter, searchQuery, dateFilterType, dateFrom, dateTo, activeDesignerTab, adminTab, dateSort, syncedImagesFilter, fixReturnedFilter])
 
   // Reset sort to newest status_changed_at when tab changes
   useEffect(() => {
@@ -1339,6 +1411,7 @@ export function OrdersListPage() {
     setDateTo('')
     setDatePreset('')
     setSyncedImagesFilter(false)
+    setFixReturnedFilter(false)
   }
 
   function openAcceptFixModal(order: OrderSummary) {
@@ -1891,6 +1964,7 @@ export function OrdersListPage() {
                 {designerPaidOrders.length}
               </span>
             </button>
+
           </div>
         </div>
       )}
@@ -2005,6 +2079,35 @@ export function OrdersListPage() {
                 </span>
               )}
             </button>
+
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFixReturnedFilter((previous) => !previous)
+                  setCurrentPage(1)
+                }}
+                aria-pressed={fixReturnedFilter}
+                className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg border transition-all cursor-pointer ${fixReturnedFilter
+                    ? 'bg-rose-600 text-white border-rose-700 shadow-2xs ring-2 ring-rose-400/40'
+                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-300'
+                  }`}
+                title="Lọc các đơn đã từng vào Fix (Fix × 1 trở lên)"
+              >
+                <AlertTriangle className={`h-3.5 w-3.5 ${fixReturnedFilter ? 'text-white' : 'text-rose-600'}`} />
+                <span>Đã vào Fix</span>
+                {fixReturnedOrdersCount > 0 && (
+                  <span
+                    className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${fixReturnedFilter
+                        ? 'bg-white text-rose-800'
+                        : 'bg-rose-100 text-rose-800 border border-rose-200'
+                      }`}
+                  >
+                    {fixReturnedOrdersCount}
+                  </span>
+                )}
+              </button>
+            )}
           </div>
         </div>
 
@@ -2090,7 +2193,7 @@ export function OrdersListPage() {
           </div>
 
           {/* Reset All Filters Button */}
-          {(statusFilter || platformStatusFilter || designerFilter || batchFilter || searchQuery || dateFrom || dateTo || syncedImagesFilter) && (
+          {(statusFilter || platformStatusFilter || designerFilter || batchFilter || searchQuery || dateFrom || dateTo || syncedImagesFilter || fixReturnedFilter) && (
             <button
               type="button"
               onClick={handleResetFilters}
@@ -2302,15 +2405,21 @@ export function OrdersListPage() {
             </button>
           )}
 
-          {(searchQuery || statusFilter || platformStatusFilter || designerFilter || batchFilter || dateFrom || dateTo || syncedImagesFilter) && (
+          {(searchQuery || statusFilter || platformStatusFilter || designerFilter || batchFilter || dateFrom || dateTo || syncedImagesFilter || fixReturnedFilter) && (
             <div className="inline-flex items-center gap-1.5 text-xs text-slate-500 bg-slate-100/80 px-2.5 py-1 rounded-md border border-slate-200/60">
               <span className="text-slate-400">Đang lọc từ:</span>
               <span className="font-mono font-bold text-slate-700">{baseOrders.length}</span>
-              <span>{isAdminGlobalSearch ? 'task trên toàn bộ tab' : 'task trong tab'}</span>
+              <span>task trong tab</span>
               {syncedImagesFilter && (
                 <span className="inline-flex items-center gap-1 ml-1 px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">
                   <Images className="h-2.5 w-2.5" />
                   Đã đồng bộ ảnh
+                </span>
+              )}
+              {fixReturnedFilter && (
+                <span className="inline-flex items-center gap-1 ml-1 px-1.5 py-0.2 rounded bg-rose-100 text-rose-800 text-[10px] font-bold">
+                  <AlertTriangle className="h-2.5 w-2.5" />
+                  Đã vào Fix
                 </span>
               )}
             </div>

@@ -31,7 +31,7 @@ describe('DesignerBoardPage', () => {
               id: 'designer-fix', username: 'fix', full_name: 'Designer Có Fix', total_orders: 2, doing_count: 1, review_count: 0, fix_count: 1, done_count: 0,
               orders: [{
                 id: 'order-remove-1', version: 7, external_order_id: 'DJ-REMOVE-1', state: 'IN_PROGRESS', thumbnail_url: null,
-                deadline_tacahu: null, product_name: 'Đơn cần gỡ', work_domain: 'standard',
+                deadline_tacahu: '2020-01-01T00:00:00Z', product_name: 'Đơn cần gỡ', work_domain: 'standard',
               }],
             },
             {
@@ -90,6 +90,24 @@ describe('DesignerBoardPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Đang có việc' }))
 
     expect(screen.getByRole('button', { name: 'Đang có việc' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByText('Designer Có Fix')).toBeInTheDocument()
+    expect(screen.queryByText('Designer Chỉ Review')).not.toBeInTheDocument()
+    expect(screen.queryByText('Designer Rảnh')).not.toBeInTheDocument()
+  })
+
+  it('filters overdue Doing orders from both the deadline filter and KPI warning', async () => {
+    render(
+      <BrowserRouter>
+        <AuthProvider><PlatformProvider><ToastProvider><GallerySyncProvider><DesignerBoardPage /></GallerySyncProvider></ToastProvider></PlatformProvider></AuthProvider>
+      </BrowserRouter>,
+    )
+
+    await screen.findByText('Designer Có Fix')
+    expect(screen.getByText('1 đơn đang làm đã quá deadline')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Lọc 1 đơn đang làm đã quá deadline' }))
+
+    expect(screen.getByRole('button', { name: /Chậm deadline/i })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByText('Designer Có Fix')).toBeInTheDocument()
     expect(screen.queryByText('Designer Chỉ Review')).not.toBeInTheDocument()
     expect(screen.queryByText('Designer Rảnh')).not.toBeInTheDocument()

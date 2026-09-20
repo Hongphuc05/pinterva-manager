@@ -130,6 +130,15 @@ export function OrderDetailPage() {
     isOpen: boolean
     mode: 'approve' | 'reject'
   } | null>(null)
+
+  useEffect(() => {
+    if (!showSubmitModal) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !busyAssignment) setShowSubmitModal(false)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [showSubmitModal, busyAssignment])
   const returnTo = typeof (location.state as { returnTo?: unknown } | null)?.returnTo === 'string'
     && (location.state as { returnTo: string }).returnTo.startsWith('/orders')
     ? (location.state as { returnTo: string }).returnTo

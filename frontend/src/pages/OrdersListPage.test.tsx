@@ -70,6 +70,52 @@ describe('OrdersListPage', () => {
     expect(screen.getByText('Tất cả trạng thái Print')).toBeInTheDocument()
   })
 
+  it('lets an admin filter the current tab to orders that have entered Fix', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) => {
+        if (url.includes('/api/me')) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ id: 'admin-fix-filter', role: 'admin', full_name: 'Admin' }) })
+        }
+        if (url.includes('/api/platforms')) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ platforms: [] }) })
+        }
+        if (url.includes('/api/orders')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              orders: [
+                {
+                  id: 'fix-returned', external_order_id: 'DJ-FIX-X1', product_name: 'Đơn đã vào Fix', state: 'WAITING', fix_return_count: 1,
+                  batch_id: null, sku: null, thumbnail_url: null, created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+                },
+                {
+                  id: 'never-fixed', external_order_id: 'DJ-NO-FIX', product_name: 'Đơn chưa vào Fix', state: 'WAITING', fix_return_count: 0,
+                  batch_id: null, sku: null, thumbnail_url: null, created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+                },
+              ],
+            }),
+          })
+        }
+        return Promise.reject(new Error(`unexpected fetch: ${url}`))
+      }),
+    )
+
+    render(
+      <BrowserRouter>
+        <AuthProvider><PlatformProvider><ToastProvider><GallerySyncProvider><OrdersListPage /></GallerySyncProvider></ToastProvider></PlatformProvider></AuthProvider>
+      </BrowserRouter>,
+    )
+
+    await screen.findByText('DJ-FIX-X1')
+    fireEvent.click(screen.getByRole('button', { name: /Đã vào Fix/i }))
+
+    expect(screen.getByRole('button', { name: /Đã vào Fix/i })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByText('DJ-FIX-X1')).toBeInTheDocument()
+    expect(screen.queryByText('DJ-NO-FIX')).not.toBeInTheDocument()
+  })
+
   it('hides order code DJ1 and renders 4 tabs for designer', async () => {
     vi.stubGlobal(
       'fetch',

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { X, Search, RotateCcw } from 'lucide-react'
 
 // Status and designer use the same values as the platform filter. Selecting
@@ -31,6 +31,15 @@ export function CrawlFilterModal({ isOpen, onClose, onSearch, loading, designers
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [deadlineTacahu, setDeadlineTacahu] = useState('')
+
+  useEffect(() => {
+    if (!isOpen) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isOpen, onClose])
 
   if (!isOpen) return null
 

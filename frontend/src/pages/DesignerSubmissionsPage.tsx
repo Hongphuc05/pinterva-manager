@@ -95,6 +95,17 @@ export function DesignerSubmissionsPage() {
   // Version History Modal state
   const [historyModalItem, setHistoryModalItem] = useState<SubmissionItem | null>(null)
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (editModalItem && !savingOverride) setEditModalItem(null)
+        else if (historyModalItem) setHistoryModalItem(null)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [editModalItem, savingOverride, historyModalItem])
+
   const fetchDesigners = useCallback(async () => {
     try {
       const res = await apiFetch<UserItem[]>('/users')

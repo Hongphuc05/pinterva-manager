@@ -13,6 +13,7 @@ import {
   Package, 
   Clock, 
   AlertCircle, 
+  AlertTriangle,
   Check, 
   ChevronDown,
   ChevronRight,
@@ -57,6 +58,19 @@ type DesignerWorkload = {
   orders: DesignerOrder[]
 }
 
+type DesignerBoardFilter = 'all' | 'needs_review' | 'has_fix' | 'active' | 'overdue'
+
+const DOING_ORDER_STATES = new Set(['IN_PROGRESS', 'ASSIGNED'])
+
+function isOverdueDoingOrder(order: DesignerOrder, now: number) {
+  if (!DOING_ORDER_STATES.has(order.state.toUpperCase()) || !order.deadline_tacahu) {
+    return false
+  }
+
+  const deadlineAt = Date.parse(order.deadline_tacahu)
+  return Number.isFinite(deadlineAt) && deadlineAt < now
+}
+
 export function DesignerBoardPage() {
   const { user } = useAuth()
   const location = useLocation()
@@ -71,9 +85,9 @@ export function DesignerBoardPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState(String(restoredViewState.searchQuery || ''))
-  const [filterMode, setFilterMode] = useState<'all' | 'needs_review' | 'has_fix' | 'active'>(
-    ['all', 'needs_review', 'has_fix', 'active'].includes(String(restoredViewState.filterMode))
-      ? restoredViewState.filterMode as 'all' | 'needs_review' | 'has_fix' | 'active'
+  const [filterMode, setFilterMode] = useState<DesignerBoardFilter>(
+    ['all', 'needs_review', 'has_fix', 'active', 'overdue'].includes(String(restoredViewState.filterMode))
+      ? restoredViewState.filterMode as DesignerBoardFilter
       : 'all',
   )
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
@@ -190,6 +204,13 @@ export function DesignerBoardPage() {
   const totalReview = designers.reduce((sum, d) => sum + d.review_count, 0)
   const totalFix = designers.reduce((sum, d) => sum + d.fix_count, 0)
   const totalDone = designers.reduce((sum, d) => sum + d.done_count, 0)
+  const now = Date.now()
+  const overdueDoingOrders = designers.flatMap((designer) =>
+    designer.orders.filter((order) => isOverdueDoingOrder(order, now)),
+  )
+  const overdueDesignerCount = designers.filter((designer) =>
+    designer.orders.some((order) => isOverdueDoingOrder(order, now)),
+  ).length
 
   // Filter designers based on search and workload state. Review and Fix have
   // dedicated filters above; “Đang có việc” means the Designer is actively
@@ -206,6 +227,7 @@ export function DesignerBoardPage() {
     if (filterMode === 'needs_review') return des.review_count > 0
     if (filterMode === 'has_fix') return des.fix_count > 0
     if (filterMode === 'active') return des.doing_count > 0
+    if (filterMode === 'overdue') return des.orders.some((order) => isOverdueDoingOrder(order, now))
     return true
   })
 
@@ -231,11 +253,19 @@ export function DesignerBoardPage() {
     setExpandedDesignerIds(new Set(filteredDesigners.map((designer) => designer.id)))
   }
 
-  function selectFilter(mode: 'all' | 'needs_review' | 'has_fix' | 'active') {
+  function selectFilter(mode: DesignerBoardFilter) {
     setFilterMode(mode)
-    // The filter is applied to the whole team immediately, not merely styled
-    // as selected. Expanding the matched people makes the result visible.
-    setExpandedDesignerIds(new Set())
+    // An overdue filter is actionable: open its matching Designers so the
+    // late orders and their deadlines are visible immediately.
+    setExpandedDesignerIds(
+      mode === 'overdue'
+        ? new Set(
+          designers
+            .filter((designer) => designer.orders.some((order) => isOverdueDoingOrder(order, now)))
+            .map((designer) => designer.id),
+        )
+        : new Set(),
+    )
   }
 
   // Listen for Topbar sync button click
@@ -312,13 +342,29 @@ export function DesignerBoardPage() {
             <div className="text-[10px] text-slate-400 mt-1 font-medium">{totalDesigners} Designer trong team</div>
           </div>
 
-          <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-4 shadow-2xs">
+          <div className={`rounded-xl border p-4 shadow-2xs transition-all ${
+            overdueDoingOrders.length > 0
+              ? 'border-rose-300 bg-rose-50 ring-2 ring-rose-400/20'
+              : 'border-blue-200 bg-blue-50/60'
+          }`}>
             <div className="text-[11px] font-bold text-blue-700 uppercase tracking-wider flex items-center gap-1.5">
               <span className="h-2 w-2 rounded-full bg-blue-500"></span>
               <span>Đang làm</span>
             </div>
             <div className="text-2xl font-black font-mono text-blue-800 mt-1">{totalDoing}</div>
-            <div className="text-[10px] text-blue-600/80 mt-1 font-medium">Đang trong quá trình thiết kế</div>
+            {overdueDoingOrders.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => selectFilter('overdue')}
+                className="mt-1 inline-flex items-center gap-1 text-left text-[10px] font-bold text-rose-700 hover:text-rose-800 hover:underline cursor-pointer"
+                aria-label={`Lọc ${overdueDoingOrders.length} đơn đang làm đã quá deadline`}
+              >
+                <AlertTriangle className="h-3 w-3 shrink-0" />
+                <span>{overdueDoingOrders.length} đơn đang làm đã quá deadline</span>
+              </button>
+            ) : (
+              <div className="text-[10px] text-blue-600/80 mt-1 font-medium">Đang trong quá trình thiết kế</div>
+            )}
           </div>
 
           <div className={`rounded-xl border p-4 shadow-2xs transition-all ${
@@ -430,6 +476,24 @@ export function DesignerBoardPage() {
               }`}
             >
               Đang có việc
+            </button>
+            <button
+              type="button"
+              onClick={() => selectFilter('overdue')}
+              aria-pressed={filterMode === 'overdue'}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
+                filterMode === 'overdue'
+                  ? 'bg-rose-600 text-white border-rose-600 shadow-2xs'
+                  : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
+              }`}
+            >
+              <AlertTriangle className="h-3.5 w-3.5" />
+              <span>Chậm deadline</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
+                filterMode === 'overdue' ? 'bg-white/20 text-white' : 'bg-rose-200 text-rose-900'
+              }`}>
+                {overdueDesignerCount}
+              </span>
             </button>
 
             <div className="h-4 w-px bg-slate-200 mx-1 hidden sm:block" />
