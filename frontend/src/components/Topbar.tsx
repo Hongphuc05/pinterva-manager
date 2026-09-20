@@ -181,7 +181,7 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
           {getPageTitle(location.pathname)}
         </h2>
         <span className="hidden rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 font-mono text-xs text-blue-700 sm:inline">
-          V1.2
+          V1.3
         </span>
       </div>
 
