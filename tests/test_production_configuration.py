@@ -51,9 +51,12 @@ def test_production_persists_private_work_note_attachments_and_backs_them_up():
     backup_script = (ROOT_DIR / "scripts" / "backup-production-assets.sh").read_text()
     preflight = (ROOT_DIR / "scripts" / "production-preflight.sh").read_text()
     deploy_script = (ROOT_DIR / "scripts" / "deploy-production.sh").read_text()
+    workflow = (ROOT_DIR / ".github" / "workflows" / "deploy-production.yml").read_text()
 
     assert "private_work_note_assets:/app/private_work_note_assets" in compose
     assert "private_work_note_assets" in backup_script
     assert "private_work_note_assets" in preflight
     assert "Preserving legacy private work-note attachments" in deploy_script
     assert "docker cp" in deploy_script
+    assert "Preparing persistent work-note attachments" in workflow
+    assert "--entrypoint chown" in workflow

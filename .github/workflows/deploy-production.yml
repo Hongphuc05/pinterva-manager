@@ -60,6 +60,25 @@ jobs:
               echo "APP_VERSION=$VERSION" >> .env.production
             fi
 
+            echo "=== Preparing persistent work-note attachments ==="
+            DATA_DIR=$(awk -F= '$1 == "DATA_DIR" { sub(/^[^=]*=/, ""); print; exit }' .env.production)
+            WORK_NOTE_ASSETS_DIR="$DATA_DIR/private_work_note_assets"
+            mkdir -p "$WORK_NOTE_ASSETS_DIR"
+
+            # The API image runs as UID/GID 10001. Bootstrap the new host mount with the
+            # currently running trusted API image before the new compose config recreates it.
+            CURRENT_API_CONTAINER=$(docker compose --env-file .env.production -f compose.production.yaml ps -q api)
+            if [ -z "$CURRENT_API_CONTAINER" ]; then
+              echo "Cannot bootstrap work-note attachment permissions: API container is not running." >&2
+              exit 1
+            fi
+            CURRENT_API_IMAGE=$(docker inspect -f '{{.Config.Image}}' "$CURRENT_API_CONTAINER")
+            docker run --rm --user 0:0 \
+              -v "$WORK_NOTE_ASSETS_DIR:/assets" \
+              --entrypoint chown \
+              "$CURRENT_API_IMAGE" \
+              -R 10001:10001 /assets
+
             echo "=== Preflight ==="
             ./scripts/production-preflight.sh --with-tunnel
 
