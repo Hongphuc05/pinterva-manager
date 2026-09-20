@@ -1021,20 +1021,36 @@ export function OrderDetailPage() {
 
         {/* Specifications Grid */}
         {!isAdmin ? (
-          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-            <span className="text-slate-400 font-semibold block uppercase text-[10px]">
-              Thời Gian Khách Đặt (Order At)
-            </span>
-            <p className="font-mono font-semibold text-slate-800 flex items-center gap-1.5 text-sm">
-              <Clock className="h-4 w-4 text-blue-600" />
-              <span>
-                {order.order_created_at_ext
-                  ? new Date(order.order_created_at_ext).toLocaleString('vi-VN')
-                  : order.created_at_ext
-                  ? new Date(order.created_at_ext).toLocaleString('vi-VN')
-                  : new Date(order.created_at).toLocaleString('vi-VN')}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+            <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
+              <span className="text-slate-400 font-semibold block uppercase text-[10px]">
+                Thời Gian Khách Đặt (Order At)
               </span>
-            </p>
+              <p className="font-mono font-semibold text-slate-800 flex items-center gap-1.5 text-sm">
+                <Clock className="h-4 w-4 text-blue-600" />
+                <span>
+                  {order.order_created_at_ext
+                    ? new Date(order.order_created_at_ext).toLocaleString('vi-VN')
+                    : order.created_at_ext
+                    ? new Date(order.created_at_ext).toLocaleString('vi-VN')
+                    : new Date(order.created_at).toLocaleString('vi-VN')}
+                </span>
+              </p>
+            </div>
+
+            <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
+              <span className="text-slate-400 font-semibold block uppercase text-[10px]">
+                Deadline
+              </span>
+              <p className="font-mono font-semibold text-slate-800 flex items-center gap-1.5 text-sm">
+                <Clock className="h-4 w-4 text-amber-600" />
+                <span>
+                  {order.deadline_tacahu
+                    ? new Date(order.deadline_tacahu).toLocaleString('vi-VN')
+                    : '-'}
+                </span>
+              </p>
+            </div>
           </div>
         ) : (
           <div className={`grid grid-cols-1 gap-4 text-xs ${isAdmin ? 'md:grid-cols-5' : 'md:grid-cols-4'}`}>

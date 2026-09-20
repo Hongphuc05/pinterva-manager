@@ -338,11 +338,11 @@ describe('OrderDetailPage', () => {
     expect(screen.getByText('Size:')).toBeInTheDocument()
     expect(screen.queryByText('| Size:')).not.toBeInTheDocument()
 
-    // 2. Shows single Order At card
+    // 2. Shows Order At and Deadline cards for designer
     expect(screen.getByText(/Thời Gian Khách Đặt \(Order At\)/i)).toBeInTheDocument()
+    expect(screen.getByText('Deadline')).toBeInTheDocument()
 
-    // 3. Old 3 cards and SKU card are hidden for designer
-    expect(screen.queryByText(/Thời Hạn \(Deadline\)/i)).not.toBeInTheDocument()
+    // 3. Old extra cards and SKU card are hidden for designer
     expect(screen.queryByText(/Ngày Phát Hiện \(Crawl\)/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/Mẫu Hàng Thiết Kế/i)).not.toBeInTheDocument()
   })

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { BrowserRouter } from 'react-router-dom'
 import { AuthProvider } from '../auth/AuthContext'
 import { PlatformProvider } from '../auth/PlatformContext'
@@ -102,18 +102,19 @@ describe('OrdersListPage', () => {
       }),
     )
 
-    render(
+    const view = render(
       <BrowserRouter>
         <AuthProvider><PlatformProvider><ToastProvider><GallerySyncProvider><OrdersListPage /></GallerySyncProvider></ToastProvider></PlatformProvider></AuthProvider>
       </BrowserRouter>,
     )
 
     await screen.findByText('DJ-FIX-X1')
-    fireEvent.click(screen.getByRole('button', { name: /Đã vào Fix/i }))
+    const fixReturnedButton = within(view.container).getByRole('button', { name: 'Lọc đơn đã vào Fix' })
+    fireEvent.click(fixReturnedButton)
 
-    expect(screen.getByRole('button', { name: /Đã vào Fix/i })).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByText('DJ-FIX-X1')).toBeInTheDocument()
-    expect(screen.queryByText('DJ-NO-FIX')).not.toBeInTheDocument()
+    expect(fixReturnedButton).toHaveAttribute('aria-pressed', 'true')
+    expect(within(view.container).getByText('DJ-FIX-X1')).toBeInTheDocument()
+    expect(within(view.container).queryByText('DJ-NO-FIX')).not.toBeInTheDocument()
   })
 
   it('hides order code DJ1 and renders 4 tabs for designer', async () => {
