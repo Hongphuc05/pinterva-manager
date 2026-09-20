@@ -7,8 +7,8 @@ from app.adapters.db.models import Order
 from app.adapters.db.session import SessionLocal
 from app.application.telegram_service import (
     is_telegram_configured,
+    notify_admin_deadline_overdue_by_designer,
     notify_admin_excessive_fix,
-    notify_admin_deadline_overdue,
     notify_admin_missing_template,
     notify_admin_new_fix,
     notify_admin_review_submitted,
@@ -143,17 +143,16 @@ def check_designer_deadlines() -> None:
             Order.deadline_overdue_notified_at.is_(None),
             Order.state.in_(("IN_PROGRESS", "REVISION")),
         ).all()
-        order_ids = []
+        overdue_orders = []
         for order in orders:
             # Starting a Fix changes state to IN_PROGRESS, but its one-hour
             # deadline remains authoritative until the designer resubmits.
             deadline = order.fix_deadline_at or order.deadline_tacahu
             if deadline and deadline <= now:
                 order.deadline_overdue_notified_at = now
-                order_ids.append(order.id)
+                overdue_orders.append(order)
         session.commit()
-        for order_id in order_ids:
-            notify_admin_deadline_overdue(session, order_id)
+        notify_admin_deadline_overdue_by_designer(session, overdue_orders)
     except Exception:
         session.rollback()
         logger.exception("Failed overdue deadline scan")

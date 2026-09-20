@@ -429,28 +429,60 @@ def notify_admin_review_submitted(
     return True
 
 
+def notify_admin_deadline_overdue_by_designer(session: Session, orders: list[Order]) -> None:
+    """Send one overdue summary per Designer instead of one message per order.
+
+    Orders must already have been selected by the periodic deadline scanner.  A
+    platform is part of the grouping key so an Admin only receives summaries for
+    the platform they are allowed to manage.
+    """
+    if not orders:
+        return
+
+    order_ids = [order.id for order in orders]
+    assignments = (
+        session.query(Assignment)
+        .filter(Assignment.order_id.in_(order_ids), Assignment.status == "approved")
+        .all()
+    )
+    assignment_by_order = {assignment.order_id: assignment for assignment in assignments}
+    designer_ids = {assignment.designer_id for assignment in assignments}
+    designers_by_id = {
+        designer.id: designer
+        for designer in session.query(User).filter(User.id.in_(designer_ids)).all()
+    } if designer_ids else {}
+
+    grouped_orders: dict[tuple[uuid.UUID | None, str], list[Order]] = {}
+    for order in orders:
+        assignment = assignment_by_order.get(order.id)
+        designer = designers_by_id.get(assignment.designer_id) if assignment else None
+        designer_name = (
+            (designer.full_name or designer.username)
+            if designer
+            else (order.printerval_designer or "Chưa rõ")
+        )
+        grouped_orders.setdefault((order.platform_id, designer_name), []).append(order)
+
+    for (platform_id, designer_name), designer_orders in grouped_orders.items():
+        chat_ids = _get_admin_chat_ids(session, platform_id)
+        if not chat_ids:
+            continue
+        text = (
+            "⏰ <b>DESIGNER QUÁ HẠN!</b>\n"
+            f"👤 <b>Designer:</b> {html.escape(designer_name)}\n"
+            f"📦 <b>Số đơn quá hạn:</b> {len(designer_orders)}\n"
+            "👉 Admin kiểm tra và xử lý các đơn trên Tacahu."
+        )
+        for cid in chat_ids:
+            send_message(cid, text)
+
+
 def notify_admin_deadline_overdue(session: Session, order_id: uuid.UUID) -> bool:
+    """Backward-compatible single-order entry point for non-periodic callers."""
     order = session.get(Order, order_id)
     if order is None:
         return False
-    chat_ids = _get_admin_chat_ids(session, order.platform_id)
-    if not chat_ids:
-        return False
-    assignment = session.query(Assignment).filter(
-        Assignment.order_id == order.id, Assignment.status == "approved"
-    ).first()
-    designer = session.get(User, assignment.designer_id) if assignment and assignment.designer_id else None
-    deadline = order.fix_deadline_at or order.deadline_tacahu
-    kind = "hạn Fix" if order.fix_deadline_at else "hạn đơn"
-    text = (
-        f"⏰ <b>DESIGNER QUÁ HẠN {kind.upper()}!</b>\n"
-        f"📦 <b>Mã đơn:</b> <code>{html.escape(order.external_order_id)}</code>\n"
-        f"👤 <b>Designer:</b> {html.escape((designer.full_name or designer.username) if designer else order.printerval_designer or 'Chưa rõ')}\n"
-        f"🕒 <b>Hạn:</b> {format_vietnam_time(deadline)}\n"
-        "👉 Admin kiểm tra và xử lý đơn trên Tacahu."
-    )
-    for cid in chat_ids:
-        send_message(cid, text)
+    notify_admin_deadline_overdue_by_designer(session, [order])
     return True
 
 
