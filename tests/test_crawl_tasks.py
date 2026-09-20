@@ -20,6 +20,14 @@ def test_printerval_assignment_requests_use_the_priority_queue():
     assert route["queue"] == "assignment"
 
 
+def test_review_submission_sync_preempts_bulk_assignment_requests():
+    route = celery_app.conf.task_routes[
+        "app.workers.assignment_sync_tasks.sync_order_review_to_printerval_task"
+    ]
+    assert route == {"queue": "assignment", "priority": 9}
+    assert celery_app.conf.worker_prefetch_multiplier == 1
+
+
 def test_celery_app_has_status_sync_beat_schedule():
     schedule = celery_app.conf.beat_schedule
     assert "sync-order-statuses" in schedule

@@ -23,15 +23,18 @@ celery_app = Celery(
 )
 
 # Writing a Designer/Status is a human-requested action and must never wait behind
-# periodic crawl/status jobs.  A normal worker consumes both queues; deployments may
-# also run a dedicated ``-Q assignment`` worker when write volume grows.
-celery_app.conf.task_queues = (Queue("celery"), Queue("assignment"))
+# periodic crawl/status jobs. Review submission is more urgent than bulk Designer
+# assignment: a Designer has already submitted work and Printerval must receive its
+# link/status promptly. Redis priorities plus a prefetch of one prevent a solo
+# assignment worker from reserving several bulk jobs ahead of that submission.
+celery_app.conf.task_queues = (Queue("celery"), Queue("assignment", max_priority=10))
 celery_app.conf.task_routes = {
     "app.workers.assignment_sync_tasks.sync_printerval_assignment_request": {
         "queue": "assignment"
     },
     "app.workers.assignment_sync_tasks.sync_order_review_to_printerval_task": {
-        "queue": "assignment"
+        "queue": "assignment",
+        "priority": 9,
     },
     "app.workers.assignment_sync_tasks.sync_assignment_to_printerval_task": {
         "queue": "assignment"
@@ -39,6 +42,7 @@ celery_app.conf.task_routes = {
     "app.workers.sync_job_tasks.run_status_sync_job": {"queue": "celery"},
     "app.workers.order_sheet_backup_tasks.export_order_sheet_backup": {"queue": "celery"},
 }
+celery_app.conf.worker_prefetch_multiplier = 1
 
 celery_app.conf.timezone = _settings.celery_timezone
 
