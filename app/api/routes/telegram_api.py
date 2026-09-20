@@ -9,9 +9,18 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.adapters.db.models import Assignment, Order, TelegramActionLog, User, WorkflowEvent
+from app.adapters.db.models import (
+    Assignment,
+    Order,
+    TelegramActionLog,
+    TelegramFixConversation,
+    User,
+    WorkflowEvent,
+)
 from app.api.deps import get_current_user, get_db
 from app.application.telegram_service import (
+    clear_message_keyboard,
+    delete_messages,
     generate_telegram_link_code,
     get_bot_username,
     is_telegram_configured,
@@ -25,6 +34,41 @@ from app.domain.models import OrderState
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/telegram", tags=["telegram"])
+
+
+def _track_fix_transient_message(db: Session, order_id, chat_id: str, message_id: int | None) -> None:
+    if message_id is None:
+        return
+    conversation = (
+        db.query(TelegramFixConversation)
+        .filter_by(order_id=order_id, chat_id=chat_id, status="active")
+        .order_by(TelegramFixConversation.created_at.desc())
+        .first()
+    )
+    if conversation is None:
+        return
+    ids = list(conversation.transient_message_ids or [])
+    if message_id not in ids:
+        conversation.transient_message_ids = [*ids, message_id]
+        db.commit()
+
+
+def _clean_completed_fix_conversations(db: Session, order_id, extra_message: tuple[str, int] | None = None) -> None:
+    """Keep the original Fix card but remove its buttons and all flow chatter."""
+    conversations = db.query(TelegramFixConversation).filter_by(order_id=order_id, status="active").all()
+    for conversation in conversations:
+        keyboard_cleared = clear_message_keyboard(conversation.chat_id, conversation.root_message_id)
+        transient = [int(message_id) for message_id in (conversation.transient_message_ids or [])]
+        if extra_message and extra_message[0] == conversation.chat_id:
+            transient.append(extra_message[1])
+        messages_deleted = delete_messages(conversation.chat_id, transient)
+        if keyboard_cleared and messages_deleted:
+            conversation.status = "cleaned"
+            conversation.cleaned_at = datetime.now(UTC)
+        else:
+            logger.warning("Telegram Fix chat cleanup remains pending for order %s chat %s", order_id, conversation.chat_id)
+    if conversations:
+        db.commit()
 
 
 def _action_is_pending_and_valid(action_log: TelegramActionLog, action_type: str) -> bool:
@@ -273,9 +317,11 @@ async def api_telegram_webhook(
                     send_message(chat_id, f"⚠️ {exc}")
                     return {"ok": True}
                 _notify_telegram_fix_designer(order, designer_id)
-                send_message(
-                    chat_id,
-                    f"✅ Đã gửi Ghi chú Admin và giao Fix cho Designer của đơn <code>{order.external_order_id}</code>.",
+                inbound_message_id = message.get("message_id")
+                _clean_completed_fix_conversations(
+                    db,
+                    order.id,
+                    (chat_id, int(inbound_message_id)) if inbound_message_id is not None else None,
                 )
                 return {"ok": True}
             if len(pending_logs) > 1:
@@ -358,7 +404,7 @@ async def api_telegram_webhook(
                     ),
                 ])
                 db.commit()
-                send_message(
+                choice_message = send_message(
                     user_chat_id,
                     "📝 <b>Bạn có muốn gửi đè Note Outsource bằng Ghi chú Admin cho Designer không?</b>\n\n"
                     "Nếu chọn <b>Có</b>, bot sẽ yêu cầu bạn soạn Ghi chú Admin. Nếu chọn <b>Không</b>, "
@@ -369,6 +415,10 @@ async def api_telegram_webhook(
                             [{"text": "➡️ Không, dùng nguyên văn Note Outsource", "callback_data": f"appfixsource:{use_source_token}"}],
                         ]
                     },
+                )
+                _track_fix_transient_message(
+                    db, order.id, user_chat_id,
+                    int(choice_message["message_id"]) if isinstance(choice_message, dict) and choice_message.get("message_id") is not None else None,
                 )
 
             elif prefix == "appfixsource":
@@ -389,10 +439,7 @@ async def api_telegram_webhook(
                     note_mode="verbatim_upstream_approved_by_admin",
                 )
                 _notify_telegram_fix_designer(order, designer_id)
-                send_message(
-                    user_chat_id,
-                    f"✅ Đã copy Note Outsource vào Ghi chú Admin và giao Fix cho Designer của đơn <code>{order.external_order_id}</code>.",
-                )
+                _clean_completed_fix_conversations(db, order.id)
 
             elif prefix == "appfixnote":
                 action_log.status = "executed"
@@ -419,6 +466,7 @@ async def api_telegram_webhook(
                 if isinstance(prompt, dict) and prompt.get("message_id") is not None:
                     note_log.payload = {**(note_log.payload or {}), "prompt_message_id": prompt["message_id"]}
                     db.commit()
+                    _track_fix_transient_message(db, order.id, user_chat_id, int(prompt["message_id"]))
 
             elif prefix == "rejfix":
                 # Admin rejects fix -> send back to Review
@@ -460,9 +508,6 @@ async def api_telegram_webhook(
                 except Exception:
                     pass
 
-                send_message(
-                    user_chat_id,
-                    f"✅ Đã từ chối Fix cho đơn <code>{order.external_order_id}</code>, chuyển về Review và gửi lại lên Platform!",
-                )
+                _clean_completed_fix_conversations(db, order.id)
 
     return {"ok": True}

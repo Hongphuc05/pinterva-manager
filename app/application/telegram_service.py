@@ -91,6 +91,17 @@ def send_message(
     return send_telegram_request("sendMessage", payload)
 
 
+def clear_message_keyboard(chat_id: str, message_id: int) -> bool:
+    return bool(send_telegram_request("editMessageReplyMarkup", {
+        "chat_id": chat_id, "message_id": message_id, "reply_markup": {"inline_keyboard": []},
+    }))
+
+
+def delete_messages(chat_id: str, message_ids: list[int]) -> bool:
+    ids = list(dict.fromkeys(message_ids))
+    return not ids or bool(send_telegram_request("deleteMessages", {"chat_id": chat_id, "message_ids": ids}))
+
+
 def send_photo(
     chat_id: str,
     photo_url: str,
@@ -389,11 +400,18 @@ def notify_admin_new_fix(session: Session, order_id: uuid.UUID) -> bool:
     )
 
     thumb = order.thumbnail_url or (order.product_image_urls[0] if order.product_image_urls else None)
+    deliveries = []
     for cid in chat_ids:
         if thumb:
-            send_photo(cid, thumb, caption=text, reply_markup=reply_markup)
+            result = send_photo(cid, thumb, caption=text, reply_markup=reply_markup)
         else:
-            send_message(cid, text, reply_markup=reply_markup)
+            result = send_message(cid, text, reply_markup=reply_markup)
+        if isinstance(result, dict) and result.get("message_id") is not None:
+            deliveries.append((cid, int(result["message_id"])))
+    if deliveries:
+        from app.adapters.db.models import TelegramFixConversation
+        session.add_all(TelegramFixConversation(order_id=order.id, chat_id=chat_id, root_message_id=message_id) for chat_id, message_id in deliveries)
+        session.commit()
     return True
 
 

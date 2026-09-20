@@ -606,3 +606,21 @@ class TelegramActionLog(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class TelegramFixConversation(Base):
+    """Per-admin Telegram delivery state for cleaning a completed Fix flow."""
+
+    __tablename__ = "telegram_fix_conversations"
+    __table_args__ = (
+        UniqueConstraint("order_id", "chat_id", "root_message_id", name="uq_telegram_fix_conversation_root"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    order_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("orders.id", ondelete="CASCADE"), nullable=False, index=True)
+    chat_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    root_message_id: Mapped[int] = mapped_column(nullable=False)
+    transient_message_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"))
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active", server_default=text("'active'"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    cleaned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
