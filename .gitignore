@@ -20,6 +20,7 @@ selenium-evidence/
 playwright-evidence/
 screenshots/
 order_assets/
+private_work_note_assets/
 frontend/node_modules/
 frontend/dist/
 

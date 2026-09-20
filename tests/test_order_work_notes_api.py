@@ -103,6 +103,10 @@ def test_admin_can_append_text_and_private_image_to_order_work_note(client, db_s
     db_session.refresh(order)
     assert order.version == original_version
 
+    _login(client, db_session, "work-note-image-denied", "designer", platform.id)
+    denied = client.get(note["attachments"][0]["url"])
+    assert denied.status_code == 404
+
 
 def test_admin_and_assigned_designer_share_append_only_order_note(client, db_session):
     platform = Platform(id=uuid.uuid4(), name="Work note access", account_username="access@example.com")

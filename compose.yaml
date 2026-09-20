@@ -19,6 +19,7 @@ x-backend: &backend
   volumes:
     - ${DATA_DIR:-./data}/crawled_assets:/app/crawled_assets
     - ${DATA_DIR:-./data}/order_assets:/app/order_assets
+    - ${DATA_DIR:-./data}/private_work_note_assets:/app/private_work_note_assets
     - ${DATA_DIR:-./data}/platform_data:/app/platform_data
     - ${DATA_DIR:-./data}/playwright_evidence:/app/playwright-evidence
     - ${DATA_DIR:-./data}/chrome_profiles:/app/chrome-profiles

@@ -20,7 +20,7 @@ RUN python -c "import tomllib; f = open('pyproject.toml', 'rb'); data = tomllib.
     && rm /tmp/requirements.txt \
     && groupadd --gid 10001 app \
     && useradd --uid 10001 --gid app --create-home --shell /usr/sbin/nologin app \
-    && mkdir -p /app/crawled_assets /app/order_assets /app/platform_data \
+    && mkdir -p /app/crawled_assets /app/order_assets /app/private_work_note_assets /app/platform_data \
         /app/playwright-evidence /app/chrome-profiles /app/credentials \
     && chown -R app:app /app /ms-playwright
 
