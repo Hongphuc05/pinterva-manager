@@ -24,12 +24,12 @@ describe('order command helpers', () => {
     )
   })
 
-  it('uses the normalized URL when downloading a private attachment', async () => {
-    vi.stubEnv('VITE_API_BASE_URL', 'https://tacahu.fun/api/')
+  it('does not duplicate the API prefix from a private attachment URL returned by the API', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'https://tacahu.fun/api/api/')
     const fetchMock = vi.fn().mockResolvedValue(new Response(new Blob(['image']), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
 
-    await apiFetchBlob('/orders/order-1/work-notes/note-1/attachments/image-1')
+    await apiFetchBlob('/api/orders/order-1/work-notes/note-1/attachments/image-1')
 
     expect(fetchMock).toHaveBeenCalledWith(
       'https://tacahu.fun/api/orders/order-1/work-notes/note-1/attachments/image-1',

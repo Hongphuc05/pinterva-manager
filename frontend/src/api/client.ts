@@ -15,11 +15,15 @@ export class ApiError extends Error {
  */
 function getApiBaseUrl(): string {
   const configured = (import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/+$/, '')
-  return configured.replace(/\/api$/, '')
+  return configured.replace(/(?:\/api)+$/, '')
 }
 
 function getApiUrl(path: string): string {
-  return `${getApiBaseUrl()}/api${path}`
+  // Most client calls use a route such as `/orders`. Some API responses, including
+  // private work-note attachment URLs, already return their canonical `/api/...` path.
+  // Normalize both forms so the client never asks for `/api/api/...`.
+  const route = path.startsWith('/api/') ? path.slice('/api'.length) : path
+  return `${getApiBaseUrl()}/api${route.startsWith('/') ? route : `/${route}`}`
 }
 
 type OrderVersionConflictDetail = {
