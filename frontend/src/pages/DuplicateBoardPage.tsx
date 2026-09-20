@@ -661,9 +661,9 @@ export function DuplicateBoardPage() {
 
   return (
     <DashboardLayout>
-      <section className="-m-3 flex h-full min-h-0 flex-col overflow-hidden bg-[#f1f2f4] p-3 sm:-m-5 sm:p-5 md:-m-6 md:p-6 xl:-m-8 xl:p-8">
+      <section className="-m-3 min-h-[calc(100vh-4rem)] bg-[#f1f2f4] p-3 sm:-m-5 sm:p-5 md:-m-6 md:p-6 xl:-m-8 xl:p-8">
         {/* Main Board Header */}
-        <header className="mb-4 shrink-0 flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-xs">
+        <header className="mb-4 flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-xs">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <h1 className="flex items-center gap-2 text-lg font-bold text-slate-800">
@@ -821,18 +821,18 @@ export function DuplicateBoardPage() {
         </header>
 
         {error && (
-          <div className="mb-4 shrink-0 flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-semibold text-red-700">
+          <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-semibold text-red-700">
             <span className="flex items-center gap-2"><AlertCircle className="h-4 w-4" />{error}</span>
             <button type="button" onClick={() => setError(null)} className="font-bold cursor-pointer">Đóng</button>
           </div>
         )}
 
         {loading && columns.length === 0 ? (
-          <div className="flex min-h-0 flex-1 gap-4 overflow-hidden">
+          <div className="flex gap-4 overflow-hidden">
             {[1, 2, 3, 4].map((item) => <div key={item} className="h-96 w-80 shrink-0 animate-pulse rounded-xl bg-slate-200" />)}
           </div>
         ) : (
-          <div className="flex min-h-0 flex-1 gap-4 overflow-x-auto overflow-y-hidden pb-5">
+          <div className="flex h-[calc(100vh-15rem)] min-h-0 gap-4 overflow-x-auto pb-5">
             {orderedColumns.map((column) => {
               const isDoneCol = column.id === 'done'
               const canDrop = canDropTo(column)

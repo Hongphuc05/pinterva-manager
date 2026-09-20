@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -342,8 +344,21 @@ def test_api_assignments_queues_status_only_requests(client, db_session, monkeyp
     platform = Platform(name="P1 status only", account_username="status-only@example.com")
     db_session.add(platform)
     db_session.flush()
-    order1 = Order(external_order_id="STATUS1", platform_id=platform.id)
-    order2 = Order(external_order_id="STATUS2", platform_id=platform.id)
+    entered_review_at = datetime.now(UTC) - timedelta(days=1)
+    order1 = Order(
+        external_order_id="STATUS1",
+        platform_id=platform.id,
+        state=OrderState.QC_PENDING.value,
+        status_changed_at=entered_review_at,
+        review_submitted_at=entered_review_at,
+    )
+    order2 = Order(
+        external_order_id="STATUS2",
+        platform_id=platform.id,
+        state=OrderState.QC_PENDING.value,
+        status_changed_at=entered_review_at,
+        review_submitted_at=entered_review_at,
+    )
     db_session.add_all([order1, order2])
     db_session.commit()
     client.app.dependency_overrides[get_current_platform_id] = lambda: platform.id
@@ -369,6 +384,12 @@ def test_api_assignments_queues_status_only_requests(client, db_session, monkeyp
     assert {request.designer_option for request in requests} == {""}
     assert {request.target_status for request in requests} == {"Review"}
     assert {call[0] for call in calls} == {str(request.id) for request in requests}
+    db_session.refresh(order1)
+    db_session.refresh(order2)
+    for order in (order1, order2):
+        assert order.state == OrderState.QC_PENDING.value
+        assert order.status_changed_at == entered_review_at
+        assert order.review_submitted_at == entered_review_at
 
 
 def test_api_assignments_accepts_lowercase_status_and_legacy_platform_fields(

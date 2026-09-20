@@ -15,15 +15,15 @@ from app.adapters.db.models import (
     WorkflowEvent,
 )
 from app.adapters.google.drive_interface import DriveAdapter
-from app.application.operations import run_idempotent
 from app.application.concurrency import require_expected_order_version
+from app.application.operations import run_idempotent
+from app.application.order_transitions import apply_transition
 from app.application.processing_leases import (
     acquire_processing_lease,
     ensure_processing_lease,
     heartbeat_processing_lease,
     release_processing_lease,
 )
-from app.application.order_transitions import apply_transition
 from app.application.sanitization import sanitize_order_detail_for_designer
 from app.domain.models import OrderState
 
@@ -385,7 +385,13 @@ def submit_result(
             "version_marker": result_version.version_marker,
             "state": order.state,
             "version": order.version,
-            "sync_printerval_review": is_fix_resubmission,
+            # Every submission must move the corresponding Printerval order to
+            # Review.  A Fix resubmission only changes that status; its existing
+            # Printerval result link must not be overwritten.  An initial
+            # submission additionally attaches the newly supplied design link.
+            "sync_printerval_review": True,
+            "sync_printerval_note": None if is_fix_resubmission else effective_drive_url,
+            "expected_fix_approved": is_fix_resubmission,
         }
 
     return run_idempotent(

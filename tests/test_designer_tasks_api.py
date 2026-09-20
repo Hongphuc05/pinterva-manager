@@ -98,11 +98,14 @@ def test_unapproved_fix_is_hidden_and_cannot_be_submitted_by_designer(client, db
     assert response.status_code == 404
 
 
-def test_trello_designer_can_submit_result_for_owned_duplicate_order(client, db_session):
+def test_trello_designer_can_submit_result_for_owned_duplicate_order(client, db_session, monkeypatch):
     trello_designer = _login(client, db_session, "designer-trello", "trello-submitter")
     assignment, order = _seed_owned_task(db_session, trello_designer, OrderState.IN_PROGRESS.value)
     order.work_domain = "duplicate"
     db_session.commit()
+    from app.workers import assignment_sync_tasks
+
+    monkeypatch.setattr(assignment_sync_tasks.sync_order_review_to_printerval_task, "delay", lambda *_args, **_kwargs: None)
 
     response = client.post(
         f"/api/assignments/{assignment.id}/results",
@@ -116,9 +119,17 @@ def test_trello_designer_can_submit_result_for_owned_duplicate_order(client, db_
     assert response.json()["state"] == OrderState.QC_PENDING.value
 
 
-def test_result_api_verifies_drive_and_enters_qc_queue(client, db_session):
+def test_result_api_verifies_drive_enters_qc_queue_and_queues_printerval_review(client, db_session, monkeypatch):
     designer = _login(client, db_session, "designer", "submitter")
-    assignment, _ = _seed_owned_task(db_session, designer, OrderState.IN_PROGRESS.value)
+    assignment, order = _seed_owned_task(db_session, designer, OrderState.IN_PROGRESS.value)
+    queued: list[tuple] = []
+    from app.workers import assignment_sync_tasks
+
+    monkeypatch.setattr(
+        assignment_sync_tasks.sync_order_review_to_printerval_task,
+        "delay",
+        lambda *args, **kwargs: queued.append((args, kwargs)),
+    )
     payload = {
         "drive_url": "https://drive.google.com/file/d/known-file/view",
         "request_id": "submit-1",
@@ -131,6 +142,18 @@ def test_result_api_verifies_drive_and_enters_qc_queue(client, db_session):
     assert first.json()["state"] == OrderState.QC_PENDING.value
     assert replay.status_code == 200
     assert replay.json() == first.json()
+    # Replaying the same submission safely queues the idempotent external
+    # status write again, which also lets a client retry a transient broker loss.
+    assert queued == [
+        ((str(order.id), "https://drive.google.com/file/d/known-file/view", "Review"), {
+            "expected_state": OrderState.QC_PENDING.value,
+            "expected_fix_approved": False,
+        }),
+        ((str(order.id), "https://drive.google.com/file/d/known-file/view", "Review"), {
+            "expected_state": OrderState.QC_PENDING.value,
+            "expected_fix_approved": False,
+        }),
+    ]
 
 
 def test_fix_resubmission_queues_printerval_review_sync(client, db_session, monkeypatch):

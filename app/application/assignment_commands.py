@@ -14,12 +14,12 @@ from app.adapters.db.models import (
     User,
     WorkflowEvent,
 )
+from app.application.concurrency import require_expected_order_version
 from app.application.printerval_assignment_requests import (
     PrintervalAssignmentValidationError,
     create_request,
     normalize_printerval_status,
 )
-from app.application.concurrency import require_expected_order_version
 from app.domain.models import OrderState
 
 
@@ -75,6 +75,12 @@ def queue_assignment_command(
     elif not designer_option and designer is not None:
         designer_option = "nguyễn thị thúy hường 2d prin"
 
+    # The "Đổi trạng thái Print" action deliberately sends no internal or
+    # Printerval Designer.  It is an external reconciliation command, not a
+    # Tacahu workflow transition: preserve the card's tab and the time it
+    # entered that tab (status_changed_at/review_submitted_at).
+    is_external_status_only = designer is None and not designer_option
+
     orders = (
         session.query(Order)
         .filter(Order.id.in_(order_ids), Order.platform_id == platform_id)
@@ -114,7 +120,10 @@ def queue_assignment_command(
         # Telegram notification for designer
         if designer is not None:
             try:
-                from app.workers.telegram_tasks import async_notify_designer_new_order, safe_dispatch_telegram_task
+                from app.workers.telegram_tasks import (
+                    async_notify_designer_new_order,
+                    safe_dispatch_telegram_task,
+                )
 
                 for order in orders:
                     safe_dispatch_telegram_task(async_notify_designer_new_order, str(order.id), str(designer.id))
@@ -130,14 +139,18 @@ def queue_assignment_command(
     for order in orders:
         if designer is not None:
             _upsert_internal_assignment(session, order, designer)
-        order.state = target_state.value
-        order.status_changed_at = now_utc
+        if not is_external_status_only:
+            order.state = target_state.value
+            order.status_changed_at = now_utc
     session.commit()
 
     # Telegram notification for designer
     if designer is not None:
         try:
-            from app.workers.telegram_tasks import async_notify_designer_new_order, safe_dispatch_telegram_task
+            from app.workers.telegram_tasks import (
+                async_notify_designer_new_order,
+                safe_dispatch_telegram_task,
+            )
 
             for order in orders:
                 safe_dispatch_telegram_task(async_notify_designer_new_order, str(order.id), str(designer.id))

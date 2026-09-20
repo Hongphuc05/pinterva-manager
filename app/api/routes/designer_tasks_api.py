@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Any
 
@@ -8,9 +9,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import User
-from app.api.concurrency import OrderCommandPayload
 from app.adapters.google.drive_adapter import GoogleDriveAdapter
 from app.adapters.google.drive_interface import DriveAdapter
+from app.api.concurrency import OrderCommandPayload
 from app.api.deps import get_db, require_any_role
 from app.application.designer_tasks import (
     DriveUnavailableError,
@@ -23,12 +24,13 @@ from app.application.designer_tasks import (
     submit_result,
     update_sub_status,
 )
-from app.application.processing_leases import ProcessingLeaseConflictError
 from app.application.operations import IdempotencyKeyReusedError, OperationInProgressError
+from app.application.processing_leases import ProcessingLeaseConflictError
 from app.domain.access import ROLE_DESIGNER, ROLE_DESIGNER_TRELLO
 from app.domain.models import OrderState
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def get_drive_adapter() -> DriveAdapter:
@@ -213,7 +215,10 @@ def api_flag_missing_template(
     except Exception as exc:
         _raise_task_error(exc)
     try:
-        from app.workers.telegram_tasks import async_notify_admin_missing_template, safe_dispatch_telegram_task
+        from app.workers.telegram_tasks import (
+            async_notify_admin_missing_template,
+            safe_dispatch_telegram_task,
+        )
         safe_dispatch_telegram_task(async_notify_admin_missing_template, result["order_id"], str(user.id))
     except Exception:
         pass
@@ -243,13 +248,16 @@ def api_submit_result(
 
             sync_order_review_to_printerval_task.delay(
                 result["order_id"],
-                None,
+                result.get("sync_printerval_note"),
                 "Review",
                 expected_state=OrderState.QC_PENDING.value,
-                expected_fix_approved=True,
+                expected_fix_approved=bool(result.get("expected_fix_approved")),
             )
         except Exception:
-            # The internal review transition is authoritative and committed; a
-            # failed enqueue is observable/retriable independently.
-            pass
+            # The internal transition is already committed. Keep the response
+            # successful, but never hide a broker/worker outage from operators.
+            logger.exception(
+                "Failed to enqueue Printerval Review sync for order %s",
+                result["order_id"],
+            )
     return TaskMutationResponse(**result)
