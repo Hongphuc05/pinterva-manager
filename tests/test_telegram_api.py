@@ -354,3 +354,63 @@ def test_rejected_fix_cleans_transient_chat_but_keeps_root_card(client, db_sessi
     delete.assert_called_once_with("777", [101, 102])
     conversation = db_session.query(TelegramFixConversation).one()
     assert conversation.status == "cleaned"
+
+
+def test_resolve_tacahu_designer_name_and_excessive_fix_notification(db_session):
+    from app.application.telegram_service import (
+        notify_admin_excessive_fix,
+        resolve_tacahu_designer_name,
+    )
+
+    admin = User(
+        username="admin_excessive_fix",
+        full_name="Admin Excessive Fix",
+        role="admin",
+        password_hash=hash_password("pass"),
+        telegram_chat_id="999888777",
+        telegram_notifications_enabled=True,
+        active=True,
+    )
+    designer = User(
+        username="huong_2d",
+        full_name="Nguyễn Thị Thuý Hường",
+        role="designer",
+        password_hash=hash_password("pass"),
+        active=True,
+    )
+    db_session.add_all([admin, designer])
+    db_session.commit()
+
+    # Case 1: Order with active assignment on Tacahu
+    order_assigned = Order(
+        external_order_id="DJ4026454",
+        printerval_designer="Nguyễn Thị Thuý Hường - 2D Prin",
+    )
+    db_session.add(order_assigned)
+    db_session.flush()
+    db_session.add(Assignment(order_id=order_assigned.id, designer_id=designer.id, status="approved"))
+    db_session.commit()
+
+    name1 = resolve_tacahu_designer_name(db_session, order_assigned)
+    assert name1 == "Nguyễn Thị Thuý Hường"
+
+    # Case 2: Order unassigned on Tacahu, but printerval_designer string matches Tacahu user
+    order_unassigned = Order(
+        external_order_id="DJ4026455",
+        printerval_designer="Nguyễn Thị Thuý Hường - 2D Prin",
+    )
+    db_session.add(order_unassigned)
+    db_session.commit()
+
+    name2 = resolve_tacahu_designer_name(db_session, order_unassigned)
+    assert name2 == "Nguyễn Thị Thuý Hường"
+
+    # Check Telegram notification for excessive fix uses Tacahu designer name
+    with patch("app.application.telegram_service.send_telegram_request") as mock_send:
+        mock_send.return_value = {"ok": True}
+        assert notify_admin_excessive_fix(db_session, order_unassigned.id, designer_name="Nguyễn Thị Thuý Hường - 2D Prin", fix_count=4) is True
+
+    assert mock_send.called
+    payload = mock_send.call_args.args[1]
+    assert "Nguyễn Thị Thuý Hường" in payload["text"]
+    assert "- 2D Prin" not in payload["text"]

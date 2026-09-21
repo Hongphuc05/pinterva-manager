@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import logging
 import secrets
+import unicodedata
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -323,6 +324,72 @@ def _get_admin_chat_ids(session: Session, platform_id: uuid.UUID | None = None) 
     return [cid for (cid,) in query.all() if cid]
 
 
+def _normalize_text(text: str | None) -> str:
+    if not text:
+        return ""
+    nfd = unicodedata.normalize("NFD", text.strip().lower())
+    nfd = nfd.replace("đ", "d").replace("Đ", "d")
+    return "".join(c for c in nfd if unicodedata.category(c) != "Mn")
+
+
+def resolve_tacahu_designer_name(session: Session, order: Order | None) -> str:
+    """Resolve the assigned designer's name on Tacahu platform for an order.
+
+    1. Query active Assignment in Tacahu for order.id -> User (full_name or username).
+    2. If no Assignment, match order.printerval_designer with Tacahu active users.
+    3. Fallback to cleaned order.printerval_designer or 'Designer'.
+    """
+    if not order:
+        return "Designer"
+
+    # 1. Check active Assignment on Tacahu
+    assignment = (
+        session.query(Assignment)
+        .filter(Assignment.order_id == order.id, Assignment.status != "cancelled")
+        .order_by(Assignment.created_at.desc())
+        .first()
+    )
+    if assignment and assignment.designer_id:
+        designer = session.get(User, assignment.designer_id)
+        if designer:
+            return designer.full_name or designer.username or "Designer"
+
+    # 2. Try matching order.printerval_designer string against Tacahu Users
+    raw_p_des = (order.printerval_designer or "").strip()
+    if raw_p_des:
+        clean_p_des = raw_p_des.split("-")[0].strip() if "-" in raw_p_des else raw_p_des
+        norm_clean = _normalize_text(clean_p_des)
+        norm_raw = _normalize_text(raw_p_des)
+
+        all_designers = session.query(User).filter(User.active.is_(True)).all()
+
+        for u in all_designers:
+            u_full = (u.full_name or "").strip()
+            u_user = (u.username or "").strip()
+            u_opt = (u.printerval_designer_option or "").strip()
+
+            for val in (u_full, u_user, u_opt):
+                if val and (clean_p_des.lower() == val.lower() or raw_p_des.lower() == val.lower()):
+                    return u.full_name or u.username
+
+            for val in (u_full, u_user, u_opt):
+                if val and (norm_clean == _normalize_text(val) or norm_raw == _normalize_text(val)):
+                    return u.full_name or u.username
+
+        if norm_clean:
+            tokens = [t for t in norm_clean.split() if len(t) > 1]
+            if tokens:
+                for u in all_designers:
+                    u_norm = _normalize_text(u.full_name or u.username or "")
+                    if u_norm and all(t in u_norm for t in tokens):
+                        return u.full_name or u.username
+
+        if clean_p_des:
+            return clean_p_des
+
+    return "Designer"
+
+
 def notify_admin_new_fix(session: Session, order_id: uuid.UUID) -> bool:
     """Notify admins when platform returns FIX, with inline buttons to Approve/Reject."""
     order = session.get(Order, order_id)
@@ -337,20 +404,7 @@ def notify_admin_new_fix(session: Session, order_id: uuid.UUID) -> bool:
     p_name = html.escape(order.product_name or "Sản phẩm")
     fix_cnt = order.fix_return_count or 1
     qc_note = html.escape(order.note_outsource or "Không có ghi chú")
-    assignment = (
-        session.query(Assignment)
-        .filter(Assignment.order_id == order.id, Assignment.status != "cancelled")
-        .order_by(Assignment.created_at.desc())
-        .first()
-    )
-    assigned_designer = session.get(User, assignment.designer_id) if assignment and assignment.designer_id else None
-    # This is the Tacahu account that owns the assignment, not the display
-    # name scraped from Printerval.
-    des_name = html.escape(
-        (assigned_designer.full_name or assigned_designer.username)
-        if assigned_designer
-        else "Chưa được phân công trên Tacahu"
-    )
+    des_name = html.escape(resolve_tacahu_designer_name(session, order))
 
     # Generate callback tokens for Approve / Reject buttons
     approve_token = secrets.token_urlsafe(16)
@@ -527,8 +581,8 @@ def notify_admin_missing_template(session: Session, order_id: uuid.UUID, designe
 def notify_admin_excessive_fix(
     session: Session,
     order_id: uuid.UUID,
-    designer_name: str,
-    fix_count: int,
+    designer_name: str | None = None,
+    fix_count: int = 3,
 ) -> bool:
     """Alert admins when an order is returned for Fix 3+ times."""
     order = session.get(Order, order_id)
@@ -539,13 +593,19 @@ def notify_admin_excessive_fix(
     if not chat_ids:
         return False
 
+    resolved_designer = resolve_tacahu_designer_name(session, order)
+    if designer_name and designer_name not in (order.printerval_designer, "Designer", ""):
+        display_designer = designer_name
+    else:
+        display_designer = resolved_designer
+
     order_id_code = html.escape(order.external_order_id)
 
     text = (
         f"🚨 <b>CẢNH BÁO CHẤT LƯỢNG (QC ALERT)!</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"⚠️ Đơn <code>{order_id_code}</code> đã bị trả về Fix <b>lần thứ {fix_count}</b>!\n"
-        f"👤 <b>Designer phụ trách:</b> {html.escape(designer_name)}\n"
+        f"👤 <b>Designer phụ trách:</b> {html.escape(display_designer)}\n"
         f"💡 <i>Gợi ý: Admin nên can thiệp kiểm tra lại file thiết kế hoặc đổi Designer để tránh trễ hạn.</i>"
     )
     for cid in chat_ids:

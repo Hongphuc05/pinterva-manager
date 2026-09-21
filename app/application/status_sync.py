@@ -59,9 +59,10 @@ def _row_designer(row: dict, designer_map: dict[str, str] | None = None) -> str 
 logger = logging.getLogger(__name__)
 
 
-def _dispatch_admin_fix_notifications(order: Order) -> None:
+def _dispatch_admin_fix_notifications(session: Session, order: Order) -> None:
     """Dispatch Fix notifications after the order transition is committed."""
     try:
+        from app.application.telegram_service import resolve_tacahu_designer_name
         from app.workers.telegram_tasks import (
             async_notify_admin_excessive_fix,
             async_notify_admin_new_fix,
@@ -70,7 +71,7 @@ def _dispatch_admin_fix_notifications(order: Order) -> None:
 
         safe_dispatch_telegram_task(async_notify_admin_new_fix, str(order.id))
         if order.fix_return_count >= 3:
-            designer_label = order.printerval_designer or "Designer"
+            designer_label = resolve_tacahu_designer_name(session, order)
             safe_dispatch_telegram_task(
                 async_notify_admin_excessive_fix,
                 str(order.id),
@@ -273,7 +274,7 @@ def sync_selected_order_statuses(
 
                     session.commit()
                     if notify_admin_fix:
-                        _dispatch_admin_fix_notifications(order)
+                        _dispatch_admin_fix_notifications(session, order)
                     if changed:
                         updated += 1
                     break
@@ -421,7 +422,7 @@ def sync_platform_order_statuses(
                     updated += 1
                 session.commit()
                 if notify_admin_fix:
-                    _dispatch_admin_fix_notifications(order)
+                    _dispatch_admin_fix_notifications(session, order)
             except StaleDataError:
                 # Concurrent transaction modified this order; rollback this order and continue
                 session.rollback()
