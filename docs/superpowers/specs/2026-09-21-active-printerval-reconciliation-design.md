@@ -3,14 +3,14 @@
 ## Mục tiêu
 
 Giảm chi phí đồng bộ trạng thái từ `O(toàn bộ orders trong DB)` về `O(queue active
-trên Printerval)`. Queue nguồn là filter Printerval `Waiting + Doing + Fix`.
+trên Printerval)`. Queue nguồn dùng hai filter Printerval độc lập: `Doing` và `Fix`.
 Luồng chỉ đọc từ Printerval, không ghi ngược trạng thái.
 
 ## Hai phạm vi đồng bộ
 
-1. Celery Beat mỗi 5 phút và nút Topbar: crawl feed active. Chỉ import một order
-   chưa tồn tại khi source status là `waiting`; các source `doing`/`fix` chưa từng
-   theo dõi được đếm là skipped, không kéo backlog cũ.
+1. Celery Beat mỗi 5 phút và nút Topbar: crawl riêng feed `doing` rồi `fix`.
+   `waiting` chỉ được Admin crawl thủ công để thêm đơn mới. Source `doing`/`fix`
+   chưa từng theo dõi được đếm là skipped, không kéo backlog cũ.
 2. Nút màu từng tab: snapshot order ID của tab Tacahu, tìm các ID đó trên Printerval
    và chỉ reconcile chúng. Không import order mới hay chạm order ngoài snapshot.
 
@@ -28,8 +28,9 @@ Luồng chỉ đọc từ Printerval, không ghi ngược trạng thái.
 
 ## An toàn và quan sát
 
-- Không fetch full detail cho mọi row trong feed active; chỉ fetch detail khi import
-  Waiting mới. Kết quả job phải có checked/added/updated/skipped_untracked/failed.
+- Không fetch full detail cho mọi row trong feed active; chỉ fetch detail khi một
+  tracked order chuyển/vẫn ở Fix để lấy note. Kết quả job phải có
+  checked/added/updated/skipped_untracked/failed (`added` luôn bằng 0 ở flow này).
 - Transition dùng cùng logic audit/Fix notification đã có. Mỗi external observation
   chỉ thay đổi version/timestamp khi giá trị thực sự đổi.
 - Job scheduler dùng đúng cùng service với Topbar, có PlatformSyncState để chống

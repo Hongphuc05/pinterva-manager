@@ -31,9 +31,11 @@ from app.application.crawl import (
 from app.config import get_settings
 from app.domain.models import OrderState
 
-# Exact active-queue option exposed by Printerval. It intentionally excludes
-# review/done history, so scheduled reconciliation stays bounded as our DB grows.
-ACTIVE_PRINTERVAL_STATUS_FILTER = "waiting+doing+fix"
+# Printerval's HTTP endpoint does not support the UI's combined
+# ``waiting+doing+fix`` label: it silently returns an empty page.  The scheduled
+# mirror therefore reads these two real source filters independently.  Waiting
+# is discovered only through Admin's explicit crawl, never by auto-sync.
+ACTIVE_PRINTERVAL_STATUS_FILTERS = ("doing", "fix")
 
 # A full database sweep normally takes a few minutes.  This lease prevents the
 # five-minute active-feed reconciler and the thirty-minute full sweep from
@@ -132,126 +134,106 @@ def reconcile_active_platform_orders(
     adapter: PrintervalAdapter,
     actor_id: object | None = None,
 ) -> dict[str, int]:
-    """Mirror only Printerval's active Waiting + Doing + Fix source queue.
+    """Mirror tracked Printerval Doing and Fix cards from independent filters.
 
-    Unknown Waiting cards are imported. Unknown Doing/Fix cards are intentionally
-    skipped, preventing historical work from becoming a Tacahu backlog. Absence from
-    the active feed never implies cancellation because Review and Done are excluded.
+    Waiting is intentionally excluded: Admin's manual crawl is the only source
+    allowed to create new Tacahu orders. Unknown Doing/Fix cards are skipped, so a
+    historical Printerval backlog cannot become Tacahu work. Absence from either
+    feed never implies cancellation because Review and Done are not queried here.
     """
-    cursor: str | None = None
     seen: set[str] = set()
     checked = added = updated = skipped_untracked = failed = 0
 
-    while True:
-        discovered = adapter.discover_orders(
-            status=ACTIVE_PRINTERVAL_STATUS_FILTER,
-            job_type=ALL_JOB_TYPES,
-            limit=100,
-            cursor=cursor,
-            platform_id=str(platform.id),
-        )
-        if not discovered.success:
-            raise RuntimeError(discovered.error_class or "Không thể đọc active queue từ Printerval.")
-
-        for summary in discovered.orders:
-            external_order_id = summary.external_order_id
-            if external_order_id in seen:
-                continue
-            seen.add(external_order_id)
-            checked += 1
-            incoming_status = (summary.status or "").strip().lower()
-            if incoming_status not in {"waiting", "doing", "fix"}:
-                failed += 1
-                logger.warning("Ignoring unexpected active-feed status %r for %s", incoming_status, external_order_id)
-                continue
-
-            try:
-                order = (
-                    session.query(Order)
-                    .filter(Order.platform_id == platform.id, Order.external_order_id == external_order_id)
-                    .one_or_none()
+    def active_summaries():
+        for source_status in ACTIVE_PRINTERVAL_STATUS_FILTERS:
+            cursor: str | None = None
+            while True:
+                discovered = adapter.discover_orders(
+                    status=source_status,
+                    job_type=ALL_JOB_TYPES,
+                    limit=100,
+                    cursor=cursor,
+                    platform_id=str(platform.id),
                 )
-                now_utc = datetime.now(UTC)
-                if order is None:
-                    if incoming_status != "waiting":
-                        skipped_untracked += 1
-                        continue
-                    order = Order(
-                        external_order_id=external_order_id,
-                        platform_id=platform.id,
-                        state=OrderState.OPEN.value,
-                        product_name=summary.product_name,
-                        thumbnail_url=summary.thumbnail_url,
-                        sku=summary.sku,
-                        product_category=summary.product_category,
-                        product_skus=summary.product_skus,
-                        printerval_designer=summary.designer,
-                        printerval_designer_synced_at=now_utc if summary.designer else None,
-                        printerval_status=incoming_status,
-                        printerval_status_synced_at=now_utc,
-                        status_changed_at=now_utc,
-                        product_image_urls=summary.product_image_urls,
+                if not discovered.success:
+                    raise RuntimeError(
+                        discovered.error_class or f"Không thể đọc queue {source_status} từ Printerval."
                     )
-                    session.add(order)
-                    session.flush()
-                    detail = adapter.get_order_detail(external_order_id, platform_id=str(platform.id))
-                    if detail.success:
-                        _apply_order_detail_result(order, detail)
-                    session.commit()
-                    added += 1
-                    continue
+                yield from discovered.orders
+                if not discovered.cursor:
+                    break
+                cursor = discovered.cursor
 
-                changed = False
-                for field, value in (
+    for summary in active_summaries():
+        external_order_id = summary.external_order_id
+        if external_order_id in seen:
+            continue
+        seen.add(external_order_id)
+        checked += 1
+        incoming_status = (summary.status or "").strip().lower()
+        if incoming_status not in ACTIVE_PRINTERVAL_STATUS_FILTERS:
+            failed += 1
+            logger.warning("Ignoring unexpected active-feed status %r for %s", incoming_status, external_order_id)
+            continue
+
+        try:
+            order = (
+                session.query(Order)
+                .filter(Order.platform_id == platform.id, Order.external_order_id == external_order_id)
+                .one_or_none()
+            )
+            now_utc = datetime.now(UTC)
+            if order is None:
+                skipped_untracked += 1
+                continue
+
+            changed = False
+            for field, value in (
                     ("product_name", summary.product_name),
                     ("thumbnail_url", summary.thumbnail_url),
                     ("sku", summary.sku),
                     ("product_category", summary.product_category),
                     ("product_skus", summary.product_skus),
-                ):
-                    if value is not None and value != getattr(order, field):
-                        setattr(order, field, value)
-                        changed = True
-                if summary.product_image_urls:
-                    previous_images = list(order.product_image_urls or [])
-                    apply_crawled_product_gallery(order, summary.product_image_urls)
-                    changed = changed or previous_images != list(order.product_image_urls or [])
-                if summary.designer != order.printerval_designer:
-                    order.printerval_designer = summary.designer
-                    order.printerval_designer_synced_at = now_utc
+            ):
+                if value is not None and value != getattr(order, field):
+                    setattr(order, field, value)
                     changed = True
-                if incoming_status != (order.printerval_status or "").lower():
-                    order.printerval_status = incoming_status
-                    changed = True
+            if summary.product_image_urls:
+                previous_images = list(order.product_image_urls or [])
+                apply_crawled_product_gallery(order, summary.product_image_urls)
+                changed = changed or previous_images != list(order.product_image_urls or [])
+            if summary.designer != order.printerval_designer:
+                order.printerval_designer = summary.designer
+                order.printerval_designer_synced_at = now_utc
+                changed = True
+            if incoming_status != (order.printerval_status or "").lower():
+                order.printerval_status = incoming_status
+                changed = True
 
-                entered_fix = incoming_status == "fix" and order.state != OrderState.REVISION.value
-                if incoming_status == "fix":
-                    # ApiAdapter resolves this from its active-feed cache, so a
-                    # changed Fix does not add a per-order source lookup.
-                    detail = adapter.get_order_detail(external_order_id, platform_id=str(platform.id))
-                    note = detail.note_outsource.strip() if detail.success else ""
-                    changed = _transition_to_fix_from_observation(
-                        session, order, note=note, actor_id=actor_id
-                    ) or changed
+            entered_fix = incoming_status == "fix" and order.state != OrderState.REVISION.value
+            if incoming_status == "fix":
+                # ApiAdapter resolves this from its active-feed cache, so a
+                # changed Fix does not add a per-order source lookup.
+                detail = adapter.get_order_detail(external_order_id, platform_id=str(platform.id))
+                note = detail.note_outsource.strip() if detail.success else ""
+                changed = _transition_to_fix_from_observation(
+                    session, order, note=note, actor_id=actor_id
+                ) or changed
 
-                if changed:
-                    order.printerval_status_synced_at = now_utc
-                    session.commit()
-                    updated += 1
-                    if entered_fix:
-                        _dispatch_admin_fix_notifications(session, order)
-                else:
-                    session.rollback()
-            except Exception as exc:
+            if changed:
+                order.printerval_status_synced_at = now_utc
+                session.commit()
+                updated += 1
+                if entered_fix:
+                    _dispatch_admin_fix_notifications(session, order)
+            else:
                 session.rollback()
-                failed += 1
-                logger.warning("Active Printerval reconciliation failed for %s: %s", external_order_id, exc)
+        except Exception as exc:
+            session.rollback()
+            failed += 1
+            logger.warning("Active Printerval reconciliation failed for %s: %s", external_order_id, exc)
 
-        if not discovered.cursor:
-            break
-        cursor = discovered.cursor
-
-    if added or updated:
+    if updated:
         export_platform_orders_csv(session, platform.id)
     return {
         "checked": checked,

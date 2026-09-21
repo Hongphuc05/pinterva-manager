@@ -7,7 +7,7 @@ from app.adapters.db.models import Order, Platform, PlatformSyncState, WorkflowE
 from app.adapters.printerval.api_client import FIND_PATH, LOGIN_PATH, PrintervalApiClient
 from app.adapters.printerval.fake_adapter import FakePrintervalAdapter
 from app.application.status_sync import (
-    ACTIVE_PRINTERVAL_STATUS_FILTER,
+    ACTIVE_PRINTERVAL_STATUS_FILTERS,
     reconcile_active_platform_orders,
     sync_all_platforms,
     sync_full_database_platform_orders,
@@ -186,23 +186,21 @@ def test_scheduled_sync_returns_a_paid_done_order_to_fix_without_clearing_paymen
     assert order.fix_return_count == 1
 
 
-def test_active_reconciliation_imports_only_new_waiting_orders(db_session):
+def test_active_reconciliation_skips_untracked_doing_and_fix_without_reading_waiting(db_session):
     platform = Platform(name="P active", account_username="acc@example.test", team_outsource="team-a")
     db_session.add(platform)
     db_session.flush()
     adapter = FakePrintervalAdapter()
-    adapter.add_order(external_order_id="DJ-WAIT", product_name="New Waiting", designer=None, status="waiting")
+    adapter.add_order(external_order_id="DJ-WAIT", product_name="Manual crawl only", designer=None, status="waiting")
     adapter.add_order(external_order_id="DJ-DOING", product_name="Old Doing", designer="Print Des", status="doing")
     adapter.add_order(external_order_id="DJ-FIX", product_name="Old Fix", designer="Print Des", status="fix")
 
     result = reconcile_active_platform_orders(db_session, platform, adapter=adapter)
 
-    imported = db_session.query(Order).filter_by(external_order_id="DJ-WAIT").one()
-    assert imported.state == "OPEN"
-    assert imported.printerval_status == "waiting"
+    assert db_session.query(Order).filter_by(external_order_id="DJ-WAIT").one_or_none() is None
     assert db_session.query(Order).filter_by(external_order_id="DJ-DOING").one_or_none() is None
     assert db_session.query(Order).filter_by(external_order_id="DJ-FIX").one_or_none() is None
-    assert result == {"checked": 3, "added": 1, "updated": 0, "skipped_untracked": 2, "failed": 0}
+    assert result == {"checked": 2, "added": 0, "updated": 0, "skipped_untracked": 2, "failed": 0}
 
 
 def test_active_reconciliation_returns_paid_done_order_to_fix(db_session, monkeypatch):
@@ -238,7 +236,7 @@ def test_active_reconciliation_returns_paid_done_order_to_fix(db_session, monkey
     assert order.fix_return_count == 1
 
 
-def test_active_reconciliation_uses_the_combined_printerval_filter(db_session):
+def test_active_reconciliation_uses_independent_doing_and_fix_filters(db_session):
     platform = Platform(name="P filter", account_username="acc@example.test", team_outsource="team-a")
     db_session.add(platform)
     db_session.commit()
@@ -254,7 +252,7 @@ def test_active_reconciliation_uses_the_combined_printerval_filter(db_session):
 
     adapter = RecordingAdapter()
     reconcile_active_platform_orders(db_session, platform, adapter=adapter)
-    assert adapter.status_filters == [ACTIVE_PRINTERVAL_STATUS_FILTER]
+    assert adapter.status_filters == list(ACTIVE_PRINTERVAL_STATUS_FILTERS)
 
 
 def test_selected_sync_with_unchanged_observation_keeps_order_version(db_session):
