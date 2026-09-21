@@ -32,15 +32,36 @@ let snapshot: SyncSnapshot = { status: null, isTriggering: false }
 let pollTimer: ReturnType<typeof setTimeout> | null = null
 let pollInFlight: Promise<void> | null = null
 
-function toSyncStatus(job: SyncJob | null): SyncStatus {
-  return {
-    is_running: job?.status === 'queued' || job?.status === 'running',
+function latestTimestamp(...values: Array<string | null | undefined>): string | null {
+  return values
+    .filter((value): value is string => Boolean(value))
+    .sort((left, right) => Date.parse(right) - Date.parse(left))[0] ?? null
+}
+
+function toSyncStatus(job: SyncJob | null, platformStatus: SyncStatus | null): SyncStatus {
+  const jobIsRunning = job?.status === 'queued' || job?.status === 'running'
+  const platformIsRunning = platformStatus?.is_running === true
+  const jobStatus: SyncStatus = {
+    is_running: jobIsRunning,
     last_started_at: job?.started_at ?? null,
     last_finished_at: job?.finished_at ?? null,
     last_result: job
       ? { processed: job.processed, total: job.total, updated: job.updated, failed: job.failed }
       : null,
     last_error: job?.error_summary ?? null,
+  }
+
+  return {
+    // Manual tab/header jobs and Celery's scheduled status mirror are durable,
+    // independent server-side jobs.  The header must reflect either one after
+    // a route change or a full browser reload.
+    is_running: jobIsRunning || platformIsRunning,
+    last_started_at: latestTimestamp(jobStatus.last_started_at, platformStatus?.last_started_at),
+    last_finished_at: latestTimestamp(jobStatus.last_finished_at, platformStatus?.last_finished_at),
+    last_result: jobIsRunning || !platformStatus?.last_result
+      ? jobStatus.last_result
+      : platformStatus.last_result,
+    last_error: jobStatus.last_error || platformStatus?.last_error || null,
   }
 }
 
@@ -61,8 +82,11 @@ async function refreshSyncStatus() {
   if (pollInFlight) return pollInFlight
   pollInFlight = (async () => {
     try {
-      const job = await apiFetch<SyncJob | null>('/sync-jobs/current')
-      const status = toSyncStatus(job)
+      const [job, platformStatus] = await Promise.all([
+        apiFetch<SyncJob | null>('/sync-jobs/current'),
+        apiFetch<SyncStatus>('/orders/sync-status'),
+      ])
+      const status = toSyncStatus(job, platformStatus)
       publish({ status })
       schedulePoll(status.is_running ? RUNNING_POLL_MS : IDLE_POLL_MS)
     } catch {
@@ -88,15 +112,15 @@ async function triggerSyncRun(orderIds?: string[] | null) {
       method: 'POST',
       body: JSON.stringify(body),
     })
-    publish({ status: toSyncStatus(job) })
+    publish({ status: toSyncStatus(job, null) })
     schedulePoll(RUNNING_POLL_MS)
   } finally {
     publish({ isTriggering: false })
   }
 }
 
-/** A platform-wide external store. Topbar and the active Orders view subscribe to
- * the same poller, so one visible page produces one `/sync-jobs/current` request. */
+/** A platform-wide external store. Topbar and active pages share one poller for
+ * both durable manual SyncJobs and Celery's scheduled PlatformSyncState. */
 export function useSyncStatus() {
   const [current, setCurrent] = useState<SyncSnapshot>(snapshot)
 

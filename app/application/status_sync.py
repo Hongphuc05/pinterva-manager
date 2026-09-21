@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import or_
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import StaleDataError
 
@@ -34,6 +34,12 @@ from app.domain.models import OrderState
 # Exact active-queue option exposed by Printerval. It intentionally excludes
 # review/done history, so scheduled reconciliation stays bounded as our DB grows.
 ACTIVE_PRINTERVAL_STATUS_FILTER = "waiting+doing+fix"
+
+# A full database sweep normally takes a few minutes.  This lease prevents the
+# five-minute active-feed reconciler and the thirty-minute full sweep from
+# concurrently mutating the same cards.  A worker crash must not suppress all
+# later syncs indefinitely, so a stale lease is reclaimed after this window.
+_PLATFORM_SYNC_LEASE_TIMEOUT = timedelta(minutes=15)
 
 
 def _status_guess_order(last_known: str | None) -> tuple[str, ...]:
@@ -636,12 +642,78 @@ def sync_platform_order_statuses(
             client.close()
 
 
-def sync_all_platforms(session: Session) -> dict[str, dict]:
-    """Sync every platform that has credentials configured, tracking per-platform
-    is_running/last_result in PlatformSyncState so the web dashboard can show a
-    live "syncing" indicator. One platform's failure doesn't stop the others."""
-    results: dict[str, dict] = {}
-    platforms = (
+def sync_full_database_platform_orders(
+    session: Session,
+    platform: Platform,
+    *,
+    api_client: PrintervalApiClient | None = None,
+) -> dict[str, int]:
+    """Refresh Printerval status for every order already tracked for one platform.
+
+    This intentionally reuses the per-order read-only mirror used by tab syncs:
+    it does not discover external history or write back to Printerval.  It does,
+    however, see a Print Fix for paid Done orders and returns those cards to Fix
+    while retaining their payment tag.
+    """
+    orders = (
+        session.query(Order)
+        .filter(Order.platform_id == platform.id)
+        .order_by(Order.created_at.asc(), Order.id.asc())
+        .all()
+    )
+    return sync_selected_order_statuses(session, platform, orders, api_client=api_client)
+
+
+def _claim_platform_sync_lease(session: Session, platform_id: object) -> bool:
+    """Atomically claim a bounded per-platform background-sync lease."""
+    now_utc = datetime.now(UTC)
+    state = session.execute(
+        select(PlatformSyncState)
+        .where(PlatformSyncState.platform_id == platform_id)
+        .with_for_update()
+    ).scalar_one_or_none()
+    if state is None:
+        state = PlatformSyncState(platform_id=platform_id)
+        session.add(state)
+        session.flush()
+
+    if (
+        state.is_running
+        and state.last_started_at is not None
+        and state.last_started_at >= now_utc - _PLATFORM_SYNC_LEASE_TIMEOUT
+    ):
+        session.rollback()
+        return False
+
+    state.is_running = True
+    state.last_started_at = now_utc
+    state.last_error = None
+    session.commit()
+    return True
+
+
+def _finish_platform_sync_lease(
+    session: Session,
+    platform_id: object,
+    *,
+    result: dict | None = None,
+    error: Exception | None = None,
+) -> None:
+    state = session.get(PlatformSyncState, platform_id)
+    if state is None:
+        return
+    if error is None:
+        state.last_result = result
+        state.last_error = None
+    else:
+        state.last_error = str(error)
+    state.is_running = False
+    state.last_finished_at = datetime.now(UTC)
+    session.commit()
+
+
+def _credentialed_platforms(session: Session) -> list[Platform]:
+    return (
         session.query(Platform)
         .filter(
             Platform.is_active.is_(True),
@@ -649,49 +721,72 @@ def sync_all_platforms(session: Session) -> dict[str, dict]:
         )
         .all()
     )
-    for platform in platforms:
+
+
+def _run_platform_syncs(
+    session: Session,
+    *,
+    run_platform: Any,
+) -> dict[str, dict]:
+    """Run one read-only status operation per credentialed platform, without overlap."""
+    results: dict[str, dict] = {}
+    for platform in _credentialed_platforms(session):
         if not platform.team_outsource:
             continue
-        state = session.get(PlatformSyncState, platform.id)
-        if state is None:
-            state = PlatformSyncState(platform_id=platform.id)
-            session.add(state)
-        state.is_running = True
-        state.last_started_at = datetime.now(UTC)
-        session.commit()
+        if not _claim_platform_sync_lease(session, platform.id):
+            results[str(platform.id)] = {"skipped": 1, "reason": "another_sync_running"}
+            continue
 
         try:
-            client = PrintervalApiClient(
-                base_url="https://printerval.com",
-                username=platform.account_username,
-                password=platform.account_password,
-                team_outsource=platform.team_outsource,
-                session_cookie=platform.session_cookie,
-            )
-            try:
-                result = reconcile_active_platform_orders(
-                    session,
-                    platform,
-                    adapter=PrintervalApiAdapter(api_client=client, download_images=False),
-                )
-            finally:
-                client.close()
-            state = session.get(PlatformSyncState, platform.id)
-            if state:
-                state.last_result = result
-                state.last_error = None
+            result = run_platform(platform)
             results[str(platform.id)] = result
+            _finish_platform_sync_lease(session, platform.id, result=result)
         except Exception as exc:
             session.rollback()
-            state = session.get(PlatformSyncState, platform.id)
-            if state:
-                state.last_error = str(exc)
             results[str(platform.id)] = {"error": str(exc)}
-        finally:
-            state = session.get(PlatformSyncState, platform.id)
-            if state:
-                state.is_running = False
-                state.last_finished_at = datetime.now(UTC)
-                session.commit()
-
+            try:
+                _finish_platform_sync_lease(session, platform.id, error=exc)
+            except Exception:
+                session.rollback()
+                logger.exception("Unable to release sync lease for platform %s", platform.id)
     return results
+
+
+def sync_all_platforms(session: Session) -> dict[str, dict]:
+    """Reconcile each credentialed platform's compact active Printerval queue."""
+    def run_platform(platform: Platform) -> dict:
+        client = PrintervalApiClient(
+            base_url="https://printerval.com",
+            username=platform.account_username,
+            password=platform.account_password,
+            team_outsource=platform.team_outsource,
+            session_cookie=platform.session_cookie,
+        )
+        try:
+            return reconcile_active_platform_orders(
+                session,
+                platform,
+                adapter=PrintervalApiAdapter(api_client=client, download_images=False),
+            )
+        finally:
+            client.close()
+
+    return _run_platform_syncs(session, run_platform=run_platform)
+
+
+def sync_all_platforms_full_database(session: Session) -> dict[str, dict]:
+    """Refresh the Printerval status of every tracked order for every platform."""
+    def run_platform(platform: Platform) -> dict:
+        client = PrintervalApiClient(
+            base_url="https://printerval.com",
+            username=platform.account_username,
+            password=platform.account_password,
+            team_outsource=platform.team_outsource,
+            session_cookie=platform.session_cookie,
+        )
+        try:
+            return sync_full_database_platform_orders(session, platform, api_client=client)
+        finally:
+            client.close()
+
+    return _run_platform_syncs(session, run_platform=run_platform)

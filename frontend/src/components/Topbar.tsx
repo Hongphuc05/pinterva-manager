@@ -30,6 +30,7 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
   const [fastSyncError, setFastSyncError] = useState<string | null>(null)
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false)
   const { status: syncStatus, triggerRun } = useSyncStatus()
+  const isStatusSyncing = isFastSyncing || syncStatus?.is_running === true
   const {
     isSyncing: isGallerySyncing,
     isPaused: isGalleryPaused,
@@ -98,7 +99,7 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
 
     try {
       await triggerRun(null)
-      showToast('Đã bắt đầu đồng bộ lại trạng thái toàn bộ đơn hàng trong database.', 'success')
+      showToast('Đã bắt đầu đồng bộ trạng thái hàng đợi đang xử lý từ Hệ thống mẹ.', 'success')
     } catch (e: any) {
       const message = e?.message || 'Đồng bộ thất bại.'
       setFastSyncError(message)
@@ -329,24 +330,37 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
             while actively syncing. Refreshes the orders present in the currently active tab. */}
         <button
           onClick={handleSyncAllOrders}
-          disabled={isFastSyncing || !!syncStatus?.is_running}
+          disabled={isStatusSyncing}
           title={
-            isFastSyncing || syncStatus?.is_running
-              ? 'Đang đồng bộ trạng thái toàn bộ đơn từ Hệ thống mẹ...'
+            isStatusSyncing
+              ? 'Đang đồng bộ trạng thái từ Hệ thống mẹ...'
               : fastSyncError || syncStatus?.last_error
               ? `Lần đồng bộ trước lỗi: ${fastSyncError || syncStatus?.last_error}`
-              : 'Bấm để đồng bộ lại trạng thái toàn bộ đơn hàng trong database từ Hệ thống mẹ'
+              : 'Bấm để đồng bộ lại trạng thái hàng đợi đang xử lý từ Hệ thống mẹ'
           }
-          className="relative p-2 rounded-lg text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer disabled:cursor-wait"
+          className={`relative inline-flex items-center gap-1.5 rounded-lg p-2 text-slate-500 transition-colors disabled:cursor-wait ${
+            isStatusSyncing
+              ? 'bg-blue-50 text-[#0052CC]'
+              : 'hover:bg-slate-100 hover:text-slate-700'
+          }`}
         >
+          {isStatusSyncing && (
+            <span
+              aria-hidden="true"
+              className="absolute inset-0 rounded-lg border-2 border-blue-200 border-t-[#0052CC] animate-spin"
+            />
+          )}
           <RefreshCw
-            className={`h-5 w-5 ${
-              isFastSyncing || syncStatus?.is_running ? 'animate-spin text-[#0052CC]' : ''
-            }`}
+            className={`relative z-10 h-5 w-5 ${isStatusSyncing ? 'animate-spin text-[#0052CC]' : ''}`}
           />
+          {isStatusSyncing && (
+            <span className="relative z-10 hidden text-[10px] font-bold text-[#0052CC] xl:inline">
+              Đang đồng bộ
+            </span>
+          )}
           <span
-            className={`absolute top-1.5 right-1.5 h-2 w-2 rounded-full ring-2 ring-white ${
-              isFastSyncing || syncStatus?.is_running
+            className={`absolute top-1.5 right-1.5 z-20 h-2 w-2 rounded-full ring-2 ring-white ${
+              isStatusSyncing
                 ? 'bg-[#0052CC] animate-pulse'
                 : fastSyncError || syncStatus?.last_error
                 ? 'bg-red-500'

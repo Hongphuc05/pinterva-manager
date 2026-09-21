@@ -956,13 +956,16 @@ def api_orders_sync_status(
     if state is None:
         return SyncStatusResponse(is_running=False)
 
-    # Automatically recover if is_running was stuck for > 3 minutes (180s)
+    # The full database status sweep is intentionally allowed several minutes.
+    # Keep this recovery threshold aligned with status_sync's bounded 15-minute
+    # platform lease; otherwise a healthy full sweep could be shown as idle
+    # halfway through and a second sync could be started over it.
     if state.is_running and state.last_started_at:
         now = datetime.now(UTC)
         started_at = state.last_started_at
         if started_at.tzinfo is None:
             started_at = started_at.replace(tzinfo=UTC)
-        if (now - started_at).total_seconds() > 180:
+        if (now - started_at).total_seconds() > 15 * 60:
             state.is_running = False
             state.last_finished_at = now
             state.last_error = "Đã tự động khôi phục do tác vụ đồng bộ quá thời gian (timeout)."

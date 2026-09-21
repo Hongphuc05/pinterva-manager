@@ -1,9 +1,8 @@
 from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
-
-from unittest.mock import patch
 
 from app.adapters.db.models import (
     Assignment,
@@ -596,6 +595,36 @@ def test_api_sync_status_serializes_a_real_sync_state_row(client, db_session, mo
     body = resp.json()
     assert body["is_running"] is False
     assert body["last_result"] == {"checked": 2, "updated": 1}
+
+
+def test_api_sync_status_keeps_a_healthy_long_running_full_sweep(client, db_session):
+    """A 649-order full sweep can legitimately exceed the old three-minute UI
+    timeout.  Its durable platform lease must remain visible to a reloaded SPA."""
+    from app.adapters.db.models import Platform, PlatformSyncState
+    from app.api.deps import get_current_platform_id
+
+    platform = Platform(name="P full sweep", account_username="acc@example.test")
+    db_session.add(platform)
+    db_session.flush()
+    db_session.add(
+        PlatformSyncState(
+            platform_id=platform.id,
+            is_running=True,
+            last_started_at=datetime.now(UTC) - timedelta(minutes=4),
+        )
+    )
+    db_session.commit()
+
+    app = client.app
+    app.dependency_overrides[get_current_platform_id] = lambda: platform.id
+    _login(client, db_session, "admin", username="full_sweep_admin")
+    try:
+        response = client.get("/api/orders/sync-status")
+    finally:
+        del app.dependency_overrides[get_current_platform_id]
+
+    assert response.status_code == 200
+    assert response.json()["is_running"] is True
 
 
 def test_api_update_order_state_flow(client, db_session):

@@ -10,6 +10,7 @@ from app.application.status_sync import (
     ACTIVE_PRINTERVAL_STATUS_FILTER,
     reconcile_active_platform_orders,
     sync_all_platforms,
+    sync_full_database_platform_orders,
     sync_platform_order_statuses,
     sync_selected_order_statuses,
 )
@@ -637,3 +638,54 @@ def test_sync_platform_order_statuses_maps_designer_email_to_full_name(db_sessio
     assert order.printerval_status == "doing"
     assert order.printerval_designer == "Nguyễn Thị Thuý Hường - 2D Prin"
     assert order.printerval_designer_synced_at is not None
+
+
+def test_full_database_sync_checks_every_tracked_platform_order(db_session):
+    platform = Platform(name="Full sweep", account_username="acc@example.test", team_outsource="team-a")
+    db_session.add(platform)
+    db_session.flush()
+    review = Order(
+        external_order_id="DJ3999001",
+        platform_id=platform.id,
+        state="QC_PENDING",
+        printerval_status="review",
+    )
+    paid_done = Order(
+        external_order_id="DJ3999002",
+        platform_id=platform.id,
+        state="DONE",
+        is_paid=True,
+        printerval_status="done",
+    )
+    other_platform = Platform(name="Other", account_username="other@example.test", team_outsource="team-b")
+    db_session.add_all([review, paid_done, other_platform])
+    db_session.flush()
+    db_session.add(
+        Order(
+            external_order_id="DJ3999003",
+            platform_id=other_platform.id,
+            state="IN_PROGRESS",
+            printerval_status="doing",
+        )
+    )
+    db_session.commit()
+
+    result = sync_full_database_platform_orders(
+        db_session,
+        platform,
+        api_client=_mock_client(
+            {
+                "DJ3999001": {"id": 3999001, "status": "done"},
+                "DJ3999002": {"id": 3999002, "status": "fix"},
+            }
+        ),
+    )
+
+    db_session.refresh(review)
+    db_session.refresh(paid_done)
+    assert result == {"checked": 2, "updated": 2, "not_found": 0, "failed": 0}
+    # Print Done does not bypass the Admin payment decision.
+    assert review.state == "QC_PENDING"
+    # A paid Done card still returns to Fix when Printerval explicitly requests it.
+    assert paid_done.state == "REVISION"
+    assert paid_done.is_paid is True

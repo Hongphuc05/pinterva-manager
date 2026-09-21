@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 
 from app.adapters.db.session import SessionLocal
-from app.application.status_sync import sync_all_platforms
+from app.application.status_sync import sync_all_platforms, sync_all_platforms_full_database
 from app.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -21,5 +21,19 @@ def sync_order_statuses() -> None:
         logger.info("sync_order_statuses cycle results: %s", results)
     except Exception:
         logger.exception("sync_order_statuses: unexpected exception mid-run")
+    finally:
+        session.close()
+
+
+@celery_app.task(name="app.workers.status_sync_tasks.sync_full_database_order_statuses")
+def sync_full_database_order_statuses() -> None:
+    """Thirty-minute read-only reconciliation of all orders already in our database."""
+    logger.disabled = False
+    session = SessionLocal()
+    try:
+        results = sync_all_platforms_full_database(session)
+        logger.info("sync_full_database_order_statuses cycle results: %s", results)
+    except Exception:
+        logger.exception("sync_full_database_order_statuses: unexpected exception mid-run")
     finally:
         session.close()
