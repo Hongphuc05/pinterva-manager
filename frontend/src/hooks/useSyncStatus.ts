@@ -74,15 +74,19 @@ async function refreshSyncStatus() {
   return pollInFlight
 }
 
-async function triggerSyncRun(orderIds: string[]) {
-  if (orderIds.length === 0) {
+async function triggerSyncRun(orderIds?: string[] | null) {
+  if (orderIds !== null && orderIds !== undefined && orderIds.length === 0) {
     throw new Error('Không có đơn trong tab hiện tại để đồng bộ.')
   }
   publish({ isTriggering: true })
   try {
+    const body: Record<string, unknown> = { type: 'status_sync' }
+    if (orderIds && orderIds.length > 0) {
+      body.order_ids = orderIds
+    }
     const job = await apiFetch<SyncJob>('/sync-jobs', {
       method: 'POST',
-      body: JSON.stringify({ type: 'status_sync', order_ids: orderIds }),
+      body: JSON.stringify(body),
     })
     publish({ status: toSyncStatus(job) })
     schedulePoll(RUNNING_POLL_MS)
@@ -108,6 +112,6 @@ export function useSyncStatus() {
     }
   }, [])
 
-  const triggerRun = useCallback((orderIds: string[]) => triggerSyncRun(orderIds), [])
+  const triggerRun = useCallback((orderIds?: string[] | null) => triggerSyncRun(orderIds), [])
   return { status: current.status, triggerRun, isTriggering: current.isTriggering }
 }

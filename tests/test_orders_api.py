@@ -3,6 +3,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from fastapi.testclient import TestClient
 
+from unittest.mock import patch
+
 from app.adapters.db.models import (
     Assignment,
     Order,
@@ -57,6 +59,8 @@ def _seed_platform(db_session):
         id=DEFAULT_PLATFORM_ID,
         name="Default Platform",
         account_username="admin",
+        account_password="pass",
+        team_outsource="team",
         is_active=True,
     )
     db_session.merge(platform)
@@ -201,8 +205,8 @@ def test_api_bulk_delete_removes_telegram_fix_callback_logs(client, db_session):
 
     assert resp.status_code == 200
     assert resp.json() == {"ok": True, "deleted_count": 1}
-    assert db_session.get(Order, order.id) is None
-    assert db_session.get(TelegramActionLog, callback.id) is None
+    assert db_session.query(Order).filter(Order.id == order.id).first() is None
+    assert db_session.query(TelegramActionLog).filter(TelegramActionLog.id == callback.id).first() is None
 
 
 def test_api_assign_order_skips_printerval_sync_when_designer_not_registered(client, db_session, monkeypatch):
@@ -543,13 +547,16 @@ def test_api_sync_status_run_requires_admin(client, db_session):
     assert resp.status_code == 403
 
 
-def test_api_sync_status_run_rejects_platform_wide_sync(client, db_session):
-    _login(client, db_session, "admin")
+def test_api_sync_status_run_dispatches_platform_wide_sync(client, db_session):
+    platform = _seed_platform(db_session)
+    _login(client, db_session, "admin", "sync_admin", platform_id=platform.id)
 
-    resp = client.post("/api/orders/sync-status/run")
+    with patch("app.api.routes.sync_jobs_api._dispatch_status_job") as mock_dispatch:
+        resp = client.post("/api/orders/sync-status/run")
 
-    assert resp.status_code == 410
-    assert "order_ids" in resp.json()["detail"]
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    assert mock_dispatch.called
 
 
 def test_api_sync_status_serializes_a_real_sync_state_row(client, db_session, monkeypatch):
@@ -877,6 +884,7 @@ def test_approve_fix_uses_admin_approved_outsource_note_when_admin_note_is_empty
     db_session.add(Assignment(order_id=order.id, designer_id=designer.id, status="approved"))
     db_session.commit()
 
+    _login(client, db_session, "admin", "fallback-fix-admin")
     response = client.post(
         f"/api/orders/{order.id}/approve-fix",
         json={"note_outsource": "Admin approved instruction copied for Designer"},

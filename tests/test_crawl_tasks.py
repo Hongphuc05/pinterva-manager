@@ -28,9 +28,10 @@ def test_review_submission_sync_preempts_bulk_assignment_requests():
     assert celery_app.conf.worker_prefetch_multiplier == 1
 
 
-def test_celery_app_does_not_schedule_platform_wide_status_sync():
+def test_celery_app_has_status_sync_beat_schedule_and_no_crawl():
     schedule = celery_app.conf.beat_schedule
-    assert "sync-order-statuses" not in schedule
+    assert "sync-order-statuses" in schedule
+    assert "crawl-and-claim" not in schedule
 
 
 def test_celery_app_includes_telegram_tasks():

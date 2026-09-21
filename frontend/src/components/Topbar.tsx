@@ -75,15 +75,11 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
 
   // Listen for sync-platform events to drive the circular animation
   useEffect(() => {
-    function onStart() {
-      setIsFastSyncing(true)
+    const onStart = () => setIsFastSyncing(true)
+    const onEnd = () => setIsFastSyncing(false)
+    const onSubmitted = () => {
       setFastSyncError(null)
-    }
-    function onEnd() {
-      setIsFastSyncing(false)
-    }
-    function onSubmitted() {
-      setIsFastSyncing(false)
+      setIsFastSyncing(true)
     }
     window.addEventListener('sync-platform-start', onStart)
     window.addEventListener('sync-platform-end', onEnd)
@@ -94,6 +90,24 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
       window.removeEventListener('sync-platform-submitted', onSubmitted)
     }
   }, [])
+
+  async function handleSyncAllOrders() {
+    setIsFastSyncing(true)
+    setFastSyncError(null)
+    window.dispatchEvent(new CustomEvent('sync-platform-start'))
+
+    try {
+      await triggerRun(null)
+      showToast('Đã bắt đầu đồng bộ lại trạng thái toàn bộ đơn hàng trong database.', 'success')
+    } catch (e: any) {
+      const message = e?.message || 'Đồng bộ thất bại.'
+      setFastSyncError(message)
+      showToast(message, 'error')
+    } finally {
+      setIsFastSyncing(false)
+      window.dispatchEvent(new CustomEvent('sync-platform-end'))
+    }
+  }
 
   async function handleRefreshCurrentTab() {
     setIsFastSyncing(true)
@@ -337,14 +351,14 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
         {/* Status-sync indicator: green = idle/ok, red = last run errored, spins
             while actively syncing. Refreshes the orders present in the currently active tab. */}
         <button
-          onClick={handleRefreshCurrentTab}
+          onClick={handleSyncAllOrders}
           disabled={isFastSyncing || !!syncStatus?.is_running}
           title={
             isFastSyncing || syncStatus?.is_running
-              ? 'Đang đồng bộ trạng thái đơn từ Hệ thống mẹ...'
+              ? 'Đang đồng bộ trạng thái toàn bộ đơn từ Hệ thống mẹ...'
               : fastSyncError || syncStatus?.last_error
               ? `Lần đồng bộ trước lỗi: ${fastSyncError || syncStatus?.last_error}`
-              : 'Bấm để làm mới trạng thái các đơn trong tab đang chọn từ Hệ thống mẹ'
+              : 'Bấm để đồng bộ lại trạng thái toàn bộ đơn hàng trong database từ Hệ thống mẹ'
           }
           className="relative p-2 rounded-lg text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer disabled:cursor-wait"
         >

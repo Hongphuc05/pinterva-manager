@@ -8,14 +8,15 @@ from datetime import UTC, datetime
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import Order, Platform, SyncJob, User
-from app.application.status_sync import sync_selected_order_statuses
+from app.application.status_sync import sync_platform_order_statuses, sync_selected_order_statuses
 
 STATUS_SYNC = "status_sync"
 ACTIVE_STATUSES = ("queued", "running")
 
 
-def scope_fingerprint(job_type: str, order_ids: list[str], filters: dict | None) -> str:
-    payload = {"type": job_type, "order_ids": sorted(order_ids), "filters": filters or {}}
+def scope_fingerprint(job_type: str, order_ids: list[str] | None, filters: dict | None) -> str:
+    ids_part = sorted(order_ids) if order_ids is not None else "ALL"
+    payload = {"type": job_type, "order_ids": ids_part, "filters": filters or {}}
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
@@ -27,9 +28,7 @@ def create_or_get_status_sync_job(
     order_ids: list[str] | None,
     filters: dict | None,
 ) -> tuple[SyncJob, bool]:
-    normalized_ids = sorted(set(order_ids or []))
-    if not normalized_ids:
-        raise ValueError("Status sync phải có danh sách đơn hàng của tab đang mở.")
+    normalized_ids = sorted(set(order_ids)) if order_ids is not None else None
     fingerprint = scope_fingerprint(STATUS_SYNC, normalized_ids, filters)
     existing = (
         session.query(SyncJob)
@@ -74,29 +73,27 @@ def run_status_sync_job(session: Session, job_id: uuid.UUID) -> SyncJob:
         session.commit()
         return job
 
-    # Jobs created by older versions could have no snapshot and therefore
-    # performed a platform-wide scan.  Never revive that behaviour: fail the
-    # legacy job explicitly so every run has a bounded, visible-tab scope.
-    if not job.order_ids:
-        job.status = "failed"
-        job.error_summary = "Sync job cũ không có danh sách đơn hàng của tab."
-        job.finished_at = datetime.now(UTC)
-        session.commit()
-        return job
-
     job.status = "running"
     job.started_at = job.started_at or datetime.now(UTC)
     session.commit()
     try:
-        ids = [uuid.UUID(value) for value in job.order_ids]
-        query = session.query(Order).filter(Order.platform_id == platform.id, Order.id.in_(ids))
-        orders = query.all()
-        job.total = len(orders)
-        session.commit()
-        result = sync_selected_order_statuses(session, platform, orders, actor_id=job.created_by_id)
-        job.processed = result["checked"]
-        job.updated = result["updated"]
-        job.failed = result["failed"]
+        if job.order_ids is not None:
+            ids = [uuid.UUID(value) for value in job.order_ids]
+            query = session.query(Order).filter(Order.platform_id == platform.id, Order.id.in_(ids))
+            orders = query.all()
+            job.total = len(orders)
+            session.commit()
+            result = sync_selected_order_statuses(session, platform, orders, actor_id=job.created_by_id)
+            job.processed = result["checked"]
+            job.updated = result["updated"]
+            job.failed = result.get("failed", 0)
+        else:
+            result = sync_platform_order_statuses(session, platform)
+            job.processed = result.get("checked", 0)
+            job.total = result.get("checked", 0)
+            job.updated = result.get("updated", 0)
+            job.failed = 0
+
         job.status = "succeeded"
         job.message = f"Đã kiểm tra {job.processed}/{job.total} đơn; cập nhật {job.updated}."
         job.finished_at = datetime.now(UTC)

@@ -971,17 +971,32 @@ def api_orders_sync_status(
     return SyncStatusResponse.model_validate(state)
 
 
-@router.post("/orders/sync-status/run", response_model=SyncStatusResponse)
+@router.post("/orders/sync-status/run")
 def api_orders_sync_status_run(
     user: User = Depends(require_role("admin")),
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
-    """Retired: a status sync must contain the current tab's explicit order IDs."""
-    raise HTTPException(
-        status.HTTP_410_GONE,
-        "Dùng /sync-jobs với order_ids của tab hiện tại; không còn hỗ trợ đồng bộ toàn bộ platform.",
+    """Trigger a platform-wide status sync job (for Topbar sync button / admin)."""
+    from app.api.routes.sync_jobs_api import _dispatch_status_job
+    from app.application.sync_jobs import create_or_get_status_sync_job
+
+    platform = db.get(Platform, platform_id)
+    if platform is None or not (platform.account_password or platform.session_cookie):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Platform chưa có thông tin xác thực Printerval.")
+    if not platform.team_outsource:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Platform chưa có Team Outsource Printerval.")
+
+    job, created = create_or_get_status_sync_job(
+        db,
+        platform=platform,
+        actor=user,
+        order_ids=None,
+        filters=None,
     )
+    if created:
+        _dispatch_status_job(job.id)
+    return {"ok": True, "job_id": str(job.id), "message": "Đã bắt đầu đồng bộ toàn bộ đơn hàng trong database."}
 
 
 @router.post("/orders/sync-status/reset", response_model=SyncStatusResponse)
