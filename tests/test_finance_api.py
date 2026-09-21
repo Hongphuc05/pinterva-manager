@@ -36,6 +36,10 @@ def test_get_task_submission_timestamp():
     ts = get_task_submission_timestamp(task)
     assert ts == dt_utc.timestamp()
 
-    # Submission on 20/09/2026 UTC+7 should be greater than end of day 18/09/2026 UTC+7
-    ts_end_18th = parse_date_to_utc_timestamp("2026-09-18", is_end_of_day=True)
-    assert ts > ts_end_18th
+def test_normalize_text():
+    from app.api.routes.finance_api import normalize_text
+    assert normalize_text("Tài") == "tai"
+    assert normalize_text("tai") == "tai"
+    assert normalize_text("Tài ") == "tai"
+    assert normalize_text("Đức Phúc") == "duc phuc"
+

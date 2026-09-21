@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import unicodedata
 import uuid
 from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
@@ -33,6 +34,15 @@ from app.domain.models import OrderState
 router = APIRouter(tags=["finance"])
 
 VN_TZ = timezone(timedelta(hours=7))
+
+
+def normalize_text(text: str | None) -> str:
+    if not text:
+        return ""
+    nfd = unicodedata.normalize("NFD", text.strip().lower())
+    nfd = nfd.replace("đ", "d").replace("Đ", "d")
+    return "".join(c for c in nfd if unicodedata.category(c) != "Mn")
+
 
 
 def parse_date_to_utc_timestamp(date_str: str | None, is_end_of_day: bool = False) -> float | None:
@@ -272,14 +282,30 @@ def get_finance_stats(
     # 1. Fetch all users for designer name mapping
     all_users = db.query(User).all()
     user_map_by_id: dict[uuid.UUID, User] = {u.id: u for u in all_users}
-    user_map_by_name: dict[str, User] = {
-        (u.full_name or u.username).lower().strip(): u for u in all_users
-    }
-    user_map_by_opt: dict[str, User] = {
-        u.printerval_designer_option.lower().strip(): u
-        for u in all_users
-        if u.printerval_designer_option
-    }
+    user_map_by_any: dict[str, User] = {}
+    for u in all_users:
+        if u.username:
+            user_map_by_any[u.username.lower().strip()] = u
+            user_map_by_any[normalize_text(u.username)] = u
+        if u.full_name:
+            user_map_by_any[u.full_name.lower().strip()] = u
+            user_map_by_any[normalize_text(u.full_name)] = u
+        if u.printerval_designer_option:
+            user_map_by_any[u.printerval_designer_option.lower().strip()] = u
+            user_map_by_any[normalize_text(u.printerval_designer_option)] = u
+
+    def resolve_designer_user(candidate: str | None) -> User | None:
+        if not candidate:
+            return None
+        cand_str = str(candidate).strip()
+        try:
+            u_id = uuid.UUID(cand_str)
+            if u_id in user_map_by_id:
+                return user_map_by_id[u_id]
+        except ValueError:
+            pass
+        return user_map_by_any.get(cand_str.lower()) or user_map_by_any.get(normalize_text(cand_str))
+
 
     # 2. Gather candidate orders
     orders_query = db.query(Order)
@@ -390,12 +416,11 @@ def get_finance_stats(
                 des_user = u_act
 
         if not des_user and ev_evidence.get("designer_name"):
-            d_name = str(ev_evidence["designer_name"]).lower().strip()
-            des_user = user_map_by_name.get(d_name) or user_map_by_opt.get(d_name)
+            des_user = resolve_designer_user(ev_evidence["designer_name"])
 
         if not des_user and order.printerval_designer:
-            d_name = order.printerval_designer.lower().strip()
-            des_user = user_map_by_name.get(d_name) or user_map_by_opt.get(d_name)
+            des_user = resolve_designer_user(order.printerval_designer)
+
 
         if not des_user and ev.order_id in asgns_by_order:
             for asg in asgns_by_order[ev.order_id]:
@@ -550,8 +575,8 @@ def get_finance_stats(
                         des_user = user_map_by_id[asg.designer_id]
                         break
             if not des_user and order.printerval_designer:
-                d_name = order.printerval_designer.lower().strip()
-                des_user = user_map_by_name.get(d_name) or user_map_by_opt.get(d_name)
+                des_user = resolve_designer_user(order.printerval_designer)
+
 
             if des_user or order.printerval_designer:
                 des_key = str(des_user.id) if des_user else str(order.printerval_designer)
@@ -673,7 +698,7 @@ def get_finance_stats(
                 "paid_amount": 0,
             }
         d_rec = designers_map[d_key]
-        if task.get("placeholder_filled"):
+        if task.get("placeholder_filled") or task.get("is_paid"):
             d_rec["total_tasks"] += 1
             t_rate = task.get("rate", standard_rate)
             d_rec["total_amount"] += t_rate
@@ -702,8 +727,8 @@ def get_finance_stats(
         for v in sorted(designers_map.values(), key=lambda x: x["total_tasks"], reverse=True)
     ]
 
-    # Global KPI counts (only credited tasks with placeholder_filled=True)
-    credited_tasks = [t for t in filtered_tasks if t.get("placeholder_filled")]
+    # Global KPI counts (only credited tasks with placeholder_filled=True or is_paid=True)
+    credited_tasks = [t for t in filtered_tasks if t.get("placeholder_filled") or t.get("is_paid")]
     total_credited = len(credited_tasks)
     total_unpaid = sum(1 for t in credited_tasks if not t.get("is_paid"))
     total_paid = sum(1 for t in credited_tasks if t.get("is_paid"))
@@ -724,14 +749,36 @@ def get_finance_stats(
     # Filter task list by designer_id, search, state, is_paid
     tasks_to_render = filtered_tasks
     if designer_id and designer_id.strip() and designer_id != "ALL":
-        d_filter = designer_id.strip().lower()
+        raw_filter = designer_id.strip()
+        matched_user = resolve_designer_user(raw_filter)
+
+        valid_targets = set()
+        if matched_user:
+            valid_targets.add(str(matched_user.id).lower())
+            if matched_user.username:
+                valid_targets.add(matched_user.username.lower().strip())
+                valid_targets.add(normalize_text(matched_user.username))
+            if matched_user.full_name:
+                valid_targets.add(matched_user.full_name.lower().strip())
+                valid_targets.add(normalize_text(matched_user.full_name))
+            if matched_user.printerval_designer_option:
+                valid_targets.add(matched_user.printerval_designer_option.lower().strip())
+                valid_targets.add(normalize_text(matched_user.printerval_designer_option))
+
+        valid_targets.add(raw_filter.lower())
+        valid_targets.add(normalize_text(raw_filter))
+
         tasks_to_render = [
             t
             for t in tasks_to_render
-            if str(t["designer_id"]).lower() == d_filter
-            or str(t["designer_key"]).lower() == d_filter
-            or str(t["designer_name"]).lower() == d_filter
+            if (str(t.get("designer_id") or "").lower() in valid_targets)
+            or (str(t.get("designer_key") or "").lower() in valid_targets)
+            or (normalize_text(str(t.get("designer_key") or "")) in valid_targets)
+            or (str(t.get("designer_name") or "").lower().strip() in valid_targets)
+            or (normalize_text(str(t.get("designer_name") or "")) in valid_targets)
+            or (str(t.get("designer_username") or "").lower().strip() in valid_targets)
         ]
+
 
     if is_paid is not None:
         tasks_to_render = [t for t in tasks_to_render if bool(t.get("is_paid")) == is_paid]
