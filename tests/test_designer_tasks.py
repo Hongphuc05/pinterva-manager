@@ -123,6 +123,30 @@ def test_submit_result_verifies_drive_creates_version_and_qc_request_idempotentl
     assert qc_request.target_id == order.id
 
 
+def test_paid_fix_resubmission_returns_to_done_without_a_new_qc_request(db_session):
+    designer, assignment, order = _seed_task(db_session, state=OrderState.REVISION.value)
+    order.is_paid = True
+    order.fix_approved_by_admin = True
+    order.fix_return_count = 1
+    db_session.commit()
+    url = "https://drive.google.com/file/d/known-file/view"
+
+    result = submit_result(
+        db_session, FakeDriveAdapter({"known-file"}), assignment.id, designer.id, url,
+        "paid-fix:1", f"{assignment.id}:{url}",
+    )
+
+    db_session.refresh(order)
+    assert order.state == OrderState.DONE.value
+    assert order.is_paid is True
+    assert result["state"] == OrderState.DONE.value
+    assert result["sync_printerval_review"] is True
+    assert result["sync_printerval_note"] is None
+    assert result["sync_printerval_expected_state"] == OrderState.DONE.value
+    assert result["expected_fix_approved"] is True
+    assert db_session.query(ApprovalRequest).filter_by(target_id=order.id).count() == 0
+
+
 def test_submit_result_rejects_unverified_drive_without_state_change(db_session):
     designer, assignment, order = _seed_task(db_session, state=OrderState.IN_PROGRESS.value)
 

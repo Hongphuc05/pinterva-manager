@@ -46,3 +46,7 @@ def test_qc_pending_allows_outcomes():
         OrderState.CANCELLED,
     ):
         validate_transition(OrderState.QC_PENDING, target)
+
+
+def test_paid_fix_workflow_can_return_from_revision_to_done():
+    validate_transition(OrderState.REVISION, OrderState.DONE)

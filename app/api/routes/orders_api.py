@@ -976,41 +976,11 @@ def api_orders_sync_status_run(
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
-    """Manual "refresh now" — marks platform as running and dispatches background sync non-blockingly."""
-    from app.adapters.db.models import PlatformSyncState
-
-    state = db.get(PlatformSyncState, platform_id)
-    if state is None:
-        state = PlatformSyncState(platform_id=platform_id)
-        db.add(state)
-    state.is_running = True
-    state.last_started_at = datetime.now(UTC)
-    state.last_error = None
-    db.commit()
-
-    try:
-        from app.workers.status_sync_tasks import sync_order_statuses
-
-        sync_order_statuses.delay()
-    except Exception:
-        # Fallback if Celery broker is not running: execute in daemon background thread
-        import threading
-
-        from app.adapters.db.session import SessionLocal
-        from app.application.status_sync import sync_all_platforms
-
-        def bg_run():
-            s = SessionLocal()
-            try:
-                sync_all_platforms(s)
-            except Exception:
-                pass
-            finally:
-                s.close()
-
-        threading.Thread(target=bg_run, daemon=True).start()
-
-    return SyncStatusResponse.model_validate(state)
+    """Retired: a status sync must contain the current tab's explicit order IDs."""
+    raise HTTPException(
+        status.HTTP_410_GONE,
+        "Dùng /sync-jobs với order_ids của tab hiện tại; không còn hỗ trợ đồng bộ toàn bộ platform.",
+    )
 
 
 @router.post("/orders/sync-status/reset", response_model=SyncStatusResponse)
@@ -2585,8 +2555,7 @@ def api_reject_fix_to_review(
 
 
 class SyncPrintervalStatusPayload(BaseModel):
-    order_ids: list[str] | None = None
-    state: str | None = None
+    order_ids: list[str] = Field(min_length=1)
 
 
 @router.post("/orders/sync-printerval-status")
@@ -2606,7 +2575,9 @@ def api_sync_printerval_status(
             "Chưa cấu hình tài khoản hoặc cookie Printerval cho platform hiện tại.",
         )
 
-    # Build query for target orders
+    # The browser must snapshot the visible tab before it submits.  Resolving a
+    # mutable state filter here could pull in hundreds of orders that were not
+    # actually present in that tab when the user clicked sync.
     query = db.query(Order).filter(Order.platform_id == platform_id)
     if user.role in (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO):
         asgn_order_ids = (
@@ -2626,33 +2597,17 @@ def api_sync_printerval_status(
             )
         )
 
-    if payload.order_ids:
-        raw_ids = [s.strip() for s in payload.order_ids if s.strip()]
-        u_ids = []
-        ext_ids = []
-        for rid in raw_ids:
-            try:
-                u_ids.append(uuid.UUID(rid))
-            except ValueError:
-                ext_ids.append(rid)
-        query = query.filter(or_(Order.id.in_(u_ids), Order.external_order_id.in_(ext_ids)))
-    elif payload.state:
-        st = payload.state.strip().upper()
-        if st in ("REVIEW", "QC_PENDING"):
-            query = query.filter(Order.state == OrderState.QC_PENDING.value)
-        elif st in ("FIX", "REVISION"):
-            query = query.filter(Order.state == OrderState.REVISION.value)
-        elif st in ("DOING", "IN_PROGRESS"):
-            query = query.filter(Order.state == OrderState.IN_PROGRESS.value)
-        elif st in ("WAITING", "ASSIGNED"):
-            query = query.filter(Order.state.in_([OrderState.WAITING.value, "ASSIGNED"]))
-        elif st == "TODO":
-            query = query.filter(
-                or_(
-                    Order.state.in_([OrderState.WAITING.value, "ASSIGNED"]),
-                    (Order.state.in_([OrderState.REVISION.value, "FIX"]) & (Order.fix_approved_by_admin.is_(True))),
-                )
-            )
+    raw_ids = [s.strip() for s in payload.order_ids if s.strip()]
+    if not raw_ids:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Cần chọn ít nhất một đơn để đồng bộ.")
+    u_ids = []
+    ext_ids = []
+    for rid in raw_ids:
+        try:
+            u_ids.append(uuid.UUID(rid))
+        except ValueError:
+            ext_ids.append(rid)
+    query = query.filter(or_(Order.id.in_(u_ids), Order.external_order_id.in_(ext_ids)))
 
     orders = query.all()
     if not orders:

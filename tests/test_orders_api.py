@@ -543,17 +543,13 @@ def test_api_sync_status_run_requires_admin(client, db_session):
     assert resp.status_code == 403
 
 
-def test_api_sync_status_run_dispatches_the_background_task(client, db_session, monkeypatch):
-    from app.workers import status_sync_tasks
-
-    calls = []
-    monkeypatch.setattr(status_sync_tasks.sync_order_statuses, "delay", lambda: calls.append(1))
+def test_api_sync_status_run_rejects_platform_wide_sync(client, db_session):
     _login(client, db_session, "admin")
 
     resp = client.post("/api/orders/sync-status/run")
 
-    assert resp.status_code == 200
-    assert calls == [1]
+    assert resp.status_code == 410
+    assert "order_ids" in resp.json()["detail"]
 
 
 def test_api_sync_status_serializes_a_real_sync_state_row(client, db_session, monkeypatch):

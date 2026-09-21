@@ -345,6 +345,7 @@ def submit_result(
             or order.state == OrderState.REVISION.value
             or order.fix_approved_by_admin
         )
+        is_paid_fix_resubmission = is_fix_resubmission and bool(order.is_paid)
         if order.state not in (OrderState.IN_PROGRESS.value, OrderState.WAITING.value, OrderState.REVISION.value):
             raise ValueError(f"Task must be in progress, waiting, or revision to submit (current state: {order.state})")
         effective_drive_url = (drive_url or "").strip()
@@ -357,7 +358,11 @@ def submit_result(
             )
             if first_rv and first_rv.drive_url:
                 effective_drive_url = first_rv.drive_url
-            elif order.drive_url:
+            # Newer orders keep result links by ResultVersion rather than on
+            # Order.  If a legacy Fix has no first version yet, retain the
+            # link the Designer supplied instead of dereferencing a removed
+            # Order.drive_url field.
+            elif getattr(order, "drive_url", None):
                 effective_drive_url = order.drive_url
 
         if not effective_drive_url:
@@ -378,15 +383,23 @@ def submit_result(
         )
         session.add(result_version)
         session.flush()
-        session.add(
-            ApprovalRequest(
-                kind="qc", target_id=order.id, target_version_id=result_version.id, status="pending"
+        target_state = OrderState.DONE if is_paid_fix_resubmission else OrderState.QC_PENDING
+        if not is_paid_fix_resubmission:
+            session.add(
+                ApprovalRequest(
+                    kind="qc", target_id=order.id, target_version_id=result_version.id, status="pending"
+                )
             )
-        )
         apply_transition(
-            session, order, OrderState.QC_PENDING, actor_id=designer_id,
+            session, order, target_state, actor_id=designer_id,
             evidence={
-                "source": "designer_result_submit", "result_version_id": str(result_version.id)
+                "source": (
+                    "designer_paid_fix_resubmit"
+                    if is_paid_fix_resubmission
+                    else "designer_result_submit"
+                ),
+                "result_version_id": str(result_version.id),
+                "is_paid_fix_resubmission": is_paid_fix_resubmission,
             },
             commit=False,
         )
@@ -410,6 +423,7 @@ def submit_result(
             # submission additionally attaches the newly supplied design link.
             "sync_printerval_review": True,
             "sync_printerval_note": None if is_fix_resubmission else effective_drive_url,
+            "sync_printerval_expected_state": target_state.value,
             "expected_fix_approved": is_fix_resubmission,
         }
 

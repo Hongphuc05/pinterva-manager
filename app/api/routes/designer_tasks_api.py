@@ -268,7 +268,7 @@ def api_submit_result(
                 result["order_id"],
                 result.get("sync_printerval_note"),
                 "Review",
-                expected_state=OrderState.QC_PENDING.value,
+                expected_state=result.get("sync_printerval_expected_state", OrderState.QC_PENDING.value),
                 expected_fix_approved=bool(result.get("expected_fix_approved")),
             )
         except Exception:

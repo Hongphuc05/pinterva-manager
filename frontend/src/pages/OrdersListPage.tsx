@@ -883,7 +883,11 @@ export function OrdersListPage() {
     }
   }
 
-  async function handleSyncPlatformStatus(orderIds?: string[]) {
+  async function handleSyncPlatformStatus(orderIds: string[]) {
+    if (orderIds.length === 0) {
+      showToast('Tab hiện tại không có đơn để đồng bộ.', 'info')
+      return
+    }
     window.dispatchEvent(new CustomEvent('sync-platform-start'))
     try {
       await triggerRun(orderIds)
@@ -1517,7 +1521,7 @@ export function OrdersListPage() {
                 : doneOrders
 
       const targetIds = targetOrders.map((o) => o.id)
-      handleSyncPlatformStatus(targetIds.length > 0 ? targetIds : undefined)
+      void handleSyncPlatformStatus(targetIds)
     }
     window.addEventListener('request-sync-current-tab', handleRequestSync)
     return () => window.removeEventListener('request-sync-current-tab', handleRequestSync)

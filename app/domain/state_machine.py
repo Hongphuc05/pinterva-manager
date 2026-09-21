@@ -33,6 +33,10 @@ ALLOWED_TRANSITIONS: dict[OrderState, set[OrderState]] = {
     OrderState.REVISION: {
         OrderState.IN_PROGRESS,
         OrderState.QC_PENDING,
+        # A paid order that the Designer has corrected skips the internal QC
+        # queue and returns to Done, while its Printerval status is updated to
+        # Review asynchronously.
+        OrderState.DONE,
         OrderState.WAITING,
         OrderState.CANCELLED,
         OrderState.EXCEPTION,

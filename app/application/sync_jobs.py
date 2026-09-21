@@ -28,6 +28,8 @@ def create_or_get_status_sync_job(
     filters: dict | None,
 ) -> tuple[SyncJob, bool]:
     normalized_ids = sorted(set(order_ids or []))
+    if not normalized_ids:
+        raise ValueError("Status sync phải có danh sách đơn hàng của tab đang mở.")
     fingerprint = scope_fingerprint(STATUS_SYNC, normalized_ids, filters)
     existing = (
         session.query(SyncJob)
@@ -48,7 +50,7 @@ def create_or_get_status_sync_job(
         created_by_id=actor.id,
         job_type=STATUS_SYNC,
         scope_fingerprint=fingerprint,
-        order_ids=normalized_ids or None,
+        order_ids=normalized_ids,
         filters=filters or None,
         message="Đang chờ đồng bộ trạng thái Printerval.",
     )
@@ -72,14 +74,22 @@ def run_status_sync_job(session: Session, job_id: uuid.UUID) -> SyncJob:
         session.commit()
         return job
 
+    # Jobs created by older versions could have no snapshot and therefore
+    # performed a platform-wide scan.  Never revive that behaviour: fail the
+    # legacy job explicitly so every run has a bounded, visible-tab scope.
+    if not job.order_ids:
+        job.status = "failed"
+        job.error_summary = "Sync job cũ không có danh sách đơn hàng của tab."
+        job.finished_at = datetime.now(UTC)
+        session.commit()
+        return job
+
     job.status = "running"
     job.started_at = job.started_at or datetime.now(UTC)
     session.commit()
     try:
-        query = session.query(Order).filter(Order.platform_id == platform.id)
-        if job.order_ids:
-            ids = [uuid.UUID(value) for value in job.order_ids]
-            query = query.filter(Order.id.in_(ids))
+        ids = [uuid.UUID(value) for value in job.order_ids]
+        query = session.query(Order).filter(Order.platform_id == platform.id, Order.id.in_(ids))
         orders = query.all()
         job.total = len(orders)
         session.commit()

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -32,7 +32,7 @@ class CreateSyncJobRequest(BaseModel):
     # The browser resolves the current tab/filter to an immutable order-ID snapshot
     # before submitting. This avoids a job unexpectedly touching orders that move
     # into or out of a mutable filter while it is queued.
-    order_ids: list[str] | None = Field(default=None, max_length=10000)
+    order_ids: list[str] = Field(min_length=1, max_length=10000)
 
 
 class SyncJobOut(BaseModel):
@@ -67,6 +67,28 @@ def _out(job: SyncJob) -> SyncJobOut:
     )
 
 
+def _retire_legacy_unscoped_jobs(db: Session, platform_id: uuid.UUID) -> None:
+    """Release old global jobs so they cannot block the scoped-tab sync UI."""
+    legacy_jobs = (
+        db.query(SyncJob)
+        .filter(
+            SyncJob.platform_id == platform_id,
+            SyncJob.job_type == "status_sync",
+            SyncJob.status.in_(ACTIVE_STATUSES),
+        )
+        .all()
+    )
+    legacy_jobs = [job for job in legacy_jobs if not job.order_ids]
+    if not legacy_jobs:
+        return
+    now = datetime.now(UTC)
+    for job in legacy_jobs:
+        job.status = "failed"
+        job.error_summary = "Sync job cũ không có danh sách đơn hàng của tab."
+        job.finished_at = now
+    db.commit()
+
+
 def _dispatch_status_job(job_id: uuid.UUID) -> None:
     try:
         from app.workers.sync_job_tasks import run_status_sync_job_task
@@ -92,27 +114,27 @@ def create_sync_job(
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
+    _retire_legacy_unscoped_jobs(db, platform_id)
     platform = db.get(Platform, platform_id)
     if platform is None or not (platform.account_password or platform.session_cookie):
         raise HTTPException(status.HTTP_409_CONFLICT, "Platform chưa có thông tin xác thực Printerval.")
     if not platform.team_outsource:
         raise HTTPException(status.HTTP_409_CONFLICT, "Platform chưa có Team Outsource Printerval.")
 
-    requested_order_ids = payload.order_ids or []
+    requested_order_ids = payload.order_ids
     try:
         parsed_ids = [uuid.UUID(value) for value in requested_order_ids]
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Order ID không hợp lệ.") from exc
     if len(set(parsed_ids)) != len(parsed_ids):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Danh sách order bị trùng.")
-    if parsed_ids:
-        owned_count = (
-            db.query(Order)
-            .filter(Order.platform_id == platform_id, Order.id.in_(parsed_ids))
-            .count()
-        )
-        if owned_count != len(parsed_ids):
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Có order không thuộc platform đang chọn.")
+    owned_count = (
+        db.query(Order)
+        .filter(Order.platform_id == platform_id, Order.id.in_(parsed_ids))
+        .count()
+    )
+    if owned_count != len(parsed_ids):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Có order không thuộc platform đang chọn.")
 
     job, created = create_or_get_status_sync_job(
         db,
@@ -132,6 +154,7 @@ def get_current_sync_job(
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
+    _retire_legacy_unscoped_jobs(db, platform_id)
     job = (
         db.query(SyncJob)
         .filter(SyncJob.platform_id == platform_id)

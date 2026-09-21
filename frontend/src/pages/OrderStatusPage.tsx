@@ -312,7 +312,7 @@ export function OrderStatusPage() {
             type="button"
             onClick={async () => {
               try {
-                await triggerRun()
+                await triggerRun(filteredOrders.map((order) => order.id))
               } catch (err: any) {
                 setError(err?.message || 'Lỗi khi kích hoạt đồng bộ.')
               }

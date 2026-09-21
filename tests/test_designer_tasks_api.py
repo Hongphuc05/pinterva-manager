@@ -232,6 +232,40 @@ def test_fix_resubmission_queues_printerval_review_sync(client, db_session, monk
     ]
 
 
+def test_paid_fix_resubmission_returns_done_and_syncs_printerval_review(client, db_session, monkeypatch):
+    designer = _login(client, db_session, "designer", "paid-fix-resubmitter")
+    assignment, order = _seed_owned_task(db_session, designer, OrderState.REVISION.value)
+    order.is_paid = True
+    order.fix_approved_by_admin = True
+    order.fix_return_count = 1
+    db_session.commit()
+    queued: list[tuple] = []
+    from app.workers import assignment_sync_tasks
+
+    monkeypatch.setattr(
+        assignment_sync_tasks.sync_order_review_to_printerval_task,
+        "delay",
+        lambda *args, **kwargs: queued.append((args, kwargs)),
+    )
+
+    response = client.post(
+        f"/api/assignments/{assignment.id}/results",
+        json={
+            "drive_url": "https://drive.google.com/file/d/known-file/view",
+            "request_id": "paid-fix-resubmit-1",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["state"] == OrderState.DONE.value
+    assert queued == [
+        ((str(order.id), None, "Review"), {
+            "expected_state": OrderState.DONE.value,
+            "expected_fix_approved": True,
+        })
+    ]
+
+
 def test_my_tasks_suppresses_note_outsource_when_flagged(client, db_session):
     designer = _login(client, db_session, "designer", "suppressed-note-designer")
     assignment, order = _seed_owned_task(db_session, designer)

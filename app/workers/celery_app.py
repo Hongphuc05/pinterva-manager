@@ -14,7 +14,6 @@ celery_app = Celery(
     backend=_settings.redis_url,
     include=[
         "app.workers.crawl_tasks",
-        "app.workers.status_sync_tasks",
         "app.workers.sync_job_tasks",
         "app.workers.assignment_sync_tasks",
         "app.workers.order_sheet_backup_tasks",
@@ -49,10 +48,6 @@ celery_app.conf.timezone = _settings.celery_timezone
 
 def build_beat_schedule(settings):
     schedule = {
-        "sync-order-statuses": {
-            "task": "app.workers.status_sync_tasks.sync_order_statuses",
-            "schedule": settings.status_sync_interval_seconds,
-        },
         "check-designer-deadlines": {
             "task": "app.workers.telegram_tasks.check_designer_deadlines",
             "schedule": 60.0,

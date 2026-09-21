@@ -96,3 +96,54 @@ def test_sync_job_rejects_more_than_10000_explicit_orders(client, db_session, mo
     )
 
     assert response.status_code == 422
+
+
+def test_sync_job_requires_an_explicit_visible_tab_snapshot(client, db_session, monkeypatch):
+    from app.api.routes import sync_jobs_api
+
+    monkeypatch.setattr(sync_jobs_api, "_dispatch_status_job", lambda job_id: None)
+    token = _admin_token(client, db_session)
+    platform = Platform(
+        name="Snapshot platform",
+        account_username="snapshot@printerval.com",
+        session_cookie="cookie",
+        team_outsource="team",
+    )
+    db_session.add(platform)
+    db_session.commit()
+    headers = {"Authorization": f"Bearer {token}", "X-Platform-Id": str(platform.id)}
+
+    for payload in ({"type": "status_sync"}, {"type": "status_sync", "order_ids": []}):
+        response = client.post("/api/sync-jobs", json=payload, headers=headers)
+        assert response.status_code == 422
+
+
+def test_current_sync_job_retires_a_legacy_platform_wide_job(client, db_session):
+    token = _admin_token(client, db_session)
+    platform = Platform(
+        name="Legacy platform",
+        account_username="legacy@printerval.com",
+        session_cookie="cookie",
+        team_outsource="team",
+    )
+    db_session.add(platform)
+    db_session.flush()
+    legacy_job = SyncJob(
+        platform_id=platform.id,
+        job_type="status_sync",
+        status="running",
+        scope_fingerprint="legacy-unscoped",
+        order_ids=None,
+    )
+    db_session.add(legacy_job)
+    db_session.commit()
+
+    response = client.get(
+        "/api/sync-jobs/current",
+        headers={"Authorization": f"Bearer {token}", "X-Platform-Id": str(platform.id)},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "failed"
+    db_session.refresh(legacy_job)
+    assert legacy_job.error_summary == "Sync job cũ không có danh sách đơn hàng của tab."

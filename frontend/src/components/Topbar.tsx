@@ -29,7 +29,7 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
   const [isFastSyncing, setIsFastSyncing] = useState(false)
   const [fastSyncError, setFastSyncError] = useState<string | null>(null)
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false)
-  const { status: syncStatus, triggerRun } = useSyncStatus()
+  const { status: syncStatus } = useSyncStatus()
   const {
     isSyncing: isGallerySyncing,
     isPaused: isGalleryPaused,
@@ -112,15 +112,11 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
     window.removeEventListener('sync-tab-handled', onHandled)
 
     if (!handled) {
-      try {
-        await triggerRun()
-        window.dispatchEvent(new CustomEvent('sync-platform-submitted'))
-      } catch (err: any) {
-        setFastSyncError(err?.message || 'Lỗi khi đồng bộ từ Web mẹ')
-      } finally {
-        setIsFastSyncing(false)
-        window.dispatchEvent(new CustomEvent('sync-platform-end'))
-      }
+      const message = 'Trang hiện tại không có danh sách đơn để đồng bộ.'
+      setFastSyncError(message)
+      showToast(message, 'info')
+      setIsFastSyncing(false)
+      window.dispatchEvent(new CustomEvent('sync-platform-end'))
     }
   }
 
