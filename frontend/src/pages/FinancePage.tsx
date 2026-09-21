@@ -383,6 +383,22 @@ export function FinancePage() {
     setCurrentPage(1)
   }
 
+  function toYmd(d: Date): string {
+    const year = d.getFullYear()
+    const month = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
+
+  function applyWeekFilter(monday: Date) {
+    const sunday = getEndOfWeekSunday(monday)
+    setStartDate(toYmd(monday))
+    setEndDate(toYmd(sunday))
+    setDatePreset('week')
+    setCurrentPage(1)
+    setSelectedOrderIds([])
+  }
+
   // Load Finance Stats
   async function loadData() {
     setLoading(true)
@@ -1484,6 +1500,55 @@ export function FinancePage() {
                       <option value="FIX">Yêu Cầu Sửa (Fix)</option>
                       {isAdmin && <option value="DONE">Hoàn Thành (Done)</option>}
                     </select>
+                  </div>
+
+                  {/* Week Navigator Widget */}
+                  <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 shadow-2xs">
+                    <button
+                      type="button"
+                      title="Tuần trước"
+                      onClick={() => {
+                        const curMon = startDate && datePreset === 'week' ? getStartOfWeekMonday(parseUtcDate(startDate) || new Date()) : getStartOfWeekMonday()
+                        const prevMon = new Date(curMon)
+                        prevMon.setDate(prevMon.getDate() - 7)
+                        applyWeekFilter(prevMon)
+                      }}
+                      className="p-1 rounded-lg hover:bg-white text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </button>
+                    <div className="px-2 text-xs font-bold text-slate-800 flex items-center gap-1.5 min-w-[180px] justify-center">
+                      <Calendar className="h-3.5 w-3.5 text-[#0052CC]" />
+                      <span>
+                        {datePreset === 'week' && startDate
+                          ? formatWeekRangeLabel(getStartOfWeekMonday(parseUtcDate(startDate) || new Date()))
+                          : 'Lọc theo tuần...'}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      title="Tuần sau"
+                      onClick={() => {
+                        const curMon = startDate && datePreset === 'week' ? getStartOfWeekMonday(parseUtcDate(startDate) || new Date()) : getStartOfWeekMonday()
+                        const nextMon = new Date(curMon)
+                        nextMon.setDate(nextMon.getDate() + 7)
+                        applyWeekFilter(nextMon)
+                      }}
+                      className="p-1 rounded-lg hover:bg-white text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => applyWeekFilter(getStartOfWeekMonday())}
+                      className={`px-2 py-0.5 text-[11px] font-bold rounded-md transition-colors cursor-pointer ml-1 ${
+                        datePreset === 'week' && startDate === toYmd(getStartOfWeekMonday())
+                          ? 'bg-[#0052CC] text-white'
+                          : 'text-[#0052CC] bg-blue-50 hover:bg-blue-100 border border-blue-200'
+                      }`}
+                    >
+                      Tuần này
+                    </button>
                   </div>
 
                   {/* Date Filter Range */}
