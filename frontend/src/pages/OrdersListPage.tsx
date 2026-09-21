@@ -261,6 +261,12 @@ export function OrdersListPage() {
   const [syncedImagesFilter, setSyncedImagesFilter] = useState(restoredViewState.syncedImagesFilter === true)
   const [fixReturnedFilter, setFixReturnedFilter] = useState(restoredViewState.fixReturnedFilter === true)
 
+  // Designers only receive work after its images have been synchronized, so
+  // this operational filter is intentionally not available in their view.
+  useEffect(() => {
+    if (!isManager && syncedImagesFilter) setSyncedImagesFilter(false)
+  }, [isManager, syncedImagesFilter])
+
   // Date Filter State (3 Modes: status_changed_at, order_created_at_ext, created_at)
   const [dateFilterType, setDateFilterType] = useState<'status_changed_at' | 'order_created_at_ext' | 'created_at'>(
     ['status_changed_at', 'order_created_at_ext', 'created_at'].includes(String(restoredViewState.dateFilterType))
@@ -1219,7 +1225,7 @@ export function OrdersListPage() {
   // Filter client-side order list & sort newest first
   const filteredOrders = baseOrders
     .filter((o) => {
-      if (syncedImagesFilter && !isOrderGallerySynced(o)) {
+      if (isManager && syncedImagesFilter && !isOrderGallerySynced(o)) {
         return false
       }
       if (isAdmin && fixReturnedFilter && (o.fix_return_count || 0) === 0) {
@@ -1319,6 +1325,15 @@ export function OrdersListPage() {
       return true
     })
     .sort((a, b) => {
+      // In the Admin Fix overview, untriaged returns need attention first.
+      // Accepted/rejected Fixes have already been handled, so keep them below
+      // regardless of their timestamps. Sub-filters contain one group only.
+      if (isAdmin && adminTab === 'fix' && adminFixSubFilter === 'all') {
+        const fixPriority = (order: OrderSummary) =>
+          !order.fix_approved_by_admin && !order.fix_rejected_by_admin ? 0 : 1
+        const priorityDifference = fixPriority(a) - fixPriority(b)
+        if (priorityDifference !== 0) return priorityDifference
+      }
       const aValue = a[dateSort.field] || (dateSort.field === 'status_changed_at' ? a.created_at : null)
       const bValue = b[dateSort.field] || (dateSort.field === 'status_changed_at' ? b.created_at : null)
       const aTime = parseUtcDate(aValue)?.getTime() ?? 0
@@ -2079,7 +2094,7 @@ export function OrdersListPage() {
             )}
 
             {/* Button Lọc Đơn Đã Đồng Bộ Ảnh */}
-            <button
+            {isManager && <button
               type="button"
               onClick={() => {
                 setSyncedImagesFilter((prev) => !prev)
@@ -2103,7 +2118,7 @@ export function OrdersListPage() {
                   {syncedOrdersCount}
                 </span>
               )}
-            </button>
+            </button>}
 
             {isAdmin && (
               <button
