@@ -183,24 +183,11 @@ def sync_selected_order_statuses(
                         old_state = order.state
 
                         if order.state not in ("WAITING", "OPEN_FOR_ALLOCATION", "DISCOVERED", "PENDING"):
-                            if norm_status == "DONE" and order.state != "DONE":
-                                order.state = "DONE"
-                                order.status_changed_at = now_utc
-                                session.add(
-                                    WorkflowEvent(
-                                        order_id=order.id,
-                                        from_state=old_state,
-                                        to_state="DONE",
-                                        actor_id=actor_id,
-                                        evidence={
-                                            "action": "APPROVE_DONE",
-                                            "actor_name": "Printerval",
-                                            "description": "Printerval đã duyệt hoàn thành đơn hàng (Done)",
-                                        },
-                                    )
-                                )
-                                changed = True
-                            elif norm_status == "FIX" and order.state != "REVISION":
+                            # Printerval Done is an external observation, not a payment
+                            # decision. A Review card remains in Review until Admin marks
+                            # its designer payment, which is the only automatic path to
+                            # our internal Done tab.
+                            if norm_status == "FIX" and order.state != "REVISION":
                                 order.state = "REVISION"
                                 order.status_changed_at = now_utc
                                 order.fix_return_count += 1
@@ -368,8 +355,13 @@ def sync_platform_order_statuses(
                     order_changed = True
 
                 norm_st = (found_status or "").upper()
-                if norm_st == "FIX" and order.state in ("QC_PENDING", "REVIEW", "IN_PROGRESS"):
+                old_state = order.state
+                if norm_st == "FIX" and order.state in (
+                    "QC_PENDING", "REVIEW", "RESULT_SUBMITTED", "SUBMITTING_TO_SITE",
+                    "IN_PROGRESS", "DOING", "ASSIGNED", "DONE", "CLAIMED_IMPORTED", "COMPLETED",
+                ):
                     order.state = "REVISION"
+                    order.status_changed_at = datetime.now(UTC)
                     order.fix_return_count += 1
                     order.previous_note_outsource = order.note_outsource
                     attrs = row.get("attributes") or {}
@@ -381,6 +373,19 @@ def sync_platform_order_statuses(
                     order.designer_note = ""
                     order.designer_note_released_for_fix = False
                     order.suppress_note_outsource_for_designer = True
+                    session.add(
+                        WorkflowEvent(
+                            order_id=order.id,
+                            from_state=old_state,
+                            to_state="REVISION",
+                            evidence={
+                                "action": "REQUEST_FIX",
+                                "actor_name": "Printerval",
+                                "description": "Printerval trả về Fix khi đồng bộ trạng thái",
+                                "note_outsource": found_note,
+                            },
+                        )
+                    )
                     notify_admin_fix = True
                     order_changed = True
                 elif (
@@ -391,9 +396,8 @@ def sync_platform_order_statuses(
                     order.state = "QC_PENDING"
                     order.status_changed_at = datetime.now(UTC)
                     order_changed = True
-                elif norm_st == "DONE" and order.state != "DONE":
-                    order.state = "DONE"
-                    order_changed = True
+                # A Printerval Done remains a read-only platform observation.
+                # Finance is the only automatic owner of the internal Done state.
 
                 found_designer = _row_designer(row, designer_map=designer_map)
                 if found_designer and found_designer != order.printerval_designer:

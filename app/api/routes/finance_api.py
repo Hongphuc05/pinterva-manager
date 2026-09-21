@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -31,6 +31,44 @@ from app.domain.access import (
 from app.domain.models import OrderState
 
 router = APIRouter(tags=["finance"])
+
+VN_TZ = timezone(timedelta(hours=7))
+
+
+def parse_date_to_utc_timestamp(date_str: str | None, is_end_of_day: bool = False) -> float | None:
+    if not date_str or not str(date_str).strip():
+        return None
+    try:
+        s = str(date_str).strip()
+        if len(s) == 10:  # "YYYY-MM-DD"
+            if is_end_of_day:
+                s = f"{s}T23:59:59.999999+07:00"
+            else:
+                s = f"{s}T00:00:00+07:00"
+        elif "T" in s and not ("+" in s or "-" in s[10:] or s.endswith("Z")):
+            s = f"{s}+07:00"
+
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=VN_TZ)
+        return dt.timestamp()
+    except Exception:
+        return None
+
+
+def get_task_submission_timestamp(task: dict[str, Any]) -> float | None:
+    dt = task.get("review_submitted_at") or task.get("first_submitted_at") or task.get("status_changed_at")
+    if not dt:
+        return None
+    if isinstance(dt, str):
+        try:
+            dt = datetime.fromisoformat(dt.replace("Z", "+00:00"))
+        except Exception:
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.timestamp()
+
 
 
 class DesignerSummaryOut(BaseModel):
@@ -145,8 +183,10 @@ class FinanceNoteListResponse(BaseModel):
 
 
 class MarkPaidPayload(BaseModel):
-    order_ids: list[str]
+    order_ids: list[str] = []
+    designer_id: str | None = None
     expected_versions: dict[uuid.UUID, int] | None = None
+
 
 
 @router.get("/finance/rates", response_model=OrderRatesOut)
@@ -585,27 +625,23 @@ def get_finance_stats(
             or str(t["designer_name"]).lower().strip() in (cur_user_name, cur_user_opt)
         ]
 
-    # Date filter: filter by task's status_changed_at / first_submitted_at timestamp
-    filtered_tasks = all_tasks
-    if start_date:
-        try:
-            st_dt = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
-            filtered_tasks = [
-                t for t in filtered_tasks if (t.get("status_changed_at") or t["first_submitted_at"]) >= st_dt
-            ]
-        except Exception:
-            pass
+    # Date filter: filter by task's submission timestamp (review_submitted_at / first_submitted_at / status_changed_at)
+    start_ts = parse_date_to_utc_timestamp(start_date, is_end_of_day=False)
+    end_ts = parse_date_to_utc_timestamp(end_date, is_end_of_day=True)
 
-    if end_date:
-        try:
-            end_dt = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
-            if len(end_date) == 10:
-                end_dt = end_dt.replace(hour=23, minute=59, second=59, microsecond=999999)
-            filtered_tasks = [
-                t for t in filtered_tasks if (t.get("status_changed_at") or t["first_submitted_at"]) <= end_dt
-            ]
-        except Exception:
-            pass
+    if start_ts is not None or end_ts is not None:
+        new_filtered = []
+        for t in all_tasks:
+            task_ts = get_task_submission_timestamp(t)
+            if start_ts is not None and (task_ts is None or task_ts < start_ts):
+                continue
+            if end_ts is not None and (task_ts is None or task_ts > end_ts):
+                continue
+            new_filtered.append(t)
+        filtered_tasks = new_filtered
+    else:
+        filtered_tasks = all_tasks
+
 
     # Group summary by designer (only counting credited tasks with placeholder_filled=True)
     designers_map: dict[str, dict[str, Any]] = {}
@@ -783,18 +819,36 @@ def mark_orders_paid(
     if user.role != "admin":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Chỉ Admin mới có quyền xác nhận thanh toán.")
 
-    if not payload.order_ids:
-        return {"ok": True, "updated_count": 0}
-
     parsed_ids = []
-    for oid in payload.order_ids:
+    if payload.order_ids:
+        for oid in payload.order_ids:
+            try:
+                parsed_ids.append(uuid.UUID(oid))
+            except ValueError:
+                pass
+
+    if not parsed_ids and payload.designer_id:
         try:
-            parsed_ids.append(uuid.UUID(oid))
-        except ValueError:
+            stats = get_finance_stats(
+                request=Request({"type": "http"}),
+                designer_id=payload.designer_id,
+                is_paid=False,
+                page=1,
+                page_size=10000,
+                user=user,
+                db=db,
+            )
+            for task in stats.tasks:
+                try:
+                    parsed_ids.append(uuid.UUID(task.order_id))
+                except ValueError:
+                    pass
+        except Exception:
             pass
 
     if not parsed_ids:
         return {"ok": True, "updated_count": 0}
+
 
     now_utc = datetime.now(UTC)
     orders = (

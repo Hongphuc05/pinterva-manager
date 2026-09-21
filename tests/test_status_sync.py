@@ -94,15 +94,15 @@ def test_platform_sync_does_not_overwrite_tacahu_deadline(db_session):
     assert order.deadline_tacahu == deadline_tacahu
 
 
-def test_sync_selected_order_statuses_only_updates_requested_orders(db_session):
+def test_selected_sync_keeps_review_internal_until_admin_marks_payment(db_session):
     platform = Platform(name="P1", account_username="acc1@printerval.com", team_outsource="team-a")
     db_session.add(platform)
     db_session.flush()
     selected = Order(
         external_order_id="DJ1001",
         platform_id=platform.id,
-        state="IN_PROGRESS",
-        printerval_status="doing",
+        state="QC_PENDING",
+        printerval_status="review",
     )
     untouched = Order(
         external_order_id="DJ1002",
@@ -123,17 +123,72 @@ def test_sync_selected_order_statuses_only_updates_requested_orders(db_session):
     db_session.refresh(selected)
     db_session.refresh(untouched)
     assert result == {"checked": 1, "updated": 1, "not_found": 0, "failed": 0}
-    assert selected.state == "DONE"
+    assert selected.state == "QC_PENDING"
     assert selected.printerval_status == "done"
     assert untouched.state == "IN_PROGRESS"
     assert untouched.printerval_status == "doing"
 
 
+def test_scheduled_sync_keeps_review_internal_when_printerval_reports_done(db_session):
+    platform = Platform(name="P review done", account_username="acc1@printerval.com", team_outsource="team-a")
+    db_session.add(platform)
+    db_session.flush()
+    order = Order(
+        external_order_id="DJ1004",
+        platform_id=platform.id,
+        state="QC_PENDING",
+        printerval_status="review",
+    )
+    db_session.add(order)
+    db_session.commit()
+
+    result = sync_platform_order_statuses(
+        db_session,
+        platform,
+        api_client=_mock_client({"DJ1004": {"id": 1004, "status": "done"}}),
+    )
+
+    db_session.refresh(order)
+    assert result["updated"] == 1
+    assert order.state == "QC_PENDING"
+    assert order.printerval_status == "done"
+
+
+def test_scheduled_sync_returns_a_paid_done_order_to_fix_without_clearing_payment(db_session):
+    platform = Platform(name="P paid fix", account_username="acc1@printerval.com", team_outsource="team-a")
+    db_session.add(platform)
+    db_session.flush()
+    order = Order(
+        external_order_id="DJ1005",
+        platform_id=platform.id,
+        state="DONE",
+        printerval_status="done",
+        is_paid=True,
+        paid_at=datetime.now(UTC),
+    )
+    db_session.add(order)
+    db_session.commit()
+
+    result = sync_platform_order_statuses(
+        db_session,
+        platform,
+        api_client=_mock_client({"DJ1005": {"id": 1005, "status": "fix", "note": "Sửa lại logo"}}),
+    )
+
+    db_session.refresh(order)
+    assert result["updated"] == 1
+    assert order.state == "REVISION"
+    assert order.is_paid is True
+    assert order.fix_return_count == 1
+
+
 def test_selected_sync_with_unchanged_observation_keeps_order_version(db_session):
     platform = Platform(name="P unchanged", account_username="acc@example.com", team_outsource="team-a")
+    db_session.add(platform)
+    db_session.flush()
     order = Order(
-        external_order_id="DJ-UNCHANGED",
-        platform=platform,
+        external_order_id="DJ1",
+        platform_id=platform.id,
         state="IN_PROGRESS",
         printerval_status="doing",
     )
@@ -145,7 +200,7 @@ def test_selected_sync_with_unchanged_observation_keeps_order_version(db_session
         db_session,
         platform,
         [order],
-        api_client=_mock_client({"DJ-UNCHANGED": {"id": 1, "status": "doing"}}),
+        api_client=_mock_client({"DJ1": {"id": 1, "status": "doing"}}),
     )
 
     db_session.refresh(order)

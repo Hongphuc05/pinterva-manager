@@ -95,6 +95,29 @@ def test_api_orders_list_filters_by_status(client, db_session):
     assert ids == ["DJ1"]
 
 
+def test_admin_can_reopen_paid_done_order_without_removing_payment_marker(client, db_session):
+    _seed_platform(db_session)
+    _login(client, db_session, "admin", "reopen-paid-done-admin")
+    paid_at = datetime.now(UTC)
+    order = Order(
+        external_order_id="DJ-PAID-REOPEN",
+        platform_id=DEFAULT_PLATFORM_ID,
+        state=OrderState.DONE.value,
+        is_paid=True,
+        paid_at=paid_at,
+    )
+    db_session.add(order)
+    db_session.commit()
+
+    response = client.patch(f"/api/orders/{order.id}/state", json={"state": "FIX"})
+
+    assert response.status_code == 200
+    db_session.refresh(order)
+    assert order.state == OrderState.REVISION.value
+    assert order.is_paid is True
+    assert order.paid_at == paid_at
+
+
 def test_api_order_detail_returns_404_for_missing_order(client, db_session):
     _login(client, db_session, "admin")
     resp = client.get("/api/orders/00000000-0000-0000-0000-000000000000")
@@ -449,7 +472,7 @@ def test_finance_rates_payment_and_workload_include_duplicate_trello_orders(clie
     duplicate_order = Order(
         external_order_id="DUP-FINANCE-1",
         platform_id=platform.id,
-        state=OrderState.IN_PROGRESS.value,
+        state=OrderState.QC_PENDING.value,
         work_domain="duplicate",
     )
     db_session.add_all([trello_designer, duplicate_order])
@@ -496,7 +519,7 @@ def test_finance_rates_payment_and_workload_include_duplicate_trello_orders(clie
     assert duplicate_order.state == OrderState.DONE.value
     assert duplicate_order.status_changed_at is not None
     event = db_session.query(WorkflowEvent).filter(WorkflowEvent.order_id == duplicate_order.id).one()
-    assert event.from_state == OrderState.IN_PROGRESS.value
+    assert event.from_state == OrderState.QC_PENDING.value
     assert event.to_state == OrderState.DONE.value
 
     board = client.get("/api/duplicate-board", headers=headers)

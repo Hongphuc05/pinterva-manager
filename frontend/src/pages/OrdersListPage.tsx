@@ -285,8 +285,8 @@ export function OrdersListPage() {
     return Number.isInteger(parsed) && parsed > 0 ? parsed : 1
   })
 
-  // Review 5-Minute Auto-Sync Countdown
-  const [reviewAutoSyncCountdown, setReviewAutoSyncCountdown] = useState(300)
+  // Review and Done tabs auto-sync their visible cards every five minutes.
+  const [tabAutoSyncCountdown, setTabAutoSyncCountdown] = useState(300)
 
   // Highlight state for newly crawled jobs and recently tab-moved jobs
   const [newlyCrawledOrderIds, setNewlyCrawledOrderIds] = useState<string[]>([])
@@ -1054,16 +1054,20 @@ export function OrdersListPage() {
     })
   }, [orders])
 
-  // Review Tab 5-Minute Auto-Sync Interval Timer
+  const autoSyncOrderIds = useMemo(
+    () => (adminTab === 'done' ? doneOrders : reviewOrders).map((order) => order.id),
+    [adminTab, doneOrders, reviewOrders],
+  )
+
+  // Review and Done Tab 5-Minute Auto-Sync Interval Timer
   useEffect(() => {
-    if (!isAdmin || adminTab !== 'review') return
+    if (!isAdmin || (adminTab !== 'review' && adminTab !== 'done')) return
 
     const timer = setInterval(() => {
-      setReviewAutoSyncCountdown((prev) => {
+      setTabAutoSyncCountdown((prev) => {
         if (prev <= 1) {
-          const targetIds = reviewOrders.map((o) => o.id)
-          if (targetIds.length > 0) {
-            handleSyncPlatformStatus(targetIds)
+          if (autoSyncOrderIds.length > 0) {
+            handleSyncPlatformStatus(autoSyncOrderIds)
           }
           return 300
         }
@@ -1072,7 +1076,7 @@ export function OrdersListPage() {
     }, 1000)
 
     return () => clearInterval(timer)
-  }, [isAdmin, adminTab, reviewOrders])
+  }, [isAdmin, adminTab, autoSyncOrderIds])
 
   // Designer Workflow groups
   const designerDoingOrders = orders.filter(
@@ -1704,12 +1708,12 @@ export function OrdersListPage() {
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] font-mono font-semibold px-2.5 py-1.5 rounded-xl bg-purple-50 text-purple-700 border border-purple-200 inline-flex items-center gap-1.5 shadow-2xs">
                     <Clock className="h-3 w-3 text-purple-600" />
-                    <span>Tự động sync: {Math.floor(reviewAutoSyncCountdown / 60)}:{(reviewAutoSyncCountdown % 60).toString().padStart(2, '0')}</span>
+                    <span>Tự động sync: {Math.floor(tabAutoSyncCountdown / 60)}:{(tabAutoSyncCountdown % 60).toString().padStart(2, '0')}</span>
                   </span>
                   <button
                     type="button"
                     onClick={() => {
-                      setReviewAutoSyncCountdown(300)
+                      setTabAutoSyncCountdown(300)
                       handleSyncPlatformStatus(reviewOrders.map((o) => o.id))
                     }}
                     disabled={isTriggering || !!syncStatus?.is_running || reviewOrders.length === 0}
@@ -1798,9 +1802,25 @@ export function OrdersListPage() {
               )}
 
               {adminTab === 'done' && (
-                <span className="text-xs text-slate-500 font-medium px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl">
-                  Tổng đơn hoàn thành: <strong className="font-bold text-emerald-700 font-mono">{doneOrders.length}</strong>
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-mono font-semibold px-2.5 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 inline-flex items-center gap-1.5 shadow-2xs">
+                    <Clock className="h-3 w-3 text-emerald-600" />
+                    <span>Tự động sync: {Math.floor(tabAutoSyncCountdown / 60)}:{(tabAutoSyncCountdown % 60).toString().padStart(2, '0')}</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTabAutoSyncCountdown(300)
+                      handleSyncPlatformStatus(doneOrders.map((o) => o.id))
+                    }}
+                    disabled={isTriggering || !!syncStatus?.is_running || doneOrders.length === 0}
+                    className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-2xs transition-all cursor-pointer disabled:opacity-50"
+                    title="Đồng bộ ngay trạng thái các đơn hoàn thành trong tab Done"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${isTriggering || syncStatus?.is_running ? 'animate-spin' : ''}`} />
+                    <span>Đồng bộ tab Done ({doneOrders.length})</span>
+                  </button>
+                </div>
               )}
             </div>
           </div>
@@ -2828,6 +2848,12 @@ export function OrdersListPage() {
                               )}
                               {o.template_missing && (
                                 <span className="inline-flex rounded border border-rose-200 bg-rose-50 px-1.5 py-0.2 text-[10px] font-bold text-rose-700">Thiếu temp</span>
+                              )}
+                              {o.is_paid && (
+                                <span className="inline-flex items-center gap-1 rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.2 text-[10px] font-bold text-emerald-700">
+                                  <CheckCircle2 className="h-3 w-3" />
+                                  Đã thanh toán
+                                </span>
                               )}
                             </div>
 

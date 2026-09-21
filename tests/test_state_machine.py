@@ -14,14 +14,21 @@ def test_invalid_transition_raises():
         validate_transition(OrderState.OPEN, OrderState.DONE)
 
 
-def test_done_can_return_for_revision_but_cancelled_only_escalates_to_exception():
-    for state in (OrderState.DONE, OrderState.CANCELLED):
+def test_done_can_return_to_each_operational_tab_but_cancelled_only_escalates_to_exception():
+    for state in (OrderState.CANCELLED,):
         with pytest.raises(InvalidTransitionError):
             validate_transition(state, OrderState.IN_PROGRESS)
         validate_transition(state, OrderState.EXCEPTION)
 
-    validate_transition(OrderState.DONE, OrderState.REVISION)
-    assert ALLOWED_TRANSITIONS[OrderState.DONE] == {OrderState.EXCEPTION, OrderState.REVISION}
+    for target in (OrderState.WAITING, OrderState.IN_PROGRESS, OrderState.QC_PENDING, OrderState.REVISION):
+        validate_transition(OrderState.DONE, target)
+    assert ALLOWED_TRANSITIONS[OrderState.DONE] == {
+        OrderState.WAITING,
+        OrderState.IN_PROGRESS,
+        OrderState.QC_PENDING,
+        OrderState.REVISION,
+        OrderState.EXCEPTION,
+    }
     assert ALLOWED_TRANSITIONS[OrderState.CANCELLED] == {OrderState.EXCEPTION}
 
 

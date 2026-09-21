@@ -517,9 +517,11 @@ export function FinancePage() {
     try {
       const params = new URLSearchParams()
       params.set('page', modalPage.toString())
-      params.set('page_size', '50')
+      params.set('page_size', '1000')
       params.set('is_paid', modalPaymentTab === 'paid' ? 'true' : 'false')
       params.set('designer_id', selectedDesignerForModal.designer_id || selectedDesignerForModal.designer_name)
+      if (startDate) params.set('start_date', startDate)
+      if (endDate) params.set('end_date', endDate)
       if (modalSearchQuery.trim()) params.set('search', modalSearchQuery.trim())
       if (modalStateFilter) params.set('state', modalStateFilter)
 
@@ -532,6 +534,7 @@ export function FinancePage() {
       setModalTasksLoading(false)
     }
   }
+
 
   useEffect(() => {
     if (selectedDesignerForModal) {
@@ -589,7 +592,8 @@ export function FinancePage() {
     const ids = orderIdsToMark && orderIdsToMark.length > 0
       ? orderIdsToMark
       : (modalSelectedOrderIds.length > 0 ? modalSelectedOrderIds : modalTasks.map((t) => t.order_id))
-    if (!ids.length) {
+    const desId = selectedDesignerForModal?.designer_id || selectedDesignerForModal?.designer_name
+    if (!ids.length && !desId) {
       showToast('Không có đơn hàng nào để thanh toán.', 'warning')
       return
     }
@@ -600,7 +604,11 @@ export function FinancePage() {
     try {
       const res = await apiFetch<{ ok: boolean; updated_count: number }>('/finance/mark-paid', {
         method: 'POST',
-        body: JSON.stringify({ order_ids: ids, expected_versions: expectedVersionsFor(ids) }),
+        body: JSON.stringify({
+          order_ids: ids,
+          designer_id: modalSelectedOrderIds.length === 0 ? desId : undefined,
+          expected_versions: expectedVersionsFor(ids),
+        }),
       })
       showToast(`Đã xác nhận thanh toán cho ${res.updated_count} đơn hàng!`, 'success')
       setModalSelectedOrderIds([])
@@ -613,6 +621,7 @@ export function FinancePage() {
       setProcessingAction(false)
     }
   }
+
 
   async function handleModalUnmarkPaid(orderIdsToUnmark?: string[]) {
     const ids = orderIdsToUnmark && orderIdsToUnmark.length > 0

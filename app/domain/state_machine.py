@@ -37,7 +37,15 @@ ALLOWED_TRANSITIONS: dict[OrderState, set[OrderState]] = {
         OrderState.CANCELLED,
         OrderState.EXCEPTION,
     },
-    OrderState.DONE: {OrderState.EXCEPTION, OrderState.REVISION},
+    # Payment is an accounting marker, not a terminal workflow state. An Admin
+    # can reopen a paid order to any operational tab; `is_paid` remains intact.
+    OrderState.DONE: {
+        OrderState.WAITING,
+        OrderState.IN_PROGRESS,
+        OrderState.QC_PENDING,
+        OrderState.REVISION,
+        OrderState.EXCEPTION,
+    },
     OrderState.CANCELLED: {OrderState.EXCEPTION},
     OrderState.EXCEPTION: set(OrderState),
 }
