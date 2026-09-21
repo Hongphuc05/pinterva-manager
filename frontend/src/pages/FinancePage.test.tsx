@@ -13,9 +13,7 @@ describe('FinancePage', () => {
   })
 
   it('renders stats, 2-line date format, and switches to notes sub-tab', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn((url: string) => {
+    const fetchMock = vi.fn((url: string) => {
         if (url.includes('/api/me')) {
           return Promise.resolve({
             ok: true,
@@ -106,7 +104,7 @@ describe('FinancePage', () => {
         }
         return Promise.resolve({ ok: true, status: 200, json: async () => ({}) })
       })
-    )
+    vi.stubGlobal('fetch', fetchMock)
 
     render(
       <BrowserRouter>
@@ -134,6 +132,12 @@ describe('FinancePage', () => {
 
     // Modal should now be open
     await waitFor(() => expect(screen.getByText('PRN-99881')).toBeInTheDocument())
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => (
+      String(url).includes('/api/finance/stats')
+      && String(url).includes('designer_id=des1')
+      && String(url).includes('page_size=50')
+    ))).toBe(true))
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('page_size=1000'))).toBe(false)
     expect(screen.getByText('Vintage T-Shirt Design')).toBeInTheDocument()
     expect(screen.getAllByText('40.000 đ').length).toBe(2)
     expect(screen.getByText('Tổng số tiền (Chưa thanh toán):')).toBeInTheDocument()

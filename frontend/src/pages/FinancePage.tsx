@@ -517,7 +517,10 @@ export function FinancePage() {
     try {
       const params = new URLSearchParams()
       params.set('page', modalPage.toString())
-      params.set('page_size', '1000')
+      // The Finance API caps page_size at 100. Keep this aligned with the
+      // modal Pagination component so a designer with paid orders never gets
+      // a 422 response and an empty table.
+      params.set('page_size', '50')
       params.set('is_paid', modalPaymentTab === 'paid' ? 'true' : 'false')
       params.set('designer_id', selectedDesignerForModal.designer_id || selectedDesignerForModal.username || selectedDesignerForModal.designer_name)
 
