@@ -223,6 +223,11 @@ describe('OrdersListPage', () => {
                   state: 'REVISION', fix_approved_by_admin: true, template_missing: false,
                   batch_id: null, sku: null, thumbnail_url: null, created_at: '2026-01-01T00:00:00Z',
                 },
+                {
+                  id: 'fix-approved-paid', external_order_id: 'DJ-PAID-FIX', product_name: 'Fix gấp đã thanh toán',
+                  state: 'REVISION', fix_approved_by_admin: true, is_paid: true, template_missing: false,
+                  batch_id: null, sku: null, thumbnail_url: null, created_at: '2026-01-01T00:00:00Z',
+                },
               ],
             }),
           })
@@ -240,6 +245,7 @@ describe('OrdersListPage', () => {
     await waitFor(() => expect(screen.getByText(/Cần Sửa Gấp \(Fix\)/i)).toBeInTheDocument())
     fireEvent.click(screen.getByText(/Cần Sửa Gấp \(Fix\)/i))
     expect(await screen.findByText('Fix đã duyệt')).toBeInTheDocument()
+    expect(screen.getByText('Fix gấp đã thanh toán')).toBeInTheDocument()
     expect(screen.queryByText('Fix chưa duyệt')).not.toBeInTheDocument()
   })
 

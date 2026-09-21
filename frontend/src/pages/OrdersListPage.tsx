@@ -1088,7 +1088,6 @@ export function OrdersListPage() {
   const designerFixOrders = orders.filter(
     (o) =>
       !o.template_missing &&
-      !o.is_paid &&
       o.fix_approved_by_admin === true &&
       ['REVISION', 'REVISION_REQUESTED', 'FIX'].includes(o.state.toUpperCase())
   )
@@ -1101,7 +1100,9 @@ export function OrdersListPage() {
   const waitingUpdateOrders = orders.filter(
     (o) => (o.template_missing || o.state.toUpperCase() === 'WAITING_UPDATE') && !o.is_paid
   )
-  const designerPaidOrders = orders.filter((o) => o.is_paid)
+  const designerPaidOrders = orders.filter((o) =>
+    o.is_paid && !designerFixOrders.some((fixOrder) => fixOrder.id === o.id)
+  )
   const designerDoneOrders = orders.filter((o) =>
     !o.is_paid && ['DONE', 'CLAIMED_IMPORTED', 'COMPLETED', 'SKIPPED'].includes(o.state.toUpperCase())
   )
