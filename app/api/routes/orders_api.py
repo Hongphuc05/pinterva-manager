@@ -2729,11 +2729,7 @@ def api_designers_workload(
         des_orders = []
         for o in platform_orders:
             assigned_des_id = order_designer_assignment.get(o.id)
-            is_match = (
-                (assigned_des_id == des.id)
-                or (des.printerval_designer_option and o.printerval_designer == des.printerval_designer_option)
-                or (des.full_name and o.printerval_designer == des.full_name)
-            )
+            is_match = (assigned_des_id == des.id)
             if is_match:
                 des_orders.append(o)
 

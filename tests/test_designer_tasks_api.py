@@ -272,6 +272,7 @@ def test_my_tasks_suppresses_note_outsource_when_flagged(client, db_session):
     order.note_outsource = "Secret Printerval outsource note"
     order.designer_note = "Admin added template: https://example.com/template"
     order.suppress_note_outsource_for_designer = True
+    order.designer_note_released_for_fix = True
     db_session.commit()
 
     response = client.get("/api/my-tasks")

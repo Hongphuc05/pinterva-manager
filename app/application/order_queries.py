@@ -202,10 +202,17 @@ def get_order_detail_for_user(session: Session, user: User, order_id: str) -> Or
     if user.role == ROLE_DESIGNER_TRELLO:
         if order.work_domain != WORK_DOMAIN_DUPLICATE:
             return None
-        # Duplicate Board is intentionally a shared workspace: every active
-        # Trello Designer may inspect any duplicate card, not only their own
-        # assignment. The caller still receives the Designer-sanitized view.
-        # Unreleased Fix remains blocked by the guard above.
+        assignment = (
+            session.query(Assignment)
+            .filter(
+                Assignment.order_id == order.id,
+                Assignment.designer_id == user.id,
+                Assignment.status != "cancelled",
+            )
+            .first()
+        )
+        if assignment is None:
+            return None
 
     return order
 

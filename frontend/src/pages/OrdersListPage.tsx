@@ -1025,7 +1025,6 @@ export function OrdersListPage() {
   // resume, including cards on the shared duplicate board.
   const waitingOrders = useMemo(() => {
     return orders.filter((o) => {
-      if (o.work_domain === 'duplicate') return false
       const st = (o.state || '').toUpperCase()
       return ['WAITING', 'OPEN_FOR_ALLOCATION', 'DISCOVERED', 'PENDING', 'OPEN'].includes(st)
     })
@@ -1054,7 +1053,6 @@ export function OrdersListPage() {
 
   const reviewOrders = useMemo(() => {
     return orders.filter((o) => {
-      if (o.work_domain === 'duplicate') return false
       const st = (o.state || '').toUpperCase()
       return ['QC_PENDING', 'RESULT_SUBMITTED', 'SUBMITTING_TO_SITE', 'REVIEW'].includes(st)
     })
@@ -1088,9 +1086,8 @@ export function OrdersListPage() {
 
   const doneOrders = useMemo(() => {
     return orders.filter((o) => {
-      if (o.work_domain === 'duplicate') return false
       const st = (o.state || '').toUpperCase()
-      return ['DONE', 'CLAIMED_IMPORTED', 'COMPLETED'].includes(st)
+      return ['DONE', 'CLAIMED_IMPORTED', 'COMPLETED', 'SKIPPED'].includes(st)
     })
   }, [orders])
 

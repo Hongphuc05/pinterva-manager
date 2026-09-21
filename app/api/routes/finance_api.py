@@ -397,7 +397,11 @@ def get_finance_stats(
             rv_by_order.setdefault(asg.order_id, []).append(rv)
 
     # 6. Build submission records per (designer_key, order_id)
-    submissions_by_key: dict[tuple[str, uuid.UUID], dict[str, Any]] = {}
+    # 6. Build submission records strictly keyed by order.id (single order count rule)
+    submissions_by_order: dict[uuid.UUID, dict[str, Any]] = {}
+
+    # Map order.id -> list of submission records: (timestamp, des_user, drive_link)
+    order_submission_candidates: dict[uuid.UUID, list[tuple[datetime, User | None, str | None]]] = {}
 
     for ev in events:
         order = orders_by_id.get(ev.order_id)
@@ -419,7 +423,6 @@ def get_finance_stats(
         if not is_submission:
             continue
 
-        # Identify designer
         des_user: User | None = None
         if ev.actor_id and ev.actor_id in user_map_by_id:
             u_act = user_map_by_id[ev.actor_id]
@@ -429,80 +432,15 @@ def get_finance_stats(
         if not des_user and ev_evidence.get("designer_name"):
             des_user = resolve_designer_user(ev_evidence["designer_name"])
 
-        if not des_user and order.printerval_designer:
-            des_user = resolve_designer_user(order.printerval_designer)
-
-
         if not des_user and ev.order_id in asgns_by_order:
             for asg in asgns_by_order[ev.order_id]:
                 if asg.status != "cancelled" and asg.designer_id and asg.designer_id in user_map_by_id:
                     des_user = user_map_by_id[asg.designer_id]
                     break
 
-        des_key = str(des_user.id) if des_user else (ev_evidence.get("designer_name") or order.printerval_designer or (ev_evidence.get("actor_name") if actor_role == "designer" else "Unknown Designer"))
-        des_display_name = (des_user.full_name or des_user.username) if des_user else str(des_key)
-        des_username = des_user.username if des_user else None
-        des_id_str = str(des_user.id) if des_user else None
+        ev_drive = ev_evidence.get("drive_link")
+        order_submission_candidates.setdefault(order.id, []).append((ev.created_at, des_user, ev_drive))
 
-        key = (des_key, order.id)
-        raw_note = (order.note_outsource or "").strip()
-        has_note_url = ("http://" in raw_note or "https://" in raw_note or "drive.google" in raw_note or "docs.google" in raw_note)
-        order_rvs = rv_by_order.get(order.id, [])
-        drive_link = ev_evidence.get("drive_link") or (order_rvs[0].drive_url if order_rvs else (raw_note if has_note_url else None))
-
-        time_anchor = order.status_changed_at or ev.created_at
-        review_sub_time = order.review_submitted_at or order.status_changed_at or ev.created_at
-
-        task_domain = order.work_domain or "standard"
-        task_rate = order.custom_rate if order.custom_rate is not None else (
-            duplicate_rate if task_domain == WORK_DOMAIN_DUPLICATE else standard_rate
-        )
-
-        is_valid_url = bool(drive_link and ("http://" in str(drive_link) or "https://" in str(drive_link) or "drive.google" in str(drive_link) or "docs.google" in str(drive_link)))
-
-        if key not in submissions_by_key:
-            submissions_by_key[key] = {
-                "order_id": str(order.id),
-                "order_version": order.version,
-                "external_order_id": order.external_order_id,
-                "product_name": order.product_name,
-                "thumbnail_url": order.thumbnail_url,
-                "designer_id": des_id_str,
-                "designer_name": des_display_name,
-                "designer_username": des_username,
-                "designer_key": des_key,
-                "current_state": order.state,
-                "printerval_status": order.printerval_status,
-                "drive_link": drive_link if is_valid_url else None,
-                "placeholder_filled": is_valid_url,
-                "status_changed_at": time_anchor,
-                "review_submitted_at": review_sub_time,
-                "first_submitted_at": ev.created_at,
-                "latest_submitted_at": ev.created_at,
-                "submission_count": 1,
-                "order_created_at": order.created_at,
-                "notes_count": order_notes_count.get(order.id, 0),
-                "is_paid": bool(order.is_paid),
-                "paid_at": order.paid_at,
-                "paid_by_id": str(order.paid_by_id) if order.paid_by_id else None,
-                "work_domain": task_domain,
-                "custom_rate": order.custom_rate,
-                "rate": task_rate,
-            }
-        else:
-            rec = submissions_by_key[key]
-            # Only count as separate submission if > 30s apart from previous recorded submission
-            if abs((ev.created_at - rec["latest_submitted_at"]).total_seconds()) > 30:
-                rec["submission_count"] += 1
-            if ev.created_at < rec["first_submitted_at"]:
-                rec["first_submitted_at"] = ev.created_at
-            if ev.created_at > rec["latest_submitted_at"]:
-                rec["latest_submitted_at"] = ev.created_at
-                if is_valid_url:
-                    rec["drive_link"] = drive_link
-                    rec["placeholder_filled"] = True
-
-    # Also incorporate ResultVersions
     for rv in result_versions:
         asg = asgn_by_id.get(rv.assignment_id)
         if not asg:
@@ -512,142 +450,89 @@ def get_finance_stats(
             continue
 
         des_user = user_map_by_id.get(asg.designer_id) if asg.designer_id else None
-        des_key = str(des_user.id) if des_user else (order.printerval_designer or "Unknown Designer")
-        des_display_name = (des_user.full_name or des_user.username) if des_user else str(des_key)
+        sub_time = rv.submitted_at or rv.created_at or order.created_at
+        order_submission_candidates.setdefault(order.id, []).append((sub_time, des_user, rv.drive_url))
+
+    # Process each order in system ONCE
+    for order in orders:
+        cands = order_submission_candidates.get(order.id, [])
+        cands_sorted = sorted(cands, key=lambda x: x[0], reverse=True)  # latest first
+
+        des_user: User | None = None
+        latest_drive_link: str | None = None
+        first_submitted_at: datetime | None = None
+        latest_submitted_at: datetime | None = None
+
+        if cands_sorted:
+            # Credit goes to the designer who submitted most recently ("sau cùng")
+            latest_sub = cands_sorted[0]
+            des_user = latest_sub[1]
+            latest_submitted_at = latest_sub[0]
+            first_submitted_at = cands_sorted[-1][0]
+            for _, d_u, d_link in cands_sorted:
+                if d_link and not latest_drive_link:
+                    latest_drive_link = d_link
+                if not des_user and d_u:
+                    des_user = d_u
+
+        # Fallback to current assignment if no submission candidate designer
+        if not des_user and order.id in asgns_by_order:
+            for asg in asgns_by_order[order.id]:
+                if asg.status != "cancelled" and asg.designer_id and asg.designer_id in user_map_by_id:
+                    des_user = user_map_by_id[asg.designer_id]
+                    break
+
+        des_key = str(des_user.id) if des_user else "unassigned"
+        des_display_name = (des_user.full_name or des_user.username) if des_user else "Chưa phân công"
         des_username = des_user.username if des_user else None
         des_id_str = str(des_user.id) if des_user else None
 
-        key = (des_key, order.id)
-        sub_time = rv.submitted_at or rv.created_at or order.created_at
+        raw_note = (order.note_outsource or "").strip()
+        has_note_url = bool("http://" in raw_note or "https://" in raw_note or "drive.google" in raw_note or "docs.google" in raw_note)
+        order_rvs = rv_by_order.get(order.id, [])
+        drive_link = latest_drive_link or (order_rvs[0].drive_url if order_rvs else (raw_note if has_note_url else None))
+        is_valid_url = bool(drive_link and ("http://" in str(drive_link) or "https://" in str(drive_link) or "drive.google" in str(drive_link) or "docs.google" in str(drive_link)))
 
-        drive_url_val = rv.drive_url
-        if not drive_url_val:
-            raw_note = (order.note_outsource or "").strip()
-            if "http://" in raw_note or "https://" in raw_note or "drive.google" in raw_note or "docs.google" in raw_note:
-                drive_url_val = raw_note
-
-        time_anchor = order.status_changed_at or sub_time
-        review_sub_time = order.review_submitted_at or sub_time
+        time_anchor = order.status_changed_at or order.updated_at or order.created_at
+        review_sub_time = order.review_submitted_at or latest_submitted_at or time_anchor
+        f_sub = first_submitted_at or order.review_submitted_at or time_anchor
+        l_sub = latest_submitted_at or order.review_submitted_at or time_anchor
 
         task_domain = order.work_domain or "standard"
         task_rate = order.custom_rate if order.custom_rate is not None else (
             duplicate_rate if task_domain == WORK_DOMAIN_DUPLICATE else standard_rate
         )
 
-        is_valid_url = bool(drive_url_val and ("http://" in drive_url_val or "https://" in drive_url_val or "drive.google" in drive_url_val or "docs.google" in drive_url_val))
+        submissions_by_order[order.id] = {
+            "order_id": str(order.id),
+            "order_version": order.version,
+            "external_order_id": order.external_order_id,
+            "product_name": order.product_name,
+            "thumbnail_url": order.thumbnail_url,
+            "designer_id": des_id_str,
+            "designer_name": des_display_name,
+            "designer_username": des_username,
+            "designer_key": des_key,
+            "current_state": order.state,
+            "printerval_status": order.printerval_status,
+            "drive_link": drive_link if is_valid_url else None,
+            "placeholder_filled": is_valid_url,
+            "status_changed_at": time_anchor,
+            "review_submitted_at": review_sub_time,
+            "first_submitted_at": f_sub,
+            "latest_submitted_at": l_sub,
+            "submission_count": max(1, len(cands)),
+            "order_created_at": order.created_at,
+            "notes_count": order_notes_count.get(order.id, 0),
+            "is_paid": bool(order.is_paid),
+            "paid_at": order.paid_at,
+            "paid_by_id": str(order.paid_by_id) if order.paid_by_id else None,
+            "work_domain": task_domain,
+            "custom_rate": order.custom_rate,
+            "rate": task_rate,
+        }
 
-        if key not in submissions_by_key:
-            submissions_by_key[key] = {
-                "order_id": str(order.id),
-                "order_version": order.version,
-                "external_order_id": order.external_order_id,
-                "product_name": order.product_name,
-                "thumbnail_url": order.thumbnail_url,
-                "designer_id": des_id_str,
-                "designer_name": des_display_name,
-                "designer_username": des_username,
-                "designer_key": des_key,
-                "current_state": order.state,
-                "printerval_status": order.printerval_status,
-                "drive_link": drive_url_val if is_valid_url else None,
-                "placeholder_filled": is_valid_url,
-                "status_changed_at": time_anchor,
-                "review_submitted_at": review_sub_time,
-                "first_submitted_at": sub_time,
-                "latest_submitted_at": sub_time,
-                "submission_count": 1,
-                "order_created_at": order.created_at,
-                "notes_count": order_notes_count.get(order.id, 0),
-                "is_paid": bool(order.is_paid),
-                "paid_at": order.paid_at,
-                "paid_by_id": str(order.paid_by_id) if order.paid_by_id else None,
-                "work_domain": task_domain,
-                "custom_rate": order.custom_rate,
-                "rate": task_rate,
-            }
-        else:
-            rec = submissions_by_key[key]
-            if not rec.get("placeholder_filled") and is_valid_url:
-                rec["drive_link"] = drive_url_val
-                rec["placeholder_filled"] = True
-            if sub_time < rec["first_submitted_at"]:
-                rec["first_submitted_at"] = sub_time
-            if sub_time > rec["latest_submitted_at"]:
-                rec["latest_submitted_at"] = sub_time
-
-    # Also check orders in QC_PENDING, REVIEW, REVISION, DONE or is_paid that have an assigned designer
-    for order in orders:
-        st_upper = (order.state or "").upper()
-        if st_upper in ("QC_PENDING", "REVIEW", "REVISION", "FIX", "DONE", "CLAIMED_IMPORTED") or order.is_paid:
-            des_user = None
-            if order.id in asgns_by_order:
-                for asg in asgns_by_order[order.id]:
-                    if asg.status != "cancelled" and asg.designer_id and asg.designer_id in user_map_by_id:
-                        des_user = user_map_by_id[asg.designer_id]
-                        break
-            if not des_user and order.printerval_designer:
-                des_user = resolve_designer_user(order.printerval_designer)
-
-
-            if des_user or order.printerval_designer:
-                des_key = str(des_user.id) if des_user else str(order.printerval_designer)
-                key = (des_key, order.id)
-
-                order_rvs = rv_by_order.get(order.id, [])
-                drive_val = order_rvs[0].drive_url if order_rvs else None
-                if not drive_val:
-                    raw_note = (order.note_outsource or "").strip()
-                    if "http://" in raw_note or "https://" in raw_note or "drive.google" in raw_note or "docs.google" in raw_note:
-                        drive_val = raw_note
-
-                is_valid_url = bool(drive_val and ("http://" in drive_val or "https://" in drive_val or "drive.google" in drive_val or "docs.google" in drive_val))
-
-                time_anchor = order.status_changed_at or order.updated_at or order.created_at
-                review_sub_time = order.review_submitted_at or order.status_changed_at or time_anchor
-
-                task_domain = order.work_domain or "standard"
-                task_rate = order.custom_rate if order.custom_rate is not None else (
-                    duplicate_rate if task_domain == WORK_DOMAIN_DUPLICATE else standard_rate
-                )
-
-                if key not in submissions_by_key:
-                    submissions_by_key[key] = {
-                        "order_id": str(order.id),
-                        "order_version": order.version,
-                        "external_order_id": order.external_order_id,
-                        "product_name": order.product_name,
-                        "thumbnail_url": order.thumbnail_url,
-                        "designer_id": str(des_user.id) if des_user else None,
-                        "designer_name": (des_user.full_name or des_user.username) if des_user else str(order.printerval_designer),
-                        "designer_username": des_user.username if des_user else None,
-                        "designer_key": des_key,
-                        "current_state": order.state,
-                        "printerval_status": order.printerval_status,
-                        "drive_link": drive_val if is_valid_url else None,
-                        "placeholder_filled": is_valid_url,
-                        "status_changed_at": time_anchor,
-                        "review_submitted_at": review_sub_time,
-                        "first_submitted_at": order.updated_at or order.created_at,
-                        "latest_submitted_at": order.updated_at or order.created_at,
-                        "submission_count": 1,
-                        "order_created_at": order.created_at,
-                        "notes_count": order_notes_count.get(order.id, 0),
-                        "is_paid": bool(order.is_paid),
-                        "paid_at": order.paid_at,
-                        "paid_by_id": str(order.paid_by_id) if order.paid_by_id else None,
-                        "work_domain": task_domain,
-                        "custom_rate": order.custom_rate,
-                        "rate": task_rate,
-                    }
-                else:
-                    # Update status_changed_at if available
-                    rec = submissions_by_key[key]
-                    if order.status_changed_at and not rec.get("status_changed_at"):
-                        rec["status_changed_at"] = order.status_changed_at
-                    if order.review_submitted_at and not rec.get("review_submitted_at"):
-                        rec["review_submitted_at"] = order.review_submitted_at
-
-    all_tasks = list(submissions_by_key.values())
+    all_tasks = list(submissions_by_order.values())
 
     # If role is designer, restrict to own tasks only
     if user.role in (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO):
