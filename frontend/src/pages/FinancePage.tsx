@@ -1106,6 +1106,91 @@ export function FinancePage() {
       {/* ========================================================================= */}
       {activeMainTab === 'finance' && (
         <div className="space-y-6">
+          {/* Main Page Week Navigation & Filter Bar */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-3.5 shadow-2xs flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                <Calendar className="h-4 w-4 text-[#0052CC]" />
+                <span>Lọc Theo Tuần:</span>
+              </span>
+
+              {/* Week Navigator Widget */}
+              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 shadow-2xs">
+                <button
+                  type="button"
+                  title="Tuần trước"
+                  onClick={() => {
+                    const curMon = startDate && datePreset === 'week' ? getStartOfWeekMonday(parseUtcDate(startDate) || new Date()) : getStartOfWeekMonday()
+                    const prevMon = new Date(curMon)
+                    prevMon.setDate(prevMon.getDate() - 7)
+                    applyWeekFilter(prevMon)
+                  }}
+                  className="p-1.5 rounded-lg hover:bg-white text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <div className="px-3 text-xs font-bold text-slate-800 flex items-center gap-1.5 min-w-[200px] justify-center">
+                  <span>
+                    {datePreset === 'week' && startDate
+                      ? formatWeekRangeLabel(getStartOfWeekMonday(parseUtcDate(startDate) || new Date()))
+                      : 'Toàn bộ thời gian (Tổng thể)'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  title="Tuần sau"
+                  onClick={() => {
+                    const curMon = startDate && datePreset === 'week' ? getStartOfWeekMonday(parseUtcDate(startDate) || new Date()) : getStartOfWeekMonday()
+                    const nextMon = new Date(curMon)
+                    nextMon.setDate(nextMon.getDate() + 7)
+                    applyWeekFilter(nextMon)
+                  }}
+                  className="p-1.5 rounded-lg hover:bg-white text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => applyWeekFilter(getStartOfWeekMonday())}
+                  className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-colors cursor-pointer ml-1 ${
+                    datePreset === 'week' && startDate === toYmd(getStartOfWeekMonday())
+                      ? 'bg-[#0052CC] text-white shadow-2xs'
+                      : 'text-[#0052CC] bg-blue-50 hover:bg-blue-100 border border-blue-200'
+                  }`}
+                >
+                  Tuần này
+                </button>
+              </div>
+
+              {datePreset === 'week' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStartDate('')
+                    setEndDate('')
+                    setDatePreset('')
+                    setCurrentPage(1)
+                  }}
+                  className="flex items-center gap-1 text-xs text-rose-600 hover:text-rose-700 font-bold px-2.5 py-1.5 rounded-xl hover:bg-rose-50 border border-rose-200 transition-colors cursor-pointer"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  <span>Xem tổng thể (Xóa lọc tuần)</span>
+                </button>
+              )}
+            </div>
+
+            {/* Indicator badge showing active filter mode */}
+            <div className="flex items-center gap-2">
+              <span className={`px-3 py-1 rounded-full text-xs font-bold font-mono border ${
+                datePreset === 'week'
+                  ? 'bg-blue-50 text-[#0052CC] border-blue-200'
+                  : 'bg-slate-100 text-slate-700 border-slate-200'
+              }`}>
+                {datePreset === 'week' ? 'Trạng thái: Đang lọc theo tuần' : 'Trạng thái: Xem tổng thể'}
+              </span>
+            </div>
+          </div>
+
           {/* Global Summary KPI Cards */}
           <div className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${isAdmin ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}>
             <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs flex items-center justify-between">
@@ -1357,9 +1442,8 @@ export function FinancePage() {
             </div>
           )}
 
-          {/* Detailed Tasks Section (Only for Non-Admin / Designer viewing personal finance) */}
-          {!isAdmin && (
-            <div className="space-y-3">
+          {/* Detailed Tasks Section */}
+          <div className="space-y-3">
             {/* Sub-Tabs: Chưa thanh toán vs Đã thanh toán */}
             <div className="flex items-center justify-between flex-wrap gap-3 border-b border-slate-200 pb-2">
               <div className="flex items-center gap-2">
@@ -1980,7 +2064,6 @@ export function FinancePage() {
               )}
             </div>
           </div>
-          )}
         </div>
       )}
 
