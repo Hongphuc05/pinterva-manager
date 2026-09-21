@@ -67,7 +67,7 @@ def parse_date_to_utc_timestamp(date_str: str | None, is_end_of_day: bool = Fals
 
 
 def get_task_submission_timestamp(task: dict[str, Any]) -> float | None:
-    dt = task.get("review_submitted_at") or task.get("first_submitted_at") or task.get("status_changed_at")
+    dt = task.get("first_submitted_at") or task.get("review_submitted_at") or task.get("status_changed_at")
     if not dt:
         return None
     if isinstance(dt, str):
@@ -256,7 +256,7 @@ def get_finance_stats(
     start_date: str | None = None,
     end_date: str | None = None,
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=100),
+    page_size: int = Query(50, ge=1, le=10000),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):

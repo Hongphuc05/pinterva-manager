@@ -7,8 +7,11 @@ import { GallerySyncProvider } from '../context/GallerySyncContext'
 import { DuplicateBoardPage } from './DuplicateBoardPage'
 
 describe('DuplicateBoardPage', () => {
+  let activeRole = 'admin'
+
   beforeEach(() => {
     localStorage.clear()
+    activeRole = 'admin'
     vi.stubGlobal(
       'fetch',
       vi.fn((url: string) => {
@@ -16,7 +19,11 @@ describe('DuplicateBoardPage', () => {
           return Promise.resolve({
             ok: true,
             status: 200,
-            json: async () => ({ id: 'admin-1', role: 'admin', full_name: 'Admin' }),
+            json: async () => ({
+              id: activeRole === 'designer-trello' ? 'trello-1' : 'admin-1',
+              role: activeRole,
+              full_name: activeRole === 'designer-trello' ? 'Trello Designer Phúc' : 'Admin',
+            }),
           })
         }
         if (url.includes('/api/platforms')) {
@@ -195,6 +202,27 @@ describe('DuplicateBoardPage', () => {
     fireEvent.change(paymentSelect, { target: { value: 'all' } })
     // DJ-DONE-1 should now show
     expect(screen.getByText('DJ-DONE-1')).toBeInTheDocument()
+  })
+
+  it('hides Done summary, filter, and column for Designer Trello only', async () => {
+    activeRole = 'designer-trello'
+
+    render(
+      <BrowserRouter>
+        <AuthProvider>
+          <PlatformProvider>
+            <GallerySyncProvider>
+              <DuplicateBoardPage />
+            </GallerySyncProvider>
+          </PlatformProvider>
+        </AuthProvider>
+      </BrowserRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('DJ-DUP-1')).toBeInTheDocument())
+    expect(screen.queryByRole('heading', { name: 'Done' })).not.toBeInTheDocument()
+    expect(screen.queryByText('DJ-DONE-1')).not.toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'Hoàn thành (Done)' })).not.toBeInTheDocument()
   })
 
   it('filters cards with global search input', async () => {

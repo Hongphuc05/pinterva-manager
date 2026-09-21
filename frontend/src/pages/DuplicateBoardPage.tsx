@@ -205,6 +205,15 @@ export function DuplicateBoardPage() {
 
   const isAdmin = user?.role === 'admin'
   const isSupport = user?.role === 'support'
+  const isDesignerTrello = user?.role === 'designer-trello'
+
+  // Designer Trello does not manage completed work from this board. Keep the
+  // Done column available to Admin/Support, but remove it entirely from the
+  // Designer's board rather than merely hiding its cards.
+  const visibleColumns = useMemo(
+    () => (isDesignerTrello ? columns.filter((column) => column.id !== 'done') : columns),
+    [columns, isDesignerTrello],
+  )
 
   useEffect(() => {
     writeViewState('duplicate-board', user?.role, {
@@ -218,6 +227,12 @@ export function DuplicateBoardPage() {
       doneTimeFilter,
     })
   }, [user?.role, designerTabs, statusSortColumns, searchQuery, globalStateFilter, globalDesignerFilter, doneDesignerFilter, donePaymentFilter, doneTimeFilter])
+
+  useEffect(() => {
+    if (isDesignerTrello && globalStateFilter === 'done') {
+      setGlobalStateFilter('all')
+    }
+  }, [isDesignerTrello, globalStateFilter])
 
   function getDesignerTab(columnId: string): DesignerBoardTab {
     return designerTabs[columnId] || 'doing'
@@ -288,7 +303,7 @@ export function DuplicateBoardPage() {
   // Get all unique designers that exist across the board
   const allDesignersList = useMemo(() => {
     const map = new Map<string, string>()
-    columns.forEach((col) => {
+    visibleColumns.forEach((col) => {
       if (col.id !== 'orders' && col.id !== 'missing_form' && col.id !== 'unassigned' && col.id !== 'done') {
         map.set(col.id, col.title)
       }
@@ -299,7 +314,7 @@ export function DuplicateBoardPage() {
       })
     })
     return Array.from(map.entries()).map(([id, name]) => ({ id, name }))
-  }, [columns])
+  }, [visibleColumns])
 
   // Aggregate KPI stats across the whole board
   const boardKPIs = useMemo(() => {
@@ -310,7 +325,7 @@ export function DuplicateBoardPage() {
     let done = 0
     let missing = 0
 
-    columns.forEach((col) => {
+    visibleColumns.forEach((col) => {
       col.cards.forEach((card) => {
         total++
         if (card.template_missing) missing++
@@ -322,7 +337,7 @@ export function DuplicateBoardPage() {
     })
 
     return { total, doing, review, fix, done, missing }
-  }, [columns])
+  }, [visibleColumns])
 
   // Filter Done column cards (supports Designer, Payment, Time filters)
   const filterDoneCards = useCallback((cards: DuplicateCard[]) => {
@@ -393,14 +408,14 @@ export function DuplicateBoardPage() {
 
   // Reorder columns according to custom order (or default)
   const orderedColumns = useMemo(() => {
-    if (columns.length === 0) return []
+    if (visibleColumns.length === 0) return []
 
     // If no custom order saved, maintain default: [orders, missing_form, ...designers, done]
     if (!customColumnOrder || customColumnOrder.length === 0) {
-      return columns
+      return visibleColumns
     }
 
-    const colMap = new Map(columns.map((c) => [c.id, c]))
+    const colMap = new Map(visibleColumns.map((c) => [c.id, c]))
     const ordered: DuplicateColumn[] = []
 
     // Add columns in custom order if they still exist
@@ -413,8 +428,8 @@ export function DuplicateBoardPage() {
     })
 
     // Any new columns (e.g. newly added Trello designers) insert before 'done'
-    const doneCol = colMap.get('done')
-    colMap.delete('done')
+    const doneCol = isDesignerTrello ? undefined : colMap.get('done')
+    if (!isDesignerTrello) colMap.delete('done')
 
     colMap.forEach((col) => {
       ordered.push(col)
@@ -425,7 +440,7 @@ export function DuplicateBoardPage() {
     }
 
     return ordered
-  }, [columns, customColumnOrder])
+  }, [visibleColumns, customColumnOrder, isDesignerTrello])
 
   function handleColumnDragStart(event: DragEvent<HTMLDivElement>, columnId: string) {
     setDraggedColumnId(columnId)
@@ -472,8 +487,9 @@ export function DuplicateBoardPage() {
 
     // If dragging a card currently assigned to this designer:
     if (draggedCard.assignee_id === myId) {
-      // Can drop to done, missing_form, orders, or other designer if cross drag enabled
-      if (column.id === 'done' || column.id === 'missing_form' || column.id === 'orders' || column.id === 'unassigned') {
+      // Can drop to missing_form, orders, or other designer if cross drag enabled.
+      // Done is not a Designer Trello board destination.
+      if (column.id === 'missing_form' || column.id === 'orders' || column.id === 'unassigned') {
         return true
       }
       return crossDesignerDragEnabled
@@ -726,7 +742,7 @@ export function DuplicateBoardPage() {
           </div>
 
           {/* KPI Summary Strip */}
-          <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-100 sm:grid-cols-3 md:grid-cols-6 text-xs">
+          <div className={`grid grid-cols-2 gap-2 pt-2 border-t border-slate-100 sm:grid-cols-3 text-xs ${isDesignerTrello ? 'md:grid-cols-5' : 'md:grid-cols-6'}`}>
             <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-2.5 text-center">
               <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Tổng Đơn</div>
               <div className="mt-0.5 text-lg font-black font-mono text-slate-800">{boardKPIs.total}</div>
@@ -743,10 +759,12 @@ export function DuplicateBoardPage() {
               <div className="text-[10px] font-bold uppercase tracking-wider text-orange-700">Cần Sửa (Fix)</div>
               <div className="mt-0.5 text-lg font-black font-mono text-orange-800">{boardKPIs.fix}</div>
             </div>
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-2.5 text-center">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Done</div>
-              <div className="mt-0.5 text-lg font-black font-mono text-emerald-800">{boardKPIs.done}</div>
-            </div>
+            {!isDesignerTrello && (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-2.5 text-center">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Done</div>
+                <div className="mt-0.5 text-lg font-black font-mono text-emerald-800">{boardKPIs.done}</div>
+              </div>
+            )}
             <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-2.5 text-center">
               <div className="text-[10px] font-bold uppercase tracking-wider text-amber-700">Thiếu Form</div>
               <div className="mt-0.5 text-lg font-black font-mono text-amber-800">{boardKPIs.missing}</div>
@@ -787,7 +805,7 @@ export function DuplicateBoardPage() {
                 <option value="doing">Đang làm (Doing)</option>
                 <option value="review">Chờ duyệt (Review)</option>
                 <option value="fix">Cần sửa (Fix)</option>
-                <option value="done">Hoàn thành (Done)</option>
+                {!isDesignerTrello && <option value="done">Hoàn thành (Done)</option>}
                 <option value="missing">Thiếu form</option>
               </select>
 

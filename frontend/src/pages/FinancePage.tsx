@@ -20,6 +20,7 @@ import {
   Filter,
   RotateCcw,
   ExternalLink,
+  ChevronLeft,
   ChevronRight,
   Package,
   Loader2,
@@ -63,6 +64,73 @@ function formatUtc7Split(dateInput: string | null | undefined): { time: string; 
     year: 'numeric',
   }).format(d)
   return { time: timeStr, date: dateStr }
+}
+
+function getVnDateParts(dateInput?: Date | string | number | null): { year: number; month: number; day: number; dayOfWeek: number } {
+  let d = dateInput ? new Date(dateInput) : new Date()
+  if (isNaN(d.getTime())) d = new Date()
+
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Ho_Chi_Minh',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    weekday: 'short',
+  })
+  const parts = formatter.formatToParts(d)
+  let year = d.getFullYear()
+  let month = d.getMonth() + 1
+  let day = d.getDate()
+  let weekdayStr = ''
+
+  for (const p of parts) {
+    if (p.type === 'year') year = parseInt(p.value, 10)
+    if (p.type === 'month') month = parseInt(p.value, 10)
+    if (p.type === 'day') day = parseInt(p.value, 10)
+    if (p.type === 'weekday') weekdayStr = p.value
+  }
+
+  const weekdayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
+  const dayOfWeek = weekdayMap[weekdayStr] ?? d.getDay()
+
+  return { year, month, day, dayOfWeek }
+}
+
+function getStartOfWeekMonday(dateInput?: Date | string | number | null): Date {
+  const { year, month, day, dayOfWeek } = getVnDateParts(dateInput)
+  const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek
+
+  const targetDateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T00:00:00+07:00`
+  const targetDate = new Date(targetDateStr)
+  targetDate.setDate(targetDate.getDate() + diffToMonday)
+  return targetDate
+}
+
+function getEndOfWeekSunday(monday: Date): Date {
+  const sunday = new Date(monday)
+  sunday.setDate(monday.getDate() + 6)
+  sunday.setHours(23, 59, 59, 999)
+  return sunday
+}
+
+function formatWeekRangeLabel(monday: Date): string {
+  const sunday = getEndOfWeekSunday(monday)
+  const currentMonday = getStartOfWeekMonday()
+  const isCurrentWeek = monday.getTime() === currentMonday.getTime()
+
+  const formatDayMonth = (d: Date) => {
+    const day = String(d.getDate()).padStart(2, '0')
+    const month = String(d.getMonth() + 1).padStart(2, '0')
+    return `${day}/${month}`
+  }
+
+  const year = sunday.getFullYear()
+  const rangeStr = `${formatDayMonth(monday)} - ${formatDayMonth(sunday)}/${year}`
+
+  if (isCurrentWeek) {
+    return `Tuần này (${rangeStr})`
+  }
+  return `Tuần (${rangeStr})`
 }
 
 export type DesignerSummary = {
@@ -244,11 +312,10 @@ export function FinancePage() {
 
   // Modal for Designer detail tasks (Admin)
   const [selectedDesignerForModal, setSelectedDesignerForModal] = useState<DesignerSummary | null>(null)
+  const [selectedWeekStart, setSelectedWeekStart] = useState<Date>(() => getStartOfWeekMonday())
   const [modalPaymentTab, setModalPaymentTab] = useState<'unpaid' | 'paid'>('unpaid')
   const [modalTasks, setModalTasks] = useState<CreditedTask[]>([])
   const [modalTasksLoading, setModalTasksLoading] = useState(false)
-  const [modalTotalCount, setModalTotalCount] = useState(0)
-  const [modalPage, setModalPage] = useState(1)
   const [modalSearchQuery, setModalSearchQuery] = useState('')
   const [modalStateFilter, setModalStateFilter] = useState('')
   const [modalSelectedOrderIds, setModalSelectedOrderIds] = useState<string[]>([])
@@ -516,22 +583,12 @@ export function FinancePage() {
     setModalTasksLoading(true)
     try {
       const params = new URLSearchParams()
-      params.set('page', modalPage.toString())
-      // The Finance API caps page_size at 100. Keep this aligned with the
-      // modal Pagination component so a designer with paid orders never gets
-      // a 422 response and an empty table.
-      params.set('page_size', '50')
-      params.set('is_paid', modalPaymentTab === 'paid' ? 'true' : 'false')
+      params.set('page', '1')
+      params.set('page_size', '10000')
       params.set('designer_id', selectedDesignerForModal.designer_id || selectedDesignerForModal.username || selectedDesignerForModal.designer_name)
-
-      if (startDate) params.set('start_date', startDate)
-      if (endDate) params.set('end_date', endDate)
-      if (modalSearchQuery.trim()) params.set('search', modalSearchQuery.trim())
-      if (modalStateFilter) params.set('state', modalStateFilter)
 
       const res = await apiFetch<FinanceStatsResponse>(`/finance/stats?${params.toString()}`)
       setModalTasks(res.tasks || [])
-      setModalTotalCount(res.total_tasks_count || 0)
     } catch (err) {
       showToast(err instanceof ApiError ? err.message : 'Không tải được danh sách đơn của Designer.', 'error')
     } finally {
@@ -539,23 +596,54 @@ export function FinancePage() {
     }
   }
 
-
   useEffect(() => {
     if (selectedDesignerForModal) {
-      loadModalTasks()
+      setSelectedWeekStart(getStartOfWeekMonday())
+      setModalPaymentTab('unpaid')
+      setModalSelectedOrderIds([])
+      setModalSearchQuery('')
+      setModalStateFilter('')
+      void loadModalTasks()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDesignerForModal, modalPaymentTab, modalPage, modalStateFilter])
+  }, [selectedDesignerForModal])
 
-  useEffect(() => {
-    if (!selectedDesignerForModal) return
-    const timer = setTimeout(() => {
-      setModalPage(1)
-      loadModalTasks()
-    }, 300)
-    return () => clearTimeout(timer)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modalSearchQuery])
+  const selectedWeekEnd = getEndOfWeekSunday(selectedWeekStart)
+
+  // Filter modal tasks belonging to selected week (by first_submitted_at)
+  const modalWeekAllTasks = modalTasks.filter((t) => {
+    const subDate = parseUtcDate(t.first_submitted_at)
+    if (!subDate) return false
+    const time = subDate.getTime()
+    return time >= selectedWeekStart.getTime() && time <= selectedWeekEnd.getTime()
+  })
+
+  const modalWeekUnpaidTasks = modalWeekAllTasks.filter((t) => !t.is_paid)
+  const modalWeekPaidTasks = modalWeekAllTasks.filter((t) => Boolean(t.is_paid))
+
+  const currentTabWeekTasks = modalPaymentTab === 'paid' ? modalWeekPaidTasks : modalWeekUnpaidTasks
+
+  const displayedModalTasks = currentTabWeekTasks
+    .filter((t) => {
+      if (modalSearchQuery.trim()) {
+        const q = modalSearchQuery.trim().toLowerCase()
+        const matchesExt = t.external_order_id.toLowerCase().includes(q)
+        const matchesProd = t.product_name ? t.product_name.toLowerCase().includes(q) : false
+        if (!matchesExt && !matchesProd) return false
+      }
+      if (modalStateFilter) {
+        const st = (t.current_state || '').toUpperCase()
+        if (modalStateFilter === 'DONE' && !['DONE', 'CLAIMED_IMPORTED', 'COMPLETED'].includes(st)) return false
+        if (modalStateFilter === 'REVIEW' && !['QC_PENDING', 'REVIEW', 'RESULT_SUBMITTED'].includes(st)) return false
+        if (modalStateFilter === 'FIX' && !['REVISION', 'FIX', 'REVISION_REQUESTED'].includes(st)) return false
+      }
+      return true
+    })
+    .sort((a, b) => {
+      const tA = parseUtcDate(a.first_submitted_at)?.getTime() ?? 0
+      const tB = parseUtcDate(b.first_submitted_at)?.getTime() ?? 0
+      return tB - tA // initial submission time descending
+    })
 
   function handleRateChange(orderId: string, delta: number) {
     setOrderRates((prev) => {
@@ -568,10 +656,10 @@ export function FinancePage() {
   }
 
   function handleModalSelectOrder(orderId: string, index: number, event?: React.MouseEvent) {
-    if (event?.shiftKey && modalLastSelectedIndex !== null && modalTasks.length > 0) {
+    if (event?.shiftKey && modalLastSelectedIndex !== null && displayedModalTasks.length > 0) {
       const start = Math.min(modalLastSelectedIndex, index)
       const end = Math.max(modalLastSelectedIndex, index)
-      const rangeIds = modalTasks.slice(start, end + 1).map((t) => t.order_id)
+      const rangeIds = displayedModalTasks.slice(start, end + 1).map((t) => t.order_id)
       setModalSelectedOrderIds((prev) => Array.from(new Set([...prev, ...rangeIds])))
     } else {
       setModalSelectedOrderIds((prev) =>
@@ -582,8 +670,8 @@ export function FinancePage() {
   }
 
   function handleModalSelectAll() {
-    if (!modalTasks || modalTasks.length === 0) return
-    const currentTaskIds = modalTasks.map((t) => t.order_id)
+    if (!displayedModalTasks || displayedModalTasks.length === 0) return
+    const currentTaskIds = displayedModalTasks.map((t) => t.order_id)
     const isAllSelected = currentTaskIds.every((id) => modalSelectedOrderIds.includes(id))
     if (isAllSelected) {
       setModalSelectedOrderIds((prev) => prev.filter((id) => !currentTaskIds.includes(id)))
@@ -593,17 +681,31 @@ export function FinancePage() {
   }
 
   async function handleModalMarkPaid(orderIdsToMark?: string[]) {
+    const targetUnpaidTasks = modalWeekUnpaidTasks
     const ids = orderIdsToMark && orderIdsToMark.length > 0
       ? orderIdsToMark
-      : (modalSelectedOrderIds.length > 0 ? modalSelectedOrderIds : modalTasks.map((t) => t.order_id))
+      : (modalSelectedOrderIds.length > 0 ? modalSelectedOrderIds : targetUnpaidTasks.map((t) => t.order_id))
+
     const desId = selectedDesignerForModal?.designer_id || selectedDesignerForModal?.designer_name
-    if (!ids.length && !desId) {
-      showToast('Không có đơn hàng nào để thanh toán.', 'warning')
+    if (!ids.length) {
+      showToast('Không có đơn hàng nào chưa thanh toán trong tuần này.', 'warning')
       return
     }
-    if (ids.length > 1 && !window.confirm(`Xác nhận thanh toán cho ${ids.length} đơn hàng của Designer này?`)) {
+
+    const totalAmount = targetUnpaidTasks
+      .filter((t) => ids.includes(t.order_id))
+      .reduce((sum, t) => sum + (orderRates[t.order_id] ?? t.rate ?? (t.work_domain === 'duplicate' ? duplicateRate : standardRate)), 0)
+
+    const weekLabel = formatWeekRangeLabel(selectedWeekStart)
+    const isPayAllWeek = modalSelectedOrderIds.length === 0 && (!orderIdsToMark || orderIdsToMark.length === 0)
+    const promptMsg = isPayAllWeek
+      ? `Xác nhận thanh toán TOÀN BỘ ${ids.length} đơn chưa thanh toán trong ${weekLabel} với tổng số tiền ${totalAmount.toLocaleString('vi-VN')} đ cho Designer này?`
+      : `Xác nhận thanh toán cho ${ids.length} đơn hàng đã chọn (${totalAmount.toLocaleString('vi-VN')} đ)?`
+
+    if (!window.confirm(promptMsg)) {
       return
     }
+
     setProcessingAction(true)
     try {
       const res = await apiFetch<{ ok: boolean; updated_count: number }>('/finance/mark-paid', {
@@ -614,11 +716,11 @@ export function FinancePage() {
           expected_versions: expectedVersionsFor(ids),
         }),
       })
-      showToast(`Đã xác nhận thanh toán cho ${res.updated_count} đơn hàng!`, 'success')
+      showToast(`Đã xác nhận thanh toán thành công cho ${res.updated_count} đơn hàng!`, 'success')
       setModalSelectedOrderIds([])
       setModalLastSelectedIndex(null)
-      loadModalTasks()
-      loadData()
+      await loadModalTasks()
+      await loadData()
     } catch (err: any) {
       showToast(err.message || 'Không thể xác nhận thanh toán.', 'error')
     } finally {
@@ -626,18 +728,26 @@ export function FinancePage() {
     }
   }
 
-
   async function handleModalUnmarkPaid(orderIdsToUnmark?: string[]) {
+    const targetPaidTasks = modalWeekPaidTasks
     const ids = orderIdsToUnmark && orderIdsToUnmark.length > 0
       ? orderIdsToUnmark
-      : (modalSelectedOrderIds.length > 0 ? modalSelectedOrderIds : modalTasks.map((t) => t.order_id))
+      : (modalSelectedOrderIds.length > 0 ? modalSelectedOrderIds : targetPaidTasks.map((t) => t.order_id))
+
     if (!ids.length) {
       showToast('Không có đơn hàng nào để hủy thanh toán.', 'warning')
       return
     }
-    if (!window.confirm(`Bạn có chắc chắn muốn hủy trạng thái thanh toán của ${ids.length} đơn hàng này không?`)) {
+    const isUnmarkAllWeek = modalSelectedOrderIds.length === 0 && (!orderIdsToUnmark || orderIdsToUnmark.length === 0)
+    const weekLabel = formatWeekRangeLabel(selectedWeekStart)
+    const promptMsg = isUnmarkAllWeek
+      ? `Bạn có chắc chắn muốn HỦY thanh toán toàn bộ ${ids.length} đơn hàng trong ${weekLabel} của Designer này không?`
+      : `Bạn có chắc chắn muốn hủy thanh toán cho ${ids.length} đơn hàng đã chọn không?`
+
+    if (!window.confirm(promptMsg)) {
       return
     }
+
     setProcessingAction(true)
     try {
       const res = await apiFetch<{ ok: boolean; updated_count: number }>('/finance/unmark-paid', {
@@ -647,8 +757,8 @@ export function FinancePage() {
       showToast(`Đã hủy thanh toán cho ${res.updated_count} đơn hàng!`, 'success')
       setModalSelectedOrderIds([])
       setModalLastSelectedIndex(null)
-      loadModalTasks()
-      loadData()
+      await loadModalTasks()
+      await loadData()
     } catch (err: any) {
       showToast(err.message || 'Không thể hủy thanh toán.', 'error')
     } finally {
@@ -1098,7 +1208,6 @@ export function FinancePage() {
                               onClick={() => {
                                 setSelectedDesignerForModal(des)
                                 setModalPaymentTab(des.unpaid_tasks > 0 ? 'unpaid' : (des.paid_tasks > 0 ? 'paid' : 'unpaid'))
-                                setModalPage(1)
                                 setModalSelectedOrderIds([])
                                 setModalSearchQuery('')
                                 setModalStateFilter('')
@@ -1213,7 +1322,6 @@ export function FinancePage() {
                                 onClick={() => {
                                   setSelectedDesignerForModal(des)
                                   setModalPaymentTab(des.unpaid_tasks > 0 ? 'unpaid' : (des.paid_tasks > 0 ? 'paid' : 'unpaid'))
-                                  setModalPage(1)
                                   setModalSelectedOrderIds([])
                                   setModalSearchQuery('')
                                   setModalStateFilter('')
@@ -2333,48 +2441,96 @@ export function FinancePage() {
 
             {/* Modal Body */}
             <div className="flex-1 overflow-y-auto p-5 space-y-4">
-              {/* Top Controls: Sub-tabs & Bulk Actions */}
+              {/* Top Controls: Week Navigator, Sub-tabs & Bulk Actions */}
               <div className="flex items-center justify-between flex-wrap gap-3 border-b border-slate-200 pb-3">
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setModalPaymentTab('unpaid')
-                      setModalPage(1)
-                      setModalSelectedOrderIds([])
-                    }}
-                    className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
-                      modalPaymentTab === 'unpaid'
-                        ? 'bg-amber-500 text-white border-amber-600 shadow-xs'
-                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    <Clock className="h-3.5 w-3.5" />
-                    <span>Chưa Thanh Toán</span>
-                    <span className={`px-2 py-0.2 rounded-full text-[11px] font-mono ${modalPaymentTab === 'unpaid' ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-700'}`}>
-                      {selectedDesignerForModal.unpaid_tasks ?? 0}
-                    </span>
-                  </button>
+                {/* Week Selector Bar & Sub-tabs */}
+                <div className="flex items-center gap-3 flex-wrap">
+                  {/* Week Navigator */}
+                  <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 shadow-2xs">
+                    <button
+                      type="button"
+                      title="Tuần trước"
+                      onClick={() => {
+                        const prev = new Date(selectedWeekStart)
+                        prev.setDate(prev.getDate() - 7)
+                        setSelectedWeekStart(prev)
+                        setModalSelectedOrderIds([])
+                      }}
+                      className="p-1.5 rounded-lg hover:bg-white text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </button>
+                    <div className="px-2.5 text-xs font-bold text-slate-800 flex items-center gap-1.5 min-w-[200px] justify-center">
+                      <Calendar className="h-3.5 w-3.5 text-[#0052CC]" />
+                      <span>{formatWeekRangeLabel(selectedWeekStart)}</span>
+                    </div>
+                    <button
+                      type="button"
+                      title="Tuần sau"
+                      onClick={() => {
+                        const next = new Date(selectedWeekStart)
+                        next.setDate(next.getDate() + 7)
+                        setSelectedWeekStart(next)
+                        setModalSelectedOrderIds([])
+                      }}
+                      className="p-1.5 rounded-lg hover:bg-white text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                    {selectedWeekStart.getTime() !== getStartOfWeekMonday().getTime() && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedWeekStart(getStartOfWeekMonday())
+                          setModalSelectedOrderIds([])
+                        }}
+                        className="px-2 py-0.5 text-[11px] font-bold text-[#0052CC] bg-blue-50 hover:bg-blue-100 rounded-md border border-blue-200 transition-colors cursor-pointer ml-1"
+                      >
+                        Tuần này
+                      </button>
+                    )}
+                  </div>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setModalPaymentTab('paid')
-                      setModalPage(1)
-                      setModalSelectedOrderIds([])
-                    }}
-                    className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
-                      modalPaymentTab === 'paid'
-                        ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
-                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    <CheckCircle2 className="h-3.5 w-3.5" />
-                    <span>Đã Thanh Toán</span>
-                    <span className={`px-2 py-0.2 rounded-full text-[11px] font-mono ${modalPaymentTab === 'paid' ? 'bg-emerald-700 text-white' : 'bg-slate-100 text-slate-700'}`}>
-                      {selectedDesignerForModal.paid_tasks ?? 0}
-                    </span>
-                  </button>
+                  {/* Sub-tabs */}
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setModalPaymentTab('unpaid')
+                        setModalSelectedOrderIds([])
+                      }}
+                      className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                        modalPaymentTab === 'unpaid'
+                          ? 'bg-amber-500 text-white border-amber-600 shadow-xs'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      <Clock className="h-3.5 w-3.5" />
+                      <span>Chưa Thanh Toán</span>
+                      <span className={`px-2 py-0.2 rounded-full text-[11px] font-mono ${modalPaymentTab === 'unpaid' ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-700'}`}>
+                        {modalWeekUnpaidTasks.length}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setModalPaymentTab('paid')
+                        setModalSelectedOrderIds([])
+                      }}
+                      className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                        modalPaymentTab === 'paid'
+                          ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      <span>Đã Thanh Toán</span>
+                      <span className={`px-2 py-0.2 rounded-full text-[11px] font-mono ${modalPaymentTab === 'paid' ? 'bg-emerald-700 text-white' : 'bg-slate-100 text-slate-700'}`}>
+                        {modalWeekPaidTasks.length}
+                      </span>
+                    </button>
+                  </div>
                 </div>
 
                 {/* Top Payment Action Button & Selection Indicator */}
@@ -2400,7 +2556,7 @@ export function FinancePage() {
                   {modalPaymentTab === 'unpaid' ? (
                     <button
                       type="button"
-                      disabled={processingAction || modalTasks.length === 0}
+                      disabled={processingAction || modalWeekUnpaidTasks.length === 0}
                       onClick={() => handleModalMarkPaid()}
                       className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:scale-95 rounded-xl shadow-xs transition-all disabled:opacity-50 cursor-pointer"
                     >
@@ -2408,13 +2564,13 @@ export function FinancePage() {
                       <span>
                         {modalSelectedOrderIds.length > 0
                           ? `Xác Nhận Thanh Toán (${modalSelectedOrderIds.length} Đơn Đã Chọn)`
-                          : `Xác Nhận Thanh Toán (${modalTasks.length} Đơn)`}
+                          : `Xác Nhận Thanh Toán Tuần Này (${modalWeekUnpaidTasks.length} Đơn)`}
                       </span>
                     </button>
                   ) : (
                     <button
                       type="button"
-                      disabled={processingAction || modalTasks.length === 0}
+                      disabled={processingAction || modalWeekPaidTasks.length === 0}
                       onClick={() => handleModalUnmarkPaid()}
                       className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-amber-800 bg-amber-100 hover:bg-amber-200 border border-amber-300 active:scale-95 rounded-xl shadow-xs transition-all disabled:opacity-50 cursor-pointer"
                     >
@@ -2422,7 +2578,7 @@ export function FinancePage() {
                       <span>
                         {modalSelectedOrderIds.length > 0
                           ? `Hủy Thanh Toán (${modalSelectedOrderIds.length} Đơn Đã Chọn)`
-                          : `Hủy Thanh Toán (${modalTasks.length} Đơn)`}
+                          : `Hủy Thanh Toán Tuần Này (${modalWeekPaidTasks.length} Đơn)`}
                       </span>
                     </button>
                   )}
@@ -2448,7 +2604,6 @@ export function FinancePage() {
                     value={modalStateFilter}
                     onChange={(e) => {
                       setModalStateFilter(e.target.value)
-                      setModalPage(1)
                       setModalSelectedOrderIds([])
                     }}
                   >
@@ -2464,7 +2619,6 @@ export function FinancePage() {
                       onClick={() => {
                         setModalSearchQuery('')
                         setModalStateFilter('')
-                        setModalPage(1)
                         setModalSelectedOrderIds([])
                       }}
                       className="flex items-center gap-1 text-xs text-rose-600 hover:text-rose-700 font-bold px-2 py-1 rounded-lg hover:bg-rose-50 cursor-pointer"
@@ -2479,9 +2633,9 @@ export function FinancePage() {
               {/* Dynamic Total Summary Banner */}
               <div className="bg-gradient-to-r from-blue-50 via-indigo-50/50 to-emerald-50/40 border border-blue-200 rounded-xl p-3.5 flex items-center justify-between flex-wrap gap-3 shadow-2xs">
                 <div className="flex items-center gap-3 flex-wrap">
-                  <span className="text-xs text-slate-600 font-medium">Số lượng đơn:</span>
+                  <span className="text-xs text-slate-600 font-medium">Số lượng đơn trong tuần:</span>
                   <span className="font-mono font-bold text-slate-900 bg-white px-2.5 py-0.5 rounded border border-slate-200 text-xs shadow-2xs">
-                    {modalTasks.length} / {selectedDesignerForModal.total_tasks} đơn hiển thị
+                    {displayedModalTasks.length} / {currentTabWeekTasks.length} đơn hiển thị
                   </span>
                   {modalSelectedOrderIds.length > 0 && (
                     <span className="font-mono font-bold text-[#0052CC] bg-blue-100 px-2.5 py-0.5 rounded text-xs border border-blue-200">
@@ -2495,7 +2649,7 @@ export function FinancePage() {
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-semibold text-blue-900">Tổng tiền đã chọn:</span>
                       <span className="font-mono text-sm font-extrabold text-[#0052CC] bg-white px-2.5 py-1 rounded-lg border border-blue-200 shadow-2xs">
-                        {modalTasks
+                        {currentTabWeekTasks
                           .filter((t) => modalSelectedOrderIds.includes(t.order_id))
                           .reduce((sum, t) => sum + (orderRates[t.order_id] ?? t.rate ?? (t.work_domain === 'duplicate' ? duplicateRate : standardRate)), 0)
                           .toLocaleString('vi-VN')} đ
@@ -2504,10 +2658,10 @@ export function FinancePage() {
                   )}
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-semibold text-slate-700">
-                      Tổng số tiền ({modalPaymentTab === 'unpaid' ? 'Chưa thanh toán' : 'Đã thanh toán'}):
+                      Tổng số tiền trong tuần ({modalPaymentTab === 'unpaid' ? 'Chưa thanh toán' : 'Đã thanh toán'}):
                     </span>
                     <span className="font-mono text-base font-extrabold text-emerald-700 bg-white px-3 py-1 rounded-lg border border-emerald-300 shadow-2xs">
-                      {modalTasks
+                      {currentTabWeekTasks
                         .reduce((sum, t) => sum + (orderRates[t.order_id] ?? t.rate ?? (t.work_domain === 'duplicate' ? duplicateRate : standardRate)), 0)
                         .toLocaleString('vi-VN')} đ
                     </span>
@@ -2516,7 +2670,7 @@ export function FinancePage() {
                   {modalPaymentTab === 'unpaid' ? (
                     <button
                       type="button"
-                      disabled={processingAction || modalTasks.length === 0}
+                      disabled={processingAction || modalWeekUnpaidTasks.length === 0}
                       onClick={() => handleModalMarkPaid()}
                       className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:scale-95 rounded-xl shadow-sm transition-all disabled:opacity-50 cursor-pointer"
                     >
@@ -2524,13 +2678,13 @@ export function FinancePage() {
                       <span>
                         {modalSelectedOrderIds.length > 0
                           ? `Thanh Toán (${modalSelectedOrderIds.length} Đơn)`
-                          : `Thanh Toán Toàn Bộ (${modalTasks.length} Đơn)`}
+                          : `Thanh Toán Toàn Bộ Tuần Này (${modalWeekUnpaidTasks.length} Đơn)`}
                       </span>
                     </button>
                   ) : (
                     <button
                       type="button"
-                      disabled={processingAction || modalTasks.length === 0}
+                      disabled={processingAction || modalWeekPaidTasks.length === 0}
                       onClick={() => handleModalUnmarkPaid()}
                       className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-amber-800 bg-amber-100 hover:bg-amber-200 border border-amber-300 active:scale-95 rounded-xl shadow-sm transition-all disabled:opacity-50 cursor-pointer"
                     >
@@ -2538,7 +2692,7 @@ export function FinancePage() {
                       <span>
                         {modalSelectedOrderIds.length > 0
                           ? `Hủy Thanh Toán (${modalSelectedOrderIds.length} Đơn)`
-                          : `Hủy Thanh Toán Toàn Bộ (${modalTasks.length} Đơn)`}
+                          : `Hủy Thanh Toán Tuần Này (${modalWeekPaidTasks.length} Đơn)`}
                       </span>
                     </button>
                   )}
@@ -2555,18 +2709,18 @@ export function FinancePage() {
                           <input
                             type="checkbox"
                             checked={
-                              modalTasks.length > 0 &&
-                              modalTasks.every((t) => modalSelectedOrderIds.includes(t.order_id))
+                              displayedModalTasks.length > 0 &&
+                              displayedModalTasks.every((t) => modalSelectedOrderIds.includes(t.order_id))
                             }
                             onChange={handleModalSelectAll}
                             className="rounded border-slate-300 text-[#0052CC] focus:ring-[#0052CC] cursor-pointer"
-                            title="Chọn tất cả đơn trên trang này"
+                            title="Chọn tất cả đơn hiển thị trong tuần"
                           />
                         </th>
                         <th className="py-3 px-3 w-28 text-center">Ảnh</th>
                         <th className="py-3 px-4">Mã Đơn / Tên Sản Phẩm</th>
                         <th className="py-3 px-4">Trạng Thái</th>
-                        <th className="py-3 px-4 whitespace-nowrap">Thời Gian Nộp</th>
+                        <th className="py-3 px-4 whitespace-nowrap">Thời Gian Nộp (Lần Đầu)</th>
                         {modalPaymentTab === 'paid' && (
                           <th className="py-3 px-4 whitespace-nowrap">Thời Gian Thanh Toán</th>
                         )}
@@ -2584,20 +2738,20 @@ export function FinancePage() {
                             <p className="font-medium text-xs text-slate-500">Đang tải danh sách đơn...</p>
                           </td>
                         </tr>
-                      ) : modalTasks.length === 0 ? (
+                      ) : displayedModalTasks.length === 0 ? (
                         <tr>
                           <td colSpan={modalPaymentTab === 'paid' ? 10 : 9} className="py-12 text-center text-slate-400">
                             <Package className="h-8 w-8 mx-auto mb-2 opacity-30" />
                             <p className="font-medium text-xs text-slate-500">
-                              {modalPaymentTab === 'unpaid' ? 'Không có đơn nào chưa thanh toán' : 'Chưa có đơn nào đã thanh toán'}
+                              {modalPaymentTab === 'unpaid' ? 'Không có đơn nào chưa thanh toán trong tuần này' : 'Chưa có đơn nào đã thanh toán trong tuần này'}
                             </p>
                           </td>
                         </tr>
                       ) : (
-                        modalTasks.map((task, idx) => {
+                        displayedModalTasks.map((task, idx) => {
                           const isSelected = modalSelectedOrderIds.includes(task.order_id)
                           const statusInfo = getStatusInfo(task.current_state)
-                          const submitTimeSplit = formatUtc7Split(task.review_submitted_at || task.status_changed_at || task.first_submitted_at)
+                          const submitTimeSplit = formatUtc7Split(task.first_submitted_at || task.review_submitted_at || task.status_changed_at)
                           const paidTimeSplit = formatUtc7Split(task.paid_at)
                           const currentRate = orderRates[task.order_id] ?? task.rate ?? (task.work_domain === 'duplicate' ? duplicateRate : standardRate)
 
@@ -2805,15 +2959,6 @@ export function FinancePage() {
                     </tbody>
                   </table>
                 </div>
-
-                {modalTotalCount > 50 && (
-                  <Pagination
-                    totalItems={modalTotalCount}
-                    currentPage={modalPage}
-                    pageSize={50}
-                    onPageChange={setModalPage}
-                  />
-                )}
               </div>
             </div>
           </div>
