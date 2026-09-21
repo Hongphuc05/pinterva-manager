@@ -29,7 +29,7 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
   const [isFastSyncing, setIsFastSyncing] = useState(false)
   const [fastSyncError, setFastSyncError] = useState<string | null>(null)
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false)
-  const { status: syncStatus } = useSyncStatus()
+  const { status: syncStatus, triggerRun } = useSyncStatus()
   const {
     isSyncing: isGallerySyncing,
     isPaused: isGalleryPaused,
@@ -109,30 +109,7 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
     }
   }
 
-  async function handleRefreshCurrentTab() {
-    setIsFastSyncing(true)
-    setFastSyncError(null)
-    window.dispatchEvent(new CustomEvent('sync-platform-start'))
 
-    let handled = false
-    const onHandled = () => {
-      handled = true
-    }
-    window.addEventListener('sync-tab-handled', onHandled, { once: true })
-    window.dispatchEvent(new CustomEvent('request-sync-current-tab'))
-
-    // Wait a brief moment to check if an active view handled syncing its specific tab
-    await new Promise((r) => setTimeout(r, 60))
-    window.removeEventListener('sync-tab-handled', onHandled)
-
-    if (!handled) {
-      const message = 'Trang hiện tại không có danh sách đơn để đồng bộ.'
-      setFastSyncError(message)
-      showToast(message, 'info')
-      setIsFastSyncing(false)
-      window.dispatchEvent(new CustomEvent('sync-platform-end'))
-    }
-  }
 
   async function handleRefreshCrawl(jobType: string, status: string, designer: string, dateFrom: string, dateTo: string, deadlineTacahu: string) {
     setRefreshing(true)
