@@ -170,3 +170,65 @@ def test_finance_stats_returns_tasks_and_summary(client, db_session):
     assert task["external_order_id"] == "DJ_FIN_1234"
     assert task["drive_link"] == "https://drive.google.com/file/d/FIN_DRIVE_LINK"
     assert task["placeholder_filled"] is True
+
+
+def test_finance_designer_filter_uses_exact_designer_identity(client, db_session):
+    platform = Platform(name="Finance Identity Platform", account_username="finance_identity@test.com")
+    db_session.add(platform)
+    db_session.commit()
+
+    _login(client, db_session, "admin", "admin_finance_identity")
+
+    lan = User(
+        username="lananhtrello",
+        role="designer-trello",
+        full_name="Lan Anh Trello",
+        password_hash=hash_password("s3cret!"),
+    )
+    ngoc = User(
+        username="ngocanh",
+        role="designer",
+        full_name="Ngọc Anh",
+        password_hash=hash_password("s3cret!"),
+    )
+    quynh = User(
+        username="quynhtrello",
+        role="designer-trello",
+        full_name="Quỳnh Trello",
+        password_hash=hash_password("s3cret!"),
+    )
+    db_session.add_all([lan, ngoc, quynh])
+    db_session.commit()
+
+    designers_and_codes = [
+        (lan, "DJ_FIN_LAN"),
+        (ngoc, "DJ_FIN_NGOC"),
+        (quynh, "DJ_FIN_QUYNH"),
+    ]
+    for designer, order_code in designers_and_codes:
+        order = Order(
+            platform_id=platform.id,
+            external_order_id=order_code,
+            state="QC_PENDING",
+        )
+        db_session.add(order)
+        db_session.flush()
+        assignment = Assignment(order_id=order.id, designer_id=designer.id, status="approved")
+        db_session.add(assignment)
+        db_session.flush()
+        db_session.add(ResultVersion(
+            assignment_id=assignment.id,
+            drive_url=f"https://drive.google.com/file/d/{order_code}",
+            version_marker=1,
+            submitted_at=datetime.now(UTC),
+            validated=True,
+        ))
+    db_session.commit()
+
+    for designer, expected_code in designers_and_codes:
+        response = client.get(
+            f"/api/finance/stats?designer_id={designer.id}",
+            headers={"X-Platform-ID": str(platform.id)},
+        )
+        assert response.status_code == 200
+        assert [task["external_order_id"] for task in response.json()["tasks"]] == [expected_code]

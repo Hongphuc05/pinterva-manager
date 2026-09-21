@@ -313,19 +313,6 @@ def get_finance_stats(
         if norm_cand in user_map_by_any:
             return user_map_by_any[norm_cand]
 
-        for u in all_users:
-            u_name_norm = normalize_text(u.full_name)
-            u_user_norm = normalize_text(u.username)
-            u_opt_norm = normalize_text(u.printerval_designer_option)
-
-            if norm_cand and (
-                norm_cand == u_user_norm
-                or norm_cand == u_opt_norm
-                or norm_cand == u_name_norm
-                or (len(norm_cand) >= 2 and norm_cand in u_name_norm.split())
-                or (len(norm_cand) >= 2 and norm_cand in u_name_norm)
-            ):
-                return u
         return None
 
 
@@ -385,6 +372,7 @@ def get_finance_stats(
     assignments = (
         db.query(Assignment)
         .filter(Assignment.order_id.in_(list(orders_by_id.keys())))
+        .order_by(Assignment.created_at.desc())
         .all()
     )
     asgn_by_id: dict[uuid.UUID, Assignment] = {a.id: a for a in assignments}
@@ -447,7 +435,7 @@ def get_finance_stats(
 
         if not des_user and ev.order_id in asgns_by_order:
             for asg in asgns_by_order[ev.order_id]:
-                if asg.designer_id and asg.designer_id in user_map_by_id:
+                if asg.status != "cancelled" and asg.designer_id and asg.designer_id in user_map_by_id:
                     des_user = user_map_by_id[asg.designer_id]
                     break
 
@@ -594,7 +582,7 @@ def get_finance_stats(
             des_user = None
             if order.id in asgns_by_order:
                 for asg in asgns_by_order[order.id]:
-                    if asg.designer_id and asg.designer_id in user_map_by_id:
+                    if asg.status != "cancelled" and asg.designer_id and asg.designer_id in user_map_by_id:
                         des_user = user_map_by_id[asg.designer_id]
                         break
             if not des_user and order.printerval_designer:
@@ -774,53 +762,30 @@ def get_finance_stats(
     if designer_id and designer_id.strip() and designer_id != "ALL":
         raw_filter = designer_id.strip()
         matched_user = resolve_designer_user(raw_filter)
-
-        valid_targets = set()
         if matched_user:
-            valid_targets.add(str(matched_user.id).lower())
-            if matched_user.username:
-                valid_targets.add(matched_user.username.lower().strip())
-                valid_targets.add(normalize_text(matched_user.username))
-            if matched_user.full_name:
-                valid_targets.add(matched_user.full_name.lower().strip())
-                valid_targets.add(normalize_text(matched_user.full_name))
-                for word in matched_user.full_name.split():
-                    valid_targets.add(word.lower().strip())
-                    valid_targets.add(normalize_text(word))
-            if matched_user.printerval_designer_option:
-                valid_targets.add(matched_user.printerval_designer_option.lower().strip())
-                valid_targets.add(normalize_text(matched_user.printerval_designer_option))
-
-        valid_targets.add(raw_filter.lower())
-        valid_targets.add(normalize_text(raw_filter))
-        for word in raw_filter.split():
-            valid_targets.add(word.lower().strip())
-            valid_targets.add(normalize_text(word))
-
-        def task_matches_designer(t: dict[str, Any]) -> bool:
-            t_des_id = str(t.get("designer_id") or "").lower().strip()
-            t_des_key = str(t.get("designer_key") or "").lower().strip()
-            t_des_name = str(t.get("designer_name") or "").lower().strip()
-            t_des_user = str(t.get("designer_username") or "").lower().strip()
-
-            norm_key = normalize_text(t_des_key)
-            norm_name = normalize_text(t_des_name)
-            norm_user = normalize_text(t_des_user)
-
-            if t_des_id in valid_targets or t_des_key in valid_targets or norm_key in valid_targets:
-                return True
-            if t_des_name in valid_targets or norm_name in valid_targets:
-                return True
-            if t_des_user in valid_targets or norm_user in valid_targets:
-                return True
-
-            for vt in valid_targets:
-                if len(vt) >= 2 and (vt in norm_name or vt in norm_user or norm_name in vt):
-                    return True
-
-            return False
-
-        tasks_to_render = [t for t in tasks_to_render if task_matches_designer(t)]
+            # The modal always supplies this canonical ID.  Matching by name
+            # fragments (e.g. "Anh" or "Trello") cross-credited orders between
+            # different Designers, so this path must be identity-only.
+            target_designer_id = str(matched_user.id).lower()
+            tasks_to_render = [
+                t for t in tasks_to_render
+                if str(t.get("designer_id") or "").lower() == target_designer_id
+                or str(t.get("designer_key") or "").lower() == target_designer_id
+            ]
+        else:
+            # Keep compatibility for an older caller that may send an unknown
+            # display identifier, but require an exact normalized match. Never
+            # match individual name words or substrings.
+            exact_targets = {raw_filter.lower(), normalize_text(raw_filter)}
+            tasks_to_render = [
+                t for t in tasks_to_render
+                if str(t.get("designer_id") or "").lower().strip() in exact_targets
+                or str(t.get("designer_key") or "").lower().strip() in exact_targets
+                or str(t.get("designer_name") or "").lower().strip() in exact_targets
+                or normalize_text(t.get("designer_name")) in exact_targets
+                or str(t.get("designer_username") or "").lower().strip() in exact_targets
+                or normalize_text(t.get("designer_username")) in exact_targets
+            ]
 
 
 
