@@ -38,6 +38,10 @@ def test_celery_app_includes_telegram_tasks():
     assert "app.workers.telegram_tasks" in celery_app.conf.include
 
 
+def test_celery_app_includes_the_scheduled_status_sync_task():
+    assert "app.workers.status_sync_tasks" in celery_app.conf.include
+
+
 def test_run_crawl_cycle_discovers_claims_and_imports_in_order(db_session):
     adapter = FakePrintervalAdapter()
     adapter.add_order(

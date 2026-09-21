@@ -121,6 +121,34 @@ def test_discover_orders_all_status_sends_an_empty_status_filter():
     assert seen_params[0]["status"] == ""
 
 
+def test_combined_status_filter_keeps_each_row_real_status():
+    seen_params = []
+
+    def handler(request):
+        if request.method == "GET" and request.url.path == LOGIN_PATH:
+            return httpx.Response(200, text='<input type="hidden" name="_token" value="csrf-123">')
+        if request.method == "POST" and request.url.path == LOGIN_PATH:
+            return httpx.Response(302, headers={"location": "/admin"})
+        if request.method == "GET" and request.url.path == FIND_PATH:
+            seen_params.append(dict(request.url.params))
+            return httpx.Response(
+                200,
+                json={
+                    "status": "successful",
+                    "result": [
+                        {"id": 101, "status": "waiting"},
+                        {"id": 102, "status": "fix"},
+                    ],
+                },
+            )
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    result = _api_adapter(handler).discover_orders(status="waiting+doing+fix")
+
+    assert seen_params[0]["status"] == "waiting+doing+fix"
+    assert [order.status for order in result.orders] == ["waiting", "fix"]
+
+
 def test_discover_orders_forwards_date_filters_to_the_client():
     seen_params = []
 

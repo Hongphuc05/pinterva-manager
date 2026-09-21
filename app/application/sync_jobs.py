@@ -8,7 +8,12 @@ from datetime import UTC, datetime
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import Order, Platform, SyncJob, User
-from app.application.status_sync import sync_platform_order_statuses, sync_selected_order_statuses
+from app.adapters.printerval.api_adapter import PrintervalApiAdapter
+from app.adapters.printerval.api_client import PrintervalApiClient
+from app.application.status_sync import (
+    reconcile_active_platform_orders,
+    sync_selected_order_statuses,
+)
 
 STATUS_SYNC = "status_sync"
 ACTIVE_STATUSES = ("queued", "running")
@@ -88,7 +93,22 @@ def run_status_sync_job(session: Session, job_id: uuid.UUID) -> SyncJob:
             job.updated = result["updated"]
             job.failed = result.get("failed", 0)
         else:
-            result = sync_platform_order_statuses(session, platform)
+            client = PrintervalApiClient(
+                base_url="https://printerval.com",
+                username=platform.account_username,
+                password=platform.account_password,
+                team_outsource=platform.team_outsource,
+                session_cookie=platform.session_cookie,
+            )
+            try:
+                result = reconcile_active_platform_orders(
+                    session,
+                    platform,
+                    adapter=PrintervalApiAdapter(api_client=client, download_images=False),
+                    actor_id=job.created_by_id,
+                )
+            finally:
+                client.close()
             job.processed = result.get("checked", 0)
             job.total = result.get("checked", 0)
             job.updated = result.get("updated", 0)

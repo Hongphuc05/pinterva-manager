@@ -5,7 +5,10 @@ import httpx
 import app.application.status_sync as status_sync_module
 from app.adapters.db.models import Order, Platform, PlatformSyncState, WorkflowEvent
 from app.adapters.printerval.api_client import FIND_PATH, LOGIN_PATH, PrintervalApiClient
+from app.adapters.printerval.fake_adapter import FakePrintervalAdapter
 from app.application.status_sync import (
+    ACTIVE_PRINTERVAL_STATUS_FILTER,
+    reconcile_active_platform_orders,
     sync_all_platforms,
     sync_platform_order_statuses,
     sync_selected_order_statuses,
@@ -182,6 +185,77 @@ def test_scheduled_sync_returns_a_paid_done_order_to_fix_without_clearing_paymen
     assert order.fix_return_count == 1
 
 
+def test_active_reconciliation_imports_only_new_waiting_orders(db_session):
+    platform = Platform(name="P active", account_username="acc@example.test", team_outsource="team-a")
+    db_session.add(platform)
+    db_session.flush()
+    adapter = FakePrintervalAdapter()
+    adapter.add_order(external_order_id="DJ-WAIT", product_name="New Waiting", designer=None, status="waiting")
+    adapter.add_order(external_order_id="DJ-DOING", product_name="Old Doing", designer="Print Des", status="doing")
+    adapter.add_order(external_order_id="DJ-FIX", product_name="Old Fix", designer="Print Des", status="fix")
+
+    result = reconcile_active_platform_orders(db_session, platform, adapter=adapter)
+
+    imported = db_session.query(Order).filter_by(external_order_id="DJ-WAIT").one()
+    assert imported.state == "OPEN"
+    assert imported.printerval_status == "waiting"
+    assert db_session.query(Order).filter_by(external_order_id="DJ-DOING").one_or_none() is None
+    assert db_session.query(Order).filter_by(external_order_id="DJ-FIX").one_or_none() is None
+    assert result == {"checked": 3, "added": 1, "updated": 0, "skipped_untracked": 2, "failed": 0}
+
+
+def test_active_reconciliation_returns_paid_done_order_to_fix(db_session, monkeypatch):
+    monkeypatch.setattr(status_sync_module, "_dispatch_admin_fix_notifications", lambda *_: None)
+    platform = Platform(name="P active paid", account_username="acc@example.test", team_outsource="team-a")
+    db_session.add(platform)
+    db_session.flush()
+    order = Order(
+        external_order_id="DJ-PAID-FIX",
+        platform_id=platform.id,
+        state="DONE",
+        printerval_status="done",
+        is_paid=True,
+    )
+    db_session.add(order)
+    db_session.commit()
+    adapter = FakePrintervalAdapter()
+    adapter.add_order(
+        external_order_id="DJ-PAID-FIX",
+        product_name="Paid Fix",
+        designer="Print Des",
+        status="fix",
+        note_outsource="Sửa lại logo",
+    )
+
+    result = reconcile_active_platform_orders(db_session, platform, adapter=adapter)
+
+    db_session.refresh(order)
+    assert result == {"checked": 1, "added": 0, "updated": 1, "skipped_untracked": 0, "failed": 0}
+    assert order.state == "REVISION"
+    assert order.printerval_status == "fix"
+    assert order.is_paid is True
+    assert order.fix_return_count == 1
+
+
+def test_active_reconciliation_uses_the_combined_printerval_filter(db_session):
+    platform = Platform(name="P filter", account_username="acc@example.test", team_outsource="team-a")
+    db_session.add(platform)
+    db_session.commit()
+
+    class RecordingAdapter(FakePrintervalAdapter):
+        def __init__(self):
+            super().__init__()
+            self.status_filters: list[str] = []
+
+        def discover_orders(self, *, status, **kwargs):
+            self.status_filters.append(status)
+            return super().discover_orders(status=status, **kwargs)
+
+    adapter = RecordingAdapter()
+    reconcile_active_platform_orders(db_session, platform, adapter=adapter)
+    assert adapter.status_filters == [ACTIVE_PRINTERVAL_STATUS_FILTER]
+
+
 def test_selected_sync_with_unchanged_observation_keeps_order_version(db_session):
     platform = Platform(name="P unchanged", account_username="acc@example.com", team_outsource="team-a")
     db_session.add(platform)
@@ -214,7 +288,7 @@ def test_selected_sync_turns_printerval_fix_into_the_existing_admin_fix_flow(db_
     monkeypatch.setattr(
         status_sync_module,
         "_dispatch_admin_fix_notifications",
-        lambda order: notifications.append(order.id),
+        lambda _session, order: notifications.append(order.id),
     )
     platform = Platform(name="P1", account_username="acc1@printerval.com", team_outsource="team-a")
     db_session.add(platform)
@@ -270,7 +344,7 @@ def test_scheduled_sync_dispatches_admin_telegram_notification_for_new_fix(db_se
     monkeypatch.setattr(
         status_sync_module,
         "_dispatch_admin_fix_notifications",
-        lambda order: notifications.append(order.id),
+        lambda _session, order: notifications.append(order.id),
     )
     platform = Platform(name="P1", account_username="acc1@printerval.com", team_outsource="team-a")
     db_session.add(platform)
@@ -444,12 +518,12 @@ def test_sync_all_platforms_tracks_running_state_and_result(db_session, monkeypa
 
     calls = []
 
-    def _fake_sync(session, plat):
+    def _fake_sync(session, plat, *, adapter, actor_id=None):
         calls.append(plat.id)
         return {"checked": 1, "updated": 0}
 
-    # Patch just the per-platform sync so this test doesn't need network mocking.
-    monkeypatch.setattr(status_sync_module, "sync_platform_order_statuses", _fake_sync)
+    # Patch just the active-feed reconciler so this test doesn't need network mocking.
+    monkeypatch.setattr(status_sync_module, "reconcile_active_platform_orders", _fake_sync)
     results = sync_all_platforms(db_session)
 
     assert calls == [platform.id]
@@ -480,13 +554,13 @@ def test_sync_all_platforms_continues_past_a_non_printerval_exception(db_session
 
     calls = []
 
-    def _fake_sync(session, plat):
+    def _fake_sync(session, plat, *, adapter, actor_id=None):
         calls.append(plat.id)
         if plat.id == platform_a.id:
             raise RuntimeError("simulated StaleDataError-like failure")
         return {"checked": 0, "updated": 0}
 
-    monkeypatch.setattr(status_sync_module, "sync_platform_order_statuses", _fake_sync)
+    monkeypatch.setattr(status_sync_module, "reconcile_active_platform_orders", _fake_sync)
     results = sync_all_platforms(db_session)
 
     assert calls == [platform_a.id, platform_b.id]  # platform_b still got processed
@@ -525,8 +599,8 @@ def test_sync_all_platforms_includes_cookie_only_platform(db_session, monkeypatc
     seen = []
     monkeypatch.setattr(
         status_sync_module,
-        "sync_platform_order_statuses",
-        lambda session, candidate: seen.append(candidate.id) or {"checked": 0, "updated": 0, "not_found": 0},
+        "reconcile_active_platform_orders",
+        lambda session, candidate, *, adapter, actor_id=None: seen.append(candidate.id) or {"checked": 0, "updated": 0},
     )
 
     results = sync_all_platforms(db_session)

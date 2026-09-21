@@ -162,7 +162,12 @@ class PrintervalApiAdapter:
                         external_order_id=order_id,
                         product_name=product_name,
                         thumbnail_url=final_thumbnail,
-                        status=status,
+                        # A combined source filter (for example
+                        # ``waiting+doing+fix``) still returns each row's real
+                        # status. Persist that observation rather than the
+                        # filter label, otherwise reconciliation cannot tell a
+                        # returned Fix from a Waiting card.
+                        status=str(row.get("status") or status),
                         sku=sku,
                         product_category=category,
                         product_skus=[product_sku.model_dump() for product_sku in extract_product_skus(row)],

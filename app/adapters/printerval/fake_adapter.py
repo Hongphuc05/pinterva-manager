@@ -70,7 +70,8 @@ class FakePrintervalAdapter:
         date_from: str | None = None,
         date_to: str | None = None,
     ) -> DiscoverResult:
-        matched = [o for o in self._orders.values() if o.status == status]
+        requested_statuses = {part.strip().lower() for part in status.split("+") if part.strip()}
+        matched = [o for o in self._orders.values() if o.status.lower() in requested_statuses]
         orders = [
             OrderSummary(
                 external_order_id=o.external_order_id,
