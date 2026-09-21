@@ -29,12 +29,13 @@ def test_parse_date_to_utc_timestamp():
 
 def test_get_task_submission_timestamp():
     dt_utc = datetime(2026, 9, 20, 16, 37, 48, tzinfo=UTC)
+    dt_first = datetime(2026, 9, 18, 10, 0, 0, tzinfo=UTC)
     task = {
         "review_submitted_at": dt_utc,
-        "first_submitted_at": datetime(2026, 9, 18, 10, 0, 0, tzinfo=UTC),
+        "first_submitted_at": dt_first,
     }
     ts = get_task_submission_timestamp(task)
-    assert ts == dt_utc.timestamp()
+    assert ts == dt_first.timestamp()
 
 def test_normalize_text():
     from app.api.routes.finance_api import normalize_text
