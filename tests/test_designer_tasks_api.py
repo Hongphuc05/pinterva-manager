@@ -271,6 +271,7 @@ def test_my_tasks_suppresses_note_outsource_when_flagged(client, db_session):
     assignment, order = _seed_owned_task(db_session, designer)
     order.note_outsource = "Secret Printerval outsource note"
     order.designer_note = "Admin added template: https://example.com/template"
+    order.designer_note_released_for_fix = True
     order.suppress_note_outsource_for_designer = True
     db_session.commit()
 
