@@ -329,37 +329,30 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
         {/* Status-sync indicator: green = idle/ok, red = last run errored, spins
             while actively syncing. Refreshes the orders present in the currently active tab. */}
         <button
+          type="button"
           onClick={handleSyncAllOrders}
           disabled={isStatusSyncing}
           title={
             isStatusSyncing
-              ? 'Đang đồng bộ trạng thái từ Hệ thống mẹ...'
+              ? 'Đang đồng bộ trạng thái toàn bộ đơn hàng trong database từ Hệ thống mẹ...'
               : fastSyncError || syncStatus?.last_error
               ? `Lần đồng bộ trước lỗi: ${fastSyncError || syncStatus?.last_error}`
-              : 'Bấm để đồng bộ lại trạng thái hàng đợi đang xử lý từ Hệ thống mẹ'
+              : 'Bấm để đồng bộ lại trạng thái toàn bộ đơn hàng trong database từ Hệ thống mẹ'
           }
-          className={`relative inline-flex items-center gap-1.5 rounded-lg p-2 text-slate-500 transition-colors disabled:cursor-wait ${
+          className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold transition-all cursor-pointer disabled:cursor-wait ${
             isStatusSyncing
-              ? 'bg-blue-50 text-[#0052CC]'
-              : 'hover:bg-slate-100 hover:text-slate-700'
+              ? 'bg-blue-50/90 border-blue-200 text-[#0052CC] shadow-xs'
+              : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:border-slate-300 shadow-2xs'
           }`}
         >
-          {isStatusSyncing && (
-            <span
-              aria-hidden="true"
-              className="absolute inset-0 rounded-lg border-2 border-blue-200 border-t-[#0052CC] animate-spin"
-            />
-          )}
           <RefreshCw
-            className={`relative z-10 h-5 w-5 ${isStatusSyncing ? 'animate-spin text-[#0052CC]' : ''}`}
+            className={`h-4 w-4 shrink-0 ${
+              isStatusSyncing ? 'animate-spin text-[#0052CC]' : 'text-slate-500'
+            }`}
           />
-          {isStatusSyncing && (
-            <span className="relative z-10 hidden text-[10px] font-bold text-[#0052CC] xl:inline">
-              Đang đồng bộ
-            </span>
-          )}
+          <span>{isStatusSyncing ? 'Đang đồng bộ' : 'Đồng bộ'}</span>
           <span
-            className={`absolute top-1.5 right-1.5 z-20 h-2 w-2 rounded-full ring-2 ring-white ${
+            className={`h-2 w-2 rounded-full shrink-0 ${
               isStatusSyncing
                 ? 'bg-[#0052CC] animate-pulse'
                 : fastSyncError || syncStatus?.last_error
