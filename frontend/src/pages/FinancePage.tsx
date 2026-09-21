@@ -519,7 +519,8 @@ export function FinancePage() {
       params.set('page', modalPage.toString())
       params.set('page_size', '1000')
       params.set('is_paid', modalPaymentTab === 'paid' ? 'true' : 'false')
-      params.set('designer_id', selectedDesignerForModal.designer_id || selectedDesignerForModal.designer_name)
+      params.set('designer_id', selectedDesignerForModal.designer_id || selectedDesignerForModal.username || selectedDesignerForModal.designer_name)
+
       if (startDate) params.set('start_date', startDate)
       if (endDate) params.set('end_date', endDate)
       if (modalSearchQuery.trim()) params.set('search', modalSearchQuery.trim())

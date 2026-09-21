@@ -298,13 +298,36 @@ def get_finance_stats(
         if not candidate:
             return None
         cand_str = str(candidate).strip()
+        if not cand_str:
+            return None
         try:
             u_id = uuid.UUID(cand_str)
             if u_id in user_map_by_id:
                 return user_map_by_id[u_id]
         except ValueError:
             pass
-        return user_map_by_any.get(cand_str.lower()) or user_map_by_any.get(normalize_text(cand_str))
+
+        norm_cand = normalize_text(cand_str)
+        if cand_str.lower() in user_map_by_any:
+            return user_map_by_any[cand_str.lower()]
+        if norm_cand in user_map_by_any:
+            return user_map_by_any[norm_cand]
+
+        for u in all_users:
+            u_name_norm = normalize_text(u.full_name)
+            u_user_norm = normalize_text(u.username)
+            u_opt_norm = normalize_text(u.printerval_designer_option)
+
+            if norm_cand and (
+                norm_cand == u_user_norm
+                or norm_cand == u_opt_norm
+                or norm_cand == u_name_norm
+                or (len(norm_cand) >= 2 and norm_cand in u_name_norm.split())
+                or (len(norm_cand) >= 2 and norm_cand in u_name_norm)
+            ):
+                return u
+        return None
+
 
 
     # 2. Gather candidate orders
@@ -761,23 +784,44 @@ def get_finance_stats(
             if matched_user.full_name:
                 valid_targets.add(matched_user.full_name.lower().strip())
                 valid_targets.add(normalize_text(matched_user.full_name))
+                for word in matched_user.full_name.split():
+                    valid_targets.add(word.lower().strip())
+                    valid_targets.add(normalize_text(word))
             if matched_user.printerval_designer_option:
                 valid_targets.add(matched_user.printerval_designer_option.lower().strip())
                 valid_targets.add(normalize_text(matched_user.printerval_designer_option))
 
         valid_targets.add(raw_filter.lower())
         valid_targets.add(normalize_text(raw_filter))
+        for word in raw_filter.split():
+            valid_targets.add(word.lower().strip())
+            valid_targets.add(normalize_text(word))
 
-        tasks_to_render = [
-            t
-            for t in tasks_to_render
-            if (str(t.get("designer_id") or "").lower() in valid_targets)
-            or (str(t.get("designer_key") or "").lower() in valid_targets)
-            or (normalize_text(str(t.get("designer_key") or "")) in valid_targets)
-            or (str(t.get("designer_name") or "").lower().strip() in valid_targets)
-            or (normalize_text(str(t.get("designer_name") or "")) in valid_targets)
-            or (str(t.get("designer_username") or "").lower().strip() in valid_targets)
-        ]
+        def task_matches_designer(t: dict[str, Any]) -> bool:
+            t_des_id = str(t.get("designer_id") or "").lower().strip()
+            t_des_key = str(t.get("designer_key") or "").lower().strip()
+            t_des_name = str(t.get("designer_name") or "").lower().strip()
+            t_des_user = str(t.get("designer_username") or "").lower().strip()
+
+            norm_key = normalize_text(t_des_key)
+            norm_name = normalize_text(t_des_name)
+            norm_user = normalize_text(t_des_user)
+
+            if t_des_id in valid_targets or t_des_key in valid_targets or norm_key in valid_targets:
+                return True
+            if t_des_name in valid_targets or norm_name in valid_targets:
+                return True
+            if t_des_user in valid_targets or norm_user in valid_targets:
+                return True
+
+            for vt in valid_targets:
+                if len(vt) >= 2 and (vt in norm_name or vt in norm_user or norm_name in vt):
+                    return True
+
+            return False
+
+        tasks_to_render = [t for t in tasks_to_render if task_matches_designer(t)]
+
 
 
     if is_paid is not None:
