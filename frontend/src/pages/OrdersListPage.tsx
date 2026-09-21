@@ -84,6 +84,7 @@ export type OrderSummary = {
   admin_note?: string | null
   drive_url?: string | null
   template_missing?: boolean
+  template_resolved_at?: string | null
   sub_status?: string | null
   suppress_note_outsource_for_designer?: boolean
   duplicate_check_status?: string
@@ -260,6 +261,17 @@ export function OrdersListPage() {
   const lastAutoSwitchedQueryRef = useRef<string>('')
   const [syncedImagesFilter, setSyncedImagesFilter] = useState(restoredViewState.syncedImagesFilter === true)
   const [fixReturnedFilter, setFixReturnedFilter] = useState(restoredViewState.fixReturnedFilter === true)
+  const [noticeClock, setNoticeClock] = useState(() => Date.now())
+
+  useEffect(() => {
+    const nextExpiry = orders
+      .map((order) => (parseUtcDate(order.template_resolved_at)?.getTime() ?? 0) + 120_000)
+      .filter((expiresAt) => expiresAt > Date.now())
+      .sort((a, b) => a - b)[0]
+    if (!nextExpiry) return
+    const timer = window.setTimeout(() => setNoticeClock(Date.now()), nextExpiry - Date.now() + 10)
+    return () => window.clearTimeout(timer)
+  }, [orders])
 
   // Designers only receive work after its images have been synchronized, so
   // this operational filter is intentionally not available in their view.
@@ -331,6 +343,7 @@ export function OrdersListPage() {
   const [platformStatusValue, setPlatformStatusValue] = useState<string>('Doing')
   const [updatingPlatformStatus, setUpdatingPlatformStatus] = useState(false)
   const [flaggingMissingOrderId, setFlaggingMissingOrderId] = useState<string | null>(null)
+  const [resolvingTemplateOrderId, setResolvingTemplateOrderId] = useState<string | null>(null)
 
   // Bulk Selection State & Range Selection
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([])
@@ -886,6 +899,23 @@ export function OrdersListPage() {
       setError(caught instanceof ApiError ? caught.message : 'Không thể báo thiếu temp.')
     } finally {
       setFlaggingMissingOrderId(null)
+    }
+  }
+
+  async function resolveMissingTemplate(order: OrderSummary) {
+    setResolvingTemplateOrderId(order.id)
+    try {
+      await apiFetch(`/orders/${order.id}/resolve-missing-template`, {
+        method: 'POST',
+        body: JSON.stringify({ expected_version: order.version }),
+      })
+      showToast(`Đã cập nhật temp cho đơn ${order.external_order_id} và trả về Doing.`, 'success')
+      markTabMoved(order.id)
+      await loadOrders()
+    } catch (err: any) {
+      showToast(err?.message || 'Không thể cập nhật temp cho đơn này.', 'error')
+    } finally {
+      setResolvingTemplateOrderId(null)
     }
   }
 
@@ -3078,15 +3108,29 @@ export function OrdersListPage() {
                             <div className="flex items-center justify-end gap-1.5 flex-wrap">
                               {/* Doing Tab Action: Revoke Assignment for Admin */}
                               {adminTab === 'doing' && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleRevokeAssignment([o.id])}
-                                  className="inline-flex items-center gap-1 text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-2.5 py-1 rounded-lg transition-colors cursor-pointer shadow-2xs"
-                                  title="Hủy phân công đơn này (trả về trạng thái Waiting)"
-                                >
-                                  <UserX className="h-3 w-3 text-rose-600" />
-                                  <span>Hủy chia</span>
-                                </button>
+                                <>
+                                  {o.template_missing && (
+                                    <button
+                                      type="button"
+                                      onClick={() => resolveMissingTemplate(o)}
+                                      disabled={resolvingTemplateOrderId === o.id}
+                                      className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1 rounded-lg transition-colors cursor-pointer shadow-2xs disabled:opacity-50"
+                                      title="Sau khi đã thêm temp vào Note làm việc, trả đơn này về Doing cho Designer"
+                                    >
+                                      {resolvingTemplateOrderId === o.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                                      <span>{resolvingTemplateOrderId === o.id ? 'Đang cập nhật…' : 'Cập nhật temp'}</span>
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRevokeAssignment([o.id])}
+                                    className="inline-flex items-center gap-1 text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-2.5 py-1 rounded-lg transition-colors cursor-pointer shadow-2xs"
+                                    title="Hủy phân công đơn này (trả về trạng thái Waiting)"
+                                  >
+                                    <UserX className="h-3 w-3 text-rose-600" />
+                                    <span>Hủy chia</span>
+                                  </button>
+                                </>
                               )}
 
                               {/* Fix Tab Actions: Accept Fix (Chấp nhận & giao Des) OR Reject Fix (Từ chối & gửi lại Review) */}
@@ -3169,6 +3213,14 @@ export function OrdersListPage() {
                                     Thiếu temp
                                   </span>
                                 )}
+                                {!o.template_missing && o.template_resolved_at && (() => {
+                                  const resolvedAt = parseUtcDate(o.template_resolved_at)?.getTime() ?? 0
+                                  return noticeClock - resolvedAt >= 0 && noticeClock - resolvedAt < 120_000 ? (
+                                    <span className="inline-flex rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 shrink-0">
+                                      Đã bổ sung temp
+                                    </span>
+                                  ) : null
+                                })()}
                                 {o.work_domain === 'duplicate' && (
                                   <span className="inline-flex rounded border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-[10px] font-bold text-violet-700 shrink-0">
                                     Đơn trùng

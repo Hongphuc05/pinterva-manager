@@ -135,6 +135,7 @@ class OrderSummaryOut(BaseModel):
     designer_note: str = ""
     designer_note_released_for_fix: bool = False
     template_missing: bool = False
+    template_resolved_at: datetime | None = None
     suppress_note_outsource_for_designer: bool = False
     duplicate_check_status: str = "uncheck"
     sku_image_url: str | None = None
@@ -2100,18 +2101,24 @@ def api_resolve_missing_template(
         raise HTTPException(status.HTTP_409_CONFLICT, "Đơn thiếu assignment đang hoạt động")
 
     old_state = order.state
-    order.designer_note = payload.designer_note.strip()
+    # The shared Work Note is the normal place for the new temp. Preserve an
+    # existing Designer instruction when the Admin resolves from that note;
+    # the optional field remains for older clients that send one directly.
+    supplied_note = payload.designer_note.strip()
+    if supplied_note:
+        order.designer_note = supplied_note
     # This is an explicit Admin release to the assigned Designer. The legacy
     # column name is retained for schema compatibility, but now represents a
     # note released to the active task (Fix or resolved missing template).
     order.designer_note_released_for_fix = bool(order.designer_note)
     order.template_missing = False
+    order.template_resolved_at = datetime.now(UTC)
     order.template_missing_reported_at = None
     order.template_missing_reported_by_id = None
     # Upstream notes are never exposed to Designers. Only designer_note above
     # is released for this resolved task.
     order.suppress_note_outsource_for_designer = True
-    assignment.sub_status = "todo"
+    assignment.sub_status = "doing"
     if order.state != OrderState.IN_PROGRESS.value:
         apply_transition(
             db, order, OrderState.IN_PROGRESS, actor_id=user.id,
@@ -2126,7 +2133,12 @@ def api_resolve_missing_template(
                       "description": "Admin đã bổ sung temp/ghi chú và trả đơn về Doing cho Designer."},
         ))
     db.commit()
-    return {"ok": True, "state": order.state, "designer_note": order.designer_note}
+    return {
+        "ok": True,
+        "state": order.state,
+        "designer_note": order.designer_note,
+        "template_resolved_at": order.template_resolved_at,
+    }
 
 
 @router.patch("/orders/{order_id}/state")

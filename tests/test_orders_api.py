@@ -714,7 +714,8 @@ def test_resolve_missing_template_returns_assigned_order_to_doing(client, db_ses
     assert order.template_missing is False
     assert order.designer_note == "Temp: https://example.com/template"
     assert order.suppress_note_outsource_for_designer is True
-    assert assignment.sub_status == "todo"
+    assert assignment.sub_status == "doing"
+    assert order.template_resolved_at is not None
 
     # The resolved template note is explicitly released to the assigned
     # Designer, while the upstream source note remains private.

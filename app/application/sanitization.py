@@ -109,6 +109,7 @@ class DesignerOrderSummaryOut(BaseModel):
     designer_note: str = ""
     designer_note_released_for_fix: bool = False
     template_missing: bool = False
+    template_resolved_at: Any | None = None
     duplicate_check_status: str = "uncheck"
     sku_image_url: str | None = None
     source_files: list[dict] | None = None
@@ -148,6 +149,7 @@ class DesignerOrderDetailOut(BaseModel):
     designer_note: str = ""
     designer_note_released_for_fix: bool = False
     template_missing: bool = False
+    template_resolved_at: Any | None = None
     duplicate_check_status: str = "uncheck"
     custom_config: dict | None = None
     product_skus: list[dict] | None = None

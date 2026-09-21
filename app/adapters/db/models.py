@@ -222,6 +222,10 @@ class Order(Base):
         ForeignKey("users.id"), nullable=True
     )
     template_missing_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Timestamp of the Admin's explicit release after a Designer reported a
+    # missing template. It powers a short-lived acknowledgement in the
+    # Designer queue without changing the durable workflow state.
+    template_resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Set to True when Admin resolves a missing-template report so the Designer
     # does not see the Printerval note_outsource during that resolution cycle.
     # Cleared back to False when the order is next synced from the platform or
