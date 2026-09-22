@@ -14,6 +14,7 @@ import { OrderHistoryPage } from './pages/OrderHistoryPage'
 import { FinancePage } from './pages/FinancePage'
 import { DuplicateBoardPage } from './pages/DuplicateBoardPage'
 import { PlatformHubPage } from './pages/PlatformHubPage'
+import { TelegramManagementPage } from './pages/TelegramManagementPage'
 
 function App() {
   return (
@@ -89,6 +90,14 @@ function App() {
             element={
               <ProtectedRoute allowedRoles={['admin']}>
                 <PlatformHubPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/telegram-management"
+            element={
+              <ProtectedRoute allowedRoles={['admin']}>
+                <TelegramManagementPage />
               </ProtectedRoute>
             }
           />

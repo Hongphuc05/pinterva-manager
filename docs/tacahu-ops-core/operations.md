@@ -23,6 +23,22 @@ SPA/API local thường ở `http://localhost:8000`. Xem cấu hình compose th�
 - Nếu build SPA mới, deploy cả `frontend/dist`; code local đã pass build không đồng nghĩa
   website production đã nhận bundle mới.
 
+### Thiết lập routing Bot Telegram cho Designer
+
+1. Chạy migration tới `head` trước khi mở tab **Quản lý Bot Telegram**.
+2. Thêm Bot `des-mana` vào group riêng tương ứng với Designer và cấp quyền gửi tin.
+3. Lấy `chat_id` group, vào tab quản trị, dán ID đúng dòng Designer rồi bấm **Lưu**.
+4. Bấm **Kiểm tra**. Chỉ khi `getChat`/`getChatMember` xác nhận group hợp lệ mới chọn được
+   mode **Group chat**.
+5. Bấm **Gửi test** để kiểm tra đích thực tế. Nếu không muốn dùng group, đổi mode về **Chat
+   riêng**; hệ thống yêu cầu Designer đã link chat riêng qua `/start <link_code>`.
+6. Sửa template trong cùng trang nếu cần. Chỉ sửa text và placeholder được hiển thị; dùng
+   **Xem preview** trước khi lưu. **Mặc định** xóa override và quay về nội dung seed.
+
+Không gán một group cho hai Designer. Khi group bị xóa, mode group tự chuyển về private nhưng
+không tự tạo kết nối chat riêng; mọi thay đổi mapping/mode/template được lưu audit trong
+PostgreSQL. Kiểm tra `group_last_error`, log API và Bot API trước khi kết luận worker bị lỗi.
+
 ## Kiểm tra tối thiểu trước bàn giao
 
 ```bash
@@ -31,6 +47,10 @@ SPA/API local thường ở `http://localhost:8000`. Xem cấu hình compose th�
 .venv/bin/pytest -q tests/test_order_work_notes_api.py
 cd frontend && npm test && npm run build
 ```
+
+Sau khi thêm Telegram management, chạy thêm các test API/service Telegram liên quan và xác nhận
+`telegram_message_templates`, `telegram_configuration_audits` đã có sau migration. DB-backed pytest
+phải chạy tuần tự trên database test riêng.
 
 Chạy DB-backed pytest tuần tự. Không chạy parallel trên cùng `pinterval_test` vì có thể
 deadlock/che lỗi concurrency.

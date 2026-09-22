@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm.exc import StaleDataError
 
+from app.api.concurrency import stale_order_detail
 from app.api.routes import assignments_api as assignments_api_routes
 from app.api.routes import auth as auth_routes
 from app.api.routes import designer_tasks_api as designer_tasks_api_routes
@@ -21,11 +22,11 @@ from app.api.routes import platforms_api as platforms_api_routes
 from app.api.routes import protected_example
 from app.api.routes import submissions_api as submissions_api_routes
 from app.api.routes import sync_jobs_api as sync_jobs_api_routes
+from app.api.routes import telegram_admin_api as telegram_admin_api_routes
 from app.api.routes import telegram_api as telegram_api_routes
 from app.api.routes import users_api as users_api_routes
 from app.application.auth import read_session_token
 from app.application.concurrency import OrderVersionConflictError
-from app.api.concurrency import stale_order_detail
 from app.config import get_settings
 
 FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
@@ -168,6 +169,7 @@ def create_app() -> FastAPI:
     app.include_router(designer_tasks_api_routes.router, prefix="/api")
     app.include_router(duplicate_board_api_routes.router, prefix="/api")
     app.include_router(telegram_api_routes.router, prefix="/api")
+    app.include_router(telegram_admin_api_routes.router, prefix="/api")
     app.include_router(protected_example.router, prefix="/api")
 
     CRAWLED_ASSETS_DIR.mkdir(parents=True, exist_ok=True)

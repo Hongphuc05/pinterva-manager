@@ -39,3 +39,17 @@ phải enforce role + platform + assignment ở backend.
   ảnh nằm tại private asset directory. Không ghi URL public, token hay nội dung ảnh vào log.
 - Attachment private phải được backup cùng database và chỉ được lưu trên persistent volume ở
   production; trạng thái mount hiện hành được ghi rõ tại [data-storage.md](data-storage.md).
+
+## Telegram Bot management
+
+- Chỉ `admin` được đọc overview kết nối của các designer, gắn/xóa group ID, xác thực group, đổi
+  delivery mode, gửi test và sửa template. Mọi endpoint đều kiểm tra platform scope ở backend.
+- `designer` và `designer-trello` chỉ tự link/unlink chat riêng qua flow `/start <link_code>`;
+  không được tự chọn group hoặc xem cấu hình của designer khác. `support` không được dùng tab
+  quản trị bot theo mặc định.
+- UI chỉ hiển thị metadata cần cho vận hành (chat ID/group title/trạng thái); không trả bot token,
+  callback token hay credential platform. Group phải được Bot API xác thực trước khi chọn mode.
+- Dynamic values trong template được escape trước khi gửi Telegram. Nội dung test ad-hoc cũng được
+  escape như text; Admin chỉ sửa body và placeholder được phép, không sửa logic callback/quyền.
+- Nếu mode `group` chưa sẵn sàng, notification designer không fallback âm thầm sang chat riêng.
+  Admin phải kiểm tra lỗi hoặc chuyển mode một cách rõ ràng; dữ liệu order vẫn chỉ đọc/ghi qua API.

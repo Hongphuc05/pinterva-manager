@@ -11,6 +11,7 @@ import {
   Columns3,
   Globe,
   FolderGit2,
+  Bot,
   X,
 } from 'lucide-react'
 
@@ -49,7 +50,10 @@ export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
     },
     {
       label: 'Cài đặt',
-      items: [{ label: 'Quản Lý Tài Khoản', path: '/users', icon: Users }],
+      items: [
+        { label: 'Quản Lý Tài Khoản', path: '/users', icon: Users },
+        { label: 'Quản Lý Bot Telegram', path: '/telegram-management', icon: Bot },
+      ],
     },
   ]
 

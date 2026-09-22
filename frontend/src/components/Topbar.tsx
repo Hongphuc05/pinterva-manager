@@ -66,6 +66,7 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
     if (path === '/platform-hub' || path === '/platform-login') return 'Mở Hệ Thống Mẹ & Đồng Bộ Ảnh'
     if (path === '/order-status') return 'Trạng Thái Đơn'
     if (path === '/users') return 'Quản Lý Tài Khoản'
+    if (path === '/telegram-management') return 'Quản Lý Bot Telegram'
     return 'Dashboard'
   }
 

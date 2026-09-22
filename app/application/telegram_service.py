@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import html
 import logging
+import re
 import secrets
 import unicodedata
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -12,13 +14,151 @@ from zoneinfo import ZoneInfo
 import httpx
 from sqlalchemy.orm import Session
 
-from app.adapters.db.models import Assignment, Order, Platform, TelegramActionLog, User
+from app.adapters.db.models import (
+    Assignment,
+    Order,
+    Platform,
+    TelegramActionLog,
+    TelegramMessageTemplate,
+    User,
+)
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
 TELEGRAM_API_BASE = "https://api.telegram.org"
 VIETNAM_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+TELEGRAM_DELIVERY_PRIVATE = "private"
+TELEGRAM_DELIVERY_GROUP = "group"
+TELEGRAM_TEMPLATE_MAX_LENGTH = 4096
+_TEMPLATE_PATTERN = re.compile(r"{{\s*([a-zA-Z0-9_]+)\s*}}")
+
+
+DEFAULT_TELEGRAM_TEMPLATES: dict[str, dict[str, Any]] = {
+    "designer_new_order": {
+        "audience": "designer",
+        "body": (
+            "🎨 <b>BẠN CÓ ĐƠN HÀNG MỚI (ĐANG LÀM)!</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "👕 <b>Sản phẩm:</b> {{product_name}}\n"
+            "⏰ <b>Hạn chót:</b> {{deadline}}\n"
+            "📝 <b>Note Admin:</b> {{admin_note}}"
+        ),
+        "placeholders": {"product_name", "deadline", "admin_note"},
+    },
+    "designer_urgent_fix": {
+        "audience": "designer",
+        "body": (
+            "🚨 <b>CẢNH BÁO: ĐƠN CẦN SỬA GẤP (FIX)!</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "👕 <b>Sản phẩm:</b> {{product_name}}\n"
+            "🔄 <b>Lần fix thứ:</b> #{{fix_count}}\n"
+            "⏰ <b>Hạn sửa:</b> {{deadline}}\n"
+            "📌 <b>Hướng dẫn từ Admin:</b> {{admin_note}}\n"
+            "⚡ <i>Vui lòng vào tab <b>Cần sửa gấp</b> trên web để xử lý ngay!</i>"
+        ),
+        "placeholders": {"product_name", "fix_count", "deadline", "admin_note"},
+    },
+    "designer_payment": {
+        "audience": "designer",
+        "body": (
+            "💰 <b>THÔNG BÁO THANH TOÁN TIỀN CÔNG</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "🎉 Admin vừa duyệt thanh toán tiền công cho bạn!\n"
+            "📦 <b>Số lượng đơn:</b> {{order_count}} đơn\n"
+            "💵 <b>Tổng tiền công:</b> <b>{{total_amount}}</b>\n"
+            "📅 <b>Thời gian:</b> {{time}}\n\n"
+            "<i>Cảm ơn bạn đã nỗ lực! Chúc bạn làm việc hiệu quả và nhiều năng lượng!</i>"
+        ),
+        "placeholders": {"order_count", "total_amount", "time"},
+    },
+    "admin_new_fix": {
+        "audience": "admin",
+        "body": (
+            "⚠️ <b>CÓ ĐƠN FIX MỚI TỪ PLATFORM!</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "📦 <b>Mã đơn:</b> <code>{{order_code}}</code>\n"
+            "👕 <b>Sản phẩm:</b> {{product_name}}\n"
+            "👤 <b>Designer:</b> {{designer_name}}\n"
+            "🔄 <b>Lần fix:</b> #{{fix_count}}\n"
+            "📝 <b>Ghi chú từ QC:</b> {{qc_note}}\n\n"
+            "👉 <i>Admin chọn thao tác xử lý bên dưới:</i>"
+        ),
+        "placeholders": {"order_code", "product_name", "designer_name", "fix_count", "qc_note"},
+    },
+    "admin_review_submitted": {
+        "audience": "admin",
+        "body": (
+            "📤 <b>DESIGNER VỪA NỘP BÀI (REVIEW)</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "📦 <b>Mã đơn:</b> <code>{{order_code}}</code>\n"
+            "👕 <b>Sản phẩm:</b> {{product_name}}\n"
+            "👤 <b>Designer:</b> {{designer_name}}\n"
+            "🔗 <b>Link nộp:</b> {{submission_link}}\n"
+            "⏱ <i>Hệ thống đang tự động đồng bộ Review lên Platform.</i>"
+        ),
+        "placeholders": {"order_code", "product_name", "designer_name", "submission_link"},
+    },
+    "admin_missing_template": {
+        "audience": "admin",
+        "body": (
+            "🚩 <b>DESIGNER BÁO THIẾU TEMP!</b>\n"
+            "📦 <b>Mã đơn:</b> <code>{{order_code}}</code>\n"
+            "👤 <b>Designer:</b> {{designer_name}}\n"
+            "🕒 <b>Deadline:</b> {{deadline}}\n"
+            "👉 Admin bổ sung temp/ghi chú để Designer tiếp tục làm."
+        ),
+        "placeholders": {"order_code", "designer_name", "deadline"},
+    },
+    "admin_excessive_fix": {
+        "audience": "admin",
+        "body": (
+            "🚨 <b>CẢNH BÁO CHẤT LƯỢNG (QC ALERT)!</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "⚠️ Đơn <code>{{order_code}}</code> đã bị trả về Fix <b>lần thứ {{fix_count}}</b>!\n"
+            "👤 <b>Designer phụ trách:</b> {{designer_name}}\n"
+            "💡 <i>Gợi ý: Admin nên can thiệp kiểm tra lại file thiết kế hoặc đổi Designer để tránh trễ hạn.</i>"
+        ),
+        "placeholders": {"order_code", "fix_count", "designer_name"},
+    },
+    "admin_deadline_overdue": {
+        "audience": "admin",
+        "body": (
+            "⏰ <b>DESIGNER QUÁ HẠN!</b>\n"
+            "👤 <b>Designer:</b> {{designer_name}}\n"
+            "📦 <b>Số đơn quá hạn:</b> {{order_count}}\n"
+            "👉 Admin kiểm tra và xử lý các đơn trên Tacahu."
+        ),
+        "placeholders": {"designer_name", "order_count"},
+    },
+    "admin_system_alert": {
+        "audience": "admin",
+        "body": (
+            "🔥 <b>CẢNH BÁO HỆ THỐNG: {{title}}</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "🏢 <b>Platform:</b> {{platform_name}}\n"
+            "❌ <b>Chi tiết:</b> {{message}}\n"
+            "⏰ <b>Thời gian:</b> {{time}}"
+        ),
+        "placeholders": {"title", "platform_name", "message", "time"},
+    },
+}
+
+
+@dataclass(frozen=True)
+class TelegramChatTarget:
+    chat_id: str
+    mode: str
+    label: str
+
+
+@dataclass(frozen=True)
+class TelegramGroupInspection:
+    ok: bool
+    chat_id: str
+    chat_type: str | None = None
+    title: str | None = None
+    error: str | None = None
 
 
 def format_vietnam_time(value: datetime | None) -> str:
@@ -135,6 +275,155 @@ def send_photo(
     return res
 
 
+def validate_telegram_template_body(template_key: str, body: str) -> set[str]:
+    """Validate an editable body against the server-owned placeholder allowlist."""
+    definition = DEFAULT_TELEGRAM_TEMPLATES.get(template_key)
+    if definition is None:
+        raise ValueError("Mẫu tin nhắn không tồn tại.")
+    clean_body = body.strip()
+    if not clean_body:
+        raise ValueError("Nội dung mẫu tin nhắn không được để trống.")
+    if len(clean_body) > TELEGRAM_TEMPLATE_MAX_LENGTH:
+        raise ValueError(f"Nội dung mẫu tin nhắn không được dài quá {TELEGRAM_TEMPLATE_MAX_LENGTH} ký tự.")
+    placeholders = {match.group(1) for match in _TEMPLATE_PATTERN.finditer(clean_body)}
+    unknown = placeholders - set(definition["placeholders"])
+    if unknown:
+        names = ", ".join(sorted(unknown))
+        raise ValueError(f"Placeholder không được phép trong mẫu này: {names}.")
+    return placeholders
+
+
+def render_telegram_template(
+    session: Session,
+    template_key: str,
+    context: dict[str, Any],
+    *,
+    body_override: str | None = None,
+) -> str:
+    """Render a stored template while escaping all dynamic values for Telegram HTML."""
+    definition = DEFAULT_TELEGRAM_TEMPLATES.get(template_key)
+    if definition is None:
+        raise ValueError("Mẫu tin nhắn không tồn tại.")
+    template = session.query(TelegramMessageTemplate).filter_by(template_key=template_key).one_or_none()
+    body = body_override if body_override is not None else (template.body if template else definition["body"])
+    validate_telegram_template_body(template_key, body)
+
+    def replace(match: re.Match[str]) -> str:
+        value = context.get(match.group(1), "")
+        return html.escape(str(value) if value is not None else "")
+
+    return _TEMPLATE_PATTERN.sub(replace, body.strip())
+
+
+def template_metadata(session: Session, template_key: str) -> dict[str, Any]:
+    definition = DEFAULT_TELEGRAM_TEMPLATES.get(template_key)
+    if definition is None:
+        raise ValueError("Mẫu tin nhắn không tồn tại.")
+    stored = session.query(TelegramMessageTemplate).filter_by(template_key=template_key).one_or_none()
+    body = stored.body if stored else definition["body"]
+    validate_telegram_template_body(template_key, body)
+    return {
+        "template_key": template_key,
+        "audience": definition["audience"],
+        "body": body,
+        "active": stored.active if stored else True,
+        "version": stored.version if stored else 1,
+        "updated_by_id": str(stored.updated_by_id) if stored and stored.updated_by_id else None,
+        "updated_at": stored.updated_at if stored else None,
+        "placeholders": sorted(definition["placeholders"]),
+    }
+
+
+def inspect_telegram_group(chat_id: str) -> TelegramGroupInspection:
+    """Verify a group belongs to this bot and the bot can send messages there."""
+    clean_chat_id = chat_id.strip()
+    if not re.fullmatch(r"-?\d{1,64}", clean_chat_id):
+        return TelegramGroupInspection(False, clean_chat_id, error="Group chat ID phải là một số hợp lệ.")
+    if not is_telegram_configured():
+        return TelegramGroupInspection(False, clean_chat_id, error="Bot Telegram chưa được cấu hình token.")
+
+    chat = send_telegram_request("getChat", {"chat_id": clean_chat_id})
+    if not isinstance(chat, dict):
+        return TelegramGroupInspection(False, clean_chat_id, error="Không tìm thấy group hoặc bot không truy cập được group.")
+    chat_type = str(chat.get("type") or "")
+    if chat_type not in {"group", "supergroup"}:
+        return TelegramGroupInspection(False, clean_chat_id, chat_type=chat_type, error="ID này không phải group hoặc supergroup.")
+
+    bot = send_telegram_request("getMe", {})
+    bot_id = bot.get("id") if isinstance(bot, dict) else None
+    if bot_id is None:
+        return TelegramGroupInspection(False, clean_chat_id, chat_type=chat_type, error="Không xác định được bot hiện tại.")
+
+    membership = send_telegram_request(
+        "getChatMember",
+        {"chat_id": clean_chat_id, "user_id": bot_id},
+    )
+    if not isinstance(membership, dict):
+        return TelegramGroupInspection(False, clean_chat_id, chat_type=chat_type, error="Không kiểm tra được quyền của bot trong group.")
+    member_status = str(membership.get("status") or "")
+    if member_status in {"left", "kicked", ""}:
+        return TelegramGroupInspection(False, clean_chat_id, chat_type=chat_type, error="Bot chưa được thêm vào group hoặc đã bị đuổi.")
+    if member_status == "restricted" and membership.get("can_send_messages") is False:
+        return TelegramGroupInspection(False, clean_chat_id, chat_type=chat_type, error="Bot đang bị hạn chế quyền gửi tin trong group.")
+
+    return TelegramGroupInspection(
+        True,
+        clean_chat_id,
+        chat_type=chat_type,
+        title=str(chat.get("title") or chat.get("username") or clean_chat_id),
+    )
+
+
+def resolve_designer_chat_target(session: Session, designer: User) -> TelegramChatTarget | None:
+    """Resolve the explicitly selected designer destination without silent fallback."""
+    if not designer.telegram_notifications_enabled:
+        return None
+    if designer.telegram_delivery_mode == TELEGRAM_DELIVERY_GROUP:
+        if designer.telegram_group_chat_id and designer.telegram_group_verified:
+            return TelegramChatTarget(
+                chat_id=designer.telegram_group_chat_id,
+                mode=TELEGRAM_DELIVERY_GROUP,
+                label=designer.telegram_group_title or designer.telegram_group_chat_id,
+            )
+        logger.warning(
+            "Telegram group destination is not ready for designer %s: group=%s verified=%s error=%s",
+            designer.id,
+            designer.telegram_group_chat_id,
+            designer.telegram_group_verified,
+            designer.telegram_group_last_error,
+        )
+        return None
+    if designer.telegram_chat_id:
+        return TelegramChatTarget(
+            chat_id=designer.telegram_chat_id,
+            mode=TELEGRAM_DELIVERY_PRIVATE,
+            label=designer.telegram_username or designer.telegram_chat_id,
+        )
+    return None
+
+
+def send_designer_notification(
+    session: Session,
+    designer: User,
+    text: str,
+    *,
+    photo_url: str | None = None,
+) -> bool:
+    target = resolve_designer_chat_target(session, designer)
+    if target is None:
+        return False
+    result = send_photo(target.chat_id, photo_url, caption=text) if photo_url else send_message(target.chat_id, text)
+    if result is None:
+        logger.warning(
+            "Telegram notification failed for designer=%s mode=%s chat=%s",
+            designer.id,
+            target.mode,
+            target.chat_id,
+        )
+        return False
+    return True
+
+
 # =========================================================================
 # User Linking & Account Management
 # =========================================================================
@@ -213,31 +502,25 @@ def notify_designer_new_order(
 ) -> bool:
     """Notify designer when a new order is assigned (Doing tab)."""
     designer = session.get(User, designer_id)
-    if not designer or not designer.telegram_chat_id or not designer.telegram_notifications_enabled:
+    if not designer or not resolve_designer_chat_target(session, designer):
         return False
 
     order = session.get(Order, order_id)
     if not order:
         return False
 
-    p_name = html.escape(order.product_name or "Sản phẩm")
-    deadline_str = format_vietnam_time(order.deadline_tacahu)
-
-    text = (
-        f"🎨 <b>BẠN CÓ ĐƠN HÀNG MỚI (ĐANG LÀM)!</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"👕 <b>Sản phẩm:</b> {p_name}\n"
-        f"⏰ <b>Hạn chót:</b> {deadline_str}\n"
+    text = render_telegram_template(
+        session,
+        "designer_new_order",
+        {
+            "product_name": order.product_name or "Sản phẩm",
+            "deadline": format_vietnam_time(order.deadline_tacahu),
+            "admin_note": order.designer_note or "",
+        },
     )
-    if order.designer_note:
-        text += f"📝 <b>Note Admin:</b> {html.escape(order.designer_note)}\n"
 
     thumb = order.thumbnail_url or (order.product_image_urls[0] if order.product_image_urls else None)
-    if thumb:
-        send_photo(designer.telegram_chat_id, thumb, caption=text)
-    else:
-        send_message(designer.telegram_chat_id, text)
-    return True
+    return send_designer_notification(session, designer, text, photo_url=thumb)
 
 
 def notify_designer_urgent_fix(
@@ -248,33 +531,27 @@ def notify_designer_urgent_fix(
 ) -> bool:
     """Notify designer when an order requires urgent Fix (Admin approved fix)."""
     designer = session.get(User, designer_id)
-    if not designer or not designer.telegram_chat_id or not designer.telegram_notifications_enabled:
+    if not designer or not resolve_designer_chat_target(session, designer):
         return False
 
     order = session.get(Order, order_id)
     if not order:
         return False
 
-    p_name = html.escape(order.product_name or "Sản phẩm")
     fix_cnt = order.fix_return_count or 1
-    adm_note = html.escape(admin_note or order.designer_note or "Sửa theo yêu cầu của khách")
-
-    text = (
-        f"🚨 <b>CẢNH BÁO: ĐƠN CẦN SỬA GẤP (FIX)!</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"👕 <b>Sản phẩm:</b> {p_name}\n"
-        f"🔄 <b>Lần fix thứ:</b> #{fix_cnt}\n"
-        f"⏰ <b>Hạn sửa:</b> {format_vietnam_time(order.fix_deadline_at)}\n"
-        f"📌 <b>Hướng dẫn từ Admin:</b> {adm_note}\n"
-        f"⚡ <i>Vui lòng vào tab <b>Cần sửa gấp</b> trên web để xử lý ngay!</i>"
+    text = render_telegram_template(
+        session,
+        "designer_urgent_fix",
+        {
+            "product_name": order.product_name or "Sản phẩm",
+            "fix_count": fix_cnt,
+            "deadline": format_vietnam_time(order.fix_deadline_at),
+            "admin_note": admin_note or order.designer_note or "Sửa theo yêu cầu của khách",
+        },
     )
 
     thumb = order.thumbnail_url or (order.product_image_urls[0] if order.product_image_urls else None)
-    if thumb:
-        send_photo(designer.telegram_chat_id, thumb, caption=text)
-    else:
-        send_message(designer.telegram_chat_id, text)
-    return True
+    return send_designer_notification(session, designer, text, photo_url=thumb)
 
 
 def notify_designer_payment(
@@ -285,23 +562,22 @@ def notify_designer_payment(
 ) -> bool:
     """Notify designer when admin completes payment for their design workload."""
     designer = session.get(User, designer_id)
-    if not designer or not designer.telegram_chat_id or not designer.telegram_notifications_enabled:
+    if not designer or not resolve_designer_chat_target(session, designer):
         return False
 
     formatted_money = f"{total_amount:,.0f} VNĐ"
-    now_str = datetime.now(UTC).strftime("%d/%m/%Y %H:%M")
+    now_str = format_vietnam_time(datetime.now(UTC))
 
-    text = (
-        f"💰 <b>THÔNG BÁO THANH TOÁN TIỀN CÔNG</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🎉 Admin vừa duyệt thanh toán tiền công cho bạn!\n"
-        f"📦 <b>Số lượng đơn:</b> {order_count} đơn\n"
-        f"💵 <b>Tổng tiền công:</b> <b>{formatted_money}</b>\n"
-        f"📅 <b>Thời gian:</b> {now_str}\n\n"
-        f"<i>Cảm ơn bạn đã nỗ lực! Chúc bạn làm việc hiệu quả và nhiều năng lượng!</i>"
+    text = render_telegram_template(
+        session,
+        "designer_payment",
+        {
+            "order_count": order_count,
+            "total_amount": formatted_money,
+            "time": now_str,
+        },
     )
-    send_message(designer.telegram_chat_id, text)
-    return True
+    return send_designer_notification(session, designer, text)
 
 
 # =========================================================================
@@ -400,11 +676,11 @@ def notify_admin_new_fix(session: Session, order_id: uuid.UUID) -> bool:
     if not chat_ids:
         return False
 
-    order_id_code = html.escape(order.external_order_id)
-    p_name = html.escape(order.product_name or "Sản phẩm")
     fix_cnt = order.fix_return_count or 1
-    qc_note = html.escape(order.note_outsource or "Không có ghi chú")
-    des_name = html.escape(resolve_tacahu_designer_name(session, order))
+    order_id_code = order.external_order_id
+    p_name = order.product_name or "Sản phẩm"
+    qc_note = order.note_outsource or "Không có ghi chú"
+    des_name = resolve_tacahu_designer_name(session, order)
 
     # Generate callback tokens for Approve / Reject buttons
     approve_token = secrets.token_urlsafe(16)
@@ -442,15 +718,16 @@ def notify_admin_new_fix(session: Session, order_id: uuid.UUID) -> bool:
         ]
     }
 
-    text = (
-        f"⚠️ <b>CÓ ĐƠN FIX MỚI TỪ PLATFORM!</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📦 <b>Mã đơn:</b> <code>{order_id_code}</code>\n"
-        f"👕 <b>Sản phẩm:</b> {p_name}\n"
-        f"👤 <b>Designer:</b> {des_name}\n"
-        f"🔄 <b>Lần fix:</b> #{fix_cnt}\n"
-        f"📝 <b>Ghi chú từ QC:</b> {qc_note}\n\n"
-        f"👉 <i>Admin chọn thao tác xử lý bên dưới:</i>"
+    text = render_telegram_template(
+        session,
+        "admin_new_fix",
+        {
+            "order_code": order_id_code,
+            "product_name": p_name,
+            "designer_name": des_name,
+            "fix_count": fix_cnt,
+            "qc_note": qc_note,
+        },
     )
 
     thumb = order.thumbnail_url or (order.product_image_urls[0] if order.product_image_urls else None)
@@ -483,18 +760,15 @@ def notify_admin_review_submitted(
     if not chat_ids:
         return False
 
-    order_id_code = html.escape(order.external_order_id)
-    p_name = html.escape(order.product_name or "Sản phẩm")
-    link = html.escape(order.note_outsource or "Chưa có link")
-
-    text = (
-        f"📤 <b>DESIGNER VỪA NỘP BÀI (REVIEW)</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📦 <b>Mã đơn:</b> <code>{order_id_code}</code>\n"
-        f"👕 <b>Sản phẩm:</b> {p_name}\n"
-        f"👤 <b>Designer:</b> {html.escape(designer_name)}\n"
-        f"🔗 <b>Link nộp:</b> {link}\n"
-        f"⏱ <i>Hệ thống đang tự động đồng bộ Review lên Platform.</i>"
+    text = render_telegram_template(
+        session,
+        "admin_review_submitted",
+        {
+            "order_code": order.external_order_id,
+            "product_name": order.product_name or "Sản phẩm",
+            "designer_name": designer_name,
+            "submission_link": order.note_outsource or "Chưa có link",
+        },
     )
     for cid in chat_ids:
         send_message(cid, text)
@@ -539,11 +813,13 @@ def notify_admin_deadline_overdue_by_designer(session: Session, orders: list[Ord
         chat_ids = _get_admin_chat_ids(session, platform_id)
         if not chat_ids:
             continue
-        text = (
-            "⏰ <b>DESIGNER QUÁ HẠN!</b>\n"
-            f"👤 <b>Designer:</b> {html.escape(designer_name)}\n"
-            f"📦 <b>Số đơn quá hạn:</b> {len(designer_orders)}\n"
-            "👉 Admin kiểm tra và xử lý các đơn trên Tacahu."
+        text = render_telegram_template(
+            session,
+            "admin_deadline_overdue",
+            {
+                "designer_name": designer_name,
+                "order_count": len(designer_orders),
+            },
         )
         for cid in chat_ids:
             send_message(cid, text)
@@ -566,12 +842,14 @@ def notify_admin_missing_template(session: Session, order_id: uuid.UUID, designe
     chat_ids = _get_admin_chat_ids(session, order.platform_id)
     if not chat_ids:
         return False
-    text = (
-        "🚩 <b>DESIGNER BÁO THIẾU TEMP!</b>\n"
-        f"📦 <b>Mã đơn:</b> <code>{html.escape(order.external_order_id)}</code>\n"
-        f"👤 <b>Designer:</b> {html.escape(designer.full_name or designer.username)}\n"
-        f"🕒 <b>Deadline:</b> {format_vietnam_time(order.deadline_tacahu)}\n"
-        "👉 Admin bổ sung temp/ghi chú để Designer tiếp tục làm."
+    text = render_telegram_template(
+        session,
+        "admin_missing_template",
+        {
+            "order_code": order.external_order_id,
+            "designer_name": designer.full_name or designer.username,
+            "deadline": format_vietnam_time(order.deadline_tacahu),
+        },
     )
     for cid in chat_ids:
         send_message(cid, text)
@@ -599,14 +877,14 @@ def notify_admin_excessive_fix(
     else:
         display_designer = resolved_designer
 
-    order_id_code = html.escape(order.external_order_id)
-
-    text = (
-        f"🚨 <b>CẢNH BÁO CHẤT LƯỢNG (QC ALERT)!</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"⚠️ Đơn <code>{order_id_code}</code> đã bị trả về Fix <b>lần thứ {fix_count}</b>!\n"
-        f"👤 <b>Designer phụ trách:</b> {html.escape(display_designer)}\n"
-        f"💡 <i>Gợi ý: Admin nên can thiệp kiểm tra lại file thiết kế hoặc đổi Designer để tránh trễ hạn.</i>"
+    text = render_telegram_template(
+        session,
+        "admin_excessive_fix",
+        {
+            "order_code": order.external_order_id,
+            "fix_count": fix_count,
+            "designer_name": display_designer,
+        },
     )
     for cid in chat_ids:
         send_message(cid, text)
@@ -630,14 +908,16 @@ def notify_admin_system_alert(
         if plat:
             plat_name = plat.name
 
-    text = (
-        f"🔥 <b>CẢNH BÁO HỆ THỐNG: {html.escape(title)}</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🏢 <b>Platform:</b> {html.escape(plat_name)}\n"
-        f"❌ <b>Chi tiết:</b> {html.escape(message)}\n"
-        f"⏰ <b>Thời gian:</b> {datetime.now(UTC).strftime('%d/%m/%Y %H:%M:%S UTC')}"
+    text = render_telegram_template(
+        session,
+        "admin_system_alert",
+        {
+            "title": title,
+            "platform_name": plat_name,
+            "message": message,
+            "time": datetime.now(UTC).strftime("%d/%m/%Y %H:%M:%S UTC"),
+        },
     )
     for cid in chat_ids:
         send_message(cid, text)
-    return True
     return True

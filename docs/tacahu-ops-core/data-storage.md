@@ -14,7 +14,7 @@ workflow Tacahu.
 
 | Nhóm | Nội dung chính | Nơi authoritative | Ghi chú |
 | --- | --- | --- | --- |
-| Identity và quyền | user, role, platform scope, trạng thái hoạt động, Telegram identity | PostgreSQL | Mật khẩu lưu hash/ciphertext; credential platform/session cookie là dữ liệu nhạy cảm. |
+| Identity và quyền | user, role, platform scope, trạng thái hoạt động, Telegram identity và private/group delivery mode | PostgreSQL | Mật khẩu lưu hash/ciphertext; credential platform/session cookie là dữ liệu nhạy cảm. Group ID là cấu hình routing, không phải bot token. |
 | Đơn hàng | mã external, product/SKU/variant, deadline, note, custom config, state, optimistic version, payment | PostgreSQL | URL Printerval/Drive/thumbnail/gallery/source thường là reference/metadata, không đảm bảo file bytes nằm trong DB. |
 | Phân công và QC | assignment, submission/result version, approval, Fix | PostgreSQL | Link bài nộp và feedback thuộc record nghiệp vụ/audit. |
 | Audit và integration | workflow event, operation/idempotency, outbox, dead letter, external observation, sync job | PostgreSQL | Dùng để đối soát retry, external write và lỗi async. |
@@ -24,6 +24,17 @@ workflow Tacahu.
 | Browser/platform runtime | session/profile, Playwright evidence | VPS filesystem | Dưới `DATA_DIR/platform_data`, `chrome_profiles`, `playwright_evidence`; cần bảo vệ như credential/evidence. |
 | Queue/cache | Celery message, schedule runtime, Redis AOF | Redis tại `DATA_DIR/redis` | Không dùng để khôi phục business state. |
 | Hệ thống ngoài | dữ liệu gốc Printerval, Drive links, Google Sheet export | Dịch vụ ngoài | Printerval là integration; Google Sheet chỉ là export/backup tùy cấu hình. |
+
+## Dữ liệu quản trị Telegram
+
+- Các cột `telegram_group_*` và `telegram_delivery_mode` nằm trên `users`; group ID, title,
+  loại group, trạng thái verify và lỗi gửi gần nhất phải được backup cùng PostgreSQL.
+- `telegram_message_templates` lưu text template, audience, version và người sửa. Migration seed
+  các template mặc định; Admin có thể sửa/preview/reset, còn placeholder được backend allowlist.
+- `telegram_configuration_audits` lưu actor, target/template, action và before/after JSON để đối
+  soát thay đổi cấu hình. Không lưu bot token hoặc raw callback token trong bảng này.
+- Telegram không phải source of truth: mất message/Telegram outage không làm mất assignment,
+  order state, approval hoặc payment state.
 
 ## Layout production theo compose
 

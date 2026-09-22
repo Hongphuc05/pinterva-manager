@@ -16,7 +16,7 @@ origin hoặc origin kèm `/api` nhưng không được tạo `/api/api`.
 | Platform | CRUD platform và Printerval option/credential scope |
 | Finance | rates, stats, payment mark/unmark, export, finance note |
 | External sync | crawl/gallery import, SyncJob, status sync và external assignment request |
-| Telegram | status/link/unlink/webhook; là kênh phụ tùy cấu hình, không thay database authority |
+| Telegram | status/link/unlink/webhook; quản trị routing/template dưới `/telegram/admin`; là kênh phụ tùy cấu hình, không thay database authority |
 
 ## Contract command
 
@@ -27,3 +27,23 @@ origin hoặc origin kèm `/api` nhưng không được tạo `/api/api`.
 - Legacy endpoint vẫn tồn tại trong migration window có header `X-Deprecated-Endpoint: true`.
   Không dùng chúng cho feature mới; danh sách code tại `app/api/main.py::DEPRECATED_PATHS`.
 
+## Quản trị Telegram Bot (Admin-only)
+
+Các endpoint dưới đây yêu cầu role `admin` và dùng platform scope hiện hành cho danh sách
+designer. Token bot không bao giờ được trả về frontend.
+
+| Method | Endpoint | Mục đích |
+| --- | --- | --- |
+| `GET` | `/telegram/admin/overview` | Trạng thái bot và kết nối private/group của designer |
+| `PUT` | `/telegram/admin/designers/{user_id}/group` | Lưu hoặc thay group chat ID; chưa coi là đã xác thực |
+| `DELETE` | `/telegram/admin/designers/{user_id}/group` | Xóa mapping group, mode group tự chuyển về private |
+| `POST` | `/telegram/admin/designers/{user_id}/group/verify` | Gọi Telegram `getChat`/`getMe`/`getChatMember` để xác thực |
+| `PATCH` | `/telegram/admin/designers/{user_id}/delivery-mode` | Chọn `private` hoặc `group`; group phải verified |
+| `POST` | `/telegram/admin/designers/{user_id}/test` | Gửi một tin nhắn text test tới đích đang chọn |
+| `GET` | `/telegram/admin/templates` | Đọc danh sách template và placeholder allowlist |
+| `PUT` | `/telegram/admin/templates/{template_key}` | Sửa nội dung text template |
+| `POST` | `/telegram/admin/templates/{template_key}/preview` | Render preview bằng dữ liệu mẫu/được cung cấp |
+| `POST` | `/telegram/admin/templates/{template_key}/reset` | Khôi phục template mặc định |
+
+Khi mode là `group` nhưng group chưa được xác thực hoặc gửi thất bại, service không tự fallback
+sang private chat; cấu hình lỗi phải được Admin sửa hoặc chuyển mode rõ ràng.

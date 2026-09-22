@@ -14,6 +14,7 @@ React SPA ── /api ── FastAPI command/query layer ── PostgreSQL
                     │              └── Printerval HTTP API, Playwright fallback
                     │
                     └── optional Telegram notifications/control callbacks
+                         └── Admin-managed private/group routing + editable text templates
 ```
 
 ## Thành phần runtime
@@ -28,6 +29,18 @@ React SPA ── /api ── FastAPI command/query layer ── PostgreSQL
   Google Sheet backup và Telegram notification.
 - `compose.yaml` / `compose.production.yaml`: API, migration, Redis, PostgreSQL,
   general worker, serialized assignment worker, Celery Beat và Cloudflare Tunnel.
+
+### Telegram management boundary
+
+Telegram là side channel tùy chọn. `User.telegram_chat_id` vẫn là kết nối chat riêng; Admin có
+thể gắn thêm một group đã được Bot API xác thực và chọn mode gửi cho từng designer. Resolver trong
+`telegram_service` là điểm duy nhất quyết định đích gửi designer; mode `group` thiếu verification
+thì bỏ qua có kiểm soát, không âm thầm gửi sang DM. Nội dung message được render từ template lưu
+trong PostgreSQL với placeholder allowlist; token bot, callback token và quyền workflow không nằm
+trong template.
+
+Các thay đổi mapping/mode/template được ghi vào `telegram_configuration_audits`. Callback Fix của
+Admin vẫn dùng chat riêng hiện hành và các state/approval vẫn do API/PostgreSQL quyết định.
 
 ## Dữ liệu và side effect
 

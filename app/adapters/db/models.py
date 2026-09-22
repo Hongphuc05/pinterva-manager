@@ -8,6 +8,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -62,6 +63,16 @@ class User(Base):
     __tablename__ = "users"
     __table_args__ = (
         CheckConstraint("role IN ('admin', 'designer', 'designer-trello', 'support')", name="ck_users_role"),
+        CheckConstraint(
+            "telegram_delivery_mode IN ('private', 'group')",
+            name="ck_users_telegram_delivery_mode",
+        ),
+        Index(
+            "uq_users_telegram_group_chat_id",
+            "telegram_group_chat_id",
+            unique=True,
+            postgresql_where=text("telegram_group_chat_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
@@ -89,6 +100,22 @@ class User(Base):
     telegram_link_code_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     telegram_notifications_enabled: Mapped[bool] = mapped_column(
         Boolean, default=True, server_default=text("true"), nullable=False
+    )
+    # A designer can keep the existing private chat connection and optionally
+    # bind one verified group chat.  `telegram_delivery_mode` controls which
+    # destination the designer notification service uses.
+    telegram_group_chat_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    telegram_group_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    telegram_group_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    telegram_group_verified: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false"), nullable=False
+    )
+    telegram_group_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    telegram_group_last_error: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    telegram_delivery_mode: Mapped[str] = mapped_column(
+        String(16), default="private", server_default=text("'private'"), nullable=False
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -674,3 +701,42 @@ class TelegramFixConversation(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active", server_default=text("'active'"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     cleaned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class TelegramMessageTemplate(Base):
+    """Admin-editable text template for a Telegram notification event."""
+
+    __tablename__ = "telegram_message_templates"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    template_key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    audience: Mapped[str] = mapped_column(String(16), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    active: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=text("true"), nullable=False
+    )
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default=text("1"), nullable=False)
+    updated_by_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class TelegramConfigurationAudit(Base):
+    """Append-only audit for Admin changes to Telegram routing/templates."""
+
+    __tablename__ = "telegram_configuration_audits"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    actor_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    target_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    template_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    action_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    before: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    after: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
