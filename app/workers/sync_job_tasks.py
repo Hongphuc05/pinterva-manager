@@ -7,10 +7,10 @@ from app.application.sync_jobs import run_status_sync_job
 from app.workers.celery_app import celery_app
 
 
-@celery_app.task(name="app.workers.sync_job_tasks.run_status_sync_job")
-def run_status_sync_job_task(job_id: str) -> None:
+@celery_app.task(bind=True, name="app.workers.sync_job_tasks.run_status_sync_job")
+def run_status_sync_job_task(self, job_id: str) -> None:
     session = SessionLocal()
     try:
-        run_status_sync_job(session, uuid.UUID(job_id))
+        run_status_sync_job(session, uuid.UUID(job_id), worker_task_id=self.request.id)
     finally:
         session.close()

@@ -1,4 +1,5 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
 import httpx
 
@@ -8,6 +9,7 @@ from app.adapters.printerval.api_client import FIND_PATH, LOGIN_PATH, Printerval
 from app.adapters.printerval.fake_adapter import FakePrintervalAdapter
 from app.application.status_sync import (
     ACTIVE_PRINTERVAL_STATUS_FILTERS,
+    reclaim_stale_platform_sync_leases,
     reconcile_active_platform_orders,
     sync_all_platforms,
     sync_full_database_platform_orders,
@@ -131,6 +133,48 @@ def test_selected_sync_keeps_review_internal_until_admin_marks_payment(db_sessio
     assert selected.printerval_status == "done"
     assert untouched.state == "IN_PROGRESS"
     assert untouched.printerval_status == "doing"
+
+
+def test_selected_sync_reports_durable_progress(db_session):
+    platform = Platform(name="P progress", account_username="acc@printerval.com", team_outsource="team-a")
+    db_session.add(platform)
+    db_session.flush()
+    orders = [
+        Order(
+            external_order_id=f"DJ100{7 + index}",
+            platform_id=platform.id,
+            state="IN_PROGRESS",
+            printerval_status="doing",
+        )
+        for index in range(2)
+    ]
+    db_session.add_all(orders)
+    db_session.commit()
+
+    progress: list[dict] = []
+    result = sync_selected_order_statuses(
+        db_session,
+        platform,
+        orders,
+        api_client=_mock_client(
+            {
+                "DJ1007": {"id": 1007, "status": "doing"},
+                "DJ1008": {"id": 1008, "status": "doing"},
+            }
+        ),
+        progress_callback=lambda item: progress.append(item),
+    )
+
+    assert result == {"checked": 2, "updated": 0, "not_found": 0, "failed": 0}
+    assert progress[0]["phase"] == "fetching"
+    assert progress[-1] == {
+        "phase": "completed",
+        "processed": 2,
+        "total": 2,
+        "updated": 0,
+        "failed": 0,
+    }
+    assert any(item["processed"] == 1 for item in progress)
 
 
 def test_scheduled_sync_keeps_review_internal_when_printerval_reports_done(db_session):
@@ -517,7 +561,7 @@ def test_sync_all_platforms_tracks_running_state_and_result(db_session, monkeypa
 
     calls = []
 
-    def _fake_sync(session, plat, *, adapter, actor_id=None):
+    def _fake_sync(session, plat, *, adapter, actor_id=None, progress_callback=None):
         calls.append(plat.id)
         return {"checked": 1, "updated": 0}
 
@@ -533,6 +577,112 @@ def test_sync_all_platforms_tracks_running_state_and_result(db_session, monkeypa
     assert state.last_finished_at is not None
     assert state.last_result == {"checked": 1, "updated": 0}
     assert state.last_error is None
+
+
+def test_sync_all_platforms_does_not_reclaim_fresh_heartbeat(db_session, monkeypatch):
+    platform = Platform(
+        name="P fresh lease",
+        account_username="acc@printerval.com",
+        account_password="pw",
+        team_outsource="team-a",
+        is_active=True,
+    )
+    db_session.add(platform)
+    db_session.flush()
+    old_token = uuid4()
+    db_session.add(
+        PlatformSyncState(
+            platform_id=platform.id,
+            is_running=True,
+            last_started_at=datetime.now(UTC) - timedelta(minutes=30),
+            last_heartbeat_at=datetime.now(UTC),
+            worker_task_id="old-worker-task",
+            run_token=old_token,
+        )
+    )
+    db_session.commit()
+
+    calls = []
+
+    def _fake_sync(session, plat, *, adapter, actor_id=None, progress_callback=None):
+        calls.append(plat.id)
+        return {"checked": 0, "updated": 0}
+
+    monkeypatch.setattr(status_sync_module, "reconcile_active_platform_orders", _fake_sync)
+    results = sync_all_platforms(db_session, worker_task_id="new-worker-task")
+
+    assert calls == []
+    assert results[str(platform.id)] == {"skipped": 1, "reason": "another_sync_running"}
+    state = db_session.get(PlatformSyncState, platform.id)
+    assert state.is_running is True
+    assert state.worker_task_id == "old-worker-task"
+    assert state.run_token == old_token
+
+
+def test_sync_all_platforms_reclaims_stale_heartbeat_with_new_worker_identity(db_session, monkeypatch):
+    platform = Platform(
+        name="P stale lease",
+        account_username="acc@printerval.com",
+        account_password="pw",
+        team_outsource="team-a",
+        is_active=True,
+    )
+    db_session.add(platform)
+    db_session.flush()
+    old_token = uuid4()
+    db_session.add(
+        PlatformSyncState(
+            platform_id=platform.id,
+            is_running=True,
+            last_started_at=datetime.now(UTC) - timedelta(minutes=30),
+            last_heartbeat_at=datetime.now(UTC) - timedelta(minutes=4),
+            worker_task_id="dead-worker-task",
+            run_token=old_token,
+        )
+    )
+    db_session.commit()
+
+    def _fake_sync(session, plat, *, adapter, actor_id=None, progress_callback=None):
+        return {"checked": 0, "updated": 0}
+
+    monkeypatch.setattr(status_sync_module, "reconcile_active_platform_orders", _fake_sync)
+    results = sync_all_platforms(db_session, worker_task_id="replacement-worker-task")
+
+    assert results[str(platform.id)] == {"checked": 0, "updated": 0}
+    state = db_session.get(PlatformSyncState, platform.id)
+    assert state.is_running is False
+    assert state.worker_task_id == "replacement-worker-task"
+    assert state.run_token != old_token
+    assert state.last_result == {"checked": 0, "updated": 0}
+
+
+def test_watchdog_reclaims_stale_platform_lease(db_session):
+    platform = Platform(
+        name="P watchdog",
+        account_username="watchdog@printerval.test",
+        team_outsource="team-watchdog",
+        is_active=True,
+    )
+    db_session.add(platform)
+    db_session.flush()
+    state = PlatformSyncState(
+        platform_id=platform.id,
+        is_running=True,
+        last_started_at=datetime.now(UTC) - timedelta(minutes=5),
+        last_heartbeat_at=datetime.now(UTC) - timedelta(minutes=4),
+        worker_task_id="dead-platform-worker",
+        progress={"phase": "saving", "processed": 10, "total": 20},
+    )
+    db_session.add(state)
+    db_session.commit()
+
+    assert reclaim_stale_platform_sync_leases(db_session) == 1
+
+    db_session.refresh(state)
+    assert state.is_running is False
+    assert state.last_error is not None
+    assert "heartbeat" in state.last_error
+    assert state.progress["phase"] == "failed"
 
 
 def test_sync_all_platforms_continues_past_a_non_printerval_exception(db_session, monkeypatch):
@@ -553,7 +703,7 @@ def test_sync_all_platforms_continues_past_a_non_printerval_exception(db_session
 
     calls = []
 
-    def _fake_sync(session, plat, *, adapter, actor_id=None):
+    def _fake_sync(session, plat, *, adapter, actor_id=None, progress_callback=None):
         calls.append(plat.id)
         if plat.id == platform_a.id:
             raise RuntimeError("simulated StaleDataError-like failure")
@@ -599,7 +749,7 @@ def test_sync_all_platforms_includes_cookie_only_platform(db_session, monkeypatc
     monkeypatch.setattr(
         status_sync_module,
         "reconcile_active_platform_orders",
-        lambda session, candidate, *, adapter, actor_id=None: seen.append(candidate.id) or {"checked": 0, "updated": 0},
+        lambda session, candidate, *, adapter, actor_id=None, progress_callback=None: seen.append(candidate.id) or {"checked": 0, "updated": 0},
     )
 
     results = sync_all_platforms(db_session)

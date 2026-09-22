@@ -41,3 +41,19 @@ deadlock/che lỗi concurrency.
 - Celery general/assignment/beat; dead letter và external write evidence.
 - status-sync cycle, crawl cycle, private asset volume và database backup.
 - Cloudflare tunnel/HTTPS ở production.
+
+### Status sync: heartbeat và tác vụ treo
+
+`GET /api/orders/sync-status` chỉ đọc `PlatformSyncState`; polling giao diện không được
+tự ý đổi `is_running` hay ghi lỗi timeout. Mỗi status-sync worker ghi:
+
+- `worker_task_id`: task Celery để truy vết log/worker;
+- `run_token`: lease của lần chạy, ngăn worker cũ ghi đè lần chạy mới;
+- `last_heartbeat_at`: heartbeat định kỳ, kể cả lúc đang chờ HTTP Printerval;
+- `progress`: phase, số đơn đã xử lý/cập nhật/lỗi và mã đơn hiện tại nếu có.
+
+Watchdog Celery chạy mỗi phút và chỉ đánh dấu `SyncJob`/`PlatformSyncState` là `failed` khi heartbeat quá hạn theo
+`STATUS_SYNC_HEARTBEAT_STALE_SECONDS` (mặc định 180 giây). Một full sweep lâu hơn 15 phút
+nhưng vẫn có heartbeat hợp lệ sẽ tiếp tục chạy bình thường. Nếu cần dừng cưỡng bức, admin
+dùng endpoint reset; sau đó kiểm tra `worker_task_id`, heartbeat cuối và log Celery trước
+khi chạy lại.

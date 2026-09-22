@@ -31,6 +31,13 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false)
   const { status: syncStatus, triggerRun } = useSyncStatus()
   const isStatusSyncing = isFastSyncing || syncStatus?.is_running === true
+  const syncProgress = syncStatus?.progress
+  const syncProcessed = typeof syncProgress?.processed === 'number' ? syncProgress.processed : null
+  const syncTotal = typeof syncProgress?.total === 'number' ? syncProgress.total : null
+  const syncPhase = typeof syncProgress?.phase === 'string' ? syncProgress.phase : null
+  const syncCurrentOrder = typeof syncProgress?.current_order_code === 'string'
+    ? syncProgress.current_order_code
+    : null
   const {
     isSyncing: isGallerySyncing,
     isPaused: isGalleryPaused,
@@ -334,7 +341,7 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
           disabled={isStatusSyncing}
           title={
             isStatusSyncing
-              ? 'Đang đồng bộ trạng thái toàn bộ đơn hàng trong database từ Hệ thống mẹ...'
+              ? `Đang ${syncPhase || 'đồng bộ'}${syncProcessed !== null && syncTotal !== null ? ` ${syncProcessed}/${syncTotal}` : ''}${syncCurrentOrder ? ` · ${syncCurrentOrder}` : ''}`
               : fastSyncError || syncStatus?.last_error
               ? `Lần đồng bộ trước lỗi: ${fastSyncError || syncStatus?.last_error}`
               : 'Bấm để đồng bộ lại trạng thái toàn bộ đơn hàng trong database từ Hệ thống mẹ'
@@ -350,7 +357,13 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
               isStatusSyncing ? 'animate-spin text-[#0052CC]' : 'text-slate-500'
             }`}
           />
-          <span>{isStatusSyncing ? 'Đang đồng bộ' : 'Đồng bộ'}</span>
+          <span>
+            {isStatusSyncing
+              ? syncProcessed !== null && syncTotal !== null && syncTotal > 0
+                ? `Đang đồng bộ ${syncProcessed}/${syncTotal}`
+                : 'Đang đồng bộ'
+              : 'Đồng bộ'}
+          </span>
           <span
             className={`h-2 w-2 rounded-full shrink-0 ${
               isStatusSyncing

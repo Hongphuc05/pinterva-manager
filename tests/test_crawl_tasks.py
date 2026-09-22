@@ -31,6 +31,7 @@ def test_review_submission_sync_preempts_bulk_assignment_requests():
 def test_celery_app_has_status_sync_beat_schedule_and_no_crawl():
     schedule = celery_app.conf.beat_schedule
     assert "sync-order-statuses" in schedule
+    assert "reclaim-stale-sync-jobs" in schedule
     assert "crawl-and-claim" not in schedule
 
 

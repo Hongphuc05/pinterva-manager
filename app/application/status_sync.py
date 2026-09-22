@@ -10,15 +10,20 @@ an operator having to open the site themselves.
 from __future__ import annotations
 
 import logging
+import threading
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime, timedelta
+from time import monotonic
 from typing import Any
+from uuid import UUID, uuid4
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import StaleDataError
 
 from app.adapters.db.models import Order, Platform, PlatformSyncState, WorkflowEvent
+from app.adapters.db.session import SessionLocal
 from app.adapters.printerval.api_adapter import PrintervalApiAdapter
 from app.adapters.printerval.api_client import PrintervalApiClient
 from app.adapters.printerval.interface import ALL_JOB_TYPES, PrintervalAdapter
@@ -37,11 +42,148 @@ from app.domain.models import OrderState
 # is discovered only through Admin's explicit crawl, never by auto-sync.
 ACTIVE_PRINTERVAL_STATUS_FILTERS = ("doing", "fix")
 
-# A full database sweep normally takes a few minutes.  This lease prevents the
-# five-minute active-feed reconciler and the thirty-minute full sweep from
-# concurrently mutating the same cards.  A worker crash must not suppress all
-# later syncs indefinitely, so a stale lease is reclaimed after this window.
-_PLATFORM_SYNC_LEASE_TIMEOUT = timedelta(minutes=15)
+ProgressCallback = Callable[[dict[str, Any]], object]
+
+
+class SyncLeaseLost(RuntimeError):
+    """The worker no longer owns the platform sync run it started."""
+
+
+def _emit_progress(callback: ProgressCallback | None, progress: dict[str, Any]) -> None:
+    if callback is None:
+        return
+    if callback(progress) is False:
+        raise SyncLeaseLost("Platform sync lease was reclaimed by another worker.")
+
+
+class _PlatformSyncProgressReporter:
+    """Persist throttled heartbeats in an independent DB session.
+
+    The sync worker's main SQLAlchemy session may be inside a per-order transaction
+    or waiting on the external HTTP API. A separate short-lived session makes the
+    heartbeat durable in both cases and prevents a rollback in order processing from
+    erasing liveness information.
+    """
+
+    def __init__(self, platform_id: UUID, run_token: UUID) -> None:
+        self.platform_id = platform_id
+        self.run_token = run_token
+        self._last_sent_at = 0.0
+        self._progress: dict[str, Any] = {
+            "phase": "starting",
+            "processed": 0,
+            "total": None,
+            "updated": 0,
+            "failed": 0,
+        }
+        self._lock = threading.Lock()
+        self._stop_event = threading.Event()
+        self._lease_lost = False
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        self._thread = threading.Thread(
+            target=self._heartbeat_loop,
+            name=f"status-sync-heartbeat-{self.platform_id}",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=max(1, get_settings().status_sync_heartbeat_interval_seconds + 1))
+
+    def _heartbeat_loop(self) -> None:
+        interval = get_settings().status_sync_heartbeat_interval_seconds
+        while not self._stop_event.wait(interval):
+            if not self.report(force=True):
+                return
+
+    def __call__(self, progress: dict[str, Any]) -> bool:
+        return self.report(progress)
+
+    def report(self, progress: dict[str, Any], *, force: bool = False) -> bool:
+        with self._lock:
+            if self._lease_lost:
+                return False
+            self._progress = dict(progress)
+
+        now_monotonic = monotonic()
+        interval = get_settings().status_sync_heartbeat_interval_seconds
+        if not force and now_monotonic - self._last_sent_at < interval:
+            return True
+        self._last_sent_at = now_monotonic
+        return self._persist_heartbeat()
+
+    def _persist_heartbeat(self) -> bool:
+        with self._lock:
+            if self._lease_lost:
+                return False
+            progress = dict(self._progress)
+        heartbeat_session = SessionLocal()
+        try:
+            state = heartbeat_session.execute(
+                select(PlatformSyncState)
+                .where(
+                    PlatformSyncState.platform_id == self.platform_id,
+                    PlatformSyncState.run_token == self.run_token,
+                    PlatformSyncState.is_running.is_(True),
+                )
+            ).scalar_one_or_none()
+            if state is None:
+                heartbeat_session.rollback()
+                with self._lock:
+                    self._lease_lost = True
+                return False
+            state.last_heartbeat_at = datetime.now(UTC)
+            state.progress = progress
+            heartbeat_session.commit()
+            return True
+        except Exception:
+            heartbeat_session.rollback()
+            logger.exception("Unable to persist status-sync heartbeat for platform %s", self.platform_id)
+            # A transient heartbeat write failure must not abort a healthy external
+            # read. The next progress callback will retry; only a confirmed missing
+            # run token means that another worker reclaimed this run.
+            return True
+        finally:
+            heartbeat_session.close()
+
+
+def _platform_sync_heartbeat_stale_after() -> timedelta:
+    return timedelta(seconds=get_settings().status_sync_heartbeat_stale_seconds)
+
+
+def reclaim_stale_platform_sync_leases(session: Session) -> int:
+    """Close platform leases whose worker stopped renewing its heartbeat."""
+    now_utc = datetime.now(UTC)
+    stale_before = now_utc - _platform_sync_heartbeat_stale_after()
+    states = session.execute(
+        select(PlatformSyncState)
+        .where(PlatformSyncState.is_running.is_(True))
+        .with_for_update()
+    ).scalars().all()
+    reclaimed = 0
+    for state in states:
+        liveness_at = state.last_heartbeat_at or state.last_started_at
+        if liveness_at is None or liveness_at >= stale_before:
+            continue
+        state.is_running = False
+        state.last_finished_at = now_utc
+        state.last_heartbeat_at = now_utc
+        state.last_error = (
+            "Worker không còn heartbeat; tác vụ đồng bộ đã được đánh dấu thất bại "
+            "để có thể chạy lại."
+        )
+        state.progress = {
+            **(state.progress or {}),
+            "phase": "failed",
+        }
+        reclaimed += 1
+    if reclaimed:
+        session.commit()
+    return reclaimed
 
 
 def _status_guess_order(last_known: str | None) -> tuple[str, ...]:
@@ -133,6 +275,7 @@ def reconcile_active_platform_orders(
     *,
     adapter: PrintervalAdapter,
     actor_id: object | None = None,
+    progress_callback: ProgressCallback | None = None,
 ) -> dict[str, int]:
     """Mirror tracked Printerval Doing and Fix cards from independent filters.
 
@@ -143,10 +286,21 @@ def reconcile_active_platform_orders(
     """
     seen: set[str] = set()
     checked = added = updated = skipped_untracked = failed = 0
+    _emit_progress(
+        progress_callback,
+        {
+            "phase": "discovering",
+            "processed": 0,
+            "total": None,
+            "updated": 0,
+            "failed": 0,
+        },
+    )
 
     def active_summaries():
         for source_status in ACTIVE_PRINTERVAL_STATUS_FILTERS:
             cursor: str | None = None
+            page = 0
             while True:
                 discovered = adapter.discover_orders(
                     status=source_status,
@@ -160,6 +314,19 @@ def reconcile_active_platform_orders(
                         discovered.error_class or f"Không thể đọc queue {source_status} từ Printerval."
                     )
                 yield from discovered.orders
+                page += 1
+                _emit_progress(
+                    progress_callback,
+                    {
+                        "phase": "discovering",
+                        "source_status": source_status,
+                        "page": page,
+                        "processed": checked,
+                        "total": None,
+                        "updated": updated,
+                        "failed": failed,
+                    },
+                )
                 if not discovered.cursor:
                     break
                 cursor = discovered.cursor
@@ -228,6 +395,19 @@ def reconcile_active_platform_orders(
                     _dispatch_admin_fix_notifications(session, order)
             else:
                 session.rollback()
+            _emit_progress(
+                progress_callback,
+                {
+                    "phase": "saving",
+                    "processed": checked,
+                    "total": None,
+                    "updated": updated,
+                    "failed": failed,
+                    "current_order_code": external_order_id,
+                },
+            )
+        except SyncLeaseLost:
+            raise
         except Exception as exc:
             session.rollback()
             failed += 1
@@ -235,13 +415,24 @@ def reconcile_active_platform_orders(
 
     if updated:
         export_platform_orders_csv(session, platform.id)
-    return {
+    result = {
         "checked": checked,
         "added": added,
         "updated": updated,
         "skipped_untracked": skipped_untracked,
         "failed": failed,
     }
+    _emit_progress(
+        progress_callback,
+        {
+            "phase": "completed",
+            "processed": checked,
+            "total": checked,
+            "updated": updated,
+            "failed": failed,
+        },
+    )
+    return result
 
 
 def _dispatch_admin_fix_notifications(session: Session, order: Order) -> None:
@@ -274,6 +465,7 @@ def sync_selected_order_statuses(
     *,
     actor_id: object | None = None,
     api_client: PrintervalApiClient | None = None,
+    progress_callback: ProgressCallback | None = None,
 ) -> dict[str, int]:
     """Fast, manually requested status mirror for one visible UI tab.
 
@@ -301,6 +493,16 @@ def sync_selected_order_statuses(
         # connection is used concurrently for read-only order searches.
         designer_map = client.get_designer_map()
         worker_count = min(max(1, get_settings().printerval_manual_sync_concurrency), len(orders))
+        _emit_progress(
+            progress_callback,
+            {
+                "phase": "fetching",
+                "processed": 0,
+                "total": len(orders),
+                "updated": 0,
+                "failed": 0,
+            },
+        )
 
         # Never let worker threads touch ORM state.  Their only job is HTTP
         # lookup; all database reads/writes stay on this caller thread.
@@ -334,6 +536,17 @@ def sync_selected_order_statuses(
                     failed += 1
                     failed_order_ids.add(order_id)
                     logger.warning("Manual status sync failed for %s: %s", external_order_id, exc)
+                _emit_progress(
+                    progress_callback,
+                    {
+                        "phase": "fetching",
+                        "processed": len(rows_by_order_id) + len(failed_order_ids),
+                        "total": len(orders),
+                        "updated": 0,
+                        "failed": failed,
+                        "current_order_code": external_order_id,
+                    },
+                )
 
         updated = 0
         not_found = 0
@@ -462,7 +675,20 @@ def sync_selected_order_statuses(
                         _dispatch_admin_fix_notifications(session, order)
                     if changed:
                         updated += 1
+                    _emit_progress(
+                        progress_callback,
+                        {
+                            "phase": "saving",
+                            "processed": len(orders),
+                            "total": len(orders),
+                            "updated": updated,
+                            "failed": failed,
+                            "current_order_code": original_order.external_order_id,
+                        },
+                    )
                     break
+                except SyncLeaseLost:
+                    raise
                 except StaleDataError:
                     session.rollback()
                     logger.info(
@@ -479,7 +705,18 @@ def sync_selected_order_statuses(
                     logger.warning("Manual status sync failed while saving %s: %s", order_id, exc)
                     break
 
-        return {"checked": len(orders), "updated": updated, "not_found": not_found, "failed": failed}
+        result = {"checked": len(orders), "updated": updated, "not_found": not_found, "failed": failed}
+        _emit_progress(
+            progress_callback,
+            {
+                "phase": "completed",
+                "processed": len(orders),
+                "total": len(orders),
+                "updated": updated,
+                "failed": failed,
+            },
+        )
+        return result
     except Exception:
         session.rollback()
         raise
@@ -629,6 +866,7 @@ def sync_full_database_platform_orders(
     platform: Platform,
     *,
     api_client: PrintervalApiClient | None = None,
+    progress_callback: ProgressCallback | None = None,
 ) -> dict[str, int]:
     """Refresh Printerval status for every order already tracked for one platform.
 
@@ -643,11 +881,22 @@ def sync_full_database_platform_orders(
         .order_by(Order.created_at.asc(), Order.id.asc())
         .all()
     )
-    return sync_selected_order_statuses(session, platform, orders, api_client=api_client)
+    return sync_selected_order_statuses(
+        session,
+        platform,
+        orders,
+        api_client=api_client,
+        progress_callback=progress_callback,
+    )
 
 
-def _claim_platform_sync_lease(session: Session, platform_id: object) -> bool:
-    """Atomically claim a bounded per-platform background-sync lease."""
+def _claim_platform_sync_lease(
+    session: Session,
+    platform_id: object,
+    *,
+    worker_task_id: str,
+) -> UUID | None:
+    """Atomically claim a per-platform lease, reclaiming only stale heartbeats."""
     now_utc = datetime.now(UTC)
     state = session.execute(
         select(PlatformSyncState)
@@ -659,38 +908,75 @@ def _claim_platform_sync_lease(session: Session, platform_id: object) -> bool:
         session.add(state)
         session.flush()
 
-    if (
-        state.is_running
-        and state.last_started_at is not None
-        and state.last_started_at >= now_utc - _PLATFORM_SYNC_LEASE_TIMEOUT
-    ):
+    heartbeat_at = state.last_heartbeat_at or state.last_started_at
+    if state.is_running and heartbeat_at and heartbeat_at >= now_utc - _platform_sync_heartbeat_stale_after():
         session.rollback()
-        return False
+        return None
 
+    if state.is_running:
+        logger.warning(
+            "Reclaiming stale platform sync lease platform=%s task=%s heartbeat_at=%s",
+            platform_id,
+            state.worker_task_id,
+            heartbeat_at,
+        )
+
+    run_token = uuid4()
     state.is_running = True
     state.last_started_at = now_utc
+    state.worker_task_id = worker_task_id
+    state.run_token = run_token
+    state.last_heartbeat_at = now_utc
+    state.progress = {
+        "phase": "starting",
+        "processed": 0,
+        "total": None,
+        "updated": 0,
+        "failed": 0,
+    }
     state.last_error = None
     session.commit()
-    return True
+    return run_token
 
 
 def _finish_platform_sync_lease(
     session: Session,
     platform_id: object,
     *,
+    run_token: UUID,
     result: dict | None = None,
     error: Exception | None = None,
 ) -> None:
-    state = session.get(PlatformSyncState, platform_id)
+    state = session.execute(
+        select(PlatformSyncState).where(
+            PlatformSyncState.platform_id == platform_id,
+            PlatformSyncState.run_token == run_token,
+            PlatformSyncState.is_running.is_(True),
+        )
+    ).scalar_one_or_none()
     if state is None:
+        session.rollback()
         return
+    now_utc = datetime.now(UTC)
     if error is None:
         state.last_result = result
         state.last_error = None
+        state.progress = {
+            "phase": "completed",
+            "processed": (result or {}).get("checked", 0),
+            "total": (result or {}).get("checked", 0),
+            "updated": (result or {}).get("updated", 0),
+            "failed": (result or {}).get("failed", 0),
+        }
     else:
-        state.last_error = str(error)
+        state.last_error = str(error)[:1024]
+        state.progress = {
+            **(state.progress or {}),
+            "phase": "failed",
+        }
     state.is_running = False
-    state.last_finished_at = datetime.now(UTC)
+    state.last_heartbeat_at = now_utc
+    state.last_finished_at = now_utc
     session.commit()
 
 
@@ -708,35 +994,59 @@ def _credentialed_platforms(session: Session) -> list[Platform]:
 def _run_platform_syncs(
     session: Session,
     *,
-    run_platform: Any,
+    run_platform: Callable[[Platform, ProgressCallback], dict],
+    worker_task_id: str | None = None,
 ) -> dict[str, dict]:
     """Run one read-only status operation per credentialed platform, without overlap."""
     results: dict[str, dict] = {}
+    effective_task_id = worker_task_id or f"local:{uuid4()}"
     for platform in _credentialed_platforms(session):
         if not platform.team_outsource:
             continue
-        if not _claim_platform_sync_lease(session, platform.id):
+        run_token = _claim_platform_sync_lease(
+            session,
+            platform.id,
+            worker_task_id=effective_task_id,
+        )
+        if run_token is None:
             results[str(platform.id)] = {"skipped": 1, "reason": "another_sync_running"}
             continue
 
+        reporter = _PlatformSyncProgressReporter(platform.id, run_token)
         try:
-            result = run_platform(platform)
+            if not reporter.report(
+                {
+                    "phase": "starting",
+                    "processed": 0,
+                    "total": None,
+                    "updated": 0,
+                    "failed": 0,
+                },
+                force=True,
+            ):
+                raise SyncLeaseLost("Platform sync lease was reclaimed before work started.")
+            reporter.start()
+            result = run_platform(platform, reporter)
+            reporter.stop()
             results[str(platform.id)] = result
-            _finish_platform_sync_lease(session, platform.id, result=result)
+            _finish_platform_sync_lease(session, platform.id, run_token=run_token, result=result)
         except Exception as exc:
+            reporter.stop()
             session.rollback()
             results[str(platform.id)] = {"error": str(exc)}
             try:
-                _finish_platform_sync_lease(session, platform.id, error=exc)
+                _finish_platform_sync_lease(session, platform.id, run_token=run_token, error=exc)
             except Exception:
                 session.rollback()
                 logger.exception("Unable to release sync lease for platform %s", platform.id)
+        finally:
+            reporter.stop()
     return results
 
 
-def sync_all_platforms(session: Session) -> dict[str, dict]:
+def sync_all_platforms(session: Session, *, worker_task_id: str | None = None) -> dict[str, dict]:
     """Reconcile each credentialed platform's compact active Printerval queue."""
-    def run_platform(platform: Platform) -> dict:
+    def run_platform(platform: Platform, progress_callback: ProgressCallback) -> dict:
         client = PrintervalApiClient(
             base_url="https://printerval.com",
             username=platform.account_username,
@@ -749,16 +1059,21 @@ def sync_all_platforms(session: Session) -> dict[str, dict]:
                 session,
                 platform,
                 adapter=PrintervalApiAdapter(api_client=client, download_images=False),
+                progress_callback=progress_callback,
             )
         finally:
             client.close()
 
-    return _run_platform_syncs(session, run_platform=run_platform)
+    return _run_platform_syncs(session, run_platform=run_platform, worker_task_id=worker_task_id)
 
 
-def sync_all_platforms_full_database(session: Session) -> dict[str, dict]:
+def sync_all_platforms_full_database(
+    session: Session,
+    *,
+    worker_task_id: str | None = None,
+) -> dict[str, dict]:
     """Refresh the Printerval status of every tracked order for every platform."""
-    def run_platform(platform: Platform) -> dict:
+    def run_platform(platform: Platform, progress_callback: ProgressCallback) -> dict:
         client = PrintervalApiClient(
             base_url="https://printerval.com",
             username=platform.account_username,
@@ -767,8 +1082,13 @@ def sync_all_platforms_full_database(session: Session) -> dict[str, dict]:
             session_cookie=platform.session_cookie,
         )
         try:
-            return sync_full_database_platform_orders(session, platform, api_client=client)
+            return sync_full_database_platform_orders(
+                session,
+                platform,
+                api_client=client,
+                progress_callback=progress_callback,
+            )
         finally:
             client.close()
 
-    return _run_platform_syncs(session, run_platform=run_platform)
+    return _run_platform_syncs(session, run_platform=run_platform, worker_task_id=worker_task_id)

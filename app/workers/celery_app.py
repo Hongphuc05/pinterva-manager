@@ -43,6 +43,7 @@ celery_app.conf.task_routes = {
     "app.workers.order_sheet_backup_tasks.export_order_sheet_backup": {"queue": "celery"},
 }
 celery_app.conf.worker_prefetch_multiplier = 1
+celery_app.conf.task_track_started = True
 
 celery_app.conf.timezone = _settings.celery_timezone
 
@@ -51,6 +52,10 @@ def build_beat_schedule(settings):
     schedule = {
         "check-designer-deadlines": {
             "task": "app.workers.telegram_tasks.check_designer_deadlines",
+            "schedule": 60.0,
+        },
+        "reclaim-stale-sync-jobs": {
+            "task": "app.workers.status_sync_tasks.reclaim_stale_sync_jobs",
             "schedule": 60.0,
         },
         "sync-order-statuses": {

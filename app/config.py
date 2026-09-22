@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     # refreshes in the background — separate from crawl_interval_seconds since it's a
     # much cheaper, purely-read HTTP job (no Playwright), safe to run more often.
     status_sync_interval_seconds: int = 300
+    # Background status syncs renew their lease while processing. A lease is only
+    # reclaimable after this heartbeat window has elapsed, so a healthy full sweep
+    # is not mistaken for a crashed worker merely because it runs longer than 15m.
+    status_sync_heartbeat_interval_seconds: int = 20
+    status_sync_heartbeat_stale_seconds: int = 180
     # A manually requested tab sync talks to Printerval for only the selected orders.
     # Keep this deliberately modest: a shared session cookie can be rate-limited if a
     # browser-like burst is too large, while four concurrent reads remove most of the
@@ -74,6 +79,13 @@ class Settings(BaseSettings):
             ZoneInfo(value)
         except ZoneInfoNotFoundError as exc:
             raise ValueError("CELERY_TIMEZONE must be a valid IANA timezone") from exc
+        return value
+
+    @field_validator("status_sync_heartbeat_interval_seconds", "status_sync_heartbeat_stale_seconds")
+    @classmethod
+    def _validate_status_sync_heartbeat_window(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("STATUS_SYNC heartbeat settings must be positive")
         return value
 
     @model_validator(mode="after")

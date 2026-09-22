@@ -5,6 +5,9 @@ export type SyncStatus = {
   is_running: boolean
   last_started_at: string | null
   last_finished_at: string | null
+  worker_task_id: string | null
+  last_heartbeat_at: string | null
+  progress: Record<string, unknown> | null
   last_result: Record<string, unknown> | null
   last_error: string | null
 }
@@ -21,6 +24,10 @@ type SyncJob = {
   error_summary: string | null
   started_at: string | null
   finished_at: string | null
+  worker_task_id: string | null
+  last_heartbeat_at: string | null
+  progress_phase: string | null
+  current_order_code: string | null
 }
 
 type SyncSnapshot = { status: SyncStatus | null; isTriggering: boolean }
@@ -41,10 +48,23 @@ function latestTimestamp(...values: Array<string | null | undefined>): string | 
 function toSyncStatus(job: SyncJob | null, platformStatus: SyncStatus | null): SyncStatus {
   const jobIsRunning = job?.status === 'queued' || job?.status === 'running'
   const platformIsRunning = platformStatus?.is_running === true
+  const jobProgress: Record<string, unknown> | null = job
+    ? {
+        phase: job.progress_phase,
+        processed: job.processed,
+        total: job.total,
+        updated: job.updated,
+        failed: job.failed,
+        current_order_code: job.current_order_code,
+      }
+    : null
   const jobStatus: SyncStatus = {
     is_running: jobIsRunning,
     last_started_at: job?.started_at ?? null,
     last_finished_at: job?.finished_at ?? null,
+    worker_task_id: job?.worker_task_id ?? null,
+    last_heartbeat_at: job?.last_heartbeat_at ?? null,
+    progress: jobProgress,
     last_result: job
       ? { processed: job.processed, total: job.total, updated: job.updated, failed: job.failed }
       : null,
@@ -58,6 +78,11 @@ function toSyncStatus(job: SyncJob | null, platformStatus: SyncStatus | null): S
     is_running: jobIsRunning || platformIsRunning,
     last_started_at: latestTimestamp(jobStatus.last_started_at, platformStatus?.last_started_at),
     last_finished_at: latestTimestamp(jobStatus.last_finished_at, platformStatus?.last_finished_at),
+    worker_task_id: jobIsRunning
+      ? jobStatus.worker_task_id
+      : platformStatus?.worker_task_id ?? jobStatus.worker_task_id,
+    last_heartbeat_at: latestTimestamp(jobStatus.last_heartbeat_at, platformStatus?.last_heartbeat_at),
+    progress: jobIsRunning ? jobProgress : platformStatus?.progress ?? jobProgress,
     last_result: jobIsRunning || !platformStatus?.last_result
       ? jobStatus.last_result
       : platformStatus.last_result,

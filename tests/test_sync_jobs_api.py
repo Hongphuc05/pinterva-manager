@@ -1,7 +1,9 @@
 import uuid
+from datetime import UTC, datetime, timedelta
 
 from app.adapters.db.models import Order, Platform, SyncJob, User
 from app.application.auth import hash_password
+from app.application.sync_jobs import reclaim_stale_sync_jobs
 
 
 def _admin_token(client, db_session):
@@ -116,3 +118,41 @@ def test_sync_job_allows_platform_wide_sync_when_order_ids_omitted(client, db_se
     response = client.post("/api/sync-jobs", json={"type": "status_sync"}, headers=headers)
     assert response.status_code == 202
     assert response.json()["status"] == "queued"
+
+
+def test_watchdog_reclaims_only_sync_jobs_without_a_fresh_heartbeat(db_session):
+    platform = Platform(
+        name="Watchdog platform",
+        account_username="watchdog@printerval.com",
+        session_cookie="cookie",
+        team_outsource="team-watchdog",
+    )
+    db_session.add(platform)
+    db_session.flush()
+    stale = SyncJob(
+        platform_id=platform.id,
+        job_type="status_sync",
+        scope_fingerprint="stale-job",
+        status="running",
+        worker_task_id="dead-worker",
+        last_heartbeat_at=datetime.now(UTC) - timedelta(minutes=4),
+    )
+    fresh = SyncJob(
+        platform_id=platform.id,
+        job_type="status_sync",
+        scope_fingerprint="fresh-job",
+        status="running",
+        worker_task_id="live-worker",
+        last_heartbeat_at=datetime.now(UTC),
+    )
+    db_session.add_all([stale, fresh])
+    db_session.commit()
+
+    assert reclaim_stale_sync_jobs(db_session) == 1
+
+    db_session.refresh(stale)
+    db_session.refresh(fresh)
+    assert stale.status == "failed"
+    assert stale.progress_phase == "failed"
+    assert "heartbeat" in stale.error_summary
+    assert fresh.status == "running"

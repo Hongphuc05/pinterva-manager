@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -45,6 +45,10 @@ class SyncJobOut(BaseModel):
     error_summary: str | None
     started_at: datetime | None
     finished_at: datetime | None
+    worker_task_id: str | None
+    last_heartbeat_at: datetime | None
+    progress_phase: str | None
+    current_order_code: str | None
     created_at: datetime
 
 
@@ -61,6 +65,10 @@ def _out(job: SyncJob) -> SyncJobOut:
         error_summary=job.error_summary,
         started_at=job.started_at,
         finished_at=job.finished_at,
+        worker_task_id=job.worker_task_id,
+        last_heartbeat_at=job.last_heartbeat_at,
+        progress_phase=job.progress_phase,
+        current_order_code=job.current_order_code,
         created_at=job.created_at,
     )
 

@@ -649,8 +649,7 @@ def test_api_sync_status_serializes_a_real_sync_state_row(client, db_session, mo
 
 
 def test_api_sync_status_keeps_a_healthy_long_running_full_sweep(client, db_session):
-    """A 649-order full sweep can legitimately exceed the old three-minute UI
-    timeout.  Its durable platform lease must remain visible to a reloaded SPA."""
+    """A long sweep stays running when its heartbeat is fresh, regardless of age."""
     from app.adapters.db.models import Platform, PlatformSyncState
     from app.api.deps import get_current_platform_id
 
@@ -661,7 +660,17 @@ def test_api_sync_status_keeps_a_healthy_long_running_full_sweep(client, db_sess
         PlatformSyncState(
             platform_id=platform.id,
             is_running=True,
-            last_started_at=datetime.now(UTC) - timedelta(minutes=4),
+            last_started_at=datetime.now(UTC) - timedelta(minutes=30),
+            last_heartbeat_at=datetime.now(UTC),
+            worker_task_id="celery-full-sweep-test",
+            progress={
+                "phase": "saving",
+                "processed": 400,
+                "total": 649,
+                "updated": 399,
+                "failed": 1,
+                "current_order_code": "DJ4000400",
+            },
         )
     )
     db_session.commit()
@@ -676,6 +685,40 @@ def test_api_sync_status_keeps_a_healthy_long_running_full_sweep(client, db_sess
 
     assert response.status_code == 200
     assert response.json()["is_running"] is True
+    assert response.json()["worker_task_id"] == "celery-full-sweep-test"
+    assert response.json()["progress"]["processed"] == 400
+
+
+def test_api_sync_status_is_read_only_until_watchdog_reclaims_stale_state(client, db_session):
+    from app.adapters.db.models import Platform, PlatformSyncState
+    from app.api.deps import get_current_platform_id
+
+    platform = Platform(name="P stale status", account_username="acc@example.test")
+    db_session.add(platform)
+    db_session.flush()
+    state = PlatformSyncState(
+        platform_id=platform.id,
+        is_running=True,
+        last_started_at=datetime.now(UTC) - timedelta(minutes=30),
+        last_heartbeat_at=datetime.now(UTC) - timedelta(minutes=5),
+        worker_task_id="stale-worker",
+    )
+    db_session.add(state)
+    db_session.commit()
+
+    app = client.app
+    app.dependency_overrides[get_current_platform_id] = lambda: platform.id
+    _login(client, db_session, "admin", username="stale_status_admin")
+    try:
+        response = client.get("/api/orders/sync-status")
+    finally:
+        del app.dependency_overrides[get_current_platform_id]
+
+    assert response.status_code == 200
+    assert response.json()["is_running"] is True
+    db_session.refresh(state)
+    assert state.is_running is True
+    assert state.last_error is None
 
 
 def test_api_update_order_state_flow(client, db_session):
