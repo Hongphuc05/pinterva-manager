@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Image as ImageIcon, Loader2, Plus, RefreshCw, Trash2, Upload, X } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { Loader2, Plus, QrCode, RefreshCw, Trash2, Upload, X } from 'lucide-react'
 import { apiFetch, apiFetchBlob, type ApiError } from '../api/client'
 
 export type BankQrImage = {
@@ -22,10 +23,11 @@ function errorMessage(error: unknown): string {
 export function BankQrManager() {
   const [images, setImages] = useState<BankQrImage[]>([])
   const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({})
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [replaceImageId, setReplaceImageId] = useState<string | null>(null)
+  const [isOpen, setIsOpen] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const loadImages = useCallback(async () => {
@@ -51,12 +53,21 @@ export function BankQrManager() {
   }, [])
 
   useEffect(() => {
-    void loadImages()
-  }, [loadImages])
+    if (isOpen) void loadImages()
+  }, [isOpen, loadImages])
 
   useEffect(() => () => {
     Object.values(previewUrls).forEach((url) => URL.revokeObjectURL(url))
   }, [previewUrls])
+
+  useEffect(() => {
+    if (!isOpen) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !busy) setIsOpen(false)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [busy, isOpen])
 
   const openPicker = (imageId: string | null = null) => {
     setReplaceImageId(imageId)
@@ -113,30 +124,12 @@ export function BankQrManager() {
     }
   }
 
-  return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-2xs">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4">
-        <div className="flex items-start gap-3">
-          <div className="rounded-xl border border-blue-100 bg-blue-50 p-2 text-[#0052CC]"><ImageIcon className="h-5 w-5" /></div>
-          <div>
-            <h2 className="text-sm font-bold text-slate-800">Mã QR tài khoản ngân hàng</h2>
-            <p className="mt-1 text-xs text-slate-500">Thêm tối đa 3 ảnh để Admin tiện thanh toán công.</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button type="button" onClick={() => void loadImages()} disabled={loading || busy} className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50 disabled:opacity-50" title="Tải lại ảnh QR" aria-label="Tải lại ảnh QR">
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-          </button>
-          <button type="button" onClick={() => openPicker()} disabled={busy || images.length >= 3} className="inline-flex items-center gap-1.5 rounded-lg bg-[#0052CC] px-3 py-2 text-xs font-bold text-white hover:bg-[#003D99] disabled:cursor-not-allowed disabled:opacity-50">
-            <Plus className="h-4 w-4" /> Thêm ảnh
-          </button>
-        </div>
-      </div>
-
+  const content = (
+    <div className="space-y-4">
       <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp" multiple onChange={(event) => void handleFiles(event.target.files)} className="hidden" />
 
       {error && (
-        <div className="mt-4 flex items-start justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-800">
+        <div className="flex items-start justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-800">
           <span>{error}</span>
           <button type="button" onClick={() => setError(null)} aria-label="Đóng thông báo lỗi"><X className="h-4 w-4" /></button>
         </div>
@@ -145,11 +138,11 @@ export function BankQrManager() {
       {loading ? (
         <div className="flex items-center justify-center gap-2 py-10 text-xs text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> Đang tải ảnh QR...</div>
       ) : images.length === 0 ? (
-        <button type="button" onClick={() => openPicker()} className="mt-4 flex w-full flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 py-9 text-xs text-slate-500 hover:border-blue-300 hover:bg-blue-50/40">
+        <button type="button" onClick={() => openPicker()} className="flex w-full flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 py-9 text-xs text-slate-500 hover:border-blue-300 hover:bg-blue-50/40">
           <Upload className="mb-2 h-6 w-6 text-slate-400" /> Chưa có ảnh QR — bấm để thêm ảnh
         </button>
       ) : (
-        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           {images.map((image) => (
             <div key={image.id} className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
               <div className="flex h-44 items-center justify-center bg-white p-3">
@@ -166,6 +159,49 @@ export function BankQrManager() {
           ))}
         </div>
       )}
-    </section>
+    </div>
+  )
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setIsOpen(true)}
+        className="inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-[#0052CC] shadow-2xs transition-colors hover:bg-blue-100"
+        title="Quản lý mã QR tài khoản ngân hàng"
+      >
+        <QrCode className="h-4 w-4" />
+        <span>{images.length > 0 ? `QR ngân hàng (${images.length}/3)` : 'QR ngân hàng'}</span>
+      </button>
+
+      {isOpen && createPortal(
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm" onClick={() => !busy && setIsOpen(false)}>
+          <div className="w-full max-w-3xl rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4">
+              <div className="flex items-start gap-3">
+                <div className="rounded-xl border border-blue-100 bg-blue-50 p-2 text-[#0052CC]"><QrCode className="h-5 w-5" /></div>
+                <div>
+                  <h2 className="text-sm font-bold text-slate-800">Mã QR tài khoản ngân hàng</h2>
+                  <p className="mt-1 text-xs text-slate-500">Thêm tối đa 3 ảnh để Admin tiện thanh toán công.</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => void loadImages()} disabled={loading || busy} className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-50 disabled:opacity-50" title="Tải lại ảnh QR" aria-label="Tải lại ảnh QR">
+                  <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                </button>
+                <button type="button" onClick={() => openPicker()} disabled={busy || images.length >= 3} className="inline-flex items-center gap-1.5 rounded-lg bg-[#0052CC] px-3 py-2 text-xs font-bold text-white hover:bg-[#003D99] disabled:cursor-not-allowed disabled:opacity-50">
+                  <Plus className="h-4 w-4" /> Thêm ảnh
+                </button>
+                <button type="button" onClick={() => setIsOpen(false)} disabled={busy} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50" title="Đóng" aria-label="Đóng quản lý QR">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+            <div className="mt-4">{content}</div>
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
   )
 }
