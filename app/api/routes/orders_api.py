@@ -1,4 +1,5 @@
 import base64
+import logging
 import math
 import re
 import uuid
@@ -96,6 +97,8 @@ from app.domain.access import (
     WORK_DOMAIN_STANDARD,
 )
 from app.domain.models import OrderState
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -805,6 +808,9 @@ class SyncStatusResponse(BaseModel):
     is_running: bool
     last_started_at: datetime | None = None
     last_finished_at: datetime | None = None
+    worker_task_id: str | None = None
+    last_heartbeat_at: datetime | None = None
+    progress: dict | None = None
     last_result: dict | None = None
     last_error: str | None = None
 
@@ -958,21 +964,6 @@ def api_orders_sync_status(
     state = db.get(PlatformSyncState, platform_id)
     if state is None:
         return SyncStatusResponse(is_running=False)
-
-    # The full database status sweep is intentionally allowed several minutes.
-    # Keep this recovery threshold aligned with status_sync's bounded 15-minute
-    # platform lease; otherwise a healthy full sweep could be shown as idle
-    # halfway through and a second sync could be started over it.
-    if state.is_running and state.last_started_at:
-        now = datetime.now(UTC)
-        started_at = state.last_started_at
-        if started_at.tzinfo is None:
-            started_at = started_at.replace(tzinfo=UTC)
-        if (now - started_at).total_seconds() > 15 * 60:
-            state.is_running = False
-            state.last_finished_at = now
-            state.last_error = "Đã tự động khôi phục do tác vụ đồng bộ quá thời gian (timeout)."
-            db.commit()
 
     return SyncStatusResponse.model_validate(state)
 
@@ -1562,7 +1553,13 @@ def api_download_order_work_note_attachment(
 def api_order_detail(
     order_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
-    order = get_order_detail_for_user(db, user, order_id)
+    order = get_order_detail_for_user(
+        db,
+        user,
+        order_id,
+        allow_shared_trello=user.role == ROLE_DESIGNER_TRELLO,
+        platform_id=user.platform_id,
+    )
     if order is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Order not found")
     history = get_order_history(db, order_id)

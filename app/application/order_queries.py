@@ -155,7 +155,14 @@ def list_orders_for_user(
     return query.distinct().order_by(Order.created_at.desc()).all()
 
 
-def get_order_detail_for_user(session: Session, user: User, order_id: str) -> Order | None:
+def get_order_detail_for_user(
+    session: Session,
+    user: User,
+    order_id: str,
+    *,
+    allow_shared_trello: bool = False,
+    platform_id: uuid.UUID | None = None,
+) -> Order | None:
     """Return Order detail for Admin or Designer in platform.
 
     A standard Designer can only view their own standard-domain orders. A
@@ -202,6 +209,10 @@ def get_order_detail_for_user(session: Session, user: User, order_id: str) -> Or
     if user.role == ROLE_DESIGNER_TRELLO:
         if order.work_domain != WORK_DOMAIN_DUPLICATE:
             return None
+        if allow_shared_trello:
+            if platform_id is None or order.platform_id != platform_id:
+                return None
+            return order
         assignment = (
             session.query(Assignment)
             .filter(

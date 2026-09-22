@@ -64,7 +64,9 @@ def _bank_qr_out(image: UserBankQr) -> BankQrImageOut:
         content_type=image.content_type,
         byte_size=image.byte_size,
         sort_order=image.sort_order,
-        url=f"/users/{image.user_id}/bank-qr/{image.id}",
+        # This URL is consumed directly by clients as well as through apiFetchBlob().
+        # Return the canonical API path so it cannot fall through to the SPA route.
+        url=f"/api/users/{image.user_id}/bank-qr/{image.id}",
     )
 
 
