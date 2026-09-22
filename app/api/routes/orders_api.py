@@ -1157,7 +1157,15 @@ def api_printerval_assignment(
     if payload.printerval_status not in PRINTERVAL_STATUSES:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid Printerval status")
     if designer is not None:
-        assignment = db.query(Assignment).filter(Assignment.order_id == order.id).one_or_none()
+        assignment = (
+            db.query(Assignment)
+            .filter(
+                Assignment.order_id == order.id,
+                Assignment.status.in_(("draft", "approved")),
+            )
+            .order_by(Assignment.created_at.desc())
+            .first()
+        )
         if assignment is None:
             assignment = Assignment(order_id=order.id, designer_id=designer.id, status="approved")
             db.add(assignment)
@@ -1232,7 +1240,15 @@ def api_bulk_printerval_assignment(
         requests: list[PrintervalAssignmentRequest] = []
         for order in orders:
             if designer is not None:
-                assignment = db.query(Assignment).filter(Assignment.order_id == order.id).one_or_none()
+                assignment = (
+                    db.query(Assignment)
+                    .filter(
+                        Assignment.order_id == order.id,
+                        Assignment.status.in_(("draft", "approved")),
+                    )
+                    .order_by(Assignment.created_at.desc())
+                    .first()
+                )
                 if assignment is None:
                     db.add(Assignment(order_id=order.id, designer_id=designer.id, status="approved"))
                 else:
@@ -1277,7 +1293,15 @@ def api_bulk_printerval_assignment(
 
     for order in orders:
         if designer is not None:
-            assignment = db.query(Assignment).filter(Assignment.order_id == order.id).one_or_none()
+            assignment = (
+                db.query(Assignment)
+                .filter(
+                    Assignment.order_id == order.id,
+                    Assignment.status.in_(("draft", "approved")),
+                )
+                .order_by(Assignment.created_at.desc())
+                .first()
+            )
             if assignment is None:
                 db.add(Assignment(order_id=order.id, designer_id=designer.id, status="approved"))
             else:
@@ -1762,8 +1786,12 @@ def api_assign_order(
     # Update or create assignment
     existing_assignment = (
         db.query(Assignment)
-        .filter(Assignment.order_id == order.id)
-        .one_or_none()
+        .filter(
+            Assignment.order_id == order.id,
+            Assignment.status.in_(("draft", "approved")),
+        )
+        .order_by(Assignment.created_at.desc())
+        .first()
     )
     old_designer_name = None
     if existing_assignment:
@@ -1878,8 +1906,12 @@ def api_bulk_assign_orders(
     for order in orders:
         existing_assignment = (
             db.query(Assignment)
-            .filter(Assignment.order_id == order.id)
-            .one_or_none()
+            .filter(
+                Assignment.order_id == order.id,
+                Assignment.status.in_(("draft", "approved")),
+            )
+            .order_by(Assignment.created_at.desc())
+            .first()
         )
         old_designer_name = None
         if existing_assignment:

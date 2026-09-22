@@ -182,7 +182,19 @@ def queue_assignment_command(
 
 
 def _upsert_internal_assignment(session: Session, order: Order, designer: User) -> None:
-    assignment = session.query(Assignment).filter(Assignment.order_id == order.id).one_or_none()
+    # Cancelled assignments are immutable history.  Re-assigning an order must
+    # update only its current active assignment, or create a fresh row after a
+    # revoke.  Querying the whole history with one_or_none() crashes as soon as
+    # an order has been revoked more than once.
+    assignment = (
+        session.query(Assignment)
+        .filter(
+            Assignment.order_id == order.id,
+            Assignment.status.in_(("draft", "approved")),
+        )
+        .order_by(Assignment.created_at.desc())
+        .first()
+    )
     if assignment is None:
         session.add(Assignment(order_id=order.id, designer_id=designer.id, status="approved"))
     else:

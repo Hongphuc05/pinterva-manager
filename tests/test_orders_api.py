@@ -358,6 +358,57 @@ def test_api_assignments_replaces_the_bulk_printerval_assignment_contract(client
     assert len(calls) == 2
 
 
+def test_api_assignments_can_reassign_after_cancelled_assignment_history(
+    client, db_session, monkeypatch
+):
+    """Cancelled assignment rows are history and must not block a new assignment."""
+    from app.workers import assignment_sync_tasks
+
+    monkeypatch.setattr(
+        assignment_sync_tasks.sync_printerval_assignment_request,
+        "delay",
+        lambda *_: None,
+    )
+    platform = Platform(name="P1 reassignment history", account_username="history@example.com")
+    designer = User(
+        username="history-designer",
+        full_name="History Designer",
+        role="designer",
+        password_hash="hash",
+    )
+    db_session.add_all([platform, designer])
+    db_session.flush()
+    order = Order(external_order_id="ASSIGN-AFTER-REVOKE", platform_id=platform.id)
+    db_session.add(order)
+    db_session.flush()
+    db_session.add_all(
+        [
+            Assignment(order_id=order.id, designer_id=designer.id, status="cancelled"),
+            Assignment(order_id=order.id, designer_id=designer.id, status="cancelled"),
+        ]
+    )
+    db_session.commit()
+    client.app.dependency_overrides[get_current_platform_id] = lambda: platform.id
+    _login(client, db_session, "admin", "reassign_after_revoke_admin")
+
+    try:
+        response = client.post(
+            "/api/assignments",
+            json={
+                "order_ids": [str(order.id)],
+                "designer_id": str(designer.id),
+                "printerval_designer": "History Designer - 2D Prin",
+                "printerval_status": "Doing",
+            },
+        )
+    finally:
+        del client.app.dependency_overrides[get_current_platform_id]
+
+    assert response.status_code == 202
+    assert db_session.query(Assignment).filter_by(order_id=order.id).count() == 3
+    assert db_session.query(Assignment).filter_by(order_id=order.id, status="approved").count() == 1
+
+
 def test_api_assignments_queues_status_only_requests(client, db_session, monkeypatch):
     from app.workers import assignment_sync_tasks
 
