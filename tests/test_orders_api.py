@@ -780,6 +780,7 @@ def test_resolve_missing_template_returns_assigned_order_to_doing(client, db_ses
         platform_id=platform.id,
         state=OrderState.IN_PROGRESS.value,
         template_missing=True,
+        is_paid=True,
         note_outsource="Printerval QC outsource note",
     )
     db_session.add(order)
@@ -788,6 +789,11 @@ def test_resolve_missing_template_returns_assigned_order_to_doing(client, db_ses
     db_session.add(assignment)
     db_session.commit()
     _login(client, db_session, "admin", username="missing-template-admin")
+
+    detail_before = client.get(f"/api/orders/{order.id}")
+    assert detail_before.status_code == 200
+    assert detail_before.json()["order"]["template_missing"] is True
+    assert detail_before.json()["order"]["is_paid"] is True
 
     response = client.post(
         f"/api/orders/{order.id}/resolve-missing-template",
@@ -799,10 +805,16 @@ def test_resolve_missing_template_returns_assigned_order_to_doing(client, db_ses
     db_session.refresh(order)
     db_session.refresh(assignment)
     assert order.template_missing is False
+    assert response.json()["template_resolved_at"] is not None
     assert order.designer_note == "Temp: https://example.com/template"
     assert order.suppress_note_outsource_for_designer is True
     assert assignment.sub_status == "doing"
     assert order.template_resolved_at is not None
+
+    detail_after = client.get(f"/api/orders/{order.id}")
+    assert detail_after.status_code == 200
+    assert detail_after.json()["order"]["template_missing"] is False
+    assert detail_after.json()["order"]["is_paid"] is True
 
     # The resolved template note is explicitly released to the assigned
     # Designer, while the upstream source note remains private.

@@ -690,6 +690,7 @@ class OrderDetailOut(BaseModel):
     designer_note: str = ""
     designer_note_released_for_fix: bool = False
     template_missing: bool = False
+    template_resolved_at: datetime | None = None
     suppress_note_outsource_for_designer: bool = False
     duplicate_check_status: str = "uncheck"
     custom_config: dict | None
@@ -709,6 +710,8 @@ class OrderDetailOut(BaseModel):
     printerval_status: str | None = None
     platform_status: str | None = None
     status_changed_at: datetime | None = None
+    is_paid: bool = False
+    paid_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

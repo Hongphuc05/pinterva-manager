@@ -151,6 +151,8 @@ class DesignerOrderDetailOut(BaseModel):
     template_missing: bool = False
     template_resolved_at: Any | None = None
     duplicate_check_status: str = "uncheck"
+    is_paid: bool = False
+    paid_at: Any | None = None
     custom_config: dict | None = None
     product_skus: list[dict] | None = None
     assigned_designer_name: str | None = None

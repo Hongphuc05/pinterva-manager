@@ -69,6 +69,10 @@ type OrderDetail = {
   fix_return_count?: number
   designer_note: string
   template_missing: boolean
+  template_resolved_at?: string | null
+  is_paid?: boolean
+  paid_at?: string | null
+  duplicate_check_status?: string
   custom_config: {
     original: { key: string; value: string }[]
     translated_vn?: { key: string; value: string }[]
@@ -126,6 +130,7 @@ export function OrderDetailPage() {
   const [actionError, setActionError] = useState<string | null>(null)
   const [actionSuccess, setActionSuccess] = useState<string | null>(null)
   const [flaggingMissingTemplate, setFlaggingMissingTemplate] = useState(false)
+  const [resolvingMissingTemplate, setResolvingMissingTemplate] = useState(false)
   const [fixActionModal, setFixActionModal] = useState<{
     isOpen: boolean
     mode: 'approve' | 'reject'
@@ -187,6 +192,26 @@ export function OrderDetailPage() {
       setActionError(caught instanceof ApiError ? caught.message : 'Không thể báo thiếu temp.')
     } finally {
       setFlaggingMissingTemplate(false)
+    }
+  }
+
+  async function resolveMissingTemplate() {
+    if (!order?.template_missing) return
+    setResolvingMissingTemplate(true)
+    setActionError(null)
+    setActionSuccess(null)
+    try {
+      await apiFetch(`/orders/${order.id}/resolve-missing-template`, {
+        method: 'POST',
+        body: JSON.stringify({ expected_version: order.version }),
+      })
+      setActionSuccess('Đã cập nhật temp. Tag thiếu temp được gỡ và đơn đã trả về Doing.')
+      window.dispatchEvent(new CustomEvent('orders-updated'))
+      await loadOrderDetail()
+    } catch (caught) {
+      setActionError(caught instanceof ApiError ? caught.message : 'Không thể cập nhật temp cho đơn này.')
+    } finally {
+      setResolvingMissingTemplate(false)
     }
   }
 
@@ -619,9 +644,21 @@ export function OrderDetailPage() {
                     <span>DES: {order.assigned_designer_name}</span>
                   </span>
                 )}
-                {(order.fix_return_count || 0) > 0 && (
+                {order.template_missing && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-rose-50 text-rose-700 text-xs font-bold border border-rose-200">
+                    <Flag className="h-3.5 w-3.5" />
+                    <span>Thiếu temp</span>
+                  </span>
+                )}
+                {order.is_paid && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-700 text-xs font-bold border border-emerald-200">
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    <span>Đã thanh toán</span>
+                  </span>
+                )}
+                {hasFixTag && (
                   <span className="inline-flex items-center px-2.5 py-1 rounded-md bg-orange-50 text-orange-800 text-xs font-bold border border-orange-200" title="Số lần Printerval trả đơn về Fix">
-                    Fix × {order.fix_return_count}
+                    Fix × {order.fix_return_count || 1}
                   </span>
                 )}
                 {isAdmin && order.platform_designer && (
@@ -700,6 +737,17 @@ export function OrderDetailPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3 shrink-0">
+            {isAdmin && order.template_missing && (
+              <button
+                type="button"
+                onClick={resolveMissingTemplate}
+                disabled={resolvingMissingTemplate || busyAssignment}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-xl transition-colors border border-emerald-200 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {resolvingMissingTemplate ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                <span>{resolvingMissingTemplate ? 'Đang cập nhật…' : 'Cập nhật temp'}</span>
+              </button>
+            )}
             {sampleMockupUrl && (
               <button
                 type="button"
