@@ -30,6 +30,7 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
   const [fastSyncError, setFastSyncError] = useState<string | null>(null)
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false)
   const { status: syncStatus, triggerRun } = useSyncStatus()
+  const isManager = user?.role === 'admin' || user?.role === 'support'
   const isStatusSyncing = isFastSyncing || syncStatus?.is_running === true
   const syncProgress = syncStatus?.progress
   const syncProcessed = typeof syncProgress?.processed === 'number' ? syncProgress.processed : null
@@ -333,47 +334,48 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
           </>
         )}
 
-        {/* Status-sync indicator: green = idle/ok, red = last run errored, spins
-            while actively syncing. Refreshes the orders present in the currently active tab. */}
-        <button
-          type="button"
-          onClick={handleSyncAllOrders}
-          disabled={isStatusSyncing}
-          title={
-            isStatusSyncing
-              ? `Đang ${syncPhase || 'đồng bộ'}${syncProcessed !== null && syncTotal !== null ? ` ${syncProcessed}/${syncTotal}` : ''}${syncCurrentOrder ? ` · ${syncCurrentOrder}` : ''}`
-              : fastSyncError || syncStatus?.last_error
-              ? `Lần đồng bộ trước lỗi: ${fastSyncError || syncStatus?.last_error}`
-              : 'Bấm để đồng bộ lại trạng thái toàn bộ đơn hàng trong database từ Hệ thống mẹ'
-          }
-          className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold transition-all cursor-pointer disabled:cursor-wait ${
-            isStatusSyncing
-              ? 'bg-blue-50/90 border-blue-200 text-[#0052CC] shadow-xs'
-              : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:border-slate-300 shadow-2xs'
-          }`}
-        >
-          <RefreshCw
-            className={`h-4 w-4 shrink-0 ${
-              isStatusSyncing ? 'animate-spin text-[#0052CC]' : 'text-slate-500'
-            }`}
-          />
-          <span>
-            {isStatusSyncing
-              ? syncProcessed !== null && syncTotal !== null && syncTotal > 0
-                ? `Đang đồng bộ ${syncProcessed}/${syncTotal}`
-                : 'Đang đồng bộ'
-              : 'Đồng bộ'}
-          </span>
-          <span
-            className={`h-2 w-2 rounded-full shrink-0 ${
+        {/* Status-sync indicator: only managers need the global manual trigger. */}
+        {isManager && (
+          <button
+            type="button"
+            onClick={handleSyncAllOrders}
+            disabled={isStatusSyncing}
+            title={
               isStatusSyncing
-                ? 'bg-[#0052CC] animate-pulse'
+                ? `Đang ${syncPhase || 'đồng bộ'}${syncProcessed !== null && syncTotal !== null ? ` ${syncProcessed}/${syncTotal}` : ''}${syncCurrentOrder ? ` · ${syncCurrentOrder}` : ''}`
                 : fastSyncError || syncStatus?.last_error
-                ? 'bg-red-500'
-                : 'bg-emerald-500'
+                ? `Lần đồng bộ trước lỗi: ${fastSyncError || syncStatus?.last_error}`
+                : 'Bấm để đồng bộ lại trạng thái toàn bộ đơn hàng trong database từ Hệ thống mẹ'
+            }
+            className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold transition-all cursor-pointer disabled:cursor-wait ${
+              isStatusSyncing
+                ? 'bg-blue-50/90 border-blue-200 text-[#0052CC] shadow-xs'
+                : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:border-slate-300 shadow-2xs'
             }`}
-          />
-        </button>
+          >
+            <RefreshCw
+              className={`h-4 w-4 shrink-0 ${
+                isStatusSyncing ? 'animate-spin text-[#0052CC]' : 'text-slate-500'
+              }`}
+            />
+            <span>
+              {isStatusSyncing
+                ? syncProcessed !== null && syncTotal !== null && syncTotal > 0
+                  ? `Đang đồng bộ ${syncProcessed}/${syncTotal}`
+                  : 'Đang đồng bộ'
+                : 'Đồng bộ'}
+            </span>
+            <span
+              className={`h-2 w-2 rounded-full shrink-0 ${
+                isStatusSyncing
+                  ? 'bg-[#0052CC] animate-pulse'
+                  : fastSyncError || syncStatus?.last_error
+                  ? 'bg-red-500'
+                  : 'bg-emerald-500'
+              }`}
+            />
+          </button>
+        )}
 
         {/* Telegram Bot Connection */}
         <button

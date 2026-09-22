@@ -2053,24 +2053,26 @@ export function OrdersListPage() {
 
           {/* Filters */}
           <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
-            {/* Tacahu Status Filter */}
-            <div className="flex items-center gap-1.5">
-              <Filter className="h-3.5 w-3.5 text-slate-400" />
-              <select
-                className="text-xs border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 font-medium focus:outline-none focus:border-[#0052CC]"
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                title="Lọc theo trạng thái Tacahu"
-              >
-                <option value="">Tất cả Trạng Thái</option>
-                <option value="WAITING">Waiting (Chờ chia / Chờ phân công)</option>
-                <option value="DOING">Doing (Đang thực hiện)</option>
-                <option value="REVIEW">Review (Chờ duyệt / Nộp bài)</option>
-                <option value="FIX">Fix (Yêu cầu sửa lại)</option>
-                <option value="DONE">Done (Đã hoàn thành / Claim)</option>
-                <option value="CANCELLED">Cancelled (Đã hủy)</option>
-              </select>
-            </div>
+            {/* Tacahu Status Filter (manager-only; Designer already has status tabs) */}
+            {isManager && (
+              <div className="flex items-center gap-1.5">
+                <Filter className="h-3.5 w-3.5 text-slate-400" />
+                <select
+                  className="text-xs border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 font-medium focus:outline-none focus:border-[#0052CC]"
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  title="Lọc theo trạng thái Tacahu"
+                >
+                  <option value="">Tất cả Trạng Thái</option>
+                  <option value="WAITING">Waiting (Chờ chia / Chờ phân công)</option>
+                  <option value="DOING">Doing (Đang thực hiện)</option>
+                  <option value="REVIEW">Review (Chờ duyệt / Nộp bài)</option>
+                  <option value="FIX">Fix (Yêu cầu sửa lại)</option>
+                  <option value="DONE">Done (Đã hoàn thành / Claim)</option>
+                  <option value="CANCELLED">Cancelled (Đã hủy)</option>
+                </select>
+              </div>
+            )}
 
             {/* Web mẹ Status Filter (Admin only) */}
             {isAdmin && (
