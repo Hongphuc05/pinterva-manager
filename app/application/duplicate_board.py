@@ -47,7 +47,14 @@ def remove_duplicate_from_backlog(session: Session, *, actor: User, platform_id:
     if actor.role not in (ROLE_ADMIN, ROLE_SUPPORT, ROLE_DESIGNER_TRELLO):
         raise DuplicateBoardError("Bạn không có quyền hủy đơn trùng lặp")
     active = _active_assignments(session, order.id, lock=True)
-    if active or order.template_missing or order.state != OrderState.IN_PROGRESS.value:
+    # A card released back to the shared "Đơn hàng" column becomes WAITING.
+    # A newly flagged duplicate reaches the same unclaimed column as
+    # IN_PROGRESS.  Both are safe to return to the ordinary queue; active
+    # assignments and missing-template cards remain blocked.
+    if active or order.template_missing or order.state not in (
+        OrderState.IN_PROGRESS.value,
+        OrderState.WAITING.value,
+    ):
         raise DuplicateBoardError("Chỉ được hủy đơn đang ở cột Đơn hàng chưa có Designer nhận")
     old_state = order.state
     order.work_domain = WORK_DOMAIN_STANDARD

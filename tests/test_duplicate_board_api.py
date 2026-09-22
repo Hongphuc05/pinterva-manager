@@ -130,6 +130,37 @@ def test_admin_can_put_orders_in_duplicate_domain_and_board_shows_missing_form(
     assert board.json()["cross_designer_drag_enabled"] is True
 
 
+def test_admin_can_remove_an_unassigned_waiting_duplicate_from_board(client, db_session):
+    platform = _platform(db_session)
+    _admin, headers = _login(client, db_session, "admin", "remove-waiting-duplicate", platform.id)
+    order = Order(
+        external_order_id="DUP-REMOVE-WAITING",
+        platform_id=platform.id,
+        work_domain="duplicate",
+        duplicate_check_status="duplicate",
+        state="WAITING",
+        template_missing=False,
+    )
+    db_session.add(order)
+    db_session.commit()
+    client.app.dependency_overrides[get_current_platform_id] = lambda: platform.id
+
+    try:
+        response = client.post(
+            "/api/duplicate-board/remove-from-duplicate",
+            json={"order_id": str(order.id), "expected_version": order.version},
+            headers=headers,
+        )
+    finally:
+        del client.app.dependency_overrides[get_current_platform_id]
+
+    assert response.status_code == 200
+    db_session.refresh(order)
+    assert order.work_domain == "standard"
+    assert order.duplicate_check_status == "uncheck"
+    assert order.state == "WAITING"
+
+
 def test_trello_designers_can_view_every_duplicate_card_and_latest_submission_link(client, db_session):
     platform = _platform(db_session, "Shared Trello board")
     viewer, headers = _login(client, db_session, "designer-trello", "trello-viewer", platform.id)
