@@ -333,15 +333,42 @@ export function OrderDetailPage() {
     )
   }
 
-  if (status === 'not-found' || !order) {
+  if (status === 'not-found') {
     return (
       <DashboardLayout>
         <div className="p-8 text-center bg-white rounded-xl border border-slate-200 shadow-xs text-slate-500">
           <AlertCircle className="h-10 w-10 mx-auto text-amber-500 mb-2" />
           <h2 className="text-base font-bold text-slate-800">Không Tìm Thấy Đơn Hàng</h2>
-          <Link to={returnTo} className="text-xs font-semibold text-[#0052CC] hover:underline mt-2 inline-block">
+          <p className="text-xs text-slate-500 mt-1">Mã đơn hàng không tồn tại hoặc đã bị xóa khỏi hệ thống.</p>
+          <Link to={returnTo} className="text-xs font-semibold text-[#0052CC] hover:underline mt-3 inline-block">
             ← Quay lại danh sách đơn hàng
           </Link>
+        </div>
+      </DashboardLayout>
+    )
+  }
+
+  if (status === 'error' || !order) {
+    return (
+      <DashboardLayout>
+        <div className="p-8 text-center bg-white rounded-xl border border-slate-200 shadow-xs text-slate-500">
+          <AlertCircle className="h-10 w-10 mx-auto text-rose-500 mb-2" />
+          <h2 className="text-base font-bold text-slate-800">Không Thể Tải Chi Tiết Đơn Hàng</h2>
+          <p className="text-xs text-slate-500 mt-1">Đã có lỗi kết nối mạng hoặc phản hồi từ máy chủ bị gián đoạn.</p>
+          <div className="mt-4 flex items-center justify-center gap-3">
+            <button
+              onClick={() => {
+                setStatus('loading')
+                loadOrderDetail()
+              }}
+              className="px-3.5 py-1.5 text-xs font-semibold bg-[#0052CC] text-white rounded-lg hover:bg-blue-700 cursor-pointer shadow-2xs"
+            >
+              Thử tải lại ngay
+            </button>
+            <Link to={returnTo} className="text-xs font-semibold text-slate-600 hover:underline">
+              ← Quay lại danh sách
+            </Link>
+          </div>
         </div>
       </DashboardLayout>
     )
