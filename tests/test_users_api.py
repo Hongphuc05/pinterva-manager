@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from app.adapters.db.models import Platform, User
 from app.api.deps import get_db
 from app.api.main import create_app
+from app.api.routes import users_api
 from app.application.auth import hash_password
 
 
@@ -206,6 +207,76 @@ def test_password_endpoints_require_admin(client, db_session):
         f"/api/users/{designer_user.id}/password", headers={"Authorization": f"Bearer {token}"}
     )
     assert resp.status_code == 403
+
+
+def test_designer_can_manage_private_bank_qr_images_and_admin_can_view_them(client, db_session, tmp_path, monkeypatch):
+    platform = Platform(name="QR platform", account_username="qr@printerval.com")
+    db_session.add(platform)
+    db_session.flush()
+    designer = User(
+        username="qr_designer",
+        full_name="QR Designer",
+        role="designer",
+        password_hash=hash_password("pass123"),
+        platform_id=platform.id,
+        active=True,
+    )
+    admin = User(
+        username="qr_admin",
+        full_name="QR Admin",
+        role="admin",
+        password_hash=hash_password("pass123"),
+        platform_id=platform.id,
+        active=True,
+    )
+    db_session.add_all([designer, admin])
+    db_session.commit()
+    monkeypatch.setattr(users_api, "BANK_QR_ASSETS_DIR", tmp_path / "bank_qr")
+
+    designer_token = client.post("/api/login", json={"username": "qr_designer", "password": "pass123"}).json()["access_token"]
+    headers = {"Authorization": f"Bearer {designer_token}"}
+    png = b"\x89PNG\r\n\x1a\nqr-image"
+
+    assert client.get("/api/users/me/bank-qr", headers=headers).json() == {"images": []}
+    created = []
+    for index in range(3):
+        response = client.post(
+            "/api/users/me/bank-qr",
+            headers=headers,
+            files={"file": (f"qr-{index}.png", png + bytes([index]), "image/png")},
+        )
+        assert response.status_code == 201
+        created.append(response.json())
+
+    limit_response = client.post(
+        "/api/users/me/bank-qr",
+        headers=headers,
+        files={"file": ("qr-extra.png", png, "image/png")},
+    )
+    assert limit_response.status_code == 409
+
+    replacement = client.post(
+        f"/api/users/me/bank-qr?replace_image_id={created[0]['id']}",
+        headers=headers,
+        files={"file": ("new-qr.webp", b"RIFF0000WEBPnew", "image/webp")},
+    )
+    assert replacement.status_code == 201
+    assert replacement.json()["id"] == created[0]["id"]
+    assert replacement.json()["filename"] == "new-qr.webp"
+
+    admin_token = client.post("/api/login", json={"username": "qr_admin", "password": "pass123"}).json()["access_token"]
+    admin_headers = {"Authorization": f"Bearer {admin_token}", "X-Platform-Id": str(platform.id)}
+    listing = client.get(f"/api/users/{designer.id}/bank-qr", headers=admin_headers)
+    assert listing.status_code == 200
+    assert len(listing.json()["images"]) == 3
+
+    image_response = client.get(listing.json()["images"][0]["url"], headers=admin_headers)
+    assert image_response.status_code == 200
+    assert image_response.headers["cache-control"] == "private, no-store"
+
+    deleted = client.delete(f"/api/users/me/bank-qr/{created[1]['id']}", headers=headers)
+    assert deleted.status_code == 204
+    assert len(client.get("/api/users/me/bank-qr", headers=headers).json()["images"]) == 2
 
 
 def test_users_are_scoped_to_the_admin_selected_platform(client, db_session):

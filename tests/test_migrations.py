@@ -15,6 +15,7 @@ EXPECTED_TABLES = {
     "outbox",
     "dead_letters",
     "printerval_assignment_requests",
+    "user_bank_qr_images",
     "alembic_version",
 }
 

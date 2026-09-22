@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 import { apiFetch } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
@@ -124,8 +125,6 @@ export function OrderHistoryTimelineModal({
     return true
   })
 
-  if (!isOpen) return null
-
   function getActionBadge(event: OrderTimelineEvent) {
     const act = (event.action || '').toUpperCase()
     if (act === 'APPROVE_DONE') {
@@ -192,9 +191,11 @@ export function OrderHistoryTimelineModal({
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isOpen, onClose])
 
-  return (
+  if (!isOpen) return null
+
+  return createPortal((
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150"
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150"
       onClick={onClose}
     >
       <div
@@ -372,5 +373,5 @@ export function OrderHistoryTimelineModal({
         </div>
       </div>
     </div>
-  )
+  ), document.body)
 }

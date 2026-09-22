@@ -656,7 +656,7 @@ def api_trigger_order_gallery_sync(
 class ResultVersionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
-    drive_url: str
+    drive_url: str = ""
     version_marker: int
     submitted_at: datetime | None = None
     qc_feedback: str | None = None
@@ -1573,78 +1573,147 @@ def api_order_detail(
         .filter(Assignment.order_id == order.id, Assignment.status != "cancelled")
         .first()
     )
-    order_out = OrderDetailOut.model_validate(order)
-    from app.adapters.printerval.row_mapper import normalize_order_custom_config_and_sources
-    norm_config, norm_sources = normalize_order_custom_config_and_sources(
-        order.custom_config, order.source_files, order.product_skus
-    )
-    if norm_config is not None:
-        order_out.custom_config = norm_config
-    if norm_sources is not None:
-        order_out.source_files = norm_sources
+
+    # 1. Defensive model validation for order_out
+    try:
+        order_out = OrderDetailOut.model_validate(order)
+    except Exception as exc:
+        logger.warning("Pydantic validation fallback for order %s: %s", order.id, exc)
+        clean_config = order.custom_config if isinstance(order.custom_config, dict) else None
+        clean_sources = order.source_files if isinstance(order.source_files, list) else None
+        clean_skus = order.product_skus if isinstance(order.product_skus, list) else None
+        clean_variants = order.product_variants if isinstance(order.product_variants, list) else None
+
+        raw_dict = {
+            "id": order.id,
+            "version": order.version,
+            "external_order_id": order.external_order_id,
+            "state": order.state,
+            "work_domain": order.work_domain or "standard",
+            "batch_id": order.batch_id,
+            "product_name": order.product_name,
+            "thumbnail_url": order.thumbnail_url,
+            "sku": order.sku,
+            "product_category": order.product_category,
+            "product_variants": clean_variants,
+            "multiple_design": bool(order.multiple_design),
+            "double_sided": bool(order.double_sided),
+            "priority_label": order.priority_label,
+            "deadline_at_ext": order.deadline_at_ext,
+            "deadline_tacahu": order.deadline_tacahu,
+            "order_created_at_ext": order.order_created_at_ext,
+            "created_at_ext": order.created_at_ext,
+            "note_outsource": order.note_outsource or "",
+            "previous_note_outsource": order.previous_note_outsource,
+            "fix_approved_by_admin": bool(order.fix_approved_by_admin),
+            "fix_rejected_by_admin": bool(order.fix_rejected_by_admin),
+            "fix_return_count": order.fix_return_count or 0,
+            "designer_note": order.designer_note or "",
+            "designer_note_released_for_fix": bool(order.designer_note_released_for_fix),
+            "template_missing": bool(order.template_missing),
+            "template_resolved_at": order.template_resolved_at,
+            "suppress_note_outsource_for_designer": bool(order.suppress_note_outsource_for_designer),
+            "duplicate_check_status": order.duplicate_check_status or "uncheck",
+            "custom_config": clean_config,
+            "product_skus": clean_skus,
+            "source_files": clean_sources,
+            "product_image_urls": order.product_image_urls,
+            "printerval_designer": order.printerval_designer,
+            "platform_designer": order.printerval_designer,
+            "printerval_status": order.printerval_status,
+            "platform_status": order.printerval_status,
+            "status_changed_at": order.status_changed_at,
+            "is_paid": bool(order.is_paid),
+            "paid_at": order.paid_at,
+            "created_at": order.created_at,
+            "updated_at": order.updated_at,
+        }
+        order_out = OrderDetailOut.model_validate(raw_dict)
+
+    # 2. Defensive custom config & sources normalization
+    try:
+        from app.adapters.printerval.row_mapper import normalize_order_custom_config_and_sources
+        norm_config, norm_sources = normalize_order_custom_config_and_sources(
+            order.custom_config, order.source_files, order.product_skus
+        )
+        if norm_config is not None:
+            order_out.custom_config = norm_config
+        if norm_sources is not None:
+            order_out.source_files = norm_sources
+    except Exception as exc:
+        logger.warning("Normalizer exception for order %s: %s", order.id, exc)
 
     if not order_out.product_image_urls and order.thumbnail_url:
         order_out.product_image_urls = [order.thumbnail_url]
+
     if assignment:
         asgn_obj, des_user = assignment
         order_out.assigned_designer_name = des_user.full_name or des_user.username
         order_out.assignment_id = asgn_obj.id
         order_out.sub_status = asgn_obj.sub_status
-        versions = (
-            db.query(ResultVersion)
-            .filter(ResultVersion.assignment_id == asgn_obj.id)
-            .order_by(ResultVersion.version_marker.asc())
-            .all()
-        )
-        order_out.result_versions = [
-            ResultVersionOut.model_validate(v) for v in versions
-        ]
-
+        try:
+            versions = (
+                db.query(ResultVersion)
+                .filter(ResultVersion.assignment_id == asgn_obj.id)
+                .order_by(ResultVersion.version_marker.asc())
+                .all()
+            )
+            order_out.result_versions = [
+                ResultVersionOut.model_validate(v) for v in versions
+            ]
+        except Exception as exc:
+            logger.warning("ResultVersion validation error for order %s: %s", order.id, exc)
+            order_out.result_versions = []
 
     actor_ids = {e.actor_id for e in history if e.actor_id}
     actors_map = {}
     if actor_ids:
-        users = db.query(User).filter(User.id.in_(actor_ids)).all()
-        actors_map = {u.id: (u.full_name or u.username, u.role) for u in users}
+        try:
+            users = db.query(User).filter(User.id.in_(actor_ids)).all()
+            actors_map = {u.id: (u.full_name or u.username, u.role) for u in users}
+        except Exception:
+            pass
 
     history_out = []
     for e in history:
-        actor_info = actors_map.get(e.actor_id)
-        actor_name = (e.evidence or {}).get("actor_name") or (actor_info[0] if actor_info else None)
-        actor_role = (e.evidence or {}).get("actor_role") or (actor_info[1] if actor_info else None)
-        action = (e.evidence or {}).get("action")
-        designer_name = (e.evidence or {}).get("designer_name")
-        description = format_event_description(
-            from_state=e.from_state,
-            to_state=e.to_state,
-            action=action,
-            actor_name=actor_name,
-            actor_role=actor_role,
-            designer_name=designer_name,
-            raw_desc=(e.evidence or {}).get("description"),
-        )
-
-        history_out.append(
-            WorkflowEventOut(
-                id=str(e.id),
-                created_at=e.created_at,
+        try:
+            ev_dict = e.evidence if isinstance(e.evidence, dict) else {}
+            actor_info = actors_map.get(e.actor_id)
+            actor_name = ev_dict.get("actor_name") or (actor_info[0] if actor_info else None)
+            actor_role = ev_dict.get("actor_role") or (actor_info[1] if actor_info else None)
+            action = ev_dict.get("action")
+            designer_name = ev_dict.get("designer_name")
+            description = format_event_description(
                 from_state=e.from_state,
                 to_state=e.to_state,
-                actor_id=str(e.actor_id) if e.actor_id else None,
+                action=action,
                 actor_name=actor_name,
                 actor_role=actor_role,
-                action=action,
-                description=description,
                 designer_name=designer_name,
-                evidence=e.evidence,
+                raw_desc=ev_dict.get("description"),
             )
-        )
+
+            history_out.append(
+                WorkflowEventOut(
+                    id=str(e.id),
+                    created_at=e.created_at,
+                    from_state=e.from_state,
+                    to_state=e.to_state,
+                    actor_id=str(e.actor_id) if e.actor_id else None,
+                    actor_name=actor_name,
+                    actor_role=actor_role,
+                    action=action,
+                    description=description,
+                    designer_name=designer_name,
+                    evidence=ev_dict,
+                )
+            )
+        except Exception as exc:
+            logger.warning("History event parsing exception for event %s: %s", getattr(e, 'id', None), exc)
 
     is_admin = user.role == ROLE_ADMIN
     if not is_admin:
         order_out = sanitize_order_detail_for_designer(order_out)
-        # Audit history belongs to Admin operations. Do not return it to
-        # Designers, including through DevTools/network inspection.
         history_out = []
 
     return OrderDetailResponse(

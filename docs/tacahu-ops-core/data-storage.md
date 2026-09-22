@@ -19,6 +19,7 @@ workflow Tacahu.
 | Phân công và QC | assignment, submission/result version, approval, Fix | PostgreSQL | Link bài nộp và feedback thuộc record nghiệp vụ/audit. |
 | Audit và integration | workflow event, operation/idempotency, outbox, dead letter, external observation, sync job | PostgreSQL | Dùng để đối soát retry, external write và lỗi async. |
 | Note làm việc | body, author, read state, metadata attachment | PostgreSQL | Bytes screenshot/ảnh được tách khỏi DB. |
+| QR ngân hàng Designer/Support | user, thứ tự, metadata ảnh | PostgreSQL + `private_work_note_assets/bank_qr` | Chỉ endpoint có authorization mới đọc được; tối đa 3 ảnh/tài khoản. |
 | Asset đã tải | crawled asset, source/order asset, checksum/storage location | PostgreSQL metadata + VPS filesystem | File bytes nằm dưới `DATA_DIR/crawled_assets` hoặc `DATA_DIR/order_assets`. |
 | Browser/platform runtime | session/profile, Playwright evidence | VPS filesystem | Dưới `DATA_DIR/platform_data`, `chrome_profiles`, `playwright_evidence`; cần bảo vệ như credential/evidence. |
 | Queue/cache | Celery message, schedule runtime, Redis AOF | Redis tại `DATA_DIR/redis` | Không dùng để khôi phục business state. |
@@ -33,7 +34,7 @@ postgres/             PostgreSQL data directory
 redis/                Redis AOF
 crawled_assets/       ảnh/tệp lấy khi crawl
 order_assets/         source/order asset đã lưu cục bộ
-private_work_note_assets/ screenshot/ảnh private của Note làm việc
+private_work_note_assets/ screenshot/ảnh private của Note làm việc; QR ngân hàng nằm trong thư mục con `bank_qr/`
 platform_data/        dữ liệu runtime platform
 playwright_evidence/  evidence browser automation
 chrome_profiles/      Chrome profile/session

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { X, ChevronLeft, ChevronRight, Copy, Check, ExternalLink, Download } from 'lucide-react'
 import { resolveAssetUrl } from '../api/client'
 
@@ -72,9 +73,9 @@ export function ImageModal({
     setTimeout(() => setCopied(false), 1500)
   }
 
-  return (
+  return createPortal((
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-3 md:p-6 animate-in fade-in duration-200"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-3 md:p-6 animate-in fade-in duration-200"
       onClick={onClose}
     >
       <div
@@ -222,5 +223,5 @@ export function ImageModal({
         )}
       </div>
     </div>
-  )
+  ), document.body)
 }

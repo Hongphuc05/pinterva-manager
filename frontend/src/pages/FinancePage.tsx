@@ -8,6 +8,8 @@ import { Pagination } from '../components/Pagination'
 import { ImageModal } from '../components/ImageModal'
 import { CopyableOrderCode } from '../components/CopyableOrderCode'
 import { OrderHistoryTimelineModal } from '../components/OrderHistoryTimelineModal'
+import { BankQrManager } from '../components/BankQrManager'
+import { BankQrViewerModal } from '../components/BankQrViewerModal'
 import { getStatusInfo, resolveExternalUrl } from '../utils/statusTranslation'
 import { readViewState, writeViewState } from '../utils/viewState'
 import {
@@ -34,7 +36,8 @@ import {
   History,
   Check,
   Download,
-  CreditCard
+  CreditCard,
+  QrCode,
 } from 'lucide-react'
 
 function parseUtcDate(dateInput: string | null | undefined): Date | null {
@@ -228,6 +231,7 @@ export function FinancePage() {
   const location = useLocation()
   const { showToast } = useToast()
   const isAdmin = user?.role === 'admin'
+  const canManageBankQr = user?.role === 'designer' || user?.role === 'designer-trello' || user?.role === 'support'
   const [restoredViewState] = useState(() => readViewState('finance', user?.role, {
     activeMainTab: 'finance',
     paymentSubTab: 'unpaid',
@@ -312,6 +316,7 @@ export function FinancePage() {
 
   // Modal for Designer detail tasks (Admin)
   const [selectedDesignerForModal, setSelectedDesignerForModal] = useState<DesignerSummary | null>(null)
+  const [qrDesigner, setQrDesigner] = useState<DesignerSummary | null>(null)
   const [selectedWeekStart, setSelectedWeekStart] = useState<Date>(() => getStartOfWeekMonday())
   const [modalPaymentTab, setModalPaymentTab] = useState<'unpaid' | 'paid'>('unpaid')
   const [modalTasks, setModalTasks] = useState<CreditedTask[]>([])
@@ -600,7 +605,7 @@ export function FinancePage() {
     try {
       const params = new URLSearchParams()
       params.set('page', '1')
-      params.set('page_size', '10000')
+      params.set('page_size', '50')
       params.set('designer_id', selectedDesignerForModal.designer_id || selectedDesignerForModal.username || selectedDesignerForModal.designer_name)
 
       const res = await apiFetch<FinanceStatsResponse>(`/finance/stats?${params.toString()}`)
@@ -910,12 +915,13 @@ export function FinancePage() {
       if (e.key === 'Escape') {
         if (exportModalOpen) setExportModalOpen(false)
         else if (noteModalOpen) setNoteModalOpen(false)
+        else if (qrDesigner) setQrDesigner(null)
         else if (selectedDesignerForModal) setSelectedDesignerForModal(null)
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [exportModalOpen, noteModalOpen, selectedDesignerForModal])
+  }, [exportModalOpen, noteModalOpen, qrDesigner, selectedDesignerForModal])
 
   return (
     <DashboardLayout>
@@ -1106,6 +1112,7 @@ export function FinancePage() {
       {/* ========================================================================= */}
       {activeMainTab === 'finance' && (
         <div className="space-y-6">
+          {canManageBankQr && <BankQrManager />}
           {/* Main Page Week Navigation & Filter Bar */}
           <div className="bg-white rounded-2xl border border-slate-200 p-3.5 shadow-2xs flex items-center justify-between flex-wrap gap-3">
             <div className="flex items-center gap-2 flex-wrap">
@@ -2281,7 +2288,7 @@ export function FinancePage() {
       {/* MODAL: EXPORT EXCEL                                                       */}
       {/* ========================================================================= */}
       {exportModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4 animate-in fade-in duration-150">
           <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl border border-slate-200 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
@@ -2425,7 +2432,7 @@ export function FinancePage() {
       {/* MODAL: ADD / EDIT NOTE                                                    */}
       {/* ========================================================================= */}
       {noteModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4 animate-in fade-in duration-150">
           <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl border border-slate-200 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
@@ -2553,7 +2560,7 @@ export function FinancePage() {
       {/* ========================================================================= */}
   {/* MODAL: DESIGNER DETAIL TASKS & FINANCE (ADMIN)                            */}
   {/* ========================================================================= */}
-  {selectedDesignerForModal && (
+      {selectedDesignerForModal && (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4 animate-in fade-in duration-150">
       <div className="w-full max-w-6xl h-[88vh] min-h-[550px] max-h-[92vh] flex flex-col rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
             {/* Modal Header */}
@@ -2576,6 +2583,16 @@ export function FinancePage() {
               </div>
 
               <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  title="Xem mã QR tài khoản ngân hàng"
+                  aria-label="Xem mã QR tài khoản ngân hàng"
+                  disabled={!selectedDesignerForModal.designer_id}
+                  onClick={() => setQrDesigner(selectedDesignerForModal)}
+                  className="rounded-lg p-1.5 text-[#0052CC] hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <QrCode className="h-5 w-5" />
+                </button>
                 <button
                   type="button"
                   title="Đóng popup"
@@ -3111,6 +3128,15 @@ export function FinancePage() {
             </div>
           </div>
         </div>
+      )}
+
+      {qrDesigner?.designer_id && (
+        <BankQrViewerModal
+          isOpen={Boolean(qrDesigner)}
+          onClose={() => setQrDesigner(null)}
+          designerId={qrDesigner.designer_id}
+          designerName={qrDesigner.designer_name}
+        />
       )}
     </DashboardLayout>
   )

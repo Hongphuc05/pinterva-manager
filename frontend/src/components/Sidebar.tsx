@@ -60,6 +60,7 @@ export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
         { label: 'Đơn Hàng', path: '/orders', icon: ListOrdered },
         { label: 'Lưu Link Nộp Bài', path: '/designer-submissions', icon: FolderGit2 },
         { label: 'Board Đơn trùng lặp', path: '/kanban', icon: Columns3 },
+        { label: 'Tài Chính', path: '/finance', icon: Coins },
       ],
     },
   ]
