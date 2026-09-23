@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { DashboardLayout } from '../components/DashboardLayout'
+import { TelegramHtmlPreview } from '../components/TelegramHtmlPreview'
 import { apiFetch, ApiError } from '../api/client'
 import { useToast } from '../context/ToastContext'
 import {
@@ -440,7 +441,9 @@ export function TelegramManagementPage() {
                   </div>
                   <div className="rounded-2xl border border-sky-200 bg-sky-50/60 p-4">
                     <h3 className="flex items-center gap-2 text-xs font-bold text-sky-900"><MessageCircle className="h-4 w-4" /> Preview với dữ liệu mẫu</h3>
-                    <div className="mt-3 min-h-64 whitespace-pre-wrap rounded-xl border border-sky-100 bg-white p-4 text-xs leading-relaxed text-slate-800 shadow-2xs">{templatePreview || 'Bấm “Xem preview” để render nội dung mẫu.'}</div>
+                    <div className="mt-3 min-h-64 whitespace-pre-wrap rounded-xl border border-sky-100 bg-white p-4 text-xs leading-relaxed text-slate-800 shadow-2xs">
+                      {templatePreview ? <TelegramHtmlPreview html={templatePreview} /> : 'Bấm “Xem preview” để render nội dung mẫu.'}
+                    </div>
                     <p className="mt-3 text-[11px] leading-relaxed text-sky-800">Giá trị trong placeholder sẽ được hệ thống tự escape trước khi gửi Telegram.</p>
                   </div>
                 </div>

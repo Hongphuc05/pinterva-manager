@@ -62,6 +62,9 @@ describe('TelegramManagementPage', () => {
     apiFetchMock.mockImplementation(async (path: string) => {
       if (path === '/telegram/admin/overview') return overview
       if (path === '/telegram/admin/templates') return templates
+      if (path === '/telegram/admin/templates/designer_new_order/preview') {
+        return { template_key: 'designer_new_order', rendered: '🚨 <b>CẢNH BÁO</b>\n<i>Ghi chú mẫu</i> <code>DJ0000000</code>' }
+      }
       throw new Error(`Unexpected API path: ${path}`)
     })
   })
@@ -93,5 +96,24 @@ describe('TelegramManagementPage', () => {
       '/telegram/admin/designers/designer-1/group',
       expect.objectContaining({ method: 'PUT', body: JSON.stringify({ group_chat_id: '-1001234567890' }) }),
     ))
+  })
+
+  it('renders Telegram HTML in the preview instead of showing raw tags', async () => {
+    render(
+      <BrowserRouter>
+        <ToastProvider>
+          <TelegramManagementPage />
+        </ToastProvider>
+      </BrowserRouter>,
+    )
+
+    expect(await screen.findByText('Designer Một')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Xem preview/ }))
+
+    const heading = await screen.findByText('CẢNH BÁO')
+    expect(heading.tagName).toBe('STRONG')
+    expect(screen.getByText('Ghi chú mẫu').tagName).toBe('EM')
+    expect(screen.getByText('DJ0000000').tagName).toBe('CODE')
+    expect(screen.queryByText(/<b>|<\/b>|<i>|<\/i>/)).not.toBeInTheDocument()
   })
 })
