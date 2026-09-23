@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from tqdm import tqdm
 
 from .models import CrawlCheckpoint, CrawlError, CrawlRun
 from .normalizer import TARGET_STATUSES, NormalizedJob, RowNormalizationError, normalize_row
@@ -262,6 +263,7 @@ def run_crawl(
                 session.commit()
                 if checkpoint.completed:
                     continue
+                bar = tqdm(desc=status, unit="page", initial=checkpoint.next_page_id, total=checkpoint.api_page_count)
 
                 while True:
                     if options.limit is not None and run.stored_count >= options.limit:
@@ -307,6 +309,9 @@ def run_crawl(
                             options=options,
                         )
                         session.commit()
+                        bar.total = checkpoint.api_page_count
+                        bar.set_postfix(stored=run.stored_count, missing=run.preview_missing_count)
+                        bar.update(1)
                     except Exception:
                         session.rollback()
                         failed_run = session.get(CrawlRun, run.id) or run
@@ -330,6 +335,7 @@ def run_crawl(
                     if options.request_delay_seconds > 0:
                         time.sleep(options.request_delay_seconds)
 
+                bar.close()
                 checkpoint = _checkpoint_for(session, run.id, status)
                 session.commit()
 
@@ -360,6 +366,7 @@ def dry_run(
 
     for status in options.statuses:
         page_id = 0
+        bar = tqdm(desc=f"dry-run {status}", unit="page")
         while True:
             if options.limit is not None and total_normalized >= options.limit:
                 break
@@ -377,6 +384,8 @@ def dry_run(
                 break
 
             by_status[status]["api_rows"] += len(page.rows)
+            bar.total = page.page_count
+            bar.update(1)
             api_totals[status] = {
                 "total_count": page.total_count,
                 "page_count": page.page_count,
@@ -408,6 +417,7 @@ def dry_run(
             page_id += 1
             if options.request_delay_seconds > 0:
                 time.sleep(options.request_delay_seconds)
+        bar.close()
 
     return {
         "statuses": by_status,
