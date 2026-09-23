@@ -268,6 +268,7 @@ def test_support_role_is_also_sanitized(client: TestClient, db_session):
     order = Order(
         external_order_id="PRIN-99903",
         state="IN_PROGRESS",
+        duplicate_check_status="non_duplicate",
         product_name="T-Shirt 2D Custom Printerval",
         thumbnail_url="https://assets.printerval.com/mockups/thumb3.png",
         external_order_url="https://printerval.com/admin/orders?id=99903",

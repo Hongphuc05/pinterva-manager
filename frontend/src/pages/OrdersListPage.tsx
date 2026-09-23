@@ -109,7 +109,18 @@ export type PlatformStatusTarget = {
 
 const PLATFORM_STATUS_OPTIONS = ['Waiting', 'Doing', 'Review', 'Fix', 'Confirm', 'Done'] as const
 const DEFAULT_PLATFORM_DES = 'nguyễn thị thúy hường 2d'
+const SUPPORT_CLASSIFICATION_STATES = new Set([
+  'WAITING',
+  'OPEN_FOR_ALLOCATION',
+  'DISCOVERED',
+  'PENDING',
+  'OPEN',
+])
 const ORDERS_CACHE_PREFIX = 'tacahu-orders-cache'
+
+function isSupportClassificationEditable(order: Pick<OrderSummary, 'state'>) {
+  return SUPPORT_CLASSIFICATION_STATES.has((order.state || '').toUpperCase())
+}
 
 function parseUtcDate(dateInput: string | null | undefined): Date | null {
   if (!dateInput) return null
@@ -568,7 +579,9 @@ export function OrdersListPage() {
 
 
   function handleSelectAll(checked: boolean) {
-    const pageOrders = paginate(filteredOrders, currentPage)
+    const pageOrders = paginate(filteredOrders, currentPage).filter(
+      (order) => !isSupport || isSupportClassificationEditable(order),
+    )
     if (checked) {
       setSelectedOrderIds(pageOrders.map((o) => o.id))
     } else {
@@ -634,16 +647,22 @@ export function OrdersListPage() {
   }
 
   async function handleSetDuplicateStatus(orderIds: string[], targetStatus: 'duplicate' | 'non_duplicate' | 'uncheck') {
-    if (orderIds.length === 0) return
+    const eligibleOrderIds = isSupport
+      ? orderIds.filter((orderId) => {
+          const order = orders.find((item) => item.id === orderId)
+          return order !== undefined && isSupportClassificationEditable(order)
+        })
+      : orderIds
+    if (eligibleOrderIds.length === 0) return
     setUpdatingDuplicateStatus(true)
     try {
       const res = await apiFetch<{ changed_count: number; status: string }>('/orders/duplicate-check-status', {
         method: 'POST',
         body: JSON.stringify({
-          order_ids: orderIds,
+          order_ids: eligibleOrderIds,
           status: targetStatus,
           expected_versions: Object.fromEntries(
-            orders.filter((order) => orderIds.includes(order.id)).map((order) => [order.id, order.version]),
+            orders.filter((order) => eligibleOrderIds.includes(order.id)).map((order) => [order.id, order.version]),
           ),
         }),
       })
@@ -654,8 +673,8 @@ export function OrdersListPage() {
             ? 'Không trùng lặp'
             : 'Chưa kiểm tra'
       showToast(`Đã chuyển ${res.changed_count} đơn sang trạng thái "${statusLabel}".`, 'success')
-      markTabMoved(orderIds)
-      setSelectedOrderIds((prev) => prev.filter((id) => !orderIds.includes(id)))
+      markTabMoved(eligibleOrderIds)
+      setSelectedOrderIds((prev) => prev.filter((id) => !eligibleOrderIds.includes(id)))
       await loadOrders()
     } catch (err: any) {
       showToast(err?.message || 'Không thể cập nhật trạng thái trùng lặp.', 'error')
@@ -1031,34 +1050,24 @@ export function OrdersListPage() {
     }
   }, [syncStatus?.is_running, syncStatus?.last_finished_at])
 
-  // Support 3 Sub-Tabs Groups. Support chỉ được kiểm tra queue Waiting; một
-  // order đã được Admin chia hoặc đã đi vào Doing không còn thuộc scope này.
+  // Support chỉ được phân loại queue Waiting. Các order đã phân loại vẫn
+  // xuất hiện ở tab tương ứng sau khi sang Doing/Review/Done, nhưng chỉ xem.
   const supportUncheckedOrders = useMemo(() => {
     return orders.filter((o) => {
       if (o.work_domain === 'duplicate') return false
       const isUncheck = !o.duplicate_check_status || o.duplicate_check_status === 'uncheck'
-      const st = (o.state || '').toUpperCase()
-      const isWaiting = ['WAITING', 'OPEN_FOR_ALLOCATION', 'DISCOVERED', 'PENDING', 'OPEN'].includes(st)
-      return isUncheck && isWaiting
+      return isUncheck && isSupportClassificationEditable(o)
     })
   }, [orders])
 
   // 2. Trùng lặp (thuộc duplicate domain / trello hoặc đã gắn tag duplicate)
   const supportDuplicateOrders = useMemo(() => {
-    return orders.filter((o) => {
-      const st = (o.state || '').toUpperCase()
-      const isWaiting = ['WAITING', 'OPEN_FOR_ALLOCATION', 'DISCOVERED', 'PENDING', 'OPEN'].includes(st)
-      return isWaiting && (o.work_domain === 'duplicate' || o.duplicate_check_status === 'duplicate')
-    })
+    return orders.filter((o) => o.work_domain === 'duplicate' || o.duplicate_check_status === 'duplicate')
   }, [orders])
 
   // 3. Không trùng lặp (đã kiểm tra và đánh dấu không trùng)
   const supportNonDuplicateOrders = useMemo(() => {
-    return orders.filter((o) => {
-      const st = (o.state || '').toUpperCase()
-      const isWaiting = ['WAITING', 'OPEN_FOR_ALLOCATION', 'DISCOVERED', 'PENDING', 'OPEN'].includes(st)
-      return isWaiting && o.work_domain !== 'duplicate' && o.duplicate_check_status === 'non_duplicate'
-    })
+    return orders.filter((o) => o.work_domain !== 'duplicate' && o.duplicate_check_status === 'non_duplicate')
   }, [orders])
 
   // Admin operational tabs stay scoped to standard work, except Fix: every
@@ -2559,12 +2568,15 @@ export function OrdersListPage() {
                   <th className="py-3 px-3 w-10 text-center">
                     <input
                       type="checkbox"
-                      checked={
-                        paginatedOrders.length > 0 &&
-                        paginatedOrders.every((o) => selectedOrderIds.includes(o.id))
-                      }
+                      checked={(() => {
+                        const selectableOrders = paginatedOrders.filter(
+                          (order) => !isSupport || isSupportClassificationEditable(order),
+                        )
+                        return selectableOrders.length > 0 && selectableOrders.every((o) => selectedOrderIds.includes(o.id))
+                      })()}
+                      disabled={isSupport && !paginatedOrders.some(isSupportClassificationEditable)}
                       onChange={(e) => handleSelectAll(e.target.checked)}
-                      className="rounded border-slate-300 text-[#0052CC] focus:ring-[#0052CC] h-3.5 w-3.5 cursor-pointer"
+                      className="rounded border-slate-300 text-[#0052CC] focus:ring-[#0052CC] h-3.5 w-3.5 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                     />
                   </th>
                   <th className="py-3 px-3 w-28 text-center">Ảnh</th>
@@ -2706,11 +2718,15 @@ export function OrdersListPage() {
                             <input
                               type="checkbox"
                               checked={isSelected}
+                              disabled={isSupport && !isSupportClassificationEditable(o)}
                               onClick={(e) => {
                                 if (e.shiftKey && lastSelectedIndex !== null) {
                                   const start = Math.min(lastSelectedIndex, idx)
                                   const end = Math.max(lastSelectedIndex, idx)
-                                  const rangeIds = paginatedOrders.slice(start, end + 1).map((item) => item.id)
+                                  const rangeIds = paginatedOrders
+                                    .slice(start, end + 1)
+                                    .filter((item) => !isSupport || isSupportClassificationEditable(item))
+                                    .map((item) => item.id)
                                   setSelectedOrderIds((prev) => Array.from(new Set([...prev, ...rangeIds])))
                                 } else {
                                   setSelectedOrderIds((prev) =>
@@ -2720,7 +2736,7 @@ export function OrdersListPage() {
                                 }
                               }}
                               onChange={() => { }}
-                              className="rounded border-slate-300 text-[#0052CC] focus:ring-[#0052CC] h-3.5 w-3.5 cursor-pointer"
+                              className="rounded border-slate-300 text-[#0052CC] focus:ring-[#0052CC] h-3.5 w-3.5 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                             />
                           </td>
 
@@ -2844,15 +2860,19 @@ export function OrdersListPage() {
                                 <div className="inline-flex items-center gap-1.5 rounded-lg bg-purple-100 border border-purple-300 px-3 py-1.5 text-xs font-bold text-purple-900 shadow-2xs group">
                                   <Layers className="h-3.5 w-3.5 text-purple-700" />
                                   <span>Trùng lặp</span>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleSetDuplicateStatus([o.id], 'uncheck')}
-                                    disabled={updatingDuplicateStatus}
-                                    className="ml-1 p-0.5 rounded-full hover:bg-purple-200 text-purple-700 hover:text-purple-950 transition-all cursor-pointer hover:scale-110"
-                                    title="Hủy tag Trùng lặp (quay lại tab Chưa kiểm tra)"
-                                  >
-                                    <X className="h-3.5 w-3.5 stroke-[2.5]" />
-                                  </button>
+                                  {isSupportClassificationEditable(o) ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSetDuplicateStatus([o.id], 'uncheck')}
+                                      disabled={updatingDuplicateStatus}
+                                      className="ml-1 p-0.5 rounded-full hover:bg-purple-200 text-purple-700 hover:text-purple-950 transition-all cursor-pointer hover:scale-110"
+                                      title="Hủy tag Trùng lặp (quay lại tab Chưa kiểm tra)"
+                                    >
+                                      <X className="h-3.5 w-3.5 stroke-[2.5]" />
+                                    </button>
+                                  ) : (
+                                    <span className="ml-1 text-[10px] font-semibold text-purple-700">Chỉ xem</span>
+                                  )}
                                 </div>
                               )}
 
@@ -2860,15 +2880,19 @@ export function OrdersListPage() {
                                 <div className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-100 border border-emerald-300 px-3 py-1.5 text-xs font-bold text-emerald-900 shadow-2xs group">
                                   <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700" />
                                   <span>Không trùng lặp</span>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleSetDuplicateStatus([o.id], 'uncheck')}
-                                    disabled={updatingDuplicateStatus}
-                                    className="ml-1 p-0.5 rounded-full hover:bg-emerald-200 text-emerald-700 hover:text-emerald-950 transition-all cursor-pointer hover:scale-110"
-                                    title="Hủy tag Không trùng lặp (quay lại tab Chưa kiểm tra)"
-                                  >
-                                    <X className="h-3.5 w-3.5 stroke-[2.5]" />
-                                  </button>
+                                  {isSupportClassificationEditable(o) ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSetDuplicateStatus([o.id], 'uncheck')}
+                                      disabled={updatingDuplicateStatus}
+                                      className="ml-1 p-0.5 rounded-full hover:bg-emerald-200 text-emerald-700 hover:text-emerald-950 transition-all cursor-pointer hover:scale-110"
+                                      title="Hủy tag Không trùng lặp (quay lại tab Chưa kiểm tra)"
+                                    >
+                                      <X className="h-3.5 w-3.5 stroke-[2.5]" />
+                                    </button>
+                                  ) : (
+                                    <span className="ml-1 text-[10px] font-semibold text-emerald-700">Chỉ xem</span>
+                                  )}
                                 </div>
                               )}
                             </div>

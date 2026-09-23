@@ -403,6 +403,15 @@ def move_duplicate_order(
     if order.work_domain != WORK_DOMAIN_DUPLICATE:
         raise DuplicateBoardError("Đơn chưa thuộc domain Đơn trùng lặp")
 
+    # Legacy rows can have entered the duplicate domain before the explicit
+    # check-status field was introduced.  The board is the authoritative
+    # duplicate workspace, so repair the two classification fields together
+    # whenever a card is handled there.  This also keeps Support's read-only
+    # classified tabs from losing a card because of stale metadata.
+    if order.duplicate_check_status != DUPLICATE_CHECK_DUPLICATE:
+        order.duplicate_check_status = DUPLICATE_CHECK_DUPLICATE
+        session.add(order)
+
     platform = session.get(Platform, platform_id)
     if platform is None:
         raise DuplicateBoardError("Không tìm thấy platform đang chọn")

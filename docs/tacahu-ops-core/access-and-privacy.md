@@ -25,8 +25,9 @@ phải enforce role + platform + assignment ở backend.
 
 - Admin có toàn quyền theo platform; một số endpoint quản lý platform/user là admin-only.
 - Support chỉ được kiểm tra/phân loại order còn ở hàng chờ `Waiting` (bao gồm các state
-  legacy tương đương). Khi Admin đã chia order cho Designer hoặc order đã sang `Doing`,
-  Support không còn thấy order ở danh sách/detail và backend cũng từ chối lệnh phân loại.
+  legacy tương đương). Sau khi đã chốt `duplicate` hoặc `non_duplicate`, order vẫn hiện
+  trong tab phân loại tương ứng để Support đối soát, kể cả khi đã sang `Doing`, `Review`
+  hoặc `Done`; các order này là read-only và backend vẫn từ chối lệnh phân loại.
 - Mỗi lần Support chốt kết quả phân loại, order lưu `support_classified_by_id` và
   `support_classified_at`. Finance của Admin dùng hai trường này để đếm công theo từng
   Support; Finance của Support chỉ trả số đơn do chính tài khoản đó phân loại, không trả

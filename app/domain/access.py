@@ -22,6 +22,17 @@ DUPLICATE_CHECK_STATUSES = (
     DUPLICATE_CHECK_NON_DUPLICATE,
 )
 
+# A classified order remains visible to Support after it leaves the Waiting
+# queue, but it is read-only there.  Keep this separate from
+# DUPLICATE_CHECK_STATUSES because ``uncheck`` is not a completed
+# classification and must not widen Support's read scope.
+SUPPORT_CLASSIFIED_STATUSES = frozenset(
+    {
+        DUPLICATE_CHECK_DUPLICATE,
+        DUPLICATE_CHECK_NON_DUPLICATE,
+    }
+)
+
 # Support may classify only orders that are still waiting for the duplicate
 # check.  Keep legacy pre-WAITING values here because production data can still
 # contain them while the state migration is being rolled out.

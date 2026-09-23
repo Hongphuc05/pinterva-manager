@@ -585,16 +585,24 @@ def test_support_can_classify_waiting_orders_but_not_recheck_doing_orders(client
         # A Support account cannot inspect the duplicate board after
         # classification; that workspace belongs to Admin/Designer Trello.
         assert client.get("/api/duplicate-board", headers=headers).status_code == 403
-        assert client.get(f"/api/orders/{order.id}/history", headers=headers).status_code == 404
+        support_detail = client.get(f"/api/orders/{order.id}", headers=headers)
+        assert support_detail.status_code == 200
+        assert support_detail.json()["order"]["work_domain"] == "duplicate"
+        assert support_detail.json()["order"]["duplicate_check_status"] == "duplicate"
+        support_history_response = client.get(f"/api/orders/{order.id}/history", headers=headers)
+        assert support_history_response.status_code == 200
+        assert support_history_response.json() == []
         support_history = client.get("/api/orders-history", headers=headers)
         assert support_history.status_code == 200
         assert all(item["order_id"] != str(order.id) for item in support_history.json()["items"])
 
-        # The operational order list no longer exposes the Doing order, but it
-        # still exposes another order waiting for classification.
+        # The classified Doing order remains visible for Support's read-only
+        # duplicate tab, alongside another order waiting for classification.
         listed = client.get("/api/orders", headers=headers)
         assert listed.status_code == 200
-        assert [item["external_order_id"] for item in listed.json()["orders"]] == ["ORD-CHK-2"]
+        assert {
+            item["external_order_id"] for item in listed.json()["orders"]
+        } == {"ORD-CHK-1", "ORD-CHK-2"}
 
         # 2. Support can classify a different order while it is still Waiting.
         res2 = client.post(
@@ -739,6 +747,7 @@ def test_move_card_to_designer_enqueues_printerval_doing_sync(client, db_session
         # Database state should be IN_PROGRESS (Doing)
         db_session.refresh(order)
         assert order.state == "IN_PROGRESS"
+        assert order.duplicate_check_status == "duplicate"
 
         # PrintervalAssignmentRequest should have been created with Doing status
         req = (

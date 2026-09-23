@@ -733,6 +733,15 @@ describe('OrdersListPage', () => {
                   duplicate_check_status: 'non_duplicate',
                   created_at: '2026-09-18T00:00:00Z',
                 },
+                {
+                  id: 'o-duplicate-doing',
+                  external_order_id: 'DJ-DUP-DOING',
+                  product_name: 'Duplicate Doing Product',
+                  state: 'IN_PROGRESS',
+                  work_domain: 'duplicate',
+                  duplicate_check_status: 'duplicate',
+                  created_at: '2026-09-18T00:00:00Z',
+                },
               ],
             }),
           })
@@ -764,6 +773,18 @@ describe('OrdersListPage', () => {
     expect(screen.queryByText('DJ-DOING')).not.toBeInTheDocument()
     // Classified non_duplicate order is NOT in Tab 1 ("Chưa kiểm tra")
     expect(screen.queryByText('DJ-REVIEW')).not.toBeInTheDocument()
+
+    // Classified orders remain visible in their own tabs after leaving
+    // Waiting, but their Support controls are read-only.
+    fireEvent.click(screen.getByRole('button', { name: /^Trùng lặp1$/i }))
+    expect(await screen.findByText('DJ-DUP-DOING')).toBeInTheDocument()
+    expect(screen.getByText('Chỉ xem')).toBeInTheDocument()
+    expect(screen.queryByTitle('Hủy tag Trùng lặp (quay lại tab Chưa kiểm tra)')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /^Không trùng lặp1$/i }))
+    expect(await screen.findByText('DJ-REVIEW')).toBeInTheDocument()
+    expect(screen.getByText('Chỉ xem')).toBeInTheDocument()
+    expect(screen.queryByTitle('Hủy tag Không trùng lặp (quay lại tab Chưa kiểm tra)')).not.toBeInTheDocument()
   })
 
   it('renders orange exclamation badge on Admin across all tabs when uncheck, and supports Hủy chia', async () => {

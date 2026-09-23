@@ -11,11 +11,29 @@ from app.domain.access import (
     ROLE_DESIGNER_TRELLO,
     ROLE_SUPPORT,
     SUPPORT_CLASSIFICATION_STATES,
+    SUPPORT_CLASSIFIED_STATUSES,
     WORK_DOMAIN_DUPLICATE,
     WORK_DOMAIN_STANDARD,
 )
 
 FIX_STATES = frozenset({"REVISION", "REVISION_REQUESTED", "FIX"})
+
+
+def is_support_visible_order(order: Order) -> bool:
+    """Return whether Support may read an order in its classification workspace.
+
+    Unclassified orders are visible only while they are waiting.  Once an
+    order has a completed duplicate classification, Support keeps read access
+    for the duplicate/non-duplicate tabs even after workflow state advances.
+    A duplicate domain is included as a defensive compatibility check for old
+    rows whose duplicate-check status was not backfilled consistently.
+    """
+    state = (order.state or "").upper()
+    return (
+        state in SUPPORT_CLASSIFICATION_STATES
+        or order.work_domain == WORK_DOMAIN_DUPLICATE
+        or (order.duplicate_check_status or "") in SUPPORT_CLASSIFIED_STATUSES
+    )
 
 
 def is_unreleased_fix(order: Order) -> bool:
@@ -35,9 +53,9 @@ def list_orders_for_user(
 ) -> list[Order]:
     """Return the orders visible to the current role.
 
-    Support is deliberately limited to the pre-classification queue.  Once an
-    order is assigned or moved to Doing, Support must no longer be able to
-    inspect or classify it from the operational order list.
+    Support may classify only the pre-classification queue, but keeps read
+    access to orders with a completed duplicate classification after they move
+    to Doing, Review or Done.
     """
     if user.role in (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO):
         designer_id = str(user.id)
@@ -48,7 +66,13 @@ def list_orders_for_user(
         if user.platform_id is None:
             return []
         query = query.filter(Order.platform_id == user.platform_id)
-        query = query.filter(Order.state.in_(SUPPORT_CLASSIFICATION_STATES))
+        query = query.filter(
+            or_(
+                Order.state.in_(SUPPORT_CLASSIFICATION_STATES),
+                Order.work_domain == WORK_DOMAIN_DUPLICATE,
+                Order.duplicate_check_status.in_(SUPPORT_CLASSIFIED_STATUSES),
+            )
+        )
     elif platform_id:
         query = query.filter(Order.platform_id == platform_id)
 
@@ -200,7 +224,7 @@ def get_order_detail_for_user(
     if user.role in (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO) and is_unreleased_fix(order):
         return None
 
-    if user.role == ROLE_SUPPORT and (order.state or "").upper() not in SUPPORT_CLASSIFICATION_STATES:
+    if user.role == ROLE_SUPPORT and not is_support_visible_order(order):
         return None
 
     if user.role == ROLE_DESIGNER:

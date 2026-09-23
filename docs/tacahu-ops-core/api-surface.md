@@ -53,6 +53,9 @@ sang private chat; cấu hình lỗi phải được Admin sửa hoặc chuyển
 - `POST /orders/duplicate-check-status` và `POST /orders/duplicate-domain` vẫn cho phép
   Admin/Support, nhưng backend chỉ cho Support thao tác trên order ở `Waiting` hoặc state
   legacy tương đương. Order đã được chia hoặc đã sang `Doing` trả HTTP 400.
+- `GET /orders` và `GET /orders/{id}` vẫn trả order đã có phân loại `duplicate` hoặc
+  `non_duplicate` sau khi state chuyển sang `Doing`/`Review`/`Done`; Support chỉ đọc các
+  order này và không được dùng chúng để phân loại lại.
 - Khi Support chốt `duplicate` hoặc `non_duplicate`, order lưu người và thời điểm phân loại
   tại `support_classified_by_id`/`support_classified_at`.
 - `GET /finance/stats` với role Support bị scope theo `user.platform_id` và chỉ trả số đơn
