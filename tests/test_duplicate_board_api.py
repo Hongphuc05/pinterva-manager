@@ -176,10 +176,19 @@ def test_trello_designers_can_view_every_duplicate_card_and_latest_submission_li
         platform_id=platform.id,
         work_domain="duplicate",
         state="DONE",
+        is_paid=True,
         product_name="Shared result product",
         note_outsource="PRIVATE UPSTREAM NOTE",
     )
-    db_session.add_all([owner, order])
+    unpaid_done = Order(
+        external_order_id="DUP-SHARED-UNPAID-DONE",
+        platform_id=platform.id,
+        work_domain="duplicate",
+        state="DONE",
+        is_paid=False,
+        product_name="Unpaid completed product",
+    )
+    db_session.add_all([owner, order, unpaid_done])
     db_session.flush()
     assignment = Assignment(order_id=order.id, designer_id=owner.id, status="approved")
     db_session.add(assignment)
@@ -203,6 +212,7 @@ def test_trello_designers_can_view_every_duplicate_card_and_latest_submission_li
     assert shared_card["submission_url"] == "https://drive.google.com/shared-result-v2"
     assert shared_card["submission_version"] == 2
     assert shared_card["note_outsource"] == ""
+    assert all(card["id"] != str(unpaid_done.id) for card in cards)
 
     # The shared-board visibility extends to product details, but the ordinary
     # Designer sanitizer still strips internal notes and result history.

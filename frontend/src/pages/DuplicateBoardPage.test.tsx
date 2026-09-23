@@ -204,7 +204,7 @@ describe('DuplicateBoardPage', () => {
     expect(screen.getByText('DJ-DONE-1')).toBeInTheDocument()
   })
 
-  it('hides Done summary, filter, and column for Designer Trello only', async () => {
+  it('shows only paid Done cards to Designer Trello', async () => {
     activeRole = 'designer-trello'
 
     render(
@@ -220,9 +220,13 @@ describe('DuplicateBoardPage', () => {
     )
 
     await waitFor(() => expect(screen.getByText('DJ-DUP-1')).toBeInTheDocument())
-    expect(screen.queryByRole('heading', { name: 'Done' })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Done' })).toBeInTheDocument()
     expect(screen.queryByText('DJ-DONE-1')).not.toBeInTheDocument()
-    expect(screen.queryByRole('option', { name: 'Hoàn thành (Done)' })).not.toBeInTheDocument()
+    expect(screen.getByText('DJ-DONE-2')).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Hoàn thành (Done)' })).toBeInTheDocument()
+
+    const donePaymentSelect = screen.getByDisplayValue('Đã thanh toán') as HTMLSelectElement
+    expect(donePaymentSelect).toBeDisabled()
   })
 
   it('filters cards with global search input', async () => {

@@ -207,13 +207,15 @@ export function DuplicateBoardPage() {
   const isSupport = user?.role === 'support'
   const isDesignerTrello = user?.role === 'designer-trello'
 
-  // Designer Trello does not manage completed work from this board. Keep the
-  // Done column available to Admin/Support, but remove it entirely from the
-  // Designer's board rather than merely hiding its cards.
-  const visibleColumns = useMemo(
-    () => (isDesignerTrello ? columns.filter((column) => column.id !== 'done') : columns),
-    [columns, isDesignerTrello],
-  )
+  // Designer Trello can review completed work, but only after it has been
+  // paid. Keep the restriction in the read model as a second safety net for
+  // stale/legacy API responses; the API applies the same rule server-side.
+  const visibleColumns = useMemo(() => {
+    if (!isDesignerTrello) return columns
+    return columns.map((column) => column.id === 'done'
+      ? { ...column, cards: column.cards.filter((card) => card.is_paid) }
+      : column)
+  }, [columns, isDesignerTrello])
 
   useEffect(() => {
     writeViewState('duplicate-board', user?.role, {
@@ -223,16 +225,10 @@ export function DuplicateBoardPage() {
       globalStateFilter,
       globalDesignerFilter,
       doneDesignerFilter,
-      donePaymentFilter,
+      donePaymentFilter: isDesignerTrello ? 'paid' : donePaymentFilter,
       doneTimeFilter,
     })
-  }, [user?.role, designerTabs, statusSortColumns, searchQuery, globalStateFilter, globalDesignerFilter, doneDesignerFilter, donePaymentFilter, doneTimeFilter])
-
-  useEffect(() => {
-    if (isDesignerTrello && globalStateFilter === 'done') {
-      setGlobalStateFilter('all')
-    }
-  }, [isDesignerTrello, globalStateFilter])
+  }, [user?.role, isDesignerTrello, designerTabs, statusSortColumns, searchQuery, globalStateFilter, globalDesignerFilter, doneDesignerFilter, donePaymentFilter, doneTimeFilter])
 
   function getDesignerTab(columnId: string): DesignerBoardTab {
     return designerTabs[columnId] || 'doing'
@@ -266,7 +262,10 @@ export function DuplicateBoardPage() {
     return () => window.removeEventListener('orders-updated', handleOrdersUpdated)
   }, [loadBoard])
 
-  const boardOrderIds = useMemo(() => columns.flatMap((column) => column.cards.map((card) => card.id)), [columns])
+  const boardOrderIds = useMemo(
+    () => visibleColumns.flatMap((column) => column.cards.map((card) => card.id)),
+    [visibleColumns],
+  )
 
   const syncBoardStatus = useCallback(async () => {
     if (boardOrderIds.length === 0) {
@@ -332,7 +331,7 @@ export function DuplicateBoardPage() {
         if (card.state === 'IN_PROGRESS') doing++
         else if (card.state === 'QC_PENDING') review++
         else if (card.state === 'REVISION') fix++
-        else if (card.state === 'DONE') done++
+        else if (card.state === 'DONE' || card.is_paid) done++
       })
     })
 
@@ -349,8 +348,9 @@ export function DuplicateBoardPage() {
         }
       }
       // 2. Payment status filter
-      if (donePaymentFilter === 'paid' && !card.is_paid) return false
-      if (donePaymentFilter === 'unpaid' && card.is_paid) return false
+      const paymentFilter = isDesignerTrello ? 'paid' : donePaymentFilter
+      if (paymentFilter === 'paid' && !card.is_paid) return false
+      if (paymentFilter === 'unpaid' && card.is_paid) return false
 
       // 3. Time filter
       if (doneTimeFilter !== 'all') {
@@ -372,7 +372,7 @@ export function DuplicateBoardPage() {
       }
       return true
     })
-  }, [doneDesignerFilter, donePaymentFilter, doneTimeFilter])
+  }, [doneDesignerFilter, donePaymentFilter, doneTimeFilter, isDesignerTrello])
 
   // Global card filter applied across columns
   const filterCardGlobal = useCallback((card: DuplicateCard) => {
@@ -392,7 +392,7 @@ export function DuplicateBoardPage() {
       if (globalStateFilter === 'doing' && card.state !== 'IN_PROGRESS') return false
       if (globalStateFilter === 'review' && card.state !== 'QC_PENDING') return false
       if (globalStateFilter === 'fix' && card.state !== 'REVISION') return false
-      if (globalStateFilter === 'done' && card.state !== 'DONE') return false
+      if (globalStateFilter === 'done' && card.state !== 'DONE' && !card.is_paid) return false
       if (globalStateFilter === 'missing' && !card.template_missing) return false
     }
 
@@ -428,8 +428,8 @@ export function DuplicateBoardPage() {
     })
 
     // Any new columns (e.g. newly added Trello designers) insert before 'done'
-    const doneCol = isDesignerTrello ? undefined : colMap.get('done')
-    if (!isDesignerTrello) colMap.delete('done')
+    const doneCol = colMap.get('done')
+    colMap.delete('done')
 
     colMap.forEach((col) => {
       ordered.push(col)
@@ -440,7 +440,7 @@ export function DuplicateBoardPage() {
     }
 
     return ordered
-  }, [visibleColumns, customColumnOrder, isDesignerTrello])
+  }, [visibleColumns, customColumnOrder])
 
   function handleColumnDragStart(event: DragEvent<HTMLDivElement>, columnId: string) {
     setDraggedColumnId(columnId)
@@ -675,7 +675,7 @@ export function DuplicateBoardPage() {
     setGlobalStateFilter('all')
     setGlobalDesignerFilter('all')
     setDoneDesignerFilter('all')
-    setDonePaymentFilter('all')
+    setDonePaymentFilter(isDesignerTrello ? 'paid' : 'all')
     setDoneTimeFilter('all')
   }
 
@@ -742,7 +742,7 @@ export function DuplicateBoardPage() {
           </div>
 
           {/* KPI Summary Strip */}
-          <div className={`grid grid-cols-2 gap-2 pt-2 border-t border-slate-100 sm:grid-cols-3 text-xs ${isDesignerTrello ? 'md:grid-cols-5' : 'md:grid-cols-6'}`}>
+          <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-100 sm:grid-cols-3 text-xs md:grid-cols-6">
             <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-2.5 text-center">
               <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Tổng Đơn</div>
               <div className="mt-0.5 text-lg font-black font-mono text-slate-800">{boardKPIs.total}</div>
@@ -759,12 +759,10 @@ export function DuplicateBoardPage() {
               <div className="text-[10px] font-bold uppercase tracking-wider text-orange-700">Cần Sửa (Fix)</div>
               <div className="mt-0.5 text-lg font-black font-mono text-orange-800">{boardKPIs.fix}</div>
             </div>
-            {!isDesignerTrello && (
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-2.5 text-center">
-                <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Done</div>
-                <div className="mt-0.5 text-lg font-black font-mono text-emerald-800">{boardKPIs.done}</div>
-              </div>
-            )}
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-2.5 text-center">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Done</div>
+              <div className="mt-0.5 text-lg font-black font-mono text-emerald-800">{boardKPIs.done}</div>
+            </div>
             <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-2.5 text-center">
               <div className="text-[10px] font-bold uppercase tracking-wider text-amber-700">Thiếu Form</div>
               <div className="mt-0.5 text-lg font-black font-mono text-amber-800">{boardKPIs.missing}</div>
@@ -805,7 +803,7 @@ export function DuplicateBoardPage() {
                 <option value="doing">Đang làm (Doing)</option>
                 <option value="review">Chờ duyệt (Review)</option>
                 <option value="fix">Cần sửa (Fix)</option>
-                {!isDesignerTrello && <option value="done">Hoàn thành (Done)</option>}
+                <option value="done">Hoàn thành (Done)</option>
                 <option value="missing">Thiếu form</option>
               </select>
 
@@ -1017,12 +1015,13 @@ export function DuplicateBoardPage() {
                         <div className="grid grid-cols-2 gap-1.5">
                           {/* 2. Payment filter */}
                           <select
-                            value={donePaymentFilter}
+                            value={isDesignerTrello ? 'paid' : donePaymentFilter}
+                            disabled={isDesignerTrello}
                             onChange={(e) => setDonePaymentFilter(e.target.value as any)}
                             className="text-[10px] font-semibold bg-white border border-emerald-300 rounded-lg px-1.5 py-1 text-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                           >
-                            <option value="all">Tất cả thanh toán</option>
-                            <option value="unpaid">Chưa thanh toán</option>
+                            {!isDesignerTrello && <option value="all">Tất cả thanh toán</option>}
+                            {!isDesignerTrello && <option value="unpaid">Chưa thanh toán</option>}
                             <option value="paid">Đã thanh toán</option>
                           </select>
 

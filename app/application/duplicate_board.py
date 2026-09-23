@@ -733,6 +733,7 @@ def list_duplicate_board(
     col_done: dict = {"id": "done", "title": "Done", "column_type": "done", "cards": []}
 
     columns = [col_orders, col_missing_form, *col_designers, col_done]
+    is_trello_viewer = bool(viewer and viewer.role == ROLE_DESIGNER_TRELLO)
 
     orders = (
         session.query(Order)
@@ -800,6 +801,11 @@ def list_duplicate_board(
         norm_st = (order.state or "").upper()
 
         if norm_st in DONE_STATES or order.is_paid:
+            # Completed work is visible to Designer Trello only after the
+            # corresponding payment has been confirmed. This is enforced in
+            # the API response, not only by the board's client-side filter.
+            if is_trello_viewer and not order.is_paid:
+                continue
             col_done["cards"].append(card_data)
         elif assignee and str(assignee.id) in column_by_designer:
             column_by_designer[str(assignee.id)]["cards"].append(card_data)
