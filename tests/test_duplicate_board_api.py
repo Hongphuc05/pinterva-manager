@@ -550,7 +550,14 @@ def test_support_can_classify_waiting_orders_but_not_recheck_doing_orders(client
         duplicate_check_status="uncheck",
         state="WAITING",
     )
-    db_session.add_all([order, waiting_non_duplicate])
+    doing_unclassified = Order(
+        external_order_id="ORD-CHK-DOING",
+        platform_id=platform.id,
+        work_domain="standard",
+        duplicate_check_status="uncheck",
+        state="IN_PROGRESS",
+    )
+    db_session.add_all([order, waiting_non_duplicate, doing_unclassified])
     db_session.commit()
     client.app.dependency_overrides[get_current_platform_id] = lambda: platform.id
     delayed_requests: list[str] = []
@@ -589,6 +596,9 @@ def test_support_can_classify_waiting_orders_but_not_recheck_doing_orders(client
         assert support_detail.status_code == 200
         assert support_detail.json()["order"]["work_domain"] == "duplicate"
         assert support_detail.json()["order"]["duplicate_check_status"] == "duplicate"
+        doing_detail = client.get(f"/api/orders/{doing_unclassified.id}", headers=headers)
+        assert doing_detail.status_code == 200
+        assert doing_detail.json()["order"]["external_order_id"] == "ORD-CHK-DOING"
         support_history_response = client.get(f"/api/orders/{order.id}/history", headers=headers)
         assert support_history_response.status_code == 200
         assert support_history_response.json() == []
@@ -602,7 +612,7 @@ def test_support_can_classify_waiting_orders_but_not_recheck_doing_orders(client
         assert listed.status_code == 200
         assert {
             item["external_order_id"] for item in listed.json()["orders"]
-        } == {"ORD-CHK-1", "ORD-CHK-2"}
+        } == {"ORD-CHK-1", "ORD-CHK-2", "ORD-CHK-DOING"}
 
         # 2. Support can classify a different order while it is still Waiting.
         res2 = client.post(

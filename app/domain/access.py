@@ -45,3 +45,8 @@ SUPPORT_CLASSIFICATION_STATES = frozenset(
         "PENDING",
     }
 )
+
+# Support may inspect every order currently being worked on, but this scope is
+# read-only.  Keep legacy ASSIGNED alongside canonical IN_PROGRESS because
+# older rows can still carry that value while state normalization is rolled out.
+SUPPORT_READ_ONLY_DOING_STATES = frozenset({"IN_PROGRESS", "ASSIGNED"})

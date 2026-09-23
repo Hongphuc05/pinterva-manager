@@ -116,10 +116,15 @@ const SUPPORT_CLASSIFICATION_STATES = new Set([
   'PENDING',
   'OPEN',
 ])
+const SUPPORT_READ_ONLY_DOING_STATES = new Set(['IN_PROGRESS', 'ASSIGNED'])
 const ORDERS_CACHE_PREFIX = 'tacahu-orders-cache'
 
 function isSupportClassificationEditable(order: Pick<OrderSummary, 'state'>) {
   return SUPPORT_CLASSIFICATION_STATES.has((order.state || '').toUpperCase())
+}
+
+function isSupportDoingOrder(order: Pick<OrderSummary, 'state'>) {
+  return SUPPORT_READ_ONLY_DOING_STATES.has((order.state || '').toUpperCase())
 }
 
 function parseUtcDate(dateInput: string | null | undefined): Date | null {
@@ -240,13 +245,15 @@ export function OrdersListPage() {
   const restoreAdminFilters = !isAdmin || restoredViewState.adminFilterTab === initialAdminTab
   const [adminTab, setAdminTab] = useState<'waiting' | 'doing' | 'review' | 'fix' | 'done'>(initialAdminTab)
 
-  // Support 3 Sub-Tabs State ('all' | 'duplicate' | 'non_duplicate')
-  const supportTabParam = searchParams.get('support_tab') as 'all' | 'duplicate' | 'non_duplicate' | null
-  const [supportTab, setSupportTab] = useState<'all' | 'duplicate' | 'non_duplicate'>(() => {
-    if (supportTabParam && ['all', 'duplicate', 'non_duplicate'].includes(supportTabParam)) {
+  // Support 4 Sub-Tabs State ('all' | 'duplicate' | 'non_duplicate' | 'doing')
+  const supportTabParam = searchParams.get('support_tab') as 'all' | 'duplicate' | 'non_duplicate' | 'doing' | null
+  const [supportTab, setSupportTab] = useState<'all' | 'duplicate' | 'non_duplicate' | 'doing'>(() => {
+    if (supportTabParam && ['all', 'duplicate', 'non_duplicate', 'doing'].includes(supportTabParam)) {
       return supportTabParam
     }
-    return restoredViewState.supportTab === 'duplicate' || restoredViewState.supportTab === 'non_duplicate'
+    return restoredViewState.supportTab === 'duplicate'
+      || restoredViewState.supportTab === 'non_duplicate'
+      || restoredViewState.supportTab === 'doing'
       ? restoredViewState.supportTab
       : 'all'
   })
@@ -636,7 +643,7 @@ export function OrdersListPage() {
     }
   }
 
-  function handleSwitchSupportTab(tab: 'all' | 'duplicate' | 'non_duplicate') {
+  function handleSwitchSupportTab(tab: 'all' | 'duplicate' | 'non_duplicate' | 'doing') {
     setSupportTab(tab)
     setCurrentPage(1)
     setSelectedOrderIds([])
@@ -1070,6 +1077,10 @@ export function OrdersListPage() {
     return orders.filter((o) => o.work_domain !== 'duplicate' && o.duplicate_check_status === 'non_duplicate')
   }, [orders])
 
+  const supportDoingOrders = useMemo(() => {
+    return orders.filter(isSupportDoingOrder)
+  }, [orders])
+
   // Admin operational tabs stay scoped to standard work, except Fix: every
   // returned Fix needs the same central Admin decision before any designer can
   // resume, including cards on the shared duplicate board.
@@ -1246,7 +1257,9 @@ export function OrdersListPage() {
         ? supportUncheckedOrders
         : supportTab === 'duplicate'
           ? supportDuplicateOrders
-          : supportNonDuplicateOrders
+          : supportTab === 'non_duplicate'
+            ? supportNonDuplicateOrders
+            : supportDoingOrders
   } else if (isAdmin) {
     baseOrders =
       adminTab === 'waiting'
@@ -1924,11 +1937,11 @@ export function OrdersListPage() {
         </div>
       )}
 
-      {/* Support 3 Sub-Tabs Navigation */}
+      {/* Support 4 Sub-Tabs Navigation */}
       {isSupport && (
         <div className="space-y-3">
           <div className="bg-white p-2 rounded-2xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 w-full lg:w-auto">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 w-full lg:w-auto">
               {/* 1. UNCHECKED ORDERS (CHƯA KIỂM TRA) */}
               <button
                 type="button"
@@ -1983,6 +1996,25 @@ export function OrdersListPage() {
                     }`}
                 >
                   {supportNonDuplicateOrders.length}
+                </span>
+              </button>
+
+              {/* 4. ORDERS CURRENTLY IN DOING (READ-ONLY) */}
+              <button
+                type="button"
+                onClick={() => handleSwitchSupportTab('doing')}
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center sm:justify-start gap-2 border ${supportTab === 'doing'
+                    ? 'bg-blue-600 text-white border-blue-600 shadow-xs ring-2 ring-blue-500/20'
+                    : 'bg-blue-50/40 text-blue-900 border-blue-200/80 hover:bg-blue-100/60'
+                  }`}
+              >
+                <Zap className="h-3.5 w-3.5" />
+                <span>Đang làm</span>
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${supportTab === 'doing' ? 'bg-white/25 text-white' : 'bg-blue-200/80 text-blue-900'
+                    }`}
+                >
+                  {supportDoingOrders.length}
                 </span>
               </button>
             </div>
@@ -2827,7 +2859,7 @@ export function OrdersListPage() {
                             </div>
                           </td>
 
-                          {/* 4. Support Actions: 2 Buttons in Tab 1 OR Tag with 'X' in Tabs 2 & 3 */}
+                          {/* 4. Support Actions: classification controls in Waiting; read-only tags/status elsewhere */}
                           <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center justify-end gap-2">
                               {supportTab === 'all' && (
@@ -2894,6 +2926,13 @@ export function OrdersListPage() {
                                     <span className="ml-1 text-[10px] font-semibold text-emerald-700">Chỉ xem</span>
                                   )}
                                 </div>
+                              )}
+
+                              {supportTab === 'doing' && (
+                                <span className="inline-flex items-center gap-1.5 rounded-lg bg-blue-100 border border-blue-300 px-3 py-1.5 text-xs font-bold text-blue-900">
+                                  <Zap className="h-3.5 w-3.5 text-blue-700" />
+                                  <span>Chỉ xem</span>
+                                </span>
                               )}
                             </div>
                           </td>

@@ -686,7 +686,7 @@ describe('OrdersListPage', () => {
     expect(screen.queryByText(/Quét Đơn Mới/i)).not.toBeInTheDocument()
   })
 
-  it('renders only Waiting unchecked orders in Support Tab 1 (Chưa kiểm tra)', async () => {
+  it('keeps unchecked classification in Waiting and exposes Doing as read-only', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn((url: string) => {
@@ -766,9 +766,8 @@ describe('OrdersListPage', () => {
       </BrowserRouter>
     )
 
-    // Only unchecked Waiting is in Tab 1 ("Chưa kiểm tra"). A Doing order is
-    // outside Support's classification scope even if a stale API/cache row
-    // still contains it.
+    // Only unchecked Waiting is in Tab 1 ("Chưa kiểm tra"). Doing orders are
+    // intentionally separated into the read-only "Đang làm" tab.
     await waitFor(() => expect(screen.getByText('DJ-WAITING')).toBeInTheDocument())
     expect(screen.queryByText('DJ-DOING')).not.toBeInTheDocument()
     // Classified non_duplicate order is NOT in Tab 1 ("Chưa kiểm tra")
@@ -785,6 +784,12 @@ describe('OrdersListPage', () => {
     expect(await screen.findByText('DJ-REVIEW')).toBeInTheDocument()
     expect(screen.getByText('Chỉ xem')).toBeInTheDocument()
     expect(screen.queryByTitle('Hủy tag Không trùng lặp (quay lại tab Chưa kiểm tra)')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /^Đang làm2$/i }))
+    expect(await screen.findByText('DJ-DOING')).toBeInTheDocument()
+    expect(screen.getByText('DJ-DUP-DOING')).toBeInTheDocument()
+    expect(screen.getAllByText('Chỉ xem').length).toBeGreaterThanOrEqual(2)
+    expect(screen.queryByTitle('Đánh dấu đơn này là Trùng lặp')).not.toBeInTheDocument()
   })
 
   it('renders orange exclamation badge on Admin across all tabs when uncheck, and supports Hủy chia', async () => {

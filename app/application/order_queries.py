@@ -12,6 +12,7 @@ from app.domain.access import (
     ROLE_SUPPORT,
     SUPPORT_CLASSIFICATION_STATES,
     SUPPORT_CLASSIFIED_STATUSES,
+    SUPPORT_READ_ONLY_DOING_STATES,
     WORK_DOMAIN_DUPLICATE,
     WORK_DOMAIN_STANDARD,
 )
@@ -22,15 +23,17 @@ FIX_STATES = frozenset({"REVISION", "REVISION_REQUESTED", "FIX"})
 def is_support_visible_order(order: Order) -> bool:
     """Return whether Support may read an order in its classification workspace.
 
-    Unclassified orders are visible only while they are waiting.  Once an
-    order has a completed duplicate classification, Support keeps read access
-    for the duplicate/non-duplicate tabs even after workflow state advances.
+    Unclassified orders are visible for classification only while they are
+    waiting.  Support also keeps read access to every order in Doing, while
+    completed duplicate classifications remain visible in their own tabs after
+    workflow state advances.
     A duplicate domain is included as a defensive compatibility check for old
     rows whose duplicate-check status was not backfilled consistently.
     """
     state = (order.state or "").upper()
     return (
         state in SUPPORT_CLASSIFICATION_STATES
+        or state in SUPPORT_READ_ONLY_DOING_STATES
         or order.work_domain == WORK_DOMAIN_DUPLICATE
         or (order.duplicate_check_status or "") in SUPPORT_CLASSIFIED_STATUSES
     )
@@ -53,9 +56,9 @@ def list_orders_for_user(
 ) -> list[Order]:
     """Return the orders visible to the current role.
 
-    Support may classify only the pre-classification queue, but keeps read
-    access to orders with a completed duplicate classification after they move
-    to Doing, Review or Done.
+    Support may classify only the pre-classification queue, keeps read access
+    to every order in Doing, and keeps completed classifications visible after
+    they move to Review or Done.
     """
     if user.role in (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO):
         designer_id = str(user.id)
@@ -69,6 +72,7 @@ def list_orders_for_user(
         query = query.filter(
             or_(
                 Order.state.in_(SUPPORT_CLASSIFICATION_STATES),
+                Order.state.in_(SUPPORT_READ_ONLY_DOING_STATES),
                 Order.work_domain == WORK_DOMAIN_DUPLICATE,
                 Order.duplicate_check_status.in_(SUPPORT_CLASSIFIED_STATUSES),
             )
