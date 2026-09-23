@@ -24,8 +24,16 @@ phải enforce role + platform + assignment ở backend.
 ## Admin và Support
 
 - Admin có toàn quyền theo platform; một số endpoint quản lý platform/user là admin-only.
-- Support có quyền workflow giới hạn: phân loại duplicate, đọc board, xem submissions;
-  không tự nhiên kế thừa quyền sửa state, platform credential hay finance admin.
+- Support chỉ được kiểm tra/phân loại order còn ở hàng chờ `Waiting` (bao gồm các state
+  legacy tương đương). Khi Admin đã chia order cho Designer hoặc order đã sang `Doing`,
+  Support không còn thấy order ở danh sách/detail và backend cũng từ chối lệnh phân loại.
+- Mỗi lần Support chốt kết quả phân loại, order lưu `support_classified_by_id` và
+  `support_classified_at`. Finance của Admin dùng hai trường này để đếm công theo từng
+  Support; Finance của Support chỉ trả số đơn do chính tài khoản đó phân loại, không trả
+  danh sách/tổng tiền tài chính của cả platform.
+- Support không có quyền đọc hoặc điều khiển Duplicate Board; board chỉ dành cho Admin và
+  Designer Trello. Support cũng không tự nhiên kế thừa quyền sửa state, platform credential
+  hay finance admin.
 
 ## Attachment ảnh Note làm việc
 

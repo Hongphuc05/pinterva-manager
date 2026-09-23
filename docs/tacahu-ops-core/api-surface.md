@@ -12,7 +12,7 @@ origin hoặc origin kèm `/api` nhưng không được tạo `/api/api`.
 | Work note | `GET/POST /orders/{id}/work-notes`, `GET .../attachments/{attachment_id}` |
 | Assignment | tạo/revoke assignment; task start/sub-status/result/flag missing template |
 | Fix | `POST /orders/{id}/approve-fix`, `POST /orders/{id}/reject-fix-to-review` |
-| Duplicate | `GET /duplicate-board`, move card, duplicate domain/check status/settings |
+| Duplicate | `GET /duplicate-board`, move card, duplicate domain/check status/settings; Support chỉ được check order còn Waiting |
 | Platform | CRUD platform và Printerval option/credential scope |
 | Finance | rates, stats, payment mark/unmark, export, finance note |
 | External sync | crawl/gallery import, SyncJob, status sync và external assignment request |
@@ -47,3 +47,14 @@ designer. Token bot không bao giờ được trả về frontend.
 
 Khi mode là `group` nhưng group chưa được xác thực hoặc gửi thất bại, service không tự fallback
 sang private chat; cấu hình lỗi phải được Admin sửa hoặc chuyển mode rõ ràng.
+
+### Phân loại order và công Support
+
+- `POST /orders/duplicate-check-status` và `POST /orders/duplicate-domain` vẫn cho phép
+  Admin/Support, nhưng backend chỉ cho Support thao tác trên order ở `Waiting` hoặc state
+  legacy tương đương. Order đã được chia hoặc đã sang `Doing` trả HTTP 400.
+- Khi Support chốt `duplicate` hoặc `non_duplicate`, order lưu người và thời điểm phân loại
+  tại `support_classified_by_id`/`support_classified_at`.
+- `GET /finance/stats` với role Support bị scope theo `user.platform_id` và chỉ trả số đơn
+  do chính Support đó phân loại. Admin nhận thêm `support_classified_count` và
+  `support_summary` để đối soát công theo người.

@@ -89,7 +89,7 @@ def test_designer_api_orders_list_contains_zero_printerval(client: TestClient, d
     # Create order with Printerval metadata
     order = Order(
         external_order_id="PRIN-99901",
-        state="IN_PROGRESS",
+        state="WAITING",
         product_name="T-Shirt 2D Custom Printerval",
         thumbnail_url="https://assets.printerval.com/mockups/thumb1.png",
         sku_image_url="https://assets.printerval.com/sku/sku1.png",
@@ -99,7 +99,7 @@ def test_designer_api_orders_list_contains_zero_printerval(client: TestClient, d
         ],
         external_order_url="https://printerval.com/admin/orders?id=99901",
         printerval_designer="nguyen van designer prin",
-        printerval_status="doing",
+        printerval_status="waiting",
         deadline_at_ext=datetime(2026, 9, 20, 10, 0),
         deadline_tacahu=datetime(2026, 9, 20, 3, 0, tzinfo=UTC),
         source_download_all_url="https://printerval.com/admin/orders/download-all?id=99901",

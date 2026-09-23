@@ -96,6 +96,27 @@ def test_list_designer_submissions_and_admin_override(client, db_session):
     assert res_search.status_code == 200
     assert res_search.json()["total_items"] == 1
 
+    res_designer = client.get(
+        f"/api/orders/designer-submissions?designer_id={designer.id}",
+        headers={"X-Platform-ID": str(platform.id)},
+    )
+    assert res_designer.status_code == 200
+    assert [item["external_order_id"] for item in res_designer.json()["items"]] == ["DJ_SUB_9999"]
+
+    res_designer_options = client.get(
+        "/api/orders/designer-submissions/designers",
+        headers={"X-Platform-ID": str(platform.id)},
+    )
+    assert res_designer_options.status_code == 200
+    assert res_designer_options.json() == [
+        {
+            "id": str(designer.id),
+            "username": "des_sub_user",
+            "full_name": "Designer Sub",
+            "role": "designer",
+        }
+    ]
+
     # 6. Test Admin Override Link
     override_res = client.post(
         f"/api/orders/{order.id}/override-submission-link",
@@ -170,6 +191,51 @@ def test_finance_stats_returns_tasks_and_summary(client, db_session):
     assert task["external_order_id"] == "DJ_FIN_1234"
     assert task["drive_link"] == "https://drive.google.com/file/d/FIN_DRIVE_LINK"
     assert task["placeholder_filled"] is True
+
+
+def test_support_can_list_submission_designers_for_its_platform(client, db_session):
+    platform = Platform(name="Support Submissions Platform", account_username="support_sub@test.com")
+    db_session.add(platform)
+    db_session.commit()
+
+    support = User(
+        username="support_sub_filter",
+        role="support",
+        full_name="Support Submissions",
+        password_hash=hash_password("s3cret!"),
+        platform_id=platform.id,
+    )
+    designer = User(
+        username="des_support_filter",
+        role="designer",
+        full_name="Designer Filter",
+        password_hash=hash_password("s3cret!"),
+    )
+    db_session.add_all([support, designer])
+    db_session.commit()
+
+    order = Order(
+        platform_id=platform.id,
+        external_order_id="DJ_SUPPORT_FILTER",
+        state="QC_PENDING",
+    )
+    db_session.add(order)
+    db_session.commit()
+    db_session.add(Assignment(order_id=order.id, designer_id=designer.id, status="assigned"))
+    db_session.commit()
+
+    _login(client, db_session, "support", "support_sub_filter")
+    response = client.get("/api/orders/designer-submissions/designers")
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "id": str(designer.id),
+            "username": "des_support_filter",
+            "full_name": "Designer Filter",
+            "role": "designer",
+        }
+    ]
 
 
 def test_finance_designer_filter_uses_exact_designer_identity(client, db_session):

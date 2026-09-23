@@ -112,7 +112,7 @@ function App() {
           <Route
             path="/kanban"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute allowedRoles={['admin', 'designer-trello']}>
                 <DuplicateBoardPage />
               </ProtectedRoute>
             }

@@ -28,7 +28,7 @@ export function MobileBottomNavigation({ onOpenNavigation }: MobileBottomNavigat
     : user.role === 'support'
       ? [
           { label: 'Đơn hàng', path: '/orders', icon: ListOrdered },
-          { label: 'Board', path: '/kanban', icon: Columns3 },
+          { label: 'Tài chính', path: '/finance', icon: WalletCards },
         ]
       : user.role === 'designer-trello'
         ? [

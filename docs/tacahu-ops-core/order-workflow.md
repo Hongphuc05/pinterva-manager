@@ -3,7 +3,9 @@
 ## Role và domain
 
 - `admin`: quản trị platform, user, phân loại/phân công, state, Fix, tài chính và audit.
-- `support`: phân loại duplicate, xem/duyệt danh sách bài nộp; không có quyền Admin tổng quát.
+- `support`: chỉ phân loại duplicate ở hàng chờ `Waiting`/state legacy tương đương và
+  xem/duyệt danh sách bài nộp; không có quyền Admin tổng quát. Sau khi Admin chia order
+  cho Designer hoặc order sang `Doing`, Support không còn được xem detail hay phân loại lại.
 - `designer`: chỉ làm assignment standard của chính mình.
 - `designer-trello`: làm duplicate domain trên board cộng tác; đây là ngoại lệ visibility có chủ đích.
 
@@ -47,7 +49,10 @@ transition nhưng application layer không được tự động recover.
    configuration và metadata. Import tạo/mapping order về `OPEN` hoặc `WAITING` theo
    command hiện hành; refresh metadata không tự đổi state.
 2. **Phân loại**: Admin/Support đặt `work_domain` là `standard` hoặc `duplicate` và cập
-   nhật duplicate check status. Standard được Admin phân công; duplicate vào Duplicate Board.
+   nhật duplicate check status. Support chỉ được thực hiện bước này khi order còn ở
+   `Waiting`; command ghi người + thời điểm Support phân loại để Finance đếm công. Standard
+   được Admin phân công; duplicate vào Duplicate Board. Sau khi order vào `Doing`, Support
+   không còn được kiểm tra lại.
 3. **Làm việc**: assignment approved hoặc Designer Trello nhận thẻ đưa order vào
    `IN_PROGRESS`. Assignment/status Printerval là write async, serialized trên queue
    `assignment`.
@@ -65,7 +70,7 @@ transition nhưng application layer không được tự động recover.
 
 Duplicate là domain xử lý cộng tác, không phải state riêng. Designer Trello có thể thấy
 card duplicate của cùng platform và link kết quả mới nhất trên board; điều này **không**
-mở quyền tương tự cho Designer standard hay toàn bộ order detail/source.
+mở quyền tương tự cho Support, Designer standard hay toàn bộ order detail/source.
 
 ## Thiếu template và Note làm việc
 
@@ -82,4 +87,3 @@ mở quyền tương tự cho Designer standard hay toàn bộ order detail/sour
 - Không coi một request enqueue là external write thành công; phải kiểm tra state/evidence.
 - Không để job async cũ ghi đè Fix/Review mới hơn.
 - Không coi link Drive hoặc chat là approval bền vững; state/event/backend mới là authority.
-

@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
@@ -27,6 +27,7 @@ from app.domain.access import (
     ROLE_ADMIN,
     ROLE_DESIGNER,
     ROLE_DESIGNER_TRELLO,
+    ROLE_SUPPORT,
     WORK_DOMAIN_DUPLICATE,
 )
 from app.domain.models import OrderState
@@ -99,6 +100,15 @@ class DesignerSummaryOut(BaseModel):
     paid_amount: int = 0
 
 
+class SupportSummaryOut(BaseModel):
+    support_id: str
+    support_name: str
+    username: str | None = None
+    classified_tasks: int = 0
+    first_classified_at: datetime | None = None
+    latest_classified_at: datetime | None = None
+
+
 class CreditedTaskOut(BaseModel):
     order_id: str
     order_version: int
@@ -145,6 +155,11 @@ class FinanceStatsResponse(BaseModel):
     page: int
     page_size: int
     total_pages: int
+    # Support classification work is counted separately from Designer
+    # submissions. It has no payment state; Admin uses the summary to calculate
+    # the Support's workload, while Support sees only their own count.
+    support_classified_count: int = 0
+    support_summary: list[SupportSummaryOut] = Field(default_factory=list)
 
 
 class OrderRatesUpdate(BaseModel):
@@ -260,15 +275,25 @@ def get_finance_stats(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    header_platform_id = request.headers.get("X-Platform-Id")
     p_uuid = None
-    if header_platform_id and header_platform_id != "ALL":
-        try:
-            p_uuid = uuid.UUID(header_platform_id)
-            if p_uuid == DEFAULT_PLATFORM_ID:
-                p_uuid = None
-        except ValueError:
-            pass
+    if user.role == ROLE_SUPPORT:
+        # Support accounts are permanently scoped to their assigned platform;
+        # never trust a browser-supplied X-Platform-Id for this role.
+        if user.platform_id is None:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Tài khoản Support chưa được gán vào Acc Mẹ Printerval.",
+            )
+        p_uuid = user.platform_id
+    else:
+        header_platform_id = request.headers.get("X-Platform-Id")
+        if header_platform_id and header_platform_id != "ALL":
+            try:
+                p_uuid = uuid.UUID(header_platform_id)
+                if p_uuid == DEFAULT_PLATFORM_ID:
+                    p_uuid = None
+            except ValueError:
+                pass
 
     # Platform rates
     target_platform = None
@@ -323,6 +348,94 @@ def get_finance_stats(
         orders_query = orders_query.filter(Order.platform_id == p_uuid)
     orders = orders_query.all()
     orders_by_id: dict[uuid.UUID, Order] = {o.id: o for o in orders}
+
+    # Classification work is credited by the timestamp at which Support made
+    # the decision, not by the Designer's later submission/payment timeline.
+    start_ts = parse_date_to_utc_timestamp(start_date, is_end_of_day=False)
+    end_ts = parse_date_to_utc_timestamp(end_date, is_end_of_day=True)
+
+    def is_in_date_range(value: datetime | None) -> bool:
+        if value is None:
+            return False
+        timestamp = value.timestamp()
+        return (start_ts is None or timestamp >= start_ts) and (
+            end_ts is None or timestamp <= end_ts
+        )
+
+    support_classified_orders = [
+        order
+        for order in orders
+        if order.support_classified_by_id
+        and is_in_date_range(order.support_classified_at)
+    ]
+
+    support_summary_by_id: dict[uuid.UUID, dict[str, Any]] = {}
+    for order in support_classified_orders:
+        support_user = user_map_by_id.get(order.support_classified_by_id)
+        if support_user is None or support_user.role != ROLE_SUPPORT:
+            continue
+        record = support_summary_by_id.setdefault(
+            support_user.id,
+            {
+                "support_id": str(support_user.id),
+                "support_name": support_user.full_name or support_user.username,
+                "username": support_user.username,
+                "classified_tasks": 0,
+                "first_classified_at": order.support_classified_at,
+                "latest_classified_at": order.support_classified_at,
+            },
+        )
+        record["classified_tasks"] += 1
+        if order.support_classified_at and (
+            record["first_classified_at"] is None
+            or order.support_classified_at < record["first_classified_at"]
+        ):
+            record["first_classified_at"] = order.support_classified_at
+        if order.support_classified_at and (
+            record["latest_classified_at"] is None
+            or order.support_classified_at > record["latest_classified_at"]
+        ):
+            record["latest_classified_at"] = order.support_classified_at
+
+    support_summary = [
+        SupportSummaryOut(**record)
+        for record in sorted(
+            support_summary_by_id.values(),
+            key=lambda item: (-item["classified_tasks"], item["support_name"]),
+        )
+    ]
+
+    if user.role == ROLE_SUPPORT:
+        own_count = sum(
+            1
+            for order in support_classified_orders
+            if order.support_classified_by_id == user.id
+        )
+        own_summary = [
+            item for item in support_summary if item.support_id == str(user.id)
+        ]
+        return FinanceStatsResponse(
+            total_credited_tasks=0,
+            total_unpaid_tasks=0,
+            total_paid_tasks=0,
+            total_designers=0,
+            total_done_tasks=0,
+            total_in_review_tasks=0,
+            total_in_fix_tasks=0,
+            standard_rate=standard_rate,
+            duplicate_rate=duplicate_rate,
+            total_amount_unpaid=0,
+            total_amount_paid=0,
+            total_amount_credited=0,
+            designers_summary=[],
+            tasks=[],
+            total_tasks_count=0,
+            page=page,
+            page_size=page_size,
+            total_pages=1,
+            support_classified_count=own_count,
+            support_summary=own_summary,
+        )
 
     if not orders:
         return FinanceStatsResponse(
@@ -547,9 +660,6 @@ def get_finance_stats(
         ]
 
     # Date filter: filter by task's submission timestamp (review_submitted_at / first_submitted_at / status_changed_at)
-    start_ts = parse_date_to_utc_timestamp(start_date, is_end_of_day=False)
-    end_ts = parse_date_to_utc_timestamp(end_date, is_end_of_day=True)
-
     if start_ts is not None or end_ts is not None:
         new_filtered = []
         for t in all_tasks:
@@ -747,6 +857,8 @@ def get_finance_stats(
         page=page,
         page_size=page_size,
         total_pages=total_pages,
+        support_classified_count=sum(item.classified_tasks for item in support_summary),
+        support_summary=support_summary,
     )
 
 
@@ -825,7 +937,10 @@ def mark_orders_paid(
         from collections import defaultdict
 
         from app.adapters.db.models import Assignment, Platform
-        from app.workers.telegram_tasks import async_notify_designer_payment, safe_dispatch_telegram_task
+        from app.workers.telegram_tasks import (
+            async_notify_designer_payment,
+            safe_dispatch_telegram_task,
+        )
 
         plat = db.get(Platform, platform_id)
         std_rate = plat.standard_order_rate if plat else 40000
@@ -987,7 +1102,7 @@ def list_finance_notes(
             pass
 
     # Non-admin users only see notes for themselves
-    if user.role == "designer":
+    if user.role in (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO, ROLE_SUPPORT):
         query = query.filter(FinanceNote.designer_id == user.id)
 
     if target_type and target_type.strip() and target_type.lower() != "all":

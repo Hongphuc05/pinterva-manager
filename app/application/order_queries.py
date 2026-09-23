@@ -9,6 +9,8 @@ from app.adapters.db.models import Assignment, Order, User, WorkflowEvent
 from app.domain.access import (
     ROLE_DESIGNER,
     ROLE_DESIGNER_TRELLO,
+    ROLE_SUPPORT,
+    SUPPORT_CLASSIFICATION_STATES,
     WORK_DOMAIN_DUPLICATE,
     WORK_DOMAIN_STANDARD,
 )
@@ -31,15 +33,23 @@ def list_orders_for_user(
     work_domain: str | None = None,
     duplicate_check_status: str | None = None,
 ) -> list[Order]:
-    """Admin and Support see all platform orders (optionally filtered).
-    Designer sees ONLY orders assigned to themselves.
+    """Return the orders visible to the current role.
+
+    Support is deliberately limited to the pre-classification queue.  Once an
+    order is assigned or moved to Doing, Support must no longer be able to
+    inspect or classify it from the operational order list.
     """
     if user.role in (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO):
         designer_id = str(user.id)
 
     query = session.query(Order)
 
-    if platform_id:
+    if user.role == ROLE_SUPPORT:
+        if user.platform_id is None:
+            return []
+        query = query.filter(Order.platform_id == user.platform_id)
+        query = query.filter(Order.state.in_(SUPPORT_CLASSIFICATION_STATES))
+    elif platform_id:
         query = query.filter(Order.platform_id == platform_id)
 
     if user.role == ROLE_DESIGNER_TRELLO:
@@ -184,7 +194,13 @@ def get_order_detail_for_user(
     if order is None:
         return None
 
+    if user.role == ROLE_SUPPORT and order.platform_id != user.platform_id:
+        return None
+
     if user.role in (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO) and is_unreleased_fix(order):
+        return None
+
+    if user.role == ROLE_SUPPORT and (order.state or "").upper() not in SUPPORT_CLASSIFICATION_STATES:
         return None
 
     if user.role == ROLE_DESIGNER:

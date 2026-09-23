@@ -17,9 +17,11 @@ from app.domain.access import (
     DUPLICATE_CHECK_DUPLICATE,
     DUPLICATE_CHECK_NON_DUPLICATE,
     DUPLICATE_CHECK_STATUSES,
+    DUPLICATE_CHECK_UNCHECK,
     ROLE_ADMIN,
     ROLE_DESIGNER_TRELLO,
     ROLE_SUPPORT,
+    SUPPORT_CLASSIFICATION_STATES,
     WORK_DOMAIN_DUPLICATE,
     WORK_DOMAIN_STANDARD,
     WORK_DOMAINS,
@@ -44,8 +46,8 @@ def remove_duplicate_from_backlog(session: Session, *, actor: User, platform_id:
     if order is None or order.work_domain != WORK_DOMAIN_DUPLICATE:
         raise DuplicateBoardError("Đơn không còn thuộc board Đơn trùng lặp")
     require_expected_order_version(order, expected_version)
-    if actor.role not in (ROLE_ADMIN, ROLE_SUPPORT, ROLE_DESIGNER_TRELLO):
-        raise DuplicateBoardError("Bạn không có quyền hủy đơn trùng lặp")
+    if actor.role not in (ROLE_ADMIN, ROLE_DESIGNER_TRELLO):
+        raise DuplicateBoardError("Chỉ Admin hoặc Designer Trello được hủy đơn trùng lặp")
     active = _active_assignments(session, order.id, lock=True)
     # A card released back to the shared "Đơn hàng" column becomes WAITING.
     # A newly flagged duplicate reaches the same unclaimed column as
@@ -179,6 +181,18 @@ def set_orders_work_domain(
     if len(orders) != len(order_ids) or any(order.platform_id != platform_id for order in orders):
         raise DuplicateBoardError("Mỗi đơn phải thuộc platform đang chọn")
 
+    if actor.role == ROLE_SUPPORT:
+        not_waiting = [
+            order.external_order_id
+            for order in orders
+            if (order.state or "").upper() not in SUPPORT_CLASSIFICATION_STATES
+        ]
+        if not_waiting:
+            raise DuplicateBoardError(
+                "Support chỉ được phân loại đơn đang ở Waiting; đơn đã được chia không thể kiểm tra lại: "
+                + ", ".join(not_waiting)
+            )
+
     request_ids: list[uuid.UUID] = []
     for order in orders:
         require_expected_order_version(order, (expected_versions or {}).get(order.id))
@@ -214,6 +228,9 @@ def set_orders_work_domain(
             order.state = OrderState.WAITING.value
             order.duplicate_check_status = DUPLICATE_CHECK_NON_DUPLICATE
             order.fix_approved_by_admin = False
+        if actor.role == ROLE_SUPPORT:
+            order.support_classified_by_id = actor.id
+            order.support_classified_at = datetime.now(UTC)
         session.add(order)
         _event(
             session,
@@ -260,6 +277,18 @@ def set_orders_duplicate_status(
     if len(orders) != len(order_ids) or any(order.platform_id != platform_id for order in orders):
         raise DuplicateBoardError("Mỗi đơn phải thuộc platform đang chọn")
 
+    if actor.role == ROLE_SUPPORT:
+        not_waiting = [
+            order.external_order_id
+            for order in orders
+            if (order.state or "").upper() not in SUPPORT_CLASSIFICATION_STATES
+        ]
+        if not_waiting:
+            raise DuplicateBoardError(
+                "Support chỉ được kiểm tra đơn đang ở Waiting; đơn đã được chia không thể kiểm tra lại: "
+                + ", ".join(not_waiting)
+            )
+
     request_ids: list[uuid.UUID] = []
     for order in orders:
         require_expected_order_version(order, (expected_versions or {}).get(order.id))
@@ -302,6 +331,13 @@ def set_orders_duplicate_status(
                 order.fix_approved_by_admin = False
 
         session.add(order)
+        if actor.role == ROLE_SUPPORT:
+            if duplicate_status == DUPLICATE_CHECK_UNCHECK:
+                order.support_classified_by_id = None
+                order.support_classified_at = None
+            else:
+                order.support_classified_by_id = actor.id
+                order.support_classified_at = datetime.now(UTC)
         _event(
             session,
             order,

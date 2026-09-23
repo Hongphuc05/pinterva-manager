@@ -90,7 +90,7 @@ class DuplicateBoardSettingsRequest(BaseModel):
 @router.post("/duplicate-board/remove-from-duplicate")
 def api_remove_from_duplicate_backlog(
     payload: MoveDuplicateCardRequest,
-    user: User = Depends(require_any_role(ROLE_ADMIN, ROLE_SUPPORT, ROLE_DESIGNER_TRELLO)),
+    user: User = Depends(require_any_role(ROLE_ADMIN, ROLE_DESIGNER_TRELLO)),
     platform_id: uuid.UUID = Depends(get_current_platform_id), db: Session = Depends(get_db),
 ):
     try:
@@ -103,7 +103,7 @@ def api_remove_from_duplicate_backlog(
 
 @router.get("/duplicate-board", response_model=DuplicateBoardResponse)
 def api_duplicate_board(
-    user: User = Depends(require_any_role(ROLE_ADMIN, ROLE_DESIGNER_TRELLO, ROLE_SUPPORT)),
+    user: User = Depends(require_any_role(ROLE_ADMIN, ROLE_DESIGNER_TRELLO)),
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):

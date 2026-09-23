@@ -93,6 +93,7 @@ from app.domain.access import (
     ROLE_DESIGNER,
     ROLE_DESIGNER_TRELLO,
     ROLE_SUPPORT,
+    SUPPORT_CLASSIFICATION_STATES,
     WORK_DOMAIN_DUPLICATE,
     WORK_DOMAIN_STANDARD,
 )
@@ -2924,14 +2925,24 @@ def api_get_orders_history(
         .join(Order, Order.id == WorkflowEvent.order_id)
     )
 
-    header_platform_id = request.headers.get("X-Platform-Id")
-    if header_platform_id and header_platform_id != "ALL":
-        try:
-            p_uuid = uuid.UUID(header_platform_id)
-            if p_uuid != DEFAULT_PLATFORM_ID:
-                query = query.filter(Order.platform_id == p_uuid)
-        except ValueError:
-            pass
+    if user.role == ROLE_SUPPORT:
+        if user.platform_id is None:
+            return OrderHistoryListResponse(
+                items=[], total=0, page=page, page_size=page_size, total_pages=1
+            )
+        query = query.filter(
+            Order.platform_id == user.platform_id,
+            Order.state.in_(SUPPORT_CLASSIFICATION_STATES),
+        )
+    else:
+        header_platform_id = request.headers.get("X-Platform-Id")
+        if header_platform_id and header_platform_id != "ALL":
+            try:
+                p_uuid = uuid.UUID(header_platform_id)
+                if p_uuid != DEFAULT_PLATFORM_ID:
+                    query = query.filter(Order.platform_id == p_uuid)
+            except ValueError:
+                pass
 
     if user.role in (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO):
         asgn_order_ids = (
@@ -3066,6 +3077,14 @@ def api_get_single_order_history(
 
     if order is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
+
+    if user.role == ROLE_SUPPORT:
+        if get_order_detail_for_user(db, user, str(order.id)) is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
+        # Support has no audit-trail view. Returning an empty list also prevents
+        # a direct API call from exposing events for an otherwise visible Waiting
+        # order beyond the classification screen.
+        return []
 
     # Reuse the same authorization gate as the detail page. This also hides a
     # Printerval Fix until Admin explicitly releases it, and applies to Trello

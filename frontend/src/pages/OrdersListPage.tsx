@@ -1031,26 +1031,34 @@ export function OrdersListPage() {
     }
   }, [syncStatus?.is_running, syncStatus?.last_finished_at])
 
-  // Support 3 Sub-Tabs Groups
-  // 1. Chưa kiểm tra (chứa toàn bộ đơn waiting và doing chưa kiểm tra của admin)
+  // Support 3 Sub-Tabs Groups. Support chỉ được kiểm tra queue Waiting; một
+  // order đã được Admin chia hoặc đã đi vào Doing không còn thuộc scope này.
   const supportUncheckedOrders = useMemo(() => {
     return orders.filter((o) => {
       if (o.work_domain === 'duplicate') return false
       const isUncheck = !o.duplicate_check_status || o.duplicate_check_status === 'uncheck'
       const st = (o.state || '').toUpperCase()
-      const isWaitingOrDoing = ['WAITING', 'OPEN_FOR_ALLOCATION', 'DISCOVERED', 'PENDING', 'OPEN', 'IN_PROGRESS', 'DOING', 'ASSIGNED'].includes(st)
-      return isUncheck && isWaitingOrDoing
+      const isWaiting = ['WAITING', 'OPEN_FOR_ALLOCATION', 'DISCOVERED', 'PENDING', 'OPEN'].includes(st)
+      return isUncheck && isWaiting
     })
   }, [orders])
 
   // 2. Trùng lặp (thuộc duplicate domain / trello hoặc đã gắn tag duplicate)
   const supportDuplicateOrders = useMemo(() => {
-    return orders.filter((o) => o.work_domain === 'duplicate' || o.duplicate_check_status === 'duplicate')
+    return orders.filter((o) => {
+      const st = (o.state || '').toUpperCase()
+      const isWaiting = ['WAITING', 'OPEN_FOR_ALLOCATION', 'DISCOVERED', 'PENDING', 'OPEN'].includes(st)
+      return isWaiting && (o.work_domain === 'duplicate' || o.duplicate_check_status === 'duplicate')
+    })
   }, [orders])
 
   // 3. Không trùng lặp (đã kiểm tra và đánh dấu không trùng)
   const supportNonDuplicateOrders = useMemo(() => {
-    return orders.filter((o) => o.work_domain !== 'duplicate' && o.duplicate_check_status === 'non_duplicate')
+    return orders.filter((o) => {
+      const st = (o.state || '').toUpperCase()
+      const isWaiting = ['WAITING', 'OPEN_FOR_ALLOCATION', 'DISCOVERED', 'PENDING', 'OPEN'].includes(st)
+      return isWaiting && o.work_domain !== 'duplicate' && o.duplicate_check_status === 'non_duplicate'
+    })
   }, [orders])
 
   // Admin operational tabs stay scoped to standard work, except Fix: every

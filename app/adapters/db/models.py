@@ -184,6 +184,15 @@ class Order(Base):
     duplicate_check_status: Mapped[str] = mapped_column(
         String(32), nullable=False, default="uncheck", server_default=text("'uncheck'")
     )
+    # Attribution for Support's duplicate classification work. This is
+    # intentionally separate from workflow_events so Finance can count the
+    # current classification owner after the order moves to Doing/Review/Done.
+    support_classified_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    support_classified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     state: Mapped[str] = mapped_column(String(32), nullable=False, default="OPEN")
     version: Mapped[int] = mapped_column(nullable=False, default=1)
     # Short-lived exclusive lease for active manual processing.  This supplements

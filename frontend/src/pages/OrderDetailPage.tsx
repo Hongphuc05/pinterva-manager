@@ -32,7 +32,8 @@ import {
   Flame,
   RotateCcw,
   Image as ImageIcon,
-  Flag
+  Flag,
+  Layers,
 } from 'lucide-react'
 import { AdminFixActionModal } from '../components/AdminFixActionModal'
 import { LinkifiedText, OpenExternalLinkButton } from '../components/LinkifiedText'
@@ -51,6 +52,7 @@ type OrderDetail = {
   version: number
   external_order_id: string
   state: string
+  work_domain?: string | null
   product_name: string | null
   thumbnail_url: string | null
   sku: string | null
@@ -380,6 +382,9 @@ export function OrderDetailPage() {
   const isFix = normState === 'REVISION' || normState === 'FIX' || normState === 'REVISION_REQUESTED'
   const isDone = normState === 'DONE' || normState === 'SKIPPED'
   const hasFixTag = (order.fix_return_count || 0) > 0 || isFix || Boolean(order.fix_approved_by_admin) || order.sub_status === 'fixing'
+  const isDuplicateOrder =
+    (order.work_domain || '').trim().toLowerCase() === 'duplicate' ||
+    (order.duplicate_check_status || '').trim().toLowerCase() === 'duplicate'
 
   // Extract all variants to display at header (Type, Size, etc.)
   const variantsToDisplay = (() => {
@@ -662,6 +667,13 @@ export function OrderDetailPage() {
                         : 'bg-blue-500'
                     }`} />
                     <span>{order.template_missing ? 'Chờ cập nhật' : isReview ? 'Chờ duyệt' : 'Đang làm'}</span>
+                  </span>
+                )}
+
+                {isDuplicateOrder && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-violet-50 text-violet-700 text-xs font-semibold border border-violet-200">
+                    <Layers className="h-3.5 w-3.5" />
+                    <span>Đơn trùng lặp</span>
                   </span>
                 )}
 

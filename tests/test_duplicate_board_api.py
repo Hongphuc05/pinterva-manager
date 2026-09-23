@@ -38,7 +38,7 @@ def _login(client, db_session, role: str, username: str, platform_id: uuid.UUID 
         role=role,
         password_hash=hash_password("pass123"),
         active=True,
-        platform_id=platform_id if role not in ("admin", "support") else None,
+        platform_id=platform_id if role != "admin" else None,
     )
     db_session.add(user)
     db_session.commit()
@@ -532,7 +532,7 @@ def test_trello_designer_cannot_see_or_move_an_unreleased_fix(client, db_session
     assert order.state == "REVISION"
 
 
-def test_support_can_set_duplicate_check_status_and_reversible(client, db_session, monkeypatch):
+def test_support_can_classify_waiting_orders_but_not_recheck_doing_orders(client, db_session, monkeypatch):
     platform = _platform(db_session)
     support, headers = _login(client, db_session, "support", "support-duplicate-check-user", platform.id)
 
@@ -543,7 +543,14 @@ def test_support_can_set_duplicate_check_status_and_reversible(client, db_sessio
         duplicate_check_status="uncheck",
         state="WAITING",
     )
-    db_session.add(order)
+    waiting_non_duplicate = Order(
+        external_order_id="ORD-CHK-2",
+        platform_id=platform.id,
+        work_domain="standard",
+        duplicate_check_status="uncheck",
+        state="WAITING",
+    )
+    db_session.add_all([order, waiting_non_duplicate])
     db_session.commit()
     client.app.dependency_overrides[get_current_platform_id] = lambda: platform.id
     delayed_requests: list[str] = []
@@ -568,58 +575,61 @@ def test_support_can_set_duplicate_check_status_and_reversible(client, db_sessio
         assert order.work_domain == "duplicate"
         assert order.duplicate_check_status == "duplicate"
         assert order.state == "IN_PROGRESS"
+        assert order.support_classified_by_id == support.id
+        assert order.support_classified_at is not None
         request = db_session.query(PrintervalAssignmentRequest).filter_by(order_id=order.id).one()
         assert request.target_status == "Doing"
         assert request.designer_option == ""
         assert request.internal_designer_id == support.id
         assert delayed_requests == [str(request.id)]
-        board = client.get("/api/duplicate-board", headers=headers).json()
-        assert any(card["id"] == str(order.id) and card["state"] == "IN_PROGRESS" for card in board["columns"][0]["cards"])
-        assert board["columns"][0]["metrics"]["doing"] == 1
+        # A Support account cannot inspect the duplicate board after
+        # classification; that workspace belongs to Admin/Designer Trello.
+        assert client.get("/api/duplicate-board", headers=headers).status_code == 403
+        assert client.get(f"/api/orders/{order.id}/history", headers=headers).status_code == 404
+        support_history = client.get("/api/orders-history", headers=headers)
+        assert support_history.status_code == 200
+        assert all(item["order_id"] != str(order.id) for item in support_history.json()["items"])
 
-        # 2. Support marks order as non_duplicate (reversible flow)
+        # The operational order list no longer exposes the Doing order, but it
+        # still exposes another order waiting for classification.
+        listed = client.get("/api/orders", headers=headers)
+        assert listed.status_code == 200
+        assert [item["external_order_id"] for item in listed.json()["orders"]] == ["ORD-CHK-2"]
+
+        # 2. Support can classify a different order while it is still Waiting.
         res2 = client.post(
             "/api/orders/duplicate-check-status",
-            json={"order_ids": [str(order.id)], "status": "non_duplicate"},
+            json={"order_ids": [str(waiting_non_duplicate.id)], "status": "non_duplicate"},
             headers=headers,
         )
         assert res2.status_code == 200
         assert res2.json()["changed_count"] == 1
-        db_session.refresh(order)
-        assert order.work_domain == "standard"
-        assert order.duplicate_check_status == "non_duplicate"
-        assert order.state == "WAITING"
+        db_session.refresh(waiting_non_duplicate)
+        assert waiting_non_duplicate.work_domain == "standard"
+        assert waiting_non_duplicate.duplicate_check_status == "non_duplicate"
+        assert waiting_non_duplicate.state == "WAITING"
+        assert waiting_non_duplicate.support_classified_by_id == support.id
+        assert waiting_non_duplicate.support_classified_at is not None
 
-        # 3. Support resets order to uncheck
+        # 3. Neither a status change nor the legacy domain endpoint may let
+        # Support re-check an order after it has entered Doing.
         res3 = client.post(
             "/api/orders/duplicate-check-status",
             json={"order_ids": [str(order.id)], "status": "uncheck"},
             headers=headers,
         )
-        assert res3.status_code == 200
-        db_session.refresh(order)
-        assert order.duplicate_check_status == "uncheck"
-        assert order.work_domain == "standard"
-
-        # Entering the duplicate board again after a reversible move queues one
-        # more source-status update.
+        assert res3.status_code == 400
         res4 = client.post(
-            "/api/orders/duplicate-check-status",
-            json={"order_ids": [str(order.id)], "status": "duplicate"},
+            "/api/orders/duplicate-domain",
+            json={"order_ids": [str(order.id)], "work_domain": "standard"},
             headers=headers,
         )
-        assert res4.status_code == 200
-        assert len(delayed_requests) == 2
-
-        # Repeating the same duplicate action while it is already on the board
-        # must not emit another external write.
-        res5 = client.post(
-            "/api/orders/duplicate-check-status",
-            json={"order_ids": [str(order.id)], "status": "duplicate"},
-            headers=headers,
-        )
-        assert res5.status_code == 200
-        assert len(delayed_requests) == 2
+        assert res4.status_code == 400
+        db_session.refresh(order)
+        assert order.duplicate_check_status == "duplicate"
+        assert order.work_domain == "duplicate"
+        assert order.state == "IN_PROGRESS"
+        assert len(delayed_requests) == 1
 
     finally:
         del client.app.dependency_overrides[get_current_platform_id]

@@ -37,6 +37,8 @@ describe('OrderDetailPage', () => {
                 id: 'a1',
                 external_order_id: 'DJ1',
                 state: 'DISCOVERED',
+                work_domain: 'duplicate',
+                duplicate_check_status: 'duplicate',
                 product_name: 'Test Mug',
                 thumbnail_url: null,
                 sku: 'SKU1',
@@ -92,6 +94,7 @@ describe('OrderDetailPage', () => {
     expect(screen.getByText(/Mẫu hàng \/ SKU/)).toBeInTheDocument()
     expect(screen.getAllByText(/1 mẫu hàng/).length).toBeGreaterThan(0)
     expect(screen.getByText('DJ1')).toBeInTheDocument()
+    expect(screen.getByText('Đơn trùng lặp')).toBeInTheDocument()
   })
 
   it('hides order code DJ1 and displays product name for designer', async () => {

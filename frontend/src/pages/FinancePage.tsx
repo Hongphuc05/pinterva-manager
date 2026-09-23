@@ -200,6 +200,17 @@ export type FinanceStatsResponse = {
   page: number
   page_size: number
   total_pages: number
+  support_classified_count?: number
+  support_summary?: SupportSummary[]
+}
+
+export type SupportSummary = {
+  support_id: string
+  support_name: string
+  username: string | null
+  classified_tasks: number
+  first_classified_at: string | null
+  latest_classified_at: string | null
 }
 
 export type FinanceNote = {
@@ -227,10 +238,11 @@ export type FinanceNoteListResponse = {
 const COMPLETED_TASK_STATES = new Set(['DONE', 'COMPLETED', 'SKIPPED'])
 
 export function FinancePage() {
-  const { user } = useAuth()
+  const { user, loading: authLoading } = useAuth()
   const location = useLocation()
   const { showToast } = useToast()
   const isAdmin = user?.role === 'admin'
+  const isSupport = user?.role === 'support'
   const canManageBankQr = user?.role === 'designer' || user?.role === 'designer-trello' || user?.role === 'support'
   const [restoredViewState] = useState(() => readViewState('finance', user?.role, {
     activeMainTab: 'finance',
@@ -250,7 +262,7 @@ export function FinancePage() {
 
   // Top sub-tabs: 'finance' (Stats & Payment Management) vs 'notes' (Admin Notes)
   const [activeMainTab, setActiveMainTab] = useState<'finance' | 'notes'>(
-    restoredViewState.activeMainTab === 'notes' ? 'notes' : 'finance',
+    isAdmin && restoredViewState.activeMainTab === 'notes' ? 'notes' : 'finance',
   )
 
   // Payment status sub-tabs: 'unpaid' (Chưa thanh toán) vs 'paid' (Đã thanh toán)
@@ -406,12 +418,13 @@ export function FinancePage() {
 
   // Load Finance Stats
   async function loadData() {
+    if (!user || authLoading) return
     setLoading(true)
     try {
       const params = new URLSearchParams()
       params.set('page', currentPage.toString())
       params.set('page_size', '50')
-      params.set('is_paid', paymentSubTab === 'paid' ? 'true' : 'false')
+      if (!isSupport) params.set('is_paid', paymentSubTab === 'paid' ? 'true' : 'false')
       if (selectedDesigner) params.set('designer_id', selectedDesigner)
       if (searchQuery.trim()) params.set('search', searchQuery.trim())
       if (stateFilter) params.set('state', stateFilter)
@@ -479,9 +492,10 @@ export function FinancePage() {
   }
 
   useEffect(() => {
+    if (authLoading || !user) return
     loadData()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, selectedDesigner, stateFilter, startDate, endDate, paymentSubTab])
+  }, [authLoading, user?.id, currentPage, selectedDesigner, stateFilter, startDate, endDate, paymentSubTab, isSupport])
 
   useEffect(() => {
     const handleOrdersUpdated = () => {
@@ -951,12 +965,14 @@ export function FinancePage() {
           </div>
           <div>
             <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-              {isAdmin ? 'Quản Lý Tài Chính & Công Lao Designer' : 'Tài Chính Của Tôi'}
+              {isAdmin ? 'Quản Lý Tài Chính & Công Lao Designer' : isSupport ? 'Công Việc Phân Loại Của Tôi' : 'Tài Chính Của Tôi'}
             </h1>
             <p className="text-xs text-gray-500 mt-0.5">
               {isAdmin
                 ? 'Theo dõi công lao nộp bài, xác nhận thanh toán cho từng Designer và xuất file Excel báo cáo đối soát.'
-                : 'Theo dõi chi tiết tất cả các đơn bạn đã nộp bài, tiến độ ghi nhận công và trạng thái thanh toán từ Admin.'}
+                : isSupport
+                  ? 'Theo dõi số lượng đơn đã kiểm tra và phân loại trong hàng chờ Waiting.'
+                  : 'Theo dõi chi tiết tất cả các đơn bạn đã nộp bài, tiến độ ghi nhận công và trạng thái thanh toán từ Admin.'}
             </p>
           </div>
         </div>
@@ -1113,6 +1129,21 @@ export function FinancePage() {
       {activeMainTab === 'finance' && (
         <div className="space-y-6">
           {canManageBankQr && <BankQrManager />}
+          {isSupport ? (
+            <div className="rounded-2xl border border-blue-200 bg-blue-50/60 p-6 shadow-xs">
+              <div className="flex items-center justify-between gap-4 flex-wrap">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-blue-800">Tổng đơn đã phân loại</p>
+                  <p className="mt-1 text-3xl font-bold font-mono text-[#0052CC]">
+                    {data?.support_classified_count ?? 0}
+                  </p>
+                  <p className="mt-1 text-xs text-blue-700">Đơn Waiting đã được Support kiểm tra và gắn kết quả phân loại.</p>
+                </div>
+                <CheckCircle2 className="h-10 w-10 text-[#0052CC]" />
+              </div>
+            </div>
+          ) : (
+            <>
           {/* Main Page Week Navigation & Filter Bar */}
           <div className="bg-white rounded-2xl border border-slate-200 p-3.5 shadow-2xs flex items-center justify-between flex-wrap gap-3">
             <div className="flex items-center gap-2 flex-wrap">
@@ -1269,6 +1300,36 @@ export function FinancePage() {
               </div>
             )}
           </div>
+
+          {/* Support classification workload — counted separately from Designer payment. */}
+          {isAdmin && (
+            <div className="rounded-xl border border-blue-200 bg-blue-50/50 shadow-xs overflow-hidden">
+              <div className="px-5 py-3.5 border-b border-blue-200/70 flex items-center justify-between gap-3 flex-wrap">
+                <h3 className="text-xs font-bold text-blue-900 uppercase tracking-wider flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-[#0052CC]" />
+                  <span>Công phân loại Support</span>
+                </h3>
+                <span className="rounded-full bg-white px-2.5 py-1 text-xs font-mono font-bold text-[#0052CC] border border-blue-200">
+                  {data?.support_classified_count ?? 0} đơn
+                </span>
+              </div>
+              {data?.support_summary && data.support_summary.length > 0 ? (
+                <div className="divide-y divide-blue-100">
+                  {data.support_summary.map((support) => (
+                    <div key={support.support_id} className="flex items-center justify-between gap-3 px-5 py-3 text-xs">
+                      <div className="min-w-0">
+                        <p className="font-bold text-slate-800 truncate">{support.support_name}</p>
+                        {support.username && <p className="text-[11px] text-slate-500">@{support.username}</p>}
+                      </div>
+                      <span className="shrink-0 font-mono font-bold text-blue-800">{support.classified_tasks} đơn</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="px-5 py-4 text-xs text-slate-500">Chưa có Support nào phân loại đơn trong khoảng thời gian này.</p>
+              )}
+            </div>
+          )}
 
           {/* Admin Designer Summary Table */}
           {isAdmin && data?.designers_summary && data.designers_summary.length > 0 && (
@@ -2071,6 +2132,8 @@ export function FinancePage() {
               )}
             </div>
           </div>
+            </>
+          )}
         </div>
       )}
 

@@ -21,6 +21,7 @@ import { usePlatform } from '../auth/PlatformContext'
 import { sortUsersByRoleAndName } from '../utils/userSorting'
 import { useToast } from '../context/ToastContext'
 import { apiFetch } from '../api/client'
+import { ImageModal } from '../components/ImageModal'
 
 interface SubmittedVersion {
   id: string
@@ -95,6 +96,9 @@ export function DesignerSubmissionsPage() {
   // Version History Modal state
   const [historyModalItem, setHistoryModalItem] = useState<SubmissionItem | null>(null)
 
+  // Product thumbnail preview state
+  const [selectedImage, setSelectedImage] = useState<string | null>(null)
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -108,13 +112,12 @@ export function DesignerSubmissionsPage() {
 
   const fetchDesigners = useCallback(async () => {
     try {
-      const res = await apiFetch<UserItem[]>('/users')
-      if (Array.isArray(res)) {
-        const filtered = res.filter((u) => u.role === 'designer' || u.role === 'designer-trello' || u.role === 'designer_trello')
-        setDesigners(sortUsersByRoleAndName(filtered))
-      }
+      const res = await apiFetch<UserItem[]>('/orders/designer-submissions/designers')
+      const filtered = res.filter((u) => u.role === 'designer' || u.role === 'designer-trello' || u.role === 'designer_trello')
+      setDesigners(sortUsersByRoleAndName(filtered))
     } catch {
-      // Ignore if user list is restricted
+      // The submissions table remains usable even if the options request fails.
+      setDesigners([])
     }
   }, [])
 
@@ -217,6 +220,13 @@ export function DesignerSubmissionsPage() {
 
   return (
     <div className="flex h-screen bg-slate-50 font-sans text-slate-800 antialiased">
+      <ImageModal
+        isOpen={!!selectedImage}
+        onClose={() => setSelectedImage(null)}
+        imageUrl={selectedImage}
+        altText="Ảnh sản phẩm"
+      />
+
       <Sidebar mobileOpen={mobileOpen} onMobileClose={() => setMobileOpen(false)} />
 
       <div className="flex flex-1 flex-col overflow-hidden">
@@ -421,11 +431,19 @@ export function DesignerSubmissionsPage() {
                           <td className="px-4 py-3.5 align-top">
                             <div className="flex items-start gap-3">
                               {item.thumbnail_url ? (
-                                <img
-                                  src={item.thumbnail_url}
-                                  alt=""
-                                  className="h-10 w-10 shrink-0 rounded-md border border-slate-200 object-cover"
-                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedImage(item.thumbnail_url)}
+                                  className="h-10 w-10 shrink-0 cursor-zoom-in rounded-md border-0 bg-transparent p-0 transition hover:ring-2 hover:ring-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  title="Xem ảnh sản phẩm"
+                                  aria-label={`Xem ảnh sản phẩm ${item.external_order_id}`}
+                                >
+                                  <img
+                                    src={item.thumbnail_url}
+                                    alt=""
+                                    className="h-full w-full rounded-md border border-slate-200 object-cover"
+                                  />
+                                </button>
                               ) : (
                                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-slate-100 text-slate-400 font-bold text-xs">
                                   N/A

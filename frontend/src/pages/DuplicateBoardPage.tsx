@@ -1137,7 +1137,7 @@ export function DuplicateBoardPage() {
                                 {new Date(card.deadline_tacahu).toLocaleDateString('vi-VN')}
                               </span>
                             )}
-                            {column.id === 'orders' && (isAdmin || isSupport || user?.role === 'designer-trello') && (
+                            {column.id === 'orders' && (isAdmin || user?.role === 'designer-trello') && (
                               <button
                                 type="button"
                                 draggable={false}

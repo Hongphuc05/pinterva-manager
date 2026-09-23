@@ -126,6 +126,7 @@ describe('FinancePage', () => {
     await waitFor(() => expect(screen.getByText('Quản Lý Tài Chính & Công Lao Designer')).toBeInTheDocument())
 
     // Check KPI and Designer summary
+    await waitFor(() => expect(screen.getAllByText('Designer Thuý Hường').length).toBeGreaterThan(0))
     expect(screen.getAllByText('Designer Thuý Hường').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('5 công')).toBeInTheDocument()
 
@@ -160,5 +161,74 @@ describe('FinancePage', () => {
 
     await waitFor(() => expect(screen.getByText('Đơn này cần chú ý màu sắc in lụa')).toBeInTheDocument())
     expect(screen.getByText('Tạo Ghi Chú Mới')).toBeInTheDocument()
+  })
+
+  it('shows Support only its classification count and does not request payment finance', async () => {
+    const fetchMock = vi.fn((url: string) => {
+      if (url.includes('/api/me')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ id: 'support1', role: 'support', full_name: 'Support User' }),
+        })
+      }
+      if (url.includes('/api/platforms')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ platforms: [] }) })
+      }
+      if (url.includes('/api/finance/stats')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            total_credited_tasks: 0,
+            total_unpaid_tasks: 0,
+            total_paid_tasks: 0,
+            total_designers: 0,
+            total_done_tasks: 0,
+            total_in_review_tasks: 0,
+            total_in_fix_tasks: 0,
+            designers_summary: [],
+            tasks: [],
+            total_tasks_count: 0,
+            page: 1,
+            page_size: 50,
+            total_pages: 1,
+            support_classified_count: 7,
+            support_summary: [{
+              support_id: 'support1',
+              support_name: 'Support User',
+              username: 'support_user',
+              classified_tasks: 7,
+              first_classified_at: null,
+              latest_classified_at: null,
+            }],
+          }),
+        })
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    window.history.pushState({}, '', '/finance')
+
+    render(
+      <BrowserRouter>
+        <AuthProvider>
+          <PlatformProvider>
+            <ToastProvider>
+              <GallerySyncProvider>
+                <FinancePage />
+              </GallerySyncProvider>
+            </ToastProvider>
+          </PlatformProvider>
+        </AuthProvider>
+      </BrowserRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('Công Việc Phân Loại Của Tôi')).toBeInTheDocument())
+    expect(screen.getByText('Tổng đơn đã phân loại')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('7')).toBeInTheDocument())
+    expect(screen.queryByText('Tổng Đơn Tính Công')).not.toBeInTheDocument()
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/finance/stats') && String(url).includes('is_paid='))).toBe(false)
   })
 })

@@ -12,11 +12,11 @@ from sqlalchemy.orm import Session
 from app.adapters.db.models import Assignment, Order, ResultVersion, User, WorkflowEvent
 from app.api.deps import (
     get_current_platform_id,
-    get_current_user,
     get_db,
     require_any_role,
     require_role,
 )
+from app.domain.access import ROLE_DESIGNER, ROLE_DESIGNER_TRELLO
 
 router = APIRouter()
 
@@ -62,10 +62,60 @@ class DesignerSubmissionsResponse(BaseModel):
     total_first_versions_count: int
 
 
+class SubmissionDesignerOption(BaseModel):
+    """A platform-scoped Designer option for the submissions filter."""
+
+    id: str
+    username: str
+    full_name: str
+    role: str
+
+
 class OverrideSubmissionLinkRequest(BaseModel):
     version_id: uuid.UUID | None = None
     drive_url: str
     reason: str | None = None
+
+
+@router.get(
+    "/orders/designer-submissions/designers",
+    response_model=list[SubmissionDesignerOption],
+)
+def list_submission_designers(
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    user: User = Depends(require_any_role("admin", "support")),
+    db: Session = Depends(get_db),
+):
+    """Return Designers that have assignments in the active platform.
+
+    The generic ``/users`` endpoint is intentionally admin-only because it is
+    part of account management.  The submissions page needs a much narrower,
+    platform-scoped read model so Support can use its Designer filter without
+    gaining access to the user-management endpoint.
+    """
+    designers = (
+        db.query(User)
+        .join(Assignment, Assignment.designer_id == User.id)
+        .join(Order, Order.id == Assignment.order_id)
+        .filter(
+            Order.platform_id == platform_id,
+            Assignment.status != "cancelled",
+            User.role.in_((ROLE_DESIGNER, ROLE_DESIGNER_TRELLO)),
+            User.active.is_(True),
+        )
+        .distinct()
+        .order_by(User.full_name.asc(), User.username.asc())
+        .all()
+    )
+    return [
+        SubmissionDesignerOption(
+            id=str(designer.id),
+            username=designer.username,
+            full_name=designer.full_name,
+            role=designer.role,
+        )
+        for designer in designers
+    ]
 
 
 @router.get("/orders/designer-submissions", response_model=DesignerSubmissionsResponse)

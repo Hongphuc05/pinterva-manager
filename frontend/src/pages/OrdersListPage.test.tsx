@@ -686,7 +686,7 @@ describe('OrdersListPage', () => {
     expect(screen.queryByText(/Quét Đơn Mới/i)).not.toBeInTheDocument()
   })
 
-  it('renders Waiting and Doing unchecked orders in Support Tab 1 (Chưa kiểm tra), while classified orders go to their respective tabs', async () => {
+  it('renders only Waiting unchecked orders in Support Tab 1 (Chưa kiểm tra)', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn((url: string) => {
@@ -757,9 +757,11 @@ describe('OrdersListPage', () => {
       </BrowserRouter>
     )
 
-    // Unchecked Waiting & Doing are in Tab 1 ("Chưa kiểm tra")
+    // Only unchecked Waiting is in Tab 1 ("Chưa kiểm tra"). A Doing order is
+    // outside Support's classification scope even if a stale API/cache row
+    // still contains it.
     await waitFor(() => expect(screen.getByText('DJ-WAITING')).toBeInTheDocument())
-    expect(screen.getByText('DJ-DOING')).toBeInTheDocument()
+    expect(screen.queryByText('DJ-DOING')).not.toBeInTheDocument()
     // Classified non_duplicate order is NOT in Tab 1 ("Chưa kiểm tra")
     expect(screen.queryByText('DJ-REVIEW')).not.toBeInTheDocument()
   })

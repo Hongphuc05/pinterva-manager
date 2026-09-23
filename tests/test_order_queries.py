@@ -1,7 +1,7 @@
 
 import pytest
 
-from app.adapters.db.models import Assignment, Order, User, WorkflowEvent
+from app.adapters.db.models import Assignment, Order, Platform, User, WorkflowEvent
 from app.application.auth import hash_password
 from app.application.order_queries import (
     get_order_detail_for_user,
@@ -11,10 +11,11 @@ from app.application.order_queries import (
 from app.domain.models import OrderState
 
 
-def _make_user(db_session, role, username):
+def _make_user(db_session, role, username, platform_id=None):
     user = User(
         username=username, full_name=username, role=role,
         password_hash=hash_password("x"),
+        platform_id=platform_id,
     )
     db_session.add(user)
     db_session.commit()
@@ -62,6 +63,38 @@ def test_list_orders_for_user_designer_with_designer_id_filter(db_session):
     orders = list_orders_for_user(db_session, designer, designer_id=str(designer.id))
 
     assert [o.external_order_id for o in orders] == ["DJ1"]
+
+
+def test_support_only_sees_waiting_orders_in_own_platform(db_session):
+    platform = Platform(name="Support queue platform", account_username="support-queue@example.com")
+    other_platform = Platform(name="Other platform", account_username="other@example.com")
+    db_session.add_all([platform, other_platform])
+    db_session.commit()
+    support = _make_user(db_session, "support", "support_queue", platform.id)
+    waiting = Order(
+        external_order_id="SUPPORT-WAITING",
+        platform_id=platform.id,
+        state=OrderState.WAITING.value,
+    )
+    doing = Order(
+        external_order_id="SUPPORT-DOING",
+        platform_id=platform.id,
+        state=OrderState.IN_PROGRESS.value,
+    )
+    other_waiting = Order(
+        external_order_id="SUPPORT-OTHER-PLATFORM",
+        platform_id=other_platform.id,
+        state=OrderState.WAITING.value,
+    )
+    db_session.add_all([waiting, doing, other_waiting])
+    db_session.commit()
+
+    visible = list_orders_for_user(db_session, support)
+
+    assert [item.external_order_id for item in visible] == ["SUPPORT-WAITING"]
+    assert get_order_detail_for_user(db_session, support, str(waiting.id)) is waiting
+    assert get_order_detail_for_user(db_session, support, str(doing.id)) is None
+    assert get_order_detail_for_user(db_session, support, str(other_waiting.id)) is None
 
 
 def test_get_order_detail_for_user_designer_cannot_view_unassigned_order(db_session):
