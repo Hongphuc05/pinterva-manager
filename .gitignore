@@ -47,6 +47,9 @@ cookies.txt
 COOKIE_SECURE=false
 scratch/
 
+# support_compare_image operator run logs (crawl/embed tee output)
+support_compare_image/*.log
+
 # celery runtime artifacts
 celery-*.log
 celery-*.pid
