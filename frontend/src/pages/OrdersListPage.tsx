@@ -189,6 +189,7 @@ export function OrdersListPage() {
     adminTab: 'waiting',
     supportTab: 'all',
     designerTab: 'doing',
+    adminFilterTab: 'waiting',
     adminDoingSubFilter: 'all',
     adminFixSubFilter: 'all',
     statusFilter: '',
@@ -212,14 +213,21 @@ export function OrdersListPage() {
 
   // Admin 5 Sub-Tabs State
   const activeTabParam = searchParams.get('tab') as 'waiting' | 'doing' | 'review' | 'fix' | 'done' | null
-  const [adminTab, setAdminTab] = useState<'waiting' | 'doing' | 'review' | 'fix' | 'done'>(() => {
+  const lastUrlAdminTabRef = useRef(activeTabParam)
+  const initialAdminTab: 'waiting' | 'doing' | 'review' | 'fix' | 'done' = (() => {
     if (activeTabParam && ['waiting', 'doing', 'review', 'fix', 'done'].includes(activeTabParam)) {
       return activeTabParam
     }
     return restoredViewState.adminTab === 'doing' || restoredViewState.adminTab === 'review' || restoredViewState.adminTab === 'fix' || restoredViewState.adminTab === 'done'
       ? restoredViewState.adminTab
       : 'waiting'
-  })
+  })()
+  // Filters used to be persisted once for the whole admin Orders page. That
+  // allowed a filter from Review (for example Prin: Review) to hide every
+  // order after switching to Doing/Fix while the tab badge still showed a
+  // count. Keep the useful persistence, but scope it to the tab that owns it.
+  const restoreAdminFilters = !isAdmin || restoredViewState.adminFilterTab === initialAdminTab
+  const [adminTab, setAdminTab] = useState<'waiting' | 'doing' | 'review' | 'fix' | 'done'>(initialAdminTab)
 
   // Support 3 Sub-Tabs State ('all' | 'duplicate' | 'non_duplicate')
   const supportTabParam = searchParams.get('support_tab') as 'all' | 'duplicate' | 'non_duplicate' | null
@@ -240,12 +248,12 @@ export function OrdersListPage() {
       : 'doing',
   )
   const [adminDoingSubFilter, setAdminDoingSubFilter] = useState<'all' | 'missing' | 'normal'>(
-    ['all', 'missing', 'normal'].includes(String(restoredViewState.adminDoingSubFilter))
+    restoreAdminFilters && ['all', 'missing', 'normal'].includes(String(restoredViewState.adminDoingSubFilter))
       ? restoredViewState.adminDoingSubFilter as 'all' | 'missing' | 'normal'
       : 'all',
   )
   const [adminFixSubFilter, setAdminFixSubFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>(
-    ['all', 'pending', 'approved', 'rejected'].includes(String(restoredViewState.adminFixSubFilter))
+    restoreAdminFilters && ['all', 'pending', 'approved', 'rejected'].includes(String(restoredViewState.adminFixSubFilter))
       ? restoredViewState.adminFixSubFilter as 'all' | 'pending' | 'approved' | 'rejected'
       : 'all',
   )
@@ -253,14 +261,14 @@ export function OrdersListPage() {
   // Search & Filter State
   const { showToast } = useToast()
   const { syncStatusMap } = useGallerySync()
-  const [statusFilter, setStatusFilter] = useState(String(restoredViewState.statusFilter || ''))
-  const [platformStatusFilter, setPlatformStatusFilter] = useState(String(restoredViewState.platformStatusFilter || ''))
-  const [designerFilter, setDesignerFilter] = useState(String(restoredViewState.designerFilter || ''))
-  const [batchFilter, setBatchFilter] = useState(String(restoredViewState.batchFilter || ''))
-  const [searchQuery, setSearchQuery] = useState(String(restoredViewState.searchQuery || ''))
+  const [statusFilter, setStatusFilter] = useState(String(restoreAdminFilters ? restoredViewState.statusFilter || '' : ''))
+  const [platformStatusFilter, setPlatformStatusFilter] = useState(String(restoreAdminFilters ? restoredViewState.platformStatusFilter || '' : ''))
+  const [designerFilter, setDesignerFilter] = useState(String(restoreAdminFilters ? restoredViewState.designerFilter || '' : ''))
+  const [batchFilter, setBatchFilter] = useState(String(restoreAdminFilters ? restoredViewState.batchFilter || '' : ''))
+  const [searchQuery, setSearchQuery] = useState(String(restoreAdminFilters ? restoredViewState.searchQuery || '' : ''))
   const lastAutoSwitchedQueryRef = useRef<string>('')
-  const [syncedImagesFilter, setSyncedImagesFilter] = useState(restoredViewState.syncedImagesFilter === true)
-  const [fixReturnedFilter, setFixReturnedFilter] = useState(restoredViewState.fixReturnedFilter === true)
+  const [syncedImagesFilter, setSyncedImagesFilter] = useState(restoreAdminFilters && restoredViewState.syncedImagesFilter === true)
+  const [fixReturnedFilter, setFixReturnedFilter] = useState(restoreAdminFilters && restoredViewState.fixReturnedFilter === true)
   const [noticeClock, setNoticeClock] = useState(() => Date.now())
 
   useEffect(() => {
@@ -285,20 +293,21 @@ export function OrdersListPage() {
       ? restoredViewState.dateFilterType as 'status_changed_at' | 'order_created_at_ext' | 'created_at'
       : 'status_changed_at',
   )
-  const [dateFrom, setDateFrom] = useState(String(restoredViewState.dateFrom || ''))
-  const [dateTo, setDateTo] = useState(String(restoredViewState.dateTo || ''))
-  const [datePreset, setDatePreset] = useState<string>(String(restoredViewState.datePreset || ''))
+  const [dateFrom, setDateFrom] = useState(String(restoreAdminFilters ? restoredViewState.dateFrom || '' : ''))
+  const [dateTo, setDateTo] = useState(String(restoreAdminFilters ? restoredViewState.dateTo || '' : ''))
+  const [datePreset, setDatePreset] = useState<string>(String(restoreAdminFilters ? restoredViewState.datePreset || '' : ''))
 
   const setFlash = (msg: string | null) => { if (msg) showToast(msg, 'success') }
   const setError = (err: string | null) => { if (err) showToast(err, 'error') }
   const [dateSort, setDateSort] = useState<{ field: 'order_created_at_ext' | 'created_at' | 'status_changed_at'; direction: 'asc' | 'desc' }>({
-    field: ['order_created_at_ext', 'created_at', 'status_changed_at'].includes(String(restoredViewState.dateSortField))
+    field: restoreAdminFilters && ['order_created_at_ext', 'created_at', 'status_changed_at'].includes(String(restoredViewState.dateSortField))
       ? restoredViewState.dateSortField as 'order_created_at_ext' | 'created_at' | 'status_changed_at'
       : 'status_changed_at',
-    direction: restoredViewState.dateSortDirection === 'asc' ? 'asc' : 'desc',
+    direction: restoreAdminFilters && restoredViewState.dateSortDirection === 'asc' ? 'asc' : 'desc',
   })
   const { status: syncStatus, triggerRun, isTriggering } = useSyncStatus()
   const [currentPage, setCurrentPage] = useState(() => {
+    if (!restoreAdminFilters) return 1
     const parsed = Number(searchParams.get('page') || restoredViewState.currentPage || '1')
     return Number.isInteger(parsed) && parsed > 0 ? parsed : 1
   })
@@ -387,6 +396,7 @@ export function OrdersListPage() {
   useEffect(() => {
     writeViewState('orders-list', user?.role, {
       adminTab,
+      adminFilterTab: adminTab,
       supportTab,
       designerTab: activeDesignerTab,
       adminDoingSubFilter,
@@ -418,11 +428,34 @@ export function OrdersListPage() {
   // Keep adminTab in sync with searchParams
   useEffect(() => {
     if (activeTabParam && ['waiting', 'doing', 'review', 'fix', 'done'].includes(activeTabParam)) {
+      if (lastUrlAdminTabRef.current !== activeTabParam) {
+        resetFiltersForAdminTab()
+      }
       setAdminTab(activeTabParam)
     }
+    lastUrlAdminTabRef.current = activeTabParam
   }, [activeTabParam])
 
+  function resetFiltersForAdminTab() {
+    setStatusFilter('')
+    setPlatformStatusFilter('')
+    setDesignerFilter('')
+    setBatchFilter('')
+    setSearchQuery('')
+    setSyncedImagesFilter(false)
+    setFixReturnedFilter(false)
+    setDateFrom('')
+    setDateTo('')
+    setDatePreset('')
+    setAdminDoingSubFilter('all')
+    setAdminFixSubFilter('all')
+    setDateSort({ field: 'status_changed_at', direction: 'desc' })
+    setCurrentPage(1)
+    lastAutoSwitchedQueryRef.current = ''
+  }
+
   function handleSwitchAdminTab(tab: 'waiting' | 'doing' | 'review' | 'fix' | 'done') {
+    resetFiltersForAdminTab()
     setAdminTab(tab)
     setSelectedOrderIds([])
     const next = new URLSearchParams(searchParams)

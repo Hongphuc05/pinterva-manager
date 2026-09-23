@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { afterEach, describe, it, expect, vi } from 'vitest'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { BrowserRouter } from 'react-router-dom'
 import { AuthProvider } from '../auth/AuthContext'
@@ -6,6 +6,13 @@ import { PlatformProvider } from '../auth/PlatformContext'
 import { GallerySyncProvider } from '../context/GallerySyncContext'
 import { ToastProvider } from '../context/ToastContext'
 import { OrdersListPage } from './OrdersListPage'
+
+afterEach(() => {
+  localStorage.clear()
+  sessionStorage.clear()
+  window.history.pushState({}, '', '/')
+  vi.unstubAllGlobals()
+})
 
 describe('OrdersListPage', () => {
   it('renders orders and Print status filter for admin', async () => {
@@ -68,6 +75,83 @@ describe('OrdersListPage', () => {
     expect(screen.getByText('21:28:00')).toBeInTheDocument()
     expect(screen.getByText('10/09/2026')).toBeInTheDocument()
     expect(screen.getByText('Tất cả trạng thái Print')).toBeInTheDocument()
+  })
+
+  it('does not let stale tab filters hide Doing or Fix orders', async () => {
+    localStorage.setItem(
+      'tacahu:view-state:v1:orders-list:admin',
+      JSON.stringify({
+        adminTab: 'doing',
+        adminDoingSubFilter: 'missing',
+        adminFixSubFilter: 'approved',
+        statusFilter: 'REVIEW',
+        platformStatusFilter: 'review',
+        dateFrom: '2099-01-01',
+        dateTo: '2099-01-31',
+        currentPage: 4,
+      }),
+    )
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) => {
+        if (url.includes('/api/me')) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ id: 'admin-stale-filter', role: 'admin', full_name: 'Admin' }) })
+        }
+        if (url.includes('/api/platforms')) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ platforms: [] }) })
+        }
+        if (url.includes('/api/users')) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => [] })
+        }
+        if (url.includes('/api/orders')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              orders: [
+                {
+                  id: 'doing-visible',
+                  external_order_id: 'DJ-DOING-VISIBLE',
+                  product_name: 'Doing order visible',
+                  state: 'IN_PROGRESS',
+                  template_missing: false,
+                  platform_status: 'doing',
+                  created_at: '2026-09-22T00:00:00Z',
+                },
+                {
+                  id: 'fix-visible',
+                  external_order_id: 'DJ-FIX-VISIBLE',
+                  product_name: 'Fix order visible',
+                  state: 'REVISION',
+                  fix_approved_by_admin: false,
+                  fix_rejected_by_admin: false,
+                  platform_status: 'fix',
+                  created_at: '2026-09-22T00:00:00Z',
+                },
+              ],
+            }),
+          })
+        }
+        return Promise.reject(new Error(`unexpected fetch: ${url}`))
+      }),
+    )
+
+    window.history.pushState({}, '', '/orders?tab=doing')
+    render(
+      <BrowserRouter>
+        <AuthProvider><PlatformProvider><ToastProvider><GallerySyncProvider><OrdersListPage /></GallerySyncProvider></ToastProvider></PlatformProvider></AuthProvider>
+      </BrowserRouter>,
+    )
+
+    // Legacy role-wide filters must not survive into the selected Doing tab.
+    expect(await screen.findByText('DJ-DOING-VISIBLE')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByTitle('Lọc theo trạng thái trên Web mẹ'), { target: { value: 'review' } })
+    await waitFor(() => expect(screen.queryByText('DJ-DOING-VISIBLE')).not.toBeInTheDocument())
+
+    // Switching to Fix clears the incompatible Print/date/sub-filter state.
+    fireEvent.click(screen.getByRole('button', { name: /Fix \(Cần sửa\)/i }))
+    expect(await screen.findByText('DJ-FIX-VISIBLE')).toBeInTheDocument()
   })
 
   it('lets an admin filter the current tab to orders that have entered Fix', async () => {
