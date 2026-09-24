@@ -64,6 +64,8 @@ class Settings(BaseSettings):
     # Notification batch size for server-side Telegram delivery. The local
     # comparison worker has its own model/scan settings.
     support_compare_batch_limit: int = 100
+    # The in-house designer that Support's "Lấy" button assigns duplicate orders to.
+    support_take_designer_username: str = "des1"
 
     @field_validator("order_sheet_backup_hour")
     @classmethod

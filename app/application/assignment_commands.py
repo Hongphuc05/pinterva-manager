@@ -254,13 +254,19 @@ def revoke_assignment_command(
             assignment.cancel_reason = f"Revoked by admin {actor.username}"
 
         order.printerval_designer = None
-        order.state = OrderState.WAITING.value
+        if order.duplicate_check_status == "duplicate":
+            # Tagged duplicate: back to the Duplicate Board's "Đơn hàng" column (in Doing, as when it
+            # was first flagged), not to the ordinary Waiting queue.
+            order.work_domain = "duplicate"
+            order.state = OrderState.IN_PROGRESS.value
+        else:
+            order.state = OrderState.WAITING.value
         order.status_changed_at = datetime.now(UTC)
         session.add(
             WorkflowEvent(
                 order_id=order.id,
                 from_state=prev_state,
-                to_state=OrderState.WAITING.value,
+                to_state=order.state,
                 actor_id=actor.id,
                 evidence={
                     "source": "assignment_revocation",

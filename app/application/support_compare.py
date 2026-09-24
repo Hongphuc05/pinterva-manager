@@ -34,7 +34,6 @@ from app.domain.access import (
     DUPLICATE_CHECK_UNCHECK,
     ROLE_SUPPORT,
     SUPPORT_CLASSIFICATION_STATES,
-    SUPPORT_READ_ONLY_DOING_STATES,
     WORK_DOMAIN_DUPLICATE,
 )
 
@@ -56,13 +55,12 @@ ACTION_EXPIRY = timedelta(hours=24)
 
 
 def _unchecked_scope(platform_id: uuid.UUID) -> list:
-    """Orders shown in Support's "Chưa kiểm tra" tab (state based, see Order visibility)."""
+    """Orders shown in Support's "Chưa kiểm tra" tab: unchecked and still Waiting."""
     return [
         Order.platform_id == platform_id,
-        or_(
-            Order.state.in_(SUPPORT_CLASSIFICATION_STATES),
-            Order.state.in_(SUPPORT_READ_ONLY_DOING_STATES),
-        ),
+        # Waiting only: an order that is already Doing is treated as non-duplicate and
+        # is not part of the check.
+        Order.state.in_(SUPPORT_CLASSIFICATION_STATES),
         or_(
             Order.duplicate_check_status.is_(None),
             Order.duplicate_check_status == DUPLICATE_CHECK_UNCHECK,

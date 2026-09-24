@@ -253,7 +253,7 @@ def test_support_check_command_counts_scope_and_enqueues_full_scan(client: TestC
         prompt = next(call for call in send_message.call_args_list if "reply_markup" in call.kwargs)
         keyboard = prompt.kwargs["reply_markup"]["inline_keyboard"][0]
         yes_callback = keyboard[0]["callback_data"]
-        assert "<b>2</b>" in prompt.args[1]
+        assert "<b>1</b>" in prompt.args[1]  # only the Waiting order: a Doing order counts as non-duplicate
 
         response = client.post(
             "/api/telegram/webhook",
@@ -277,7 +277,7 @@ def test_support_check_command_counts_scope_and_enqueues_full_scan(client: TestC
     assert job.status == "queued"
     assert job.platform_id == platform.id
     assert job.chat_id == "998877"
-    assert job.requested_count == 2
+    assert job.requested_count == 1
     assert executed.payload["job_id"] == str(job.id)
 
 

@@ -44,6 +44,7 @@ import {
   Images,
   Trash2,
   UserX,
+  UserCheck,
   Zap,
 } from 'lucide-react'
 
@@ -696,6 +697,26 @@ export function OrdersListPage() {
     }
   }
 
+  const [takingOrderId, setTakingOrderId] = useState<string | null>(null)
+
+  // Support's "Lấy": give a duplicate order to the in-house designer instead of the board.
+  async function handleTakeDuplicate(order: OrderSummary) {
+    if (!window.confirm(`Lấy đơn ${order.external_order_id} cho designer nội bộ (des1)? Đơn sẽ rời board Đơn trùng lặp.`)) return
+    setTakingOrderId(order.id)
+    try {
+      await apiFetch<{ taken_count: number }>('/orders/support-take', {
+        method: 'POST',
+        body: JSON.stringify({ order_ids: [order.id] }),
+      })
+      showToast(`Đã lấy đơn ${order.external_order_id} cho des1.`, 'success')
+      await loadOrders()
+    } catch (err: any) {
+      showToast(err?.message || 'Không thể lấy đơn này.', 'error')
+    } finally {
+      setTakingOrderId(null)
+    }
+  }
+
   async function handleSetDuplicateStatus(orderIds: string[], targetStatus: 'duplicate' | 'non_duplicate' | 'uncheck') {
     const eligibleOrderIds = isSupport
       ? orderIds.filter((orderId) => {
@@ -1107,7 +1128,8 @@ export function OrdersListPage() {
     return orders.filter((o) => {
       if (o.work_domain === 'duplicate') return false
       const isUncheck = !o.duplicate_check_status || o.duplicate_check_status === 'uncheck'
-      return isUncheck && (isSupportClassificationEditable(o) || isSupportDoingOrder(o))
+      // Waiting only: an order that is already Doing counts as non-duplicate (see the tab below).
+      return isUncheck && isSupportClassificationEditable(o)
     })
   }, [orders])
 
@@ -1118,7 +1140,12 @@ export function OrdersListPage() {
 
   // 3. Không trùng lặp (đã kiểm tra và đánh dấu không trùng)
   const supportNonDuplicateOrders = useMemo(() => {
-    return orders.filter((o) => o.work_domain !== 'duplicate' && o.duplicate_check_status === 'non_duplicate')
+    return orders.filter((o) => {
+      if (o.work_domain === 'duplicate') return false
+      const isUncheck = !o.duplicate_check_status || o.duplicate_check_status === 'uncheck'
+      // An unchecked order that is already Doing is automatically non-duplicate.
+      return o.duplicate_check_status === 'non_duplicate' || (isUncheck && isSupportDoingOrder(o))
+    })
   }, [orders])
 
   const supportDoingOrders = useMemo(() => {
@@ -2950,6 +2977,26 @@ export function OrdersListPage() {
                                     <span>Chờ kiểm tra qua Telegram</span>
                                   </span>
                                 ))}
+
+                              {supportTab === 'duplicate' && o.duplicate_check_status === 'duplicate' && (
+                                o.work_domain === 'duplicate' && !o.assigned_designer_name ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleTakeDuplicate(o)}
+                                    disabled={takingOrderId === o.id}
+                                    className="inline-flex items-center gap-1.5 text-xs font-bold text-white bg-[#0052CC] hover:bg-[#0747A6] rounded-lg px-3 py-1.5 shadow-sm transition-all cursor-pointer disabled:opacity-50"
+                                    title="Lấy đơn này cho designer nội bộ (des1) thay vì để trên board Đơn trùng lặp"
+                                  >
+                                    {takingOrderId === o.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserCheck className="h-3.5 w-3.5" />}
+                                    <span>Lấy</span>
+                                  </button>
+                                ) : o.assigned_designer_name ? (
+                                  <span className="inline-flex items-center gap-1.5 rounded-lg bg-blue-50 border border-blue-200 px-3 py-1.5 text-xs font-bold text-blue-900">
+                                    <UserCheck className="h-3.5 w-3.5" />
+                                    Đã lấy · {o.assigned_designer_name}
+                                  </span>
+                                ) : null
+                              )}
 
                               {supportTab === 'duplicate' && (
                                 <div className="inline-flex items-center gap-1.5 rounded-lg bg-purple-100 border border-purple-300 px-3 py-1.5 text-xs font-bold text-purple-900 shadow-2xs group">

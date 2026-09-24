@@ -229,13 +229,12 @@ class PostgresComparisonRepository:
                 ]
             )
             if source_kind == "support_unchecked":
-                # Recurring Support queue: internal state only, matching what
+                # Support queue: Waiting orders only (a Doing order counts as non-duplicate), state only, matching what
                 # Support sees on the web (a stale printerval_status mirror on a
                 # QC_PENDING/DONE order must not pull it back into the queue).
                 clauses.append(
                     "(UPPER(COALESCE(o.state, '')) IN "
-                    "('OPEN', 'WAITING', 'OPEN_FOR_ALLOCATION', 'DISCOVERED', 'PENDING', "
-                    "'IN_PROGRESS', 'ASSIGNED', 'DOING'))"
+                    "('OPEN', 'WAITING', 'OPEN_FOR_ALLOCATION', 'DISCOVERED', 'PENDING'))"
                 )
                 clauses.append("COALESCE(o.work_domain, 'standard') <> 'duplicate'")
             else:

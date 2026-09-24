@@ -773,12 +773,12 @@ describe('OrdersListPage', () => {
       </BrowserRouter>
     )
 
-    // Both unchecked Waiting and Doing feed the automated comparison queue.
+    // Only the unchecked Waiting order is in the check queue; an unchecked Doing order is treated as
+    // non-duplicate and moves to that tab automatically.
     await waitFor(() => expect(screen.getByText('DJ-WAITING')).toBeInTheDocument())
-    expect(screen.getByText('DJ-DOING')).toBeInTheDocument()
-    // Support can classify both on the web; Doing is no longer Telegram-only.
+    expect(screen.queryByText('DJ-DOING')).not.toBeInTheDocument()
     expect(screen.queryByText('Chờ kiểm tra qua Telegram')).not.toBeInTheDocument()
-    expect(screen.getAllByTitle('Đánh dấu đơn này là Trùng lặp')).toHaveLength(2)
+    expect(screen.getAllByTitle('Đánh dấu đơn này là Trùng lặp')).toHaveLength(1)
     // Web entry for the same job as Telegram /check.
     expect(await screen.findByRole('button', { name: /Kiểm tra trùng \(2\)/ })).toBeInTheDocument()
     // Classified non_duplicate order is NOT in Tab 1 ("Chưa kiểm tra")
@@ -790,10 +790,21 @@ describe('OrdersListPage', () => {
     expect(await screen.findByText('DJ-DUP-DOING')).toBeInTheDocument()
     expect(screen.getByText('Chỉ xem')).toBeInTheDocument()
     expect(screen.queryByTitle('Hủy tag Trùng lặp (quay lại tab Chưa kiểm tra)')).not.toBeInTheDocument()
+    // A free duplicate card can be taken for the in-house designer ("Lấy").
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Lấy' }))
+    await waitFor(() =>
+      expect(
+        (fetch as unknown as { mock: { calls: [string, RequestInit?][] } }).mock.calls.some(
+          ([url, init]) => url.includes('/api/orders/support-take') && init?.method === 'POST',
+        ),
+      ).toBe(true),
+    )
 
-    fireEvent.click(screen.getByRole('button', { name: /^Không trùng lặp1$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^Không trùng lặp2$/i }))
     expect(await screen.findByText('DJ-REVIEW')).toBeInTheDocument()
-    expect(screen.getByText('Chỉ xem')).toBeInTheDocument()
+    expect(screen.getByText('DJ-DOING')).toBeInTheDocument()
+    expect(screen.getAllByText('Chỉ xem').length).toBeGreaterThanOrEqual(1)
     expect(screen.queryByTitle('Hủy tag Không trùng lặp (quay lại tab Chưa kiểm tra)')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /^Đang làm2$/i }))

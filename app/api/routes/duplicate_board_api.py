@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.adapters.db.models import User
 from app.api.concurrency import OrderCommandPayload
 from app.api.deps import get_current_platform_id, get_db, require_any_role, require_role
+from app.application.assignment_commands import AssignmentCommandError
 from app.application.duplicate_board import (
     DuplicateBoardError,
     list_duplicate_board,
@@ -19,6 +20,7 @@ from app.application.duplicate_board import (
     set_orders_duplicate_status,
     set_orders_work_domain,
 )
+from app.application.support_take import take_duplicate_orders
 from app.domain.access import ROLE_ADMIN, ROLE_DESIGNER_TRELLO, ROLE_SUPPORT
 
 router = APIRouter()
@@ -159,6 +161,26 @@ def api_set_orders_duplicate_domain(
         db.rollback()
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     return {"changed_count": changed_count, "work_domain": payload.work_domain}
+
+
+class SupportTakeRequest(BaseModel):
+    order_ids: list[uuid.UUID] = Field(min_length=1, max_length=100)
+
+
+@router.post("/orders/support-take")
+def api_support_take_duplicates(
+    payload: SupportTakeRequest,
+    user: User = Depends(require_any_role(ROLE_ADMIN, ROLE_SUPPORT)),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    """Support's "Lấy": give duplicate orders to the in-house designer instead of the board."""
+    try:
+        taken = take_duplicate_orders(db, actor=user, platform_id=platform_id, order_ids=payload.order_ids)
+    except AssignmentCommandError as exc:
+        db.rollback()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    return {"taken_count": taken}
 
 
 @router.post("/orders/duplicate-check-status")

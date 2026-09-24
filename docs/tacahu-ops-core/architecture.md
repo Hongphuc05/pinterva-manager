@@ -47,7 +47,7 @@ Admin vẫn dùng chat riêng hiện hành và các state/approval vẫn do API/
 
 `support_compare_image/dup-compare/local_worker.py` là process duy nhất sở hữu runtime Hugging
 Face DINOv2. Nó chạy trên máy riêng của Support, kết nối PostgreSQL qua SSH tunnel/private VPN,
-đọc job trong `support_compare_image.comparison_jobs`, lấy order `Waiting`/`Doing` chưa phân
+đọc job trong `support_compare_image.comparison_jobs`, lấy order `Waiting` chưa phân
 loại từ `public.orders`, đọc baseline từ `image_embeddings` và ghi run/item/candidate vào cùng
 schema. Model được cache trong process local giữa các job; production VPS không cài `torch`,
 `transformers` hay tải checkpoint Hugging Face.
@@ -66,8 +66,17 @@ giao diện localhost của `dup-compare` (`/`, app React trong `review-ui/`). G
 `support_compare_image`, không đổi order. Với `selected_duplicate`, notifier gửi cặp (ảnh gốc, ảnh
 đã chọn, kèm mã đơn) qua Telegram; **Xác nhận** gọi `set_orders_duplicate_status` để gắn Trùng lặp,
 **Từ chối** chuyển order sang Không trùng lặp. Các order `no_match`/`ai_wrong` vẫn nằm ở tab **Chưa
-kiểm tra** cho tới khi Support gõ `/handle` để chuyển chúng sang Không trùng lặp. Doing chỉ được
-phân loại qua các đường này và nút trên web cho đơn chưa phân loại.
+kiểm tra** cho tới khi Support gõ `/handle` để chuyển chúng sang Không trùng lặp.
+
+Đơn đã sang `Doing` mà chưa phân loại được coi là **Không trùng lặp** trên giao diện Support (tab
+Không trùng lặp, không còn ở Chưa kiểm tra) và không nằm trong `/check`, `/handle` hay job so sánh.
+
+**Lấy đơn trùng lặp:** ở tab Trùng lặp, Support có nút **Lấy** (`POST /api/orders/support-take`) cho các
+thẻ còn ở cột Đơn hàng của board (chưa có Designer nhận). Đơn được chia cho designer nội bộ
+(`SUPPORT_TAKE_DESIGNER_USERNAME`, mặc định `des1`) bằng lệnh chia đơn thường (`queue_assignment_command`,
+Printerval Doing), `work_domain` chuyển về `standard` nên rời board và đi theo luồng đơn thường, vẫn giữ
+tag Trùng lặp. Khi hủy chia (`/assignments/revoke`), đơn có tag Trùng lặp quay lại cột Đơn hàng của board
+(`work_domain=duplicate`, `IN_PROGRESS`) thay vì về Waiting.
 
 Runner fail-closed với model: không dùng HOG fallback để so với baseline DINOv2. Hàng đợi là
 PostgreSQL source of truth; Redis/Celery chỉ lo lịch tạo job và gửi Telegram, không chạy ML.
