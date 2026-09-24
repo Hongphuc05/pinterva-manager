@@ -1,4 +1,4 @@
-"""One-time Printerval historical preview backfill for Support duplicate search."""
+"""Schema (SQLAlchemy models + alembic settings) for the Support duplicate-image search."""
 
 __all__ = ["__version__"]
 __version__ = "0.1.0"

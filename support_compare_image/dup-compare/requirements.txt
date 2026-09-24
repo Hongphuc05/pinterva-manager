@@ -12,6 +12,5 @@ torch
 torchvision
 transformers
 
-# embed_backfill.py (ghi Postgres VPS qua SSH tunnel)
+# Postgres access (local worker, review API)
 psycopg[binary]
-tqdm

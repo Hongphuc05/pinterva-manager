@@ -13,17 +13,14 @@ Mỗi cặp ảnh được chấm theo 4 tín hiệu:
 Kết quả chỉ có 2 nhãn: **`TRUNG`** / **`KHONG_TRUNG`**. Lý do cụ thể (y hệt, đổi màu,
 có thể khác custom text) nằm trong `reasons`.
 
-Module có 3 phần:
+Module có 3 phần (pool 85k ảnh lịch sử đã được crawl và embedding một lần trước đó, nay chỉ tăng thêm qua luồng `/check`):
 
 1. **So 1-1** (`frontend/index.html`): upload 2 ảnh rồi xem ngay từng tín hiệu.
 2. **Quét pool tăng dần** (`frontend/scan.html`): ingest kho `data/old/` một lần,
    sau đó quét `data/new/` lần lượt theo tên file. Mỗi ảnh mới được so với toàn bộ
    pool (gồm ảnh cũ và ảnh mới đã quét trước nó), gắn nhãn, rồi được thêm vào pool.
    Dữ liệu lưu trong SQLite.
-3. **Backfill embedding** (`embed_backfill.py`): tính embedding cho ảnh Printerval đã
-   crawl và ghi vào Postgres trên VPS (schema `support_compare_image`). Chạy trên máy
-   có GPU.
-4. **So sánh với PostgreSQL** (`compare_orders.py`): lấy ảnh preview của order từ
+3. **So sánh với PostgreSQL** (`compare_orders.py`): lấy ảnh preview của order từ
    `public.orders`, đọc pool DINOv2 cũ từ `support_compare_image.image_embeddings`,
    tính candidate và ghi kết quả vào các bảng `comparison_*`. Có thể chạy thử với
    order `review`; các order này không được promote ngược vào pool.
@@ -130,63 +127,7 @@ Ví dụ response của `/compare`:
 }
 ```
 
-## 2. Backfill embedding lên Postgres VPS
-
-Script `embed_backfill.py` tính embedding, pHash và màu LAB cho các ảnh trong
-`support_compare_image.image_assets`, rồi ghi vào bảng `image_embeddings`. Schema bảng
-này do migration `0002_image_embeddings` bên `pinterva-manager` tạo ra.
-
-```powershell
-# Terminal 1: mở SSH tunnel tới Postgres, để nguyên cửa sổ này
-ssh -N -L 15432:127.0.0.1:5432 USER@VPS_HOST
-
-# Terminal 2
-cd dup-compare
-$env:DATABASE_URL = "postgresql://USER:PASS@127.0.0.1:15432/DB"
-py embed_backfill.py --limit 200   # chạy thử
-py embed_backfill.py               # chạy toàn bộ
-```
-
-| Tham số | Mặc định | Ý nghĩa |
-|---|---|---|
-| `--limit` | – | chỉ xử lý N ảnh (để chạy thử) |
-| `--chunk` | 512 | số ảnh ghi DB mỗi transaction |
-| `--batch` | 64 | batch size trên GPU |
-| `--workers` | 16 | số thread tải ảnh song song |
-
-- **Chạy tiếp được:** ảnh đã có embedding của model hiện tại sẽ được bỏ qua, nên cứ chạy
-  lại để làm tiếp chỗ dở. Nếu mất tunnel giữa chừng thì chỉ mất chunk đang chạy dở.
-- **Ảnh lỗi** (link chết, 403, ảnh hỏng) bị đánh dấu `fetch_status='failed'` kèm
-  `last_error`, và không làm dừng cả lượt chạy.
-
-**Kiểm tra tiến độ** (chạy psql trên VPS):
-
-```bash
-docker exec -it $(docker ps -qf name=postgres) sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
-```
-
-```sql
--- Chỉ còn 'embedded' và 'failed' nghĩa là đã xong
-SELECT fetch_status, COUNT(*) FROM support_compare_image.image_assets GROUP BY 1;
-
--- Xem lý do lỗi
-SELECT last_error, COUNT(*) FROM support_compare_image.image_assets
-WHERE fetch_status = 'failed' GROUP BY 1 ORDER BY 2 DESC LIMIT 10;
-
--- Cho các ảnh lỗi chạy lại, rồi chạy lại embed_backfill.py
-UPDATE support_compare_image.image_assets SET fetch_status = 'pending' WHERE fetch_status = 'failed';
-```
-
-**Quy ước lưu embedding** (bên đọc dữ liệu phải theo đúng quy ước này):
-`embedding` là bytes float32 little-endian, đã L2-normalize, lấy trung bình các patch
-token (bỏ CLS), 768 chiều với dinov2-base. `model_version` là tên model trên Hugging
-Face. Metric là cosine, bằng dot product vì vector đã chuẩn hóa. Tiền xử lý ảnh
-(`convert("RGB")`) giống hệt `scan.py`, nên vector từ hai phía so với nhau được.
-
-> Hiện tại luồng quét pool (`scan.html`) vẫn đọc từ SQLite, chưa đọc từ bảng
-> `image_embeddings` trên Postgres.
-
-## 3. So sánh order mẫu từ `public.orders`
+## 2. So sánh order mẫu từ `public.orders`
 
 Migration `support_compare_image/migrations/versions/0003_comparison_runs.py` tạo
 `comparison_runs`, `comparison_items` và `comparison_candidates`. Chạy migration
@@ -285,7 +226,7 @@ Review chỉ là nguồn test: candidate được lưu để kiểm tra, nhưng 
 cho đổi trạng thái order. Candidate live `support_unchecked` mới được phép đi qua command Support;
 Doing chỉ được phân loại qua callback Telegram, còn command web vẫn Waiting-only.
 
-### Chạy local worker cho job `/check` hoặc lịch 30 phút
+### Chạy local worker cho job `/check`
 
 ```bash
 cd support_compare_image
@@ -353,7 +294,7 @@ Mỗi thẻ hiện ảnh gốc và top-5 candidate, tất cả kèm mã đơn:
 Trang này chỉ ghi vào schema `support_compare_image`, chỉ nhận request same-origin tới
 `127.0.0.1`/`localhost`, và không bao giờ đổi order. Không mở cổng ra ngoài (`--host 127.0.0.1`).
 
-## 4. Chuyển sang weight fine-tune ở phase 2
+## 3. Chuyển sang weight fine-tune ở phase 2
 
 Có thể trỏ runner tới một thư mục Hugging Face local:
 
@@ -370,7 +311,7 @@ Nếu dimension, preprocessing hoặc model space thay đổi, phải re-embed p
 đúng weight mới trước khi so sánh. Không trộn vector `facebook/dinov2-base` với
 vector fine-tune trong cùng một pool.
 
-## 5. Test và calibrate
+## 4. Test và calibrate
 
 ```bash
 # Smoke test bằng ảnh vẽ tay tổng hợp, không cần ảnh thật
@@ -429,7 +370,6 @@ dup-compare/
   frontend/
     index.html      # UI so 1-1
     scan.html       # UI quét pool
-  embed_backfill.py     # backfill embedding lên Postgres VPS
   calibrate_dataset.py  # đo trên dataset gán nhãn tay
   test_pipeline.py      # smoke test bằng ảnh tổng hợp
   requirements.txt
