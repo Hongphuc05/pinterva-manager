@@ -1,8 +1,8 @@
 import asyncio
 import uuid
 
-from starlette.requests import Request
 from sqlalchemy.orm.exc import StaleDataError
+from starlette.requests import Request
 
 from app.api.main import create_app
 from app.application.concurrency import OrderVersionConflictError

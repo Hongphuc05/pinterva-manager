@@ -6,7 +6,6 @@ from app.adapters.playwright_support import _profile_path
 from app.api.main import create_app
 from app.config import get_settings
 
-
 ROOT_DIR = Path(__file__).resolve().parents[1]
 
 
