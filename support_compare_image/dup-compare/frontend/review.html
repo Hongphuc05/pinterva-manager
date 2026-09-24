@@ -4,68 +4,247 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Duyệt kết quả kiểm tra trùng</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <style>
-  :root { --bg:#0f1117; --panel:#171a22; --border:#262a35; --text:#e6e8ee; --muted:#9aa1b1;
-          --accent:#5b8def; --ok:#3fb27f; --warn:#e0a13a; --bad:#e5606b; }
+  /* Design tokens: UI_style.md (Enterprise Admin Dashboard, HSL) */
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 210 10% 18%;
+    --primary: 218 100% 40%;          /* #0052CC */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 218 90% 52%;         /* #1E6FFF */
+    --tertiary: 210 16% 96%;          /* #F4F6F8 */
+    --muted: 210 14% 90%;
+    --muted-foreground: 210 10% 30%;
+    --accent: 148 48% 40%;            /* emerald */
+    --warning: 38 90% 50%;
+    --destructive: 0 84% 60%;
+    --border: 210 14% 90%;
+    --radius: 0.5rem;
+  }
   * { box-sizing: border-box; }
-  body { margin:0; padding:24px; background:var(--bg); color:var(--text);
-         font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
-  h1 { font-size:20px; margin:0 0 4px; }
-  .sub { color:var(--muted); font-size:13px; margin-bottom:16px; }
-  .bar { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:14px; }
-  select, button { font:inherit; border-radius:8px; border:1px solid var(--border); padding:7px 12px;
-                   background:#1f2330; color:var(--text); cursor:pointer; }
-  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
-  button.danger { background:transparent; border-color:var(--bad); color:var(--bad); }
-  button:disabled { opacity:.45; cursor:not-allowed; }
-  .tabs button.active { background:var(--accent); border-color:var(--accent); color:#fff; }
-  .stats { color:var(--muted); font-size:13px; }
-  .card { background:var(--panel); border:1px solid var(--border); border-radius:12px;
-          padding:14px; margin-bottom:14px; }
-  .card h3 { margin:0 0 10px; font-size:15px; display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; }
-  .code { font-family:ui-monospace,Menlo,monospace; background:#20263a; padding:2px 8px; border-radius:6px; }
-  .name { color:var(--muted); font-weight:400; font-size:13px; }
-  .row { display:flex; gap:14px; align-items:flex-start; flex-wrap:wrap; }
-  .fig { width:190px; }
-  .fig img { width:190px; height:190px; object-fit:contain; background:#0b0d12;
-             border:1px solid var(--border); border-radius:8px; display:block; }
-  .fig.chosen img { border-color:var(--ok); box-shadow:0 0 0 2px var(--ok); }
-  .fig .cap { font-size:12px; margin-top:6px; line-height:1.5; }
-  .fig .cap b { font-family:ui-monospace,Menlo,monospace; }
-  .muted { color:var(--muted); }
-  .sep { width:1px; align-self:stretch; background:var(--border); }
-  .cands { display:flex; gap:12px; flex-wrap:wrap; flex:1; }
-  .badge { display:inline-block; font-size:11px; padding:1px 7px; border-radius:999px; border:1px solid var(--border); }
-  .badge.trung { color:var(--warn); border-color:var(--warn); }
-  .badge.ok { color:var(--ok); border-color:var(--ok); }
-  .badge.bad { color:var(--bad); border-color:var(--bad); }
-  .actions { margin-top:12px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-  .msg { color:var(--muted); font-size:13px; padding:20px 0; }
-  .err { color:var(--bad); }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+         font-size: 14px; color: hsl(var(--foreground)); background: hsl(var(--tertiary)); }
+  .mono { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; }
+  button { font: inherit; cursor: pointer; }
+  svg { width: 16px; height: 16px; flex: none; stroke: currentColor; fill: none; stroke-width: 2;
+        stroke-linecap: round; stroke-linejoin: round; }
+
+  /* Layout: fixed sidebar + sticky topbar */
+  .shell { display: flex; min-height: 100vh; }
+  .sidebar { width: 256px; background: hsl(var(--primary)); color: hsl(var(--primary-foreground));
+             position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; flex: none; }
+  .brand { display: flex; align-items: center; gap: 12px; padding: 20px; border-bottom: 1px solid rgb(255 255 255 / .15); }
+  .brand-logo { width: 40px; height: 40px; border-radius: 12px; background: rgb(255 255 255 / .2);
+                display: grid; place-items: center; }
+  .brand-logo svg { width: 22px; height: 22px; }
+  .brand b { display: block; font-size: 17px; font-weight: 700; letter-spacing: -.01em; }
+  .brand span { font-size: 12px; opacity: .8; }
+  .nav { padding: 16px 12px; display: flex; flex-direction: column; gap: 4px; }
+  .nav-label { font-size: 11px; font-weight: 600; letter-spacing: .08em; opacity: .65; padding: 12px 12px 4px; }
+  .nav a { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px; font-weight: 500;
+           color: inherit; text-decoration: none; transition: background .2s; }
+  .nav a:hover { background: rgb(255 255 255 / .1); }
+  .nav a.active { background: rgb(255 255 255 / .2); }
+  .side-foot { margin-top: auto; padding: 16px 20px; font-size: 12px; opacity: .75; border-top: 1px solid rgb(255 255 255 / .15); }
+  .main-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .topbar { height: 64px; background: #fff; border-bottom: 1px solid hsl(var(--border)); position: sticky; top: 0; z-index: 40;
+            display: flex; align-items: center; gap: 12px; padding: 0 24px; }
+  .topbar h2 { margin: 0; font-size: 16px; font-weight: 600; }
+  .topbar .grow { flex: 1; }
+  .burger { display: none; width: 36px; height: 36px; border: 1px solid hsl(var(--border)); border-radius: 8px; background: #fff;
+            place-items: center; }
+  .content { padding: 24px 32px; display: flex; flex-direction: column; gap: 24px; }
+  .overlay { display: none; position: fixed; inset: 0; background: rgb(17 24 39 / .5); z-index: 45; }
+  @media (max-width: 1023px) {
+    .sidebar { position: fixed; left: 0; top: 0; z-index: 50; transform: translateX(-100%); transition: transform .2s; }
+    .shell.drawer .sidebar { transform: none; }
+    .shell.drawer .overlay { display: block; }
+    .burger { display: grid; }
+    .content { padding: 16px; }
+    .topbar { padding: 0 16px; }
+  }
+
+  /* Page header */
+  .page-title { margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -.02em; }
+  .page-sub { margin: 4px 0 0; color: hsl(var(--muted-foreground)); font-size: 13px; max-width: 900px; line-height: 1.5; }
+
+  /* Controls */
+  select { height: 36px; border: 1px solid hsl(var(--border)); border-radius: 8px; background: #fff; padding: 0 10px;
+           font: inherit; max-width: 340px; color: inherit; }
+  select:focus, button:focus-visible { outline: 2px solid hsl(var(--primary) / .35); outline-offset: 1px; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 36px; padding: 0 14px;
+         border-radius: 6px; border: 1px solid transparent; font-weight: 600; font-size: 13px; transition: all .2s; }
+  .btn.sm { height: 32px; padding: 0 12px; font-size: 12px; }
+  .btn.primary { background: hsl(var(--primary)); color: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / .08); }
+  .btn.primary:hover { background: hsl(var(--primary) / .9); }
+  .btn.outline { background: #fff; border-color: hsl(var(--border)); color: hsl(var(--foreground)); }
+  .btn.outline:hover { background: hsl(var(--tertiary)); }
+  .btn.destructive-outline { background: #fff; border-color: hsl(var(--destructive) / .5); color: hsl(0 72% 45%); }
+  .btn.destructive-outline:hover { background: hsl(0 86% 97%); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .spin { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* KPI cards */
+  .kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+  @media (max-width: 1100px) { .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 520px) { .kpis { grid-template-columns: 1fr; } }
+  .card { background: #fff; border: 1px solid hsl(var(--border)); border-radius: 12px; box-shadow: 0 1px 2px rgb(0 0 0 / .05); }
+  .kpi { padding: 16px 20px; transition: box-shadow .2s; }
+  .kpi:hover { box-shadow: 0 4px 12px rgb(0 0 0 / .08); }
+  .kpi-head { display: flex; justify-content: space-between; align-items: center; color: hsl(var(--muted-foreground));
+              font-size: 13px; font-weight: 500; }
+  .kpi-head svg { color: hsl(var(--primary)); }
+  .kpi-val { margin-top: 8px; font-size: 26px; font-weight: 700; }
+  .kpi-note { margin-top: 2px; font-size: 12px; color: hsl(var(--muted-foreground)); }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+  .tab { display: inline-flex; align-items: center; gap: 8px; padding: 9px 14px; border-radius: 12px; border: 1px solid hsl(var(--border));
+         background: #fff; font-size: 12px; font-weight: 700; color: hsl(var(--foreground)); transition: all .2s; }
+  .tab:hover { background: hsl(var(--muted) / .5); }
+  .tab .count { padding: 1px 8px; border-radius: 999px; background: hsl(var(--muted)); font-size: 10px; font-family: "IBM Plex Mono", monospace; }
+  .tab.active { background: hsl(var(--primary)); border-color: hsl(var(--primary)); color: #fff;
+                box-shadow: 0 0 0 3px hsl(var(--primary) / .18); }
+  .tab.active .count { background: rgb(255 255 255 / .25); }
+
+  /* Badges */
+  .badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 6px; border: 1px solid;
+           font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .badge.success { background: #d1fae5; color: #065f46; border-color: #a7f3d0; }
+  .badge.pending { background: #fef3c7; color: #92400e; border-color: #fde68a; }
+  .badge.danger  { background: #fee2e2; color: #991b1b; border-color: #fecaca; }
+  .badge.info    { background: #dbeafe; color: #1e40af; border-color: #bfdbfe; }
+  .badge.muted   { background: hsl(var(--tertiary)); color: hsl(var(--muted-foreground)); border-color: hsl(var(--border)); }
+  .badge svg { width: 12px; height: 12px; }
+
+  /* Order card */
+  .order { overflow: hidden; margin-bottom: 16px; }
+  .order-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 20px;
+                background: hsl(var(--muted) / .5); border-bottom: 1px solid hsl(var(--border) / .7); }
+  .code { font-size: 13px; font-weight: 500; padding: 2px 8px; border-radius: 6px; background: #fff; border: 1px solid hsl(var(--border));
+          color: hsl(var(--primary)); }
+  .pname { color: hsl(var(--muted-foreground)); font-size: 13px; flex: 1; min-width: 160px; }
+  .order-body { display: flex; gap: 20px; padding: 20px; align-items: flex-start; }
+  @media (max-width: 800px) { .order-body { flex-direction: column; } .divider { display: none; } }
+  .divider { width: 1px; align-self: stretch; background: hsl(var(--border)); }
+  .figs { display: flex; gap: 14px; flex: 1; min-width: 0; overflow-x: auto; padding-bottom: 4px; }
+  .fig { width: 188px; flex: none; }
+  .fig .frame { position: relative; display: block; width: 188px; height: 188px; border-radius: 12px; overflow: hidden;
+                background: hsl(var(--tertiary)); border: 1px solid hsl(var(--border)); cursor: zoom-in; padding: 0; }
+  .fig img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .fig.chosen .frame { border-color: hsl(var(--accent)); box-shadow: 0 0 0 3px hsl(var(--accent) / .25); }
+  .fig .tag { position: absolute; top: 8px; left: 8px; }
+  .fig .meta { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+  .fig .meta .row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+  .fig .sub { color: hsl(var(--muted-foreground)); }
+  .fig .name { color: hsl(var(--muted-foreground)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fig .btn { margin-top: 6px; width: 100%; }
+  .order-foot { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 12px 20px;
+                border-top: 1px solid hsl(var(--border) / .7); }
+  .order-foot .hint { margin-right: auto; font-size: 12px; color: hsl(var(--muted-foreground)); }
+
+  /* States */
+  .empty { text-align: center; padding: 56px 16px; color: hsl(var(--muted-foreground)); }
+  .empty svg { width: 40px; height: 40px; color: hsl(var(--muted-foreground) / .6); margin-bottom: 8px; }
+  .empty b { display: block; color: hsl(var(--foreground)); font-size: 15px; margin-bottom: 2px; }
+  .loading { display: flex; justify-content: center; align-items: center; gap: 8px; padding: 56px 0; color: hsl(var(--muted-foreground)); }
+  .conn { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: hsl(var(--muted-foreground)); }
+  .conn i { width: 8px; height: 8px; border-radius: 50%; background: hsl(var(--accent)); }
+  .conn.off i { background: hsl(var(--destructive)); }
+
+  /* Toast + lightbox */
+  .toasts { position: fixed; right: 20px; bottom: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 80; }
+  .toast { background: #fff; border: 1px solid hsl(var(--border)); border-left: 4px solid hsl(var(--accent)); border-radius: 8px;
+           padding: 10px 14px; box-shadow: 0 8px 24px rgb(0 0 0 / .12); font-size: 13px; max-width: 360px; }
+  .toast.error { border-left-color: hsl(var(--destructive)); }
+  .lightbox { display: none; position: fixed; inset: 0; z-index: 90; background: rgb(17 24 39 / .8); align-items: center;
+              justify-content: center; padding: 24px; cursor: zoom-out; }
+  .lightbox.open { display: flex; }
+  .lightbox img { max-width: 100%; max-height: 100%; border-radius: 12px; background: #fff; }
 </style>
 </head>
 <body>
-  <h1>Duyệt kết quả kiểm tra trùng</h1>
-  <div class="sub">Mỗi ảnh đều kèm mã đơn. Chọn ảnh model gợi ý mà bạn thấy thật sự trùng để gửi Telegram xác nhận;
-    nếu model sai, bấm "Model sai". Đơn "Model sai" và đơn không thấy trùng vẫn ở tab Chưa kiểm tra cho tới khi bạn gõ /handle.</div>
+<div class="shell" id="shell">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-logo"><svg viewBox="0 0 24 24"><path d="m12 2 9 5v10l-9 5-9-5V7z"/><path d="M12 22V12"/><path d="m21 7-9 5-9-5"/></svg></div>
+      <div><b>Tacahu Ops</b><span>Kiểm tra trùng thiết kế</span></div>
+    </div>
+    <nav class="nav">
+      <div class="nav-label">VẬN HÀNH</div>
+      <a href="/review.html" class="active"><svg viewBox="0 0 24 24"><path d="m12 2 10 5-10 5L2 7z"/><path d="m2 12 10 5 10-5"/><path d="m2 17 10 5 10-5"/></svg>Duyệt kết quả</a>
+      <div class="nav-label">CÔNG CỤ KHÁC</div>
+      <a href="/index.html"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></svg>So sánh 1-1</a>
+      <a href="/scan.html"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>Quét pool</a>
+    </nav>
+    <div class="side-foot">Chỉ chạy trên máy local. Không ghi vào bảng đơn hàng.</div>
+  </aside>
+  <div class="overlay" id="overlay"></div>
 
-  <div class="bar">
-    <label>Job: <select id="job"></select></label>
-    <button id="reload">Tải lại</button>
-    <span class="stats" id="stats"></span>
+  <div class="main-col">
+    <header class="topbar">
+      <button class="burger" id="burger" aria-label="Mở menu"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+      <h2>Duyệt kết quả kiểm tra trùng</h2>
+      <div class="grow"></div>
+      <span class="conn" id="conn"><i></i><span>Đang kết nối…</span></span>
+    </header>
+
+    <main class="content">
+      <div>
+        <h1 class="page-title">Duyệt kết quả</h1>
+        <p class="page-sub">Mỗi ảnh đều kèm mã đơn. Chọn ảnh model gợi ý mà bạn thấy thật sự trùng để gửi Telegram xác nhận;
+          nếu model sai, bấm "Model sai". Đơn "Model sai" và đơn không thấy trùng vẫn ở tab Chưa kiểm tra cho tới khi bạn gõ <span class="mono">/handle</span>.</p>
+      </div>
+
+      <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+        <label for="job" style="font-weight:500;">Job</label>
+        <select id="job"></select>
+        <button class="btn outline" id="reload"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>Tải lại</button>
+      </div>
+
+      <section class="kpis" id="kpis"></section>
+
+      <div class="tabs" id="tabs"></div>
+
+      <section id="list"><div class="loading"><svg class="spin" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>Đang tải…</div></section>
+    </main>
   </div>
-  <div class="bar tabs" id="tabs">
-    <button data-tab="todo" class="active">Cần duyệt</button>
-    <button data-tab="done">Đã duyệt</button>
-    <button data-tab="nomatch">Không thấy trùng</button>
-  </div>
-  <div id="list"><div class="msg">Đang tải…</div></div>
+</div>
+<div class="toasts" id="toasts"></div>
+<div class="lightbox" id="lightbox"><img alt="" /></div>
 
 <script>
 const $ = (id) => document.getElementById(id);
-const state = { tab: "todo", jobs: [], items: [], job: null };
+const state = { tab: "todo", jobs: [], items: [], job: null, busy: new Set() };
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 const safeUrl = (u) => (/^https?:\/\//i.test(u || "") ? u : "");
+const ICON = {
+  clock: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>',
+  check: '<svg viewBox="0 0 24 24"><path d="M22 11.1V12a10 10 0 1 1-5.9-9.1"/><path d="m9 11 3 3L22 4"/></svg>',
+  search: '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>',
+  alert: '<svg viewBox="0 0 24 24"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>',
+  send: '<svg viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/></svg>',
+  x: '<svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+  box: '<svg viewBox="0 0 24 24"><path d="m21 8-9-5-9 5v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/></svg>',
+  loader: '<svg class="spin" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>',
+};
+
+function toast(msg, kind) {
+  const el = document.createElement("div");
+  el.className = "toast" + (kind === "error" ? " error" : "");
+  el.textContent = msg;
+  $("toasts").appendChild(el);
+  setTimeout(() => el.remove(), 4500);
+}
+function setConn(ok, text) {
+  $("conn").className = "conn" + (ok ? "" : " off");
+  $("conn").lastElementChild.textContent = text;
+}
 
 async function api(path, opts) {
   const res = await fetch(path, opts);
@@ -83,94 +262,153 @@ function jobLabel(j) {
 }
 
 async function loadJobs() {
-  const { jobs } = await api("/review/jobs");
-  state.jobs = jobs;
-  $("job").innerHTML = jobs.map((j) => `<option value="${esc(j.id)}">${esc(jobLabel(j))}</option>`).join("");
-  if (!jobs.length) { $("list").innerHTML = '<div class="msg">Chưa có job nào.</div>'; return; }
-  await loadJob();
+  try {
+    const { jobs } = await api("/review/jobs");
+    setConn(true, "Đã kết nối DB");
+    state.jobs = jobs;
+    $("job").innerHTML = jobs.map((j) => `<option value="${esc(j.id)}">${esc(jobLabel(j))}</option>`).join("");
+    if (!jobs.length) { render(); $("list").innerHTML = emptyHtml("Chưa có job nào", "Gõ /check trên Telegram rồi bấm Có để tạo job."); return; }
+    await loadJob();
+  } catch (e) {
+    setConn(false, "Mất kết nối DB");
+    $("list").innerHTML = emptyHtml("Không tải được dữ liệu", e.message, "alert");
+  }
 }
 
 async function loadJob() {
   const id = $("job").value;
   if (!id) return;
-  $("list").innerHTML = '<div class="msg">Đang tải…</div>';
+  $("list").innerHTML = `<div class="loading">${ICON.loader}Đang tải…</div>`;
   try {
     const data = await api(`/review/jobs/${id}`);
     state.job = data.job; state.items = data.items;
     render();
-  } catch (e) { $("list").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
+  } catch (e) { $("list").innerHTML = emptyHtml("Không tải được job", e.message, "alert"); }
 }
 
 const isTodo = (i) => i.review_status === "pending_review";
 const isDone = (i) => i.review_status === "selected_duplicate" || i.review_status === "ai_wrong";
 const isNoMatch = (i) => i.review_status === "no_match";
 
-function figure(img, code, name, extra, chosen) {
+function emptyHtml(title, note, icon) {
+  return `<div class="card empty">${ICON[icon || "box"]}<b>${esc(title)}</b><span>${esc(note || "")}</span></div>`;
+}
+
+function statusBadge(item) {
+  if (item.review_status === "ai_wrong") return `<span class="badge danger">${ICON.x}Model sai</span>`;
+  if (item.review_status === "selected_duplicate") return `<span class="badge success">${ICON.check}Đã chọn</span>`;
+  if (item.review_status === "no_match") return '<span class="badge info">Không thấy trùng</span>';
+  return `<span class="badge pending">${ICON.clock}Chờ duyệt</span>`;
+}
+
+function figure({ img, code, name, tag, chosen, lines, button }) {
   const src = safeUrl(img);
   return `<div class="fig${chosen ? " chosen" : ""}">
-    ${src ? `<a href="${esc(src)}" target="_blank" rel="noopener"><img src="${esc(src)}" loading="lazy" alt="${esc(code)}"></a>` : '<div class="muted">Không có ảnh</div>'}
-    <div class="cap">Mã đơn <b>${esc(code)}</b>${name ? `<div class="muted">${esc(name)}</div>` : ""}${extra || ""}</div></div>`;
+    ${src ? `<button class="frame" data-zoom="${esc(src)}" title="Bấm để phóng to"><img src="${esc(src)}" loading="lazy" alt="${esc(code)}">${tag ? `<span class="tag">${tag}</span>` : ""}</button>`
+          : '<div class="frame" style="display:grid;place-items:center;color:#94a3b8;cursor:default">Không có ảnh</div>'}
+    <div class="meta">
+      <div class="row"><span class="mono code" style="align-self:flex-start">${esc(code)}</span></div>
+      ${name ? `<div class="name" title="${esc(name)}">${esc(name)}</div>` : ""}
+      ${lines || ""}
+      ${button || ""}
+    </div></div>`;
 }
 
 function candidateHtml(item, c, canAct) {
   const chosen = item.selected_candidate_id === c.id;
-  const extra = `<div>#${c.rank} · sim ${c.similarity.toFixed(3)}
-      <span class="badge ${c.classification === "TRUNG" ? "trung" : ""}">${esc(c.classification)}</span></div>
-    <div class="muted">pHash ${c.phash_distance ?? "-"} · SSIM ${c.ssim == null ? "-" : c.ssim.toFixed(2)}</div>
-    ${chosen ? `<div class="badge ok">${c.sent_to_telegram ? "Đã gửi Telegram" : "Đã chọn · chờ gửi Telegram (≤60s)"}</div>` : ""}
-    ${canAct && !c.sent_to_telegram ? `<div class="actions"><button class="primary" data-act="select" data-item="${esc(item.id)}" data-cand="${esc(c.id)}">Chọn ảnh này là trùng</button></div>` : ""}`;
-  return figure(c.image_url, c.order_code || "không rõ", c.product_name, extra, chosen);
+  const trung = c.classification === "TRUNG";
+  const rank = `<span class="badge muted">#${c.rank}</span>`;
+  const lines = `
+    <div class="row"><span class="sub">Độ giống</span><b class="mono">${c.similarity.toFixed(3)}</b></div>
+    <div class="row"><span class="sub">pHash / SSIM</span><span class="mono">${c.phash_distance ?? "-"} / ${c.ssim == null ? "-" : c.ssim.toFixed(2)}</span></div>
+    <div>${trung ? '<span class="badge pending">Model: TRÙNG</span>' : '<span class="badge muted">Model: khác</span>'}</div>
+    ${chosen ? `<div><span class="badge success">${ICON.send}${c.sent_to_telegram ? "Đã gửi Telegram" : "Chờ gửi Telegram (≤60s)"}</span></div>` : ""}`;
+  const busy = state.busy.has(item.id);
+  const button = canAct && !c.sent_to_telegram
+    ? `<button class="btn primary sm" data-act="select" data-item="${esc(item.id)}" data-cand="${esc(c.id)}" ${busy ? "disabled" : ""}>Chọn ảnh này là trùng</button>` : "";
+  return figure({ img: c.image_url, code: c.order_code || "không rõ", name: c.product_name, tag: rank, chosen, lines, button });
 }
 
 function itemHtml(item) {
   const sent = item.candidates.some((c) => c.id === item.selected_candidate_id && c.sent_to_telegram);
   const canAct = !sent && (isTodo(item) || isDone(item));
-  const status = item.review_status === "ai_wrong" ? '<span class="badge bad">Model sai</span>'
-    : item.review_status === "selected_duplicate" ? '<span class="badge ok">Đã chọn</span>'
-    : item.review_status === "no_match" ? '<span class="badge">Không thấy trùng</span>' : "";
-  return `<div class="card" data-item="${esc(item.id)}">
-    <h3><span class="code">${esc(item.order_code)}</span><span class="name">${esc(item.product_name || "")}</span>${status}</h3>
-    <div class="row">
-      ${figure(item.image_url, item.order_code, "", '<div class="badge">Ảnh gốc</div>', false)}
-      <div class="sep"></div>
-      <div class="cands">${item.candidates.map((c) => candidateHtml(item, c, canAct)).join("") || '<div class="muted">Không có candidate</div>'}</div>
+  const busy = state.busy.has(item.id);
+  const own = figure({ img: item.image_url, code: item.order_code, name: "", tag: '<span class="badge info">Ảnh gốc</span>', chosen: false });
+  return `<article class="card order" data-item="${esc(item.id)}">
+    <div class="order-head"><span class="mono code">${esc(item.order_code)}</span><span class="pname">${esc(item.product_name || "")}</span>${statusBadge(item)}</div>
+    <div class="order-body">
+      ${own}
+      <div class="divider"></div>
+      <div class="figs">${item.candidates.map((c) => candidateHtml(item, c, canAct)).join("") || '<div class="empty" style="padding:24px 0">Không có candidate</div>'}</div>
     </div>
-    ${canAct ? `<div class="actions"><button class="danger" data-act="reject" data-item="${esc(item.id)}">Model sai — bỏ qua đơn ${esc(item.order_code)}</button></div>` : ""}
-  </div>`;
+    ${canAct ? `<div class="order-foot"><span class="hint">Model đoán sai? Đơn ${esc(item.order_code)} sẽ nằm cùng nhóm "không thấy trùng" cho tới khi bạn gõ /handle.</span>
+      <button class="btn destructive-outline sm" data-act="reject" data-item="${esc(item.id)}" ${busy ? "disabled" : ""}>${ICON.x}Model sai</button></div>` : ""}
+  </article>`;
+}
+
+function kpi(label, value, note, icon) {
+  return `<div class="card kpi"><div class="kpi-head"><span>${label}</span>${ICON[icon]}</div>
+    <div class="kpi-val mono">${value}</div><div class="kpi-note">${note}</div></div>`;
 }
 
 function render() {
   const groups = { todo: state.items.filter(isTodo), done: state.items.filter(isDone), nomatch: state.items.filter(isNoMatch) };
-  document.querySelectorAll("#tabs button").forEach((b) => {
-    b.classList.toggle("active", b.dataset.tab === state.tab);
-    b.textContent = { todo: "Cần duyệt", done: "Đã duyệt", nomatch: "Không thấy trùng" }[b.dataset.tab] + ` (${groups[b.dataset.tab].length})`;
-  });
   const j = state.job;
-  $("stats").textContent = `Job ${j.status}: ${j.processed_count}/${j.requested_count} đơn đã so · ${j.duplicate_count} nghi trùng · ${j.error_count} lỗi`;
+  $("kpis").innerHTML = j ? [
+    kpi("Cần duyệt", groups.todo.length, "Đơn model nghi trùng", "clock"),
+    kpi("Đã duyệt", groups.done.length, "Đã chọn ảnh hoặc Model sai", "check"),
+    kpi("Không thấy trùng", groups.nomatch.length, "Chờ /handle", "search"),
+    kpi("Lỗi", j.error_count, `Job ${esc(j.status)} · ${j.processed_count}/${j.requested_count} đơn`, "alert"),
+  ].join("") : "";
+  const labels = { todo: "Cần duyệt", done: "Đã duyệt", nomatch: "Không thấy trùng" };
+  $("tabs").innerHTML = Object.keys(labels).map((k) =>
+    `<button class="tab${state.tab === k ? " active" : ""}" data-tab="${k}">${labels[k]}<span class="count">${groups[k].length}</span></button>`).join("");
   const list = groups[state.tab];
-  $("list").innerHTML = list.length ? list.map(itemHtml).join("") : '<div class="msg">Không có đơn nào trong mục này.</div>';
+  $("list").innerHTML = list.length ? list.map(itemHtml).join("")
+    : emptyHtml("Không có đơn nào trong mục này", state.tab === "todo" ? "Bạn đã duyệt hết các đơn nghi trùng của job này." : "");
 }
 
-document.addEventListener("click", async (ev) => {
-  const btn = ev.target.closest("button[data-act]");
-  if (!btn) return;
+async function act(btn) {
+  const itemId = btn.dataset.item;
+  if (state.busy.has(itemId)) return;
+  state.busy.add(itemId);
   btn.disabled = true;
+  btn.innerHTML = ICON.loader + btn.textContent;
   try {
     if (btn.dataset.act === "select") {
-      await api(`/review/items/${btn.dataset.item}/select`, {
+      await api(`/review/items/${itemId}/select`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ candidate_id: btn.dataset.cand }),
       });
+      toast("Đã chọn ảnh trùng. Telegram sẽ gửi cặp ảnh trong ≤60 giây.");
     } else {
-      await api(`/review/items/${btn.dataset.item}/reject`, { method: "POST" });
+      await api(`/review/items/${itemId}/reject`, { method: "POST" });
+      toast("Đã ghi nhận: model sai.");
     }
+    state.busy.delete(itemId);
     await loadJob();
-  } catch (e) { alert(e.message); btn.disabled = false; }
+  } catch (e) {
+    state.busy.delete(itemId);
+    toast(e.message, "error");
+    render();
+  }
+}
+
+document.addEventListener("click", (ev) => {
+  const zoom = ev.target.closest("[data-zoom]");
+  if (zoom) { const lb = $("lightbox"); lb.querySelector("img").src = zoom.dataset.zoom; lb.classList.add("open"); return; }
+  const btn = ev.target.closest("button[data-act]");
+  if (btn) { act(btn); return; }
+  const tab = ev.target.closest("button[data-tab]");
+  if (tab) { state.tab = tab.dataset.tab; render(); }
 });
-$("tabs").addEventListener("click", (ev) => { const b = ev.target.closest("button"); if (b) { state.tab = b.dataset.tab; render(); } });
+$("lightbox").addEventListener("click", () => $("lightbox").classList.remove("open"));
+document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") { $("lightbox").classList.remove("open"); $("shell").classList.remove("drawer"); } });
+$("burger").addEventListener("click", () => $("shell").classList.add("drawer"));
+$("overlay").addEventListener("click", () => $("shell").classList.remove("drawer"));
 $("job").addEventListener("change", loadJob);
 $("reload").addEventListener("click", loadJobs);
-loadJobs().catch((e) => { $("list").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; });
+loadJobs();
 </script>
 </body>
 </html>
