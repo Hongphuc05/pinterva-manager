@@ -32,10 +32,10 @@ phải enforce role + platform + assignment ở backend.
   `non_duplicate`, order vẫn hiện trong tab phân loại tương ứng để Support đối soát, kể cả
   khi đã sang `Doing`, `Review` hoặc `Done`; backend vẫn từ chối lệnh phân loại ngoài
   `Waiting` từ web.
-- Mỗi lần Support chốt kết quả phân loại, order lưu `support_classified_by_id` và
-  `support_classified_at`. Finance của Admin dùng hai trường này để đếm công theo từng
-  Support; Finance của Support chỉ trả số đơn do chính tài khoản đó phân loại, không trả
-  danh sách/tổng tiền tài chính của cả platform.
+- Khi Support chốt `duplicate`, order lưu `support_classified_by_id` và
+  `support_classified_at`, đồng thời ghi timeline để Finance đếm công theo từng Support.
+  Chốt `non_duplicate` chỉ đổi trạng thái kiểm tra, không ghi timeline và không được tính
+  công; Finance của Support chỉ trả số đơn duplicate do chính tài khoản đó xác nhận.
 - Support không có quyền đọc hoặc điều khiển Duplicate Board; board chỉ dành cho Admin và
   Designer Trello. Support cũng không tự nhiên kế thừa quyền sửa state, platform credential
   hay finance admin.

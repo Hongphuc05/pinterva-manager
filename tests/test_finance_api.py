@@ -48,6 +48,8 @@ def test_normalize_text():
 def test_support_finance_is_scoped_to_own_classification_count(client, db_session):
     platform = Platform(name="Support finance platform", account_username="support-finance@example.com")
     other_platform = Platform(name="Other finance platform", account_username="other-finance@example.com")
+    db_session.add_all([platform, other_platform])
+    db_session.flush()
     support = User(
         username="support_finance_owner",
         full_name="Support Owner",
@@ -62,13 +64,14 @@ def test_support_finance_is_scoped_to_own_classification_count(client, db_sessio
         password_hash=hash_password("pass"),
         platform_id=platform.id,
     )
-    db_session.add_all([platform, other_platform, support, another_support])
+    db_session.add_all([support, another_support])
     db_session.flush()
     classified_at = datetime.now(UTC)
     own_order = Order(
         external_order_id="SUPPORT-FIN-OWN",
         platform_id=platform.id,
         state=OrderState.IN_PROGRESS.value,
+        duplicate_check_status="duplicate",
         support_classified_by_id=support.id,
         support_classified_at=classified_at,
     )
@@ -76,6 +79,7 @@ def test_support_finance_is_scoped_to_own_classification_count(client, db_sessio
         external_order_id="SUPPORT-FIN-OTHER",
         platform_id=platform.id,
         state=OrderState.IN_PROGRESS.value,
+        duplicate_check_status="duplicate",
         support_classified_by_id=another_support.id,
         support_classified_at=classified_at,
     )
@@ -83,10 +87,19 @@ def test_support_finance_is_scoped_to_own_classification_count(client, db_sessio
         external_order_id="SUPPORT-FIN-FOREIGN",
         platform_id=other_platform.id,
         state=OrderState.IN_PROGRESS.value,
+        duplicate_check_status="duplicate",
         support_classified_by_id=support.id,
         support_classified_at=classified_at,
     )
-    db_session.add_all([own_order, other_support_order, foreign_order])
+    stale_non_duplicate = Order(
+        external_order_id="SUPPORT-FIN-NON-DUPLICATE",
+        platform_id=platform.id,
+        state=OrderState.WAITING.value,
+        duplicate_check_status="non_duplicate",
+        support_classified_by_id=support.id,
+        support_classified_at=classified_at,
+    )
+    db_session.add_all([own_order, other_support_order, foreign_order, stale_non_duplicate])
     db_session.commit()
 
     support_token = create_session_token(str(support.id), support.role)

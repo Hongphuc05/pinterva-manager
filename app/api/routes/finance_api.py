@@ -24,6 +24,7 @@ from app.api.deps import DEFAULT_PLATFORM_ID, get_current_platform_id, get_curre
 from app.application.concurrency import require_expected_order_version
 from app.application.sanitization import encode_proxy_url
 from app.domain.access import (
+    DUPLICATE_CHECK_DUPLICATE,
     ROLE_ADMIN,
     ROLE_DESIGNER,
     ROLE_DESIGNER_TRELLO,
@@ -365,7 +366,8 @@ def get_finance_stats(
     support_classified_orders = [
         order
         for order in orders
-        if order.support_classified_by_id
+        if order.duplicate_check_status == DUPLICATE_CHECK_DUPLICATE
+        and order.support_classified_by_id
         and is_in_date_range(order.support_classified_at)
     ]
 

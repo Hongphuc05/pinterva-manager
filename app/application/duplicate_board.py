@@ -103,6 +103,29 @@ def _event(
     )
 
 
+def _record_support_classification(
+    order: Order,
+    *,
+    actor: User,
+    duplicate_status: str,
+) -> None:
+    """Keep Support work attribution only for a positive duplicate decision."""
+    if actor.role != ROLE_SUPPORT:
+        return
+    if duplicate_status == DUPLICATE_CHECK_DUPLICATE:
+        order.support_classified_by_id = actor.id
+        order.support_classified_at = datetime.now(UTC)
+    else:
+        # ``non_duplicate`` and ``uncheck`` are not Support work items.
+        order.support_classified_by_id = None
+        order.support_classified_at = None
+
+
+def _should_record_support_timeline(*, actor: User, duplicate_status: str) -> bool:
+    """Support's timeline/work item exists only for a duplicate decision."""
+    return actor.role != ROLE_SUPPORT or duplicate_status == DUPLICATE_CHECK_DUPLICATE
+
+
 def _cancel_assignments(
     session: Session, assignments: list[Assignment], *, reason: str
 ) -> None:
@@ -229,21 +252,32 @@ def set_orders_work_domain(
             order.state = OrderState.WAITING.value
             order.duplicate_check_status = DUPLICATE_CHECK_NON_DUPLICATE
             order.fix_approved_by_admin = False
-        if actor.role == ROLE_SUPPORT:
-            order.support_classified_by_id = actor.id
-            order.support_classified_at = datetime.now(UTC)
-        session.add(order)
-        _event(
-            session,
-            order,
-            actor.id,
-            "work_domain_changed",
-            from_state=previous_state,
-            to_state=order.state,
-            from_domain=previous_domain,
-            to_domain=work_domain,
-            cancelled_assignment_ids=[str(item.id) for item in active_assignments],
+        classification_status = (
+            DUPLICATE_CHECK_DUPLICATE
+            if work_domain == WORK_DOMAIN_DUPLICATE
+            else DUPLICATE_CHECK_NON_DUPLICATE
         )
+        _record_support_classification(
+            order,
+            actor=actor,
+            duplicate_status=classification_status,
+        )
+        session.add(order)
+        if _should_record_support_timeline(
+            actor=actor,
+            duplicate_status=classification_status,
+        ):
+            _event(
+                session,
+                order,
+                actor.id,
+                "work_domain_changed",
+                from_state=previous_state,
+                to_state=order.state,
+                from_domain=previous_domain,
+                to_domain=work_domain,
+                cancelled_assignment_ids=[str(item.id) for item in active_assignments],
+            )
     session.commit()
     _dispatch_printerval_requests(request_ids)
     return len(orders)
@@ -364,26 +398,28 @@ def set_orders_duplicate_status(
                 order.fix_approved_by_admin = False
 
         session.add(order)
-        if actor.role == ROLE_SUPPORT:
-            if duplicate_status == DUPLICATE_CHECK_UNCHECK:
-                order.support_classified_by_id = None
-                order.support_classified_at = None
-            else:
-                order.support_classified_by_id = actor.id
-                order.support_classified_at = datetime.now(UTC)
-        _event(
-            session,
+        _record_support_classification(
             order,
-            actor.id,
-            "duplicate_status_changed",
-            from_state=prev_state,
-            to_state=order.state,
-            from_domain=prev_domain,
-            to_domain=order.work_domain,
-            from_check_status=prev_check_status,
-            to_check_status=duplicate_status,
-            cancelled_assignment_ids=cancelled_ids,
+            actor=actor,
+            duplicate_status=duplicate_status,
         )
+        if _should_record_support_timeline(
+            actor=actor,
+            duplicate_status=duplicate_status,
+        ):
+            _event(
+                session,
+                order,
+                actor.id,
+                "duplicate_status_changed",
+                from_state=prev_state,
+                to_state=order.state,
+                from_domain=prev_domain,
+                to_domain=order.work_domain,
+                from_check_status=prev_check_status,
+                to_check_status=duplicate_status,
+                cancelled_assignment_ids=cancelled_ids,
+            )
 
     session.commit()
     _dispatch_printerval_requests(request_ids)

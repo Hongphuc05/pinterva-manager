@@ -584,6 +584,7 @@ def test_support_can_classify_waiting_orders_but_not_recheck_doing_orders(client
         assert order.state == "IN_PROGRESS"
         assert order.support_classified_by_id == support.id
         assert order.support_classified_at is not None
+        assert db_session.query(WorkflowEvent).filter_by(order_id=order.id).count() == 1
         request = db_session.query(PrintervalAssignmentRequest).filter_by(order_id=order.id).one()
         assert request.target_status == "Doing"
         assert request.designer_option == ""
@@ -626,8 +627,9 @@ def test_support_can_classify_waiting_orders_but_not_recheck_doing_orders(client
         assert waiting_non_duplicate.work_domain == "standard"
         assert waiting_non_duplicate.duplicate_check_status == "non_duplicate"
         assert waiting_non_duplicate.state == "WAITING"
-        assert waiting_non_duplicate.support_classified_by_id == support.id
-        assert waiting_non_duplicate.support_classified_at is not None
+        assert waiting_non_duplicate.support_classified_by_id is None
+        assert waiting_non_duplicate.support_classified_at is None
+        assert db_session.query(WorkflowEvent).filter_by(order_id=waiting_non_duplicate.id).count() == 0
 
         # 3. Neither a status change nor the legacy domain endpoint may let
         # Support re-check an order after it has entered Doing.

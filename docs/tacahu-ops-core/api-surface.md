@@ -62,8 +62,9 @@ vì callback duplicate chỉ xác thực chat riêng.
   nút web để phân loại các order này: chỉ callback Telegram của source `support_unchecked` mới
   được phép quyết định. Order đã có phân loại `duplicate` hoặc `non_duplicate` vẫn được trả sau
   khi state chuyển sang `Doing`/`Review`/`Done`.
-- Khi Support chốt `duplicate` hoặc `non_duplicate`, order lưu người và thời điểm phân loại
-  tại `support_classified_by_id`/`support_classified_at`.
+- Khi Support chốt `duplicate`, order lưu người và thời điểm tại
+  `support_classified_by_id`/`support_classified_at` và có timeline Support. Chốt
+  `non_duplicate` không lưu attribution/timeline và không được tính công.
 - `GET /finance/stats` với role Support bị scope theo `user.platform_id` và chỉ trả số đơn
-  do chính Support đó phân loại. Admin nhận thêm `support_classified_count` và
+  duplicate do chính Support đó xác nhận. Admin nhận thêm `support_classified_count` và
   `support_summary` để đối soát công theo người.

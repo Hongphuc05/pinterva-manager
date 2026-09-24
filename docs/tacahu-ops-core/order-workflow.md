@@ -52,7 +52,8 @@ transition nhưng application layer không được tự động recover.
    command hiện hành; refresh metadata không tự đổi state.
 2. **Phân loại**: Admin/Support đặt `work_domain` là `standard` hoặc `duplicate` và cập
    nhật duplicate check status. Support chỉ được thực hiện bước này khi order còn ở
-   `Waiting`; command ghi người + thời điểm Support phân loại để Finance đếm công. Standard
+   `Waiting`; chỉ quyết định `duplicate` mới ghi người + thời điểm, timeline và công
+   Support. Quyết định `non_duplicate` không tạo timeline/công Support. Standard
    được Admin phân công; duplicate vào Duplicate Board. Sau khi order vào `Doing`, Support
    vẫn xem được mọi order trong tab `Đang làm`, còn order đã phân loại tiếp tục xuất hiện ở
    tab phân loại tương ứng; tất cả đều read-only.
