@@ -1,5 +1,6 @@
 import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
+import { useSecretEntry } from '../features/dupReview/useSecretEntry'
 import {
   ListOrdered,
   PackageCheck,
@@ -24,6 +25,7 @@ interface SidebarProps {
 export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
   const { user } = useAuth()
   const location = useLocation()
+  const { onLogoClick } = useSecretEntry()
 
   if (!user) return null
 
@@ -101,7 +103,7 @@ export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
       } md:sticky md:top-0 md:w-20 md:translate-x-0 xl:w-64`}
     >
       <div className="flex h-16 items-center gap-3 border-b border-white/15 bg-blue-900/30 px-4 md:justify-center md:px-0 xl:justify-start xl:px-6">
-        <div className="rounded-xl bg-white/20 p-2 backdrop-blur-md">
+        <div className="rounded-xl bg-white/20 p-2 backdrop-blur-md" onClick={onLogoClick}>
           <PackageCheck className="h-6 w-6 text-white" />
         </div>
         <div className="min-w-0 md:hidden xl:block">

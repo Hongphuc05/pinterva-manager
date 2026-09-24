@@ -70,7 +70,7 @@ Luồng vận hành một lô (ví dụ 100 order admin vừa crawl về Waiting
    Token của máy hết hạn sau 12 giờ; Support dừng máy bất cứ lúc nào ở trang Hàng đợi.
 4. Agent so sánh cả lô rồi VPS thêm cả lô vào pool. Bot báo số order đã so, số nghi trùng, số không
    thấy trùng và số lỗi.
-5. Support mở khu vực ẩn **Quản lý trùng lặp** (`/duplicate-review`, không có trong menu; mật khẩu riêng,
+5. Support mở khu vực ẩn **Quản lý trùng lặp** (`/duplicate-review`, không có trong menu; vào bằng Alt+Shift+D hoặc bấm nhanh 5 lần vào logo; mật khẩu riêng,
    lần đầu mở thì đặt, đổi ở mục Cài đặt; khóa 10 phút sau 5 lần nhập sai). Với mỗi order nghi trùng:
    **Chọn trùng** (Telegram gửi cặp ảnh kèm mã đơn trong ≤60 giây) hoặc **Model sai**. Quên mật khẩu:
    xóa dòng của platform trong `support_compare_image.review_access` để đặt lại ở lần mở sau.

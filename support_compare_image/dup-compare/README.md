@@ -87,7 +87,9 @@ Safari chặn kiểu kết nối này nên không dùng được để cho phép
 - **Hàng đợi** (`/support-queue`, có trong menu): số job đang đợi (mỗi lần bấm Có trên Telegram là
   một job), bấm vào job để xem các đơn còn chờ kiểm tra trùng; trạng thái máy này và nút cho phép/dừng.
   Khi đăng nhập trên máy có agent, web hỏi "Cho phép dùng GPU/CPU của máy này?".
-- **Quản lý trùng lặp** (`/duplicate-review`, không có trong menu, cần mật khẩu riêng): lần đầu mở
+- **Quản lý trùng lặp** (`/duplicate-review`, không có trong menu, cần mật khẩu riêng). Lối vào kín từ
+  giao diện chính (chỉ role Support): phím tắt **Alt+Shift+D** (Option+Shift+D trên Mac) hoặc **bấm nhanh 5
+  lần vào logo** góc trên trái; hoặc gõ thẳng địa chỉ: lần đầu mở
   sẽ đặt mật khẩu (dùng chung cho nhóm Support), đổi được ở mục **Cài đặt**; nhập sai 5 lần thì khóa
   10 phút. Có 4 mục:
   - **Duyệt kết quả**: danh sách job bên trái; mỗi order hiện ảnh gốc và top-10 candidate kèm mã đơn.
