@@ -236,7 +236,7 @@ trước khi chạy `uvicorn`. Phát triển giao diện: chạy `uvicorn` ở c
 `review-ui/` (Vite proxy `/review/*` về cổng 8000); test bằng `npm test`. Hai công cụ cũ vẫn ở
 `/index.html` (so sánh 1-1).
 
-Mỗi thẻ hiện ảnh gốc và top-5 candidate, tất cả kèm mã đơn:
+Mỗi thẻ hiện ảnh gốc và top-10 candidate, tất cả kèm mã đơn:
 
 - **Chọn ảnh này là trùng**: ghi `selected_duplicate`; VPS gửi cặp (ảnh gốc, ảnh đã chọn) lên
   Telegram trong ≤60 giây. **Xác nhận trùng** gắn tag Trùng lặp và chuyển tab; **Từ chối** đưa order
@@ -292,7 +292,7 @@ fallback.
 | `DESIGN_SSIM_MIN_THRESHOLD` | 0.60 | sim cao nhưng SSIM dưới ngưỡng này thì vẫn là `KHONG_TRUNG` |
 | `COLOR_DIFFERENCE_THRESHOLD` | 12.0 | ΔE từ ngưỡng này trở lên thì ghi lý do "đổi màu" (không ảnh hưởng nhãn) |
 | `OCR_SIMILARITY_THRESHOLD` | 0.90 | chưa dùng, OCR chưa được tích hợp |
-| `TOP_K_CANDIDATES` | 5 | số ứng viên được kiểm tra kỹ cho mỗi ảnh mới |
+| `TOP_K_CANDIDATES` | 10 | số ứng viên được kiểm tra kỹ cho mỗi ảnh mới |
 | `DATA_DIR`, `OLD_IMAGES_DIR`, `NEW_IMAGES_DIR`, `DB_PATH` | xem trên | đường dẫn |
 | `MODEL_VERSION`, `PROCESSING_VERSION` | `dinov2-base-v1`, `mvp-0.2.0` | chỉ để hiển thị trong `meta` |
 

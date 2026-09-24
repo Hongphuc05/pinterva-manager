@@ -1,4 +1,4 @@
-import { Loader2 } from 'lucide-react'
+import { Loader2, Maximize2 } from 'lucide-react'
 import { isDone, isSent, isTodo, type Item } from '../types'
 import { StatusBadge } from './StatusBadge'
 import { CandidateCard } from './CandidateCard'
@@ -12,9 +12,10 @@ interface Props {
   onReject: (itemId: string) => void
   onZoom: (src: string) => void
   onFocus: () => void
+  onDetail: (itemId: string) => void
 }
 
-export function OrderCard({ item, active, busy, onSelect, onReject, onZoom, onFocus }: Props) {
+export function OrderCard({ item, active, busy, onSelect, onReject, onZoom, onFocus, onDetail }: Props) {
   const canAct = !isSent(item) && (isTodo(item) || isDone(item))
   return (
     <article
@@ -26,6 +27,17 @@ export function OrderCard({ item, active, busy, onSelect, onReject, onZoom, onFo
         <span className="font-mono text-[13px] font-medium text-brand">{item.order_code}</span>
         <span className="min-w-0 flex-1 truncate text-dim" title={item.product_name ?? ''}>{item.product_name}</span>
         <StatusBadge status={item.review_status} />
+        {item.candidates.length > 0 && (
+          <button
+            type="button"
+            title="So sánh ảnh gốc với từng ảnh trong top (phím D)"
+            onClick={() => onDetail(item.id)}
+            className="inline-flex h-6 cursor-pointer items-center gap-1 rounded border border-line bg-raised px-2 text-[11px] font-medium transition hover:border-brand/60 hover:text-brand"
+          >
+            <Maximize2 className="size-3" />
+            Chi tiết
+          </button>
+        )}
         {canAct && (
           <button
             type="button"

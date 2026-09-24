@@ -98,6 +98,40 @@ describe('review page', () => {
     expect(within(card).getByRole('link', { name: 'Mở link gốc' })).toHaveAttribute('href', 'https://img.test/11.png')
   })
 
+  it('opens a side-by-side detail modal, walks the top list with the arrows and closes with Esc', async () => {
+    renderApp()
+    const card = await screen.findByTestId('order-DJ0001')
+    await userEvent.click(within(card).getByRole('button', { name: /Chi tiết/ }))
+
+    const dialog = await screen.findByRole('dialog', { name: 'Chi tiết đơn DJ0001' })
+    expect(within(dialog).getByText('Ảnh 1/2 trong top 2')).toBeInTheDocument()
+    expect(within(dialog).getByAltText('DJ0001')).toBeInTheDocument() // original on the left
+    expect(within(dialog).getByAltText('OLD-11')).toBeInTheDocument() // first candidate on the right
+
+    await userEvent.keyboard('{ArrowRight}')
+    expect(within(dialog).getByText('Ảnh 2/2 trong top 2')).toBeInTheDocument()
+    expect(within(dialog).getByAltText('OLD-12')).toBeInTheDocument()
+    await userEvent.keyboard('{ArrowLeft}')
+    expect(within(dialog).getByAltText('OLD-11')).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Ảnh sau' }))
+    expect(within(dialog).getByAltText('OLD-12')).toBeInTheDocument()
+
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog', { name: 'Chi tiết đơn DJ0001' })).not.toBeInTheDocument()
+  })
+
+  it('selects the shown candidate from the detail modal', async () => {
+    renderApp()
+    await userEvent.click(within(await screen.findByTestId('order-DJ0001')).getByRole('button', { name: /Chi tiết/ }))
+    await userEvent.keyboard('{ArrowRight}')
+    const dialog = await screen.findByRole('dialog')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Chọn ảnh này là trùng' }))
+    await waitFor(() =>
+      expect(calls.some((c) => c.url === '/review/items/i1/select' && c.init?.body === JSON.stringify({ candidate_id: 'i1-c2' }))).toBe(true),
+    )
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
   it('marks the model wrong', async () => {
     renderApp()
     const card = await screen.findByTestId('order-DJ0001')

@@ -7,6 +7,7 @@ import { SearchPage } from './components/SearchPage'
 import { OrderCard } from './components/OrderCard'
 import { Empty, Loading } from './components/Empty'
 import { Lightbox } from './components/Lightbox'
+import { DetailModal } from './components/DetailModal'
 import { useToast } from './components/Toaster'
 
 const TABS: { key: TabKey; label: string }[] = [
@@ -32,6 +33,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<Set<string>>(new Set())
   const [zoom, setZoom] = useState<string | null>(null)
+  const [detail, setDetail] = useState<{ itemId: string; index: number } | null>(null)
   const [active, setActive] = useState(0)
   const [view, setView] = useState<View>(() => (window.location.hash === '#/search' ? 'search' : 'review'))
 
@@ -128,17 +130,20 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement
-      if (view !== 'review' || e.metaKey || e.ctrlKey || e.altKey || zoom || ['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName)) return
+      if (view !== 'review' || e.metaKey || e.ctrlKey || e.altKey || zoom || detail || ['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName)) return
       if (e.key === 'j' || e.key === 'ArrowDown') setActive((i) => Math.min(i + 1, Math.max(list.length - 1, 0)))
       else if (e.key === 'k' || e.key === 'ArrowUp') setActive((i) => Math.max(i - 1, 0))
       else if (current && !busy.has(current.id) && !isSent(current) && (isTodo(current) || isDone(current))) {
-        if (/^[1-9]$/.test(e.key) && current.candidates[Number(e.key) - 1]) void onSelect(current.id, current.candidates[Number(e.key) - 1].id)
+        // 1-9 pick the 1st-9th candidate, 0 the 10th
+        const n = e.key === '0' ? 10 : /^[1-9]$/.test(e.key) ? Number(e.key) : 0
+        if (n && current.candidates[n - 1]) void onSelect(current.id, current.candidates[n - 1].id)
+        else if (e.key === 'd') setDetail({ itemId: current.id, index: 0 })
         else if (e.key === 'x') void onReject(current.id)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [view, list, current, busy, zoom, onSelect, onReject])
+  }, [view, list, current, busy, zoom, detail, onSelect, onReject])
 
   useEffect(() => {
     if (current) document.querySelector(`[data-testid="order-${current.order_code}"]`)?.scrollIntoView?.({ block: 'nearest' })
@@ -208,7 +213,7 @@ export default function App() {
           </span>
         )}
         <span className="ml-auto hidden text-[11px] text-dim md:block">
-          <kbd className="font-mono">J</kbd>/<kbd className="font-mono">K</kbd> chuyển đơn · <kbd className="font-mono">1-9</kbd> chọn ảnh trùng ·{' '}
+          <kbd className="font-mono">J</kbd>/<kbd className="font-mono">K</kbd> chuyển đơn · <kbd className="font-mono">1-9,0</kbd> chọn ảnh trùng · <kbd className="font-mono">D</kbd> chi tiết ·{' '}
           <kbd className="font-mono">X</kbd> model sai
         </span>
       </div>
@@ -230,6 +235,7 @@ export default function App() {
             onReject={onReject}
             onZoom={setZoom}
             onFocus={() => setActive(idx)}
+            onDetail={(itemId) => setDetail({ itemId, index: 0 })}
           />
         ))
       ) : (
@@ -240,6 +246,22 @@ export default function App() {
       )}
         </>
       )}
+      {(() => {
+        const detailItem = detail && items.find((i) => i.id === detail.itemId)
+        return detail && detailItem ? (
+          <DetailModal
+            item={detailItem}
+            index={Math.min(detail.index, detailItem.candidates.length - 1)}
+            busy={busy.has(detailItem.id)}
+            onIndex={(index) => setDetail({ itemId: detail.itemId, index })}
+            onClose={() => setDetail(null)}
+            onSelect={(itemId, candidateId) => {
+              setDetail(null)
+              void onSelect(itemId, candidateId)
+            }}
+          />
+        ) : null
+      })()}
       <Lightbox src={zoom} onClose={() => setZoom(null)} />
     </Layout>
   )

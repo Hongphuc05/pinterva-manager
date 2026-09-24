@@ -766,3 +766,22 @@ def test_a_decision_interrupted_after_the_order_changed_is_finished_by_the_next_
     assert statuses["SUPPORT_COMPARE_CONFIRM_DUPLICATE"] == "executed"
     candidate = db_session.query(SupportCompareCandidate).one()
     assert candidate.decision_status == "duplicate"
+
+
+def test_review_api_returns_the_custom_configuration_of_the_order_and_of_each_candidate(db_session, setup, review_client):
+    from app.adapters.db.models import SupportCompareJob
+
+    order = _order(db_session, setup, "DJ-REV-CFG")
+    order.custom_config = {"original": [{"key": "Name", "value": "Ann"}], "translated_vn": []}
+    db_session.commit()
+    item = _item(db_session, setup, order, "pending_review", is_duplicate=True)
+    candidate = _candidate(db_session, item, 1)
+    candidate.historical_job_id = _seed_pool_job(db_session, "OLD-CFG", {"original": [{"key": "Color", "value": "Red"}], "translated_vn": []})
+    job = SupportCompareJob(platform_id=setup.platform.id, chat_id=CHAT_ID, status="completed", run_id=setup.run.id)
+    db_session.add(job)
+    db_session.commit()
+
+    data = review_client.get(f"/review/jobs/{job.id}").json()
+    [entry] = data["items"]
+    assert entry["custom_config"]["original"][0]["value"] == "Ann"
+    assert entry["candidates"][0]["custom_config"]["original"][0]["value"] == "Red"

@@ -25,6 +25,7 @@ export interface Candidate {
   classification: string
   sent_to_telegram: boolean
   decision: string
+  custom_config?: CustomConfig | null
 }
 
 export interface Item {
@@ -36,6 +37,7 @@ export interface Item {
   review_status: ReviewStatus | null
   selected_candidate_id: string | null
   reviewed_at: string | null
+  custom_config?: CustomConfig | null
   candidates: Candidate[]
 }
 

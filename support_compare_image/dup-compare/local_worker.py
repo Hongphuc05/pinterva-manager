@@ -240,7 +240,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--model-version", default=os.environ.get("MODEL_VERSION"))
     parser.add_argument("--embedding-dim", type=int, default=_env_int("EMBEDDING_DIM", 768))
     parser.add_argument("--batch-size", type=int, default=_env_int("EMBEDDING_BATCH_SIZE", 16))
-    parser.add_argument("--top-k", type=int, default=_env_int("TOP_K_CANDIDATES", 5))
+    parser.add_argument("--top-k", type=int, default=_env_int("TOP_K_CANDIDATES", 10))
     parser.add_argument("--timeout", type=float, default=_env_float("IMAGE_FETCH_TIMEOUT_SECONDS", 30.0))
     parser.add_argument("--scan-limit", type=int, default=_optional_env_int("SUPPORT_COMPARE_SCAN_LIMIT"))
     parser.add_argument("--poll-seconds", type=float, default=_env_float("SUPPORT_COMPARE_POLL_SECONDS", 10.0))

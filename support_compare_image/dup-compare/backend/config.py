@@ -60,7 +60,7 @@ class ModelConfig:
 
 # Top-K candidate lấy ra từ vector search (brute-force ở quy mô nhỏ) để chạy
 # comparison sâu (pHash/SSIM/color). Không hard-code trong logic, đọc ở đây.
-TOP_K_CANDIDATES = _i("TOP_K_CANDIDATES", 5)
+TOP_K_CANDIDATES = _i("TOP_K_CANDIDATES", 10)
 
 THRESHOLDS = Thresholds()
 MODEL_CONFIG = ModelConfig()

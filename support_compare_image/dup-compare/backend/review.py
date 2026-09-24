@@ -157,20 +157,22 @@ def get_job(job_id: uuid.UUID) -> dict[str, Any]:
         items: list[dict[str, Any]] = []
         if run_id:
             item_rows = conn.execute(
-                f"""SELECT id, external_order_id, product_name, image_url, is_duplicate,
-                           review_status, selected_candidate_id, reviewed_at
-                    FROM {S}.comparison_items
-                    WHERE run_id = %s AND processing_status = 'completed'
-                    ORDER BY (review_status = 'pending_review') DESC, external_order_id""",
+                f"""SELECT i.id, i.external_order_id, i.product_name, i.image_url, i.is_duplicate,
+                           i.review_status, i.selected_candidate_id, i.reviewed_at, o.custom_config
+                    FROM {S}.comparison_items i
+                    LEFT JOIN public.orders o ON o.id = i.order_id
+                    WHERE i.run_id = %s AND i.processing_status = 'completed'
+                    ORDER BY (i.review_status = 'pending_review') DESC, i.external_order_id""",
                 (run_id,),
             ).fetchall()
             cand_rows = conn.execute(
                 f"""SELECT c.comparison_item_id, c.id, c.rank, c.matched_external_order_id,
                            c.matched_product_name, c.matched_image_url, c.visual_similarity,
                            c.phash_distance, c.ssim, c.color_delta_e, c.classification,
-                           c.telegram_notified_at, c.decision_status
+                           c.telegram_notified_at, c.decision_status, hj.custom_config
                     FROM {S}.comparison_candidates c
                     JOIN {S}.comparison_items i ON i.id = c.comparison_item_id
+                    LEFT JOIN {S}.historical_jobs hj ON hj.id = c.historical_job_id
                     WHERE i.run_id = %s ORDER BY c.comparison_item_id, c.rank""",
                 (run_id,),
             ).fetchall()
@@ -180,7 +182,7 @@ def get_job(job_id: uuid.UUID) -> dict[str, Any]:
                     "id": str(r[1]), "rank": r[2], "order_code": r[3], "product_name": r[4],
                     "image_url": r[5], "similarity": r[6], "phash_distance": r[7],
                     "ssim": r[8], "color_delta_e": r[9], "classification": r[10],
-                    "sent_to_telegram": r[11] is not None, "decision": r[12],
+                    "sent_to_telegram": r[11] is not None, "decision": r[12], "custom_config": r[13],
                 })
             for r in item_rows:
                 items.append({
@@ -189,6 +191,7 @@ def get_job(job_id: uuid.UUID) -> dict[str, Any]:
                     "review_status": r[5],
                     "selected_candidate_id": str(r[6]) if r[6] else None,
                     "reviewed_at": r[7].isoformat() if r[7] else None,
+                    "custom_config": r[8],
                     "candidates": by_item.get(r[0], []),
                 })
             if job[1] == "running":
