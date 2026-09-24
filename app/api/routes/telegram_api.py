@@ -252,6 +252,14 @@ def _start_support_confirmation(db: Session, chat_id: str, kind: str) -> None:
     db.commit()
 
 
+def _reply_to_stale_button(callback_query: dict, chat_id: str) -> None:
+    """A button that was already used or expired: a toast, so nothing is left in the chat."""
+    text = "Nút này đã được xử lý hoặc đã hết hạn."
+    if callback_query.get("id") and answer_callback_query(str(callback_query["id"]), text):
+        return
+    send_message(chat_id, f"⚠️ {text}")
+
+
 def _legacy_pair_message_ids(db: Session, chat_id: str, prompt_id: int | None) -> list[int]:
     """Message ids of a pair sent before ids were stored (album x2, configuration, then this prompt).
 
@@ -576,7 +584,7 @@ async def api_telegram_webhook(
                 .first()
             )
             if not action_log or not _action_is_pending_and_valid(action_log, expected_action_type):
-                send_message(user_chat_id, "⚠️ Nút bấm này đã được xử lý trước đó hoặc đã hết hạn.")
+                _reply_to_stale_button(callback_query, user_chat_id)
                 return {"ok": True}
 
             payload = action_log.payload or {}
@@ -690,7 +698,7 @@ async def api_telegram_webhook(
                 .first()
             )
             if not action_log or not _action_is_pending_and_valid(action_log, expected_action_type):
-                send_message(user_chat_id, "⚠️ Nút bấm này đã được xử lý trước đó hoặc đã hết hạn.")
+                _reply_to_stale_button(callback_query, user_chat_id)
                 return {"ok": True}
             if str((action_log.payload or {}).get("chat_id") or "") != user_chat_id:
                 logger.warning("Support comparison callback chat mismatch for action %s", action_log.id)
@@ -707,6 +715,11 @@ async def api_telegram_webhook(
             except ValueError as exc:
                 db.rollback()
                 send_message(user_chat_id, f"⚠️ {exc}")
+                return {"ok": True}
+            except Exception:  # never answer a callback with an error status: Telegram would retry it for hours
+                db.rollback()
+                logger.exception("Support duplicate decision failed for action %s", action_log.id)
+                send_message(user_chat_id, "❌ Không xử lý được lúc này. Vui lòng thử lại.")
                 return {"ok": True}
 
             action_log.status = "executed"

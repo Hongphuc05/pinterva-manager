@@ -627,15 +627,14 @@ def execute_support_duplicate_decision(
     # The normal web command remains Waiting-only.  This scoped callback is the
     # only path allowed to classify an unverified Doing order after the model
     # has produced a positive candidate and Support has clicked a button.
-    expected_version = (action_log.payload or {}).get("expected_order_version")
-    expected_versions = {order.id: int(expected_version)} if expected_version is not None else None
+    # No expected order version here: the order legitimately changes between the notification and
+    # Support's click (status sync bumps it), and the service re-checks scope under a row lock.
     set_orders_duplicate_status(
         session,
         actor=actor,
         platform_id=item.platform_id,
         order_ids=[order.id],
         duplicate_status=decision_status,
-        expected_versions=expected_versions,
         allow_support_unclassified_doing=True,
     )
 

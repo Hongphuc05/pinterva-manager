@@ -722,3 +722,30 @@ def test_pairs_sent_before_ids_were_stored_still_lose_their_album_and_configurat
     _, _, delete, _ = _press(client, f"scdup_yes:{tokens['SUPPORT_COMPARE_CONFIRM_DUPLICATE']}", delete_ok=True)
 
     delete.assert_called_once_with(CHAT_ID, [17, 19, 20])
+
+
+def test_decision_still_works_when_the_order_version_changed_after_the_notification(client, db_session, setup):
+    order, tokens = _notify_selected_pair(db_session, setup, "DJ-VERSION-DRIFT")
+    order.product_name = "changed by the status sync"  # bumps Order.version after the pair was sent
+    db_session.commit()
+    db_session.refresh(order)
+    assert order.version > 1
+
+    send, _, delete, answer = _press(client, f"scdup_yes:{tokens['SUPPORT_COMPARE_CONFIRM_DUPLICATE']}", delete_ok=True)
+
+    db_session.refresh(order)
+    assert order.duplicate_check_status == "duplicate"
+    delete.assert_called_once()
+    send.assert_not_called()
+
+
+def test_pressing_a_used_button_shows_a_toast_instead_of_a_chat_message(client, db_session, setup):
+    _, tokens = _notify_selected_pair(db_session, setup, "DJ-STALE-BTN")
+    data = f"scdup_no:{tokens['SUPPORT_COMPARE_REJECT_DUPLICATE']}"
+    _press(client, data, delete_ok=True)
+
+    send, _, delete, answer = _press(client, data, delete_ok=True)  # double tap / Telegram retry
+
+    send.assert_not_called()
+    delete.assert_not_called()
+    assert "đã được xử lý" in answer.call_args.args[1]
