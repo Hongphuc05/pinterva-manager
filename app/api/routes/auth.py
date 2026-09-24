@@ -1,12 +1,20 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import User
 from app.api.deps import SESSION_COOKIE_NAME, get_current_user, get_db
-from app.application.auth import create_session_token, ensure_seed_users, verify_password
+from app.application.auth import (
+    create_session_token,
+    ensure_seed_users,
+    read_session_token,
+    verify_password,
+)
+from app.application.support_worker import revoke_user_devices
 from app.config import get_settings
 
 router = APIRouter()
@@ -51,7 +59,14 @@ def login(payload: LoginRequest, response: Response, db: Session = Depends(get_d
 
 
 @router.post("/logout")
-def logout(response: Response):
+def logout(request: Request, response: Response, db: Session = Depends(get_db)):
+    # Logging out also stops every Support machine this user allowed to compute.
+    authorization = request.headers.get("authorization", "")
+    token = authorization[7:].strip() if authorization.lower().startswith("bearer ") else None
+    data = read_session_token(token or request.cookies.get(SESSION_COOKIE_NAME) or "")
+    if data is not None:
+        revoke_user_devices(db, uuid.UUID(data["user_id"]))
+        db.commit()
     response.delete_cookie(SESSION_COOKIE_NAME)
     return {"ok": True}
 

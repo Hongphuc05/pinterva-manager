@@ -834,6 +834,7 @@ class SupportCompareJob(Base):
         String(16), nullable=False, default="queued", server_default=text("'queued'")
     )
     worker_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    device_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -949,3 +950,63 @@ class SupportCompareCandidate(Base):
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     telegram_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class SupportWorkerDevice(Base):
+    """A Support machine paired with the web by device login; it may run jobs only while
+    the approving user's web page keeps ``presence_at`` fresh."""
+
+    __tablename__ = "worker_devices"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'approved', 'revoked')", name="ck_support_worker_device_status"
+        ),
+        {"schema": SUPPORT_COMPARE_SCHEMA},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    machine_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    user_code: Mapped[str] = mapped_column(String(16), nullable=False)
+    device_code_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    user_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    platform_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    token_delivery: Mapped[str | None] = mapped_column(Text, nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    presence_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    busy_with: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class SupportSearchJob(Base):
+    """An image-search request queued for a Support machine (it owns the DINO model)."""
+
+    __tablename__ = "search_jobs"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('queued', 'running', 'completed', 'failed')", name="ck_support_search_job_status"
+        ),
+        {"schema": SUPPORT_COMPARE_SCHEMA},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    platform_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    requested_by_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    image: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    top_k: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued")
+    device_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

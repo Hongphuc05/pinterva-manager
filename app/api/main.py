@@ -22,6 +22,8 @@ from app.api.routes import platforms_api as platforms_api_routes
 from app.api.routes import protected_example
 from app.api.routes import submissions_api as submissions_api_routes
 from app.api.routes import support_compare_api as support_compare_api_routes
+from app.api.routes import support_review_api as support_review_api_routes
+from app.api.routes import support_worker_api as support_worker_api_routes
 from app.api.routes import sync_jobs_api as sync_jobs_api_routes
 from app.api.routes import telegram_admin_api as telegram_admin_api_routes
 from app.api.routes import telegram_api as telegram_api_routes
@@ -170,6 +172,8 @@ def create_app() -> FastAPI:
     app.include_router(designer_tasks_api_routes.router, prefix="/api")
     app.include_router(duplicate_board_api_routes.router, prefix="/api")
     app.include_router(support_compare_api_routes.router, prefix="/api")
+    app.include_router(support_review_api_routes.router, prefix="/api")
+    app.include_router(support_worker_api_routes.router, prefix="/api")
     app.include_router(telegram_api_routes.router, prefix="/api")
     app.include_router(telegram_admin_api_routes.router, prefix="/api")
     app.include_router(protected_example.router, prefix="/api")

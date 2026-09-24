@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     support_compare_batch_limit: int = 100
     # The in-house designer that Support's "Lấy" button assigns duplicate orders to.
     support_take_designer_username: str = "des1"
+    # Public URL of the web app; the Support agent prints "<url>/support-queue?code=..." so the
+    # user can approve the machine (device login).
+    public_web_url: str | None = None
 
     @field_validator("order_sheet_backup_hour")
     @classmethod
