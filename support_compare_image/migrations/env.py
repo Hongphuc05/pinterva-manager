@@ -1,24 +1,27 @@
 from __future__ import annotations
 
+import os
 from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool, text
-from support_compare_image.config import get_settings
-from support_compare_image.db import Base
-from support_compare_image.models import SCHEMA_NAME
+
+SCHEMA_NAME = "support_compare_image"
 
 config = context.config
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-target_metadata = Base.metadata
+# Migrations are hand-written (no autogenerate), so there is no model metadata.
+target_metadata = None
 
 
 def _database_url() -> str:
-    url = get_settings().validate_database_url()
-    return url.replace("%", "%%")
+    url = config.get_main_option("sqlalchemy.url") or os.environ.get("DATABASE_URL", "")
+    if not url.strip():
+        raise RuntimeError("Set DATABASE_URL (or sqlalchemy.url) to run the migrations")
+    return url
 
 
 def run_migrations_offline() -> None:
