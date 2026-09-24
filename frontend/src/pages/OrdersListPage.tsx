@@ -2991,9 +2991,12 @@ export function OrdersListPage() {
                                     <span>Lấy</span>
                                   </button>
                                 ) : o.assigned_designer_name ? (
-                                  <span className="inline-flex items-center gap-1.5 rounded-lg bg-blue-50 border border-blue-200 px-3 py-1.5 text-xs font-bold text-blue-900">
+                                  <span
+                                    className="inline-flex items-center rounded-lg bg-blue-50 border border-blue-200 px-2.5 py-1.5 text-blue-900"
+                                    title={`Đã lấy · ${o.assigned_designer_name}`}
+                                    aria-label={`Đã lấy · ${o.assigned_designer_name}`}
+                                  >
                                     <UserCheck className="h-3.5 w-3.5" />
-                                    Đã lấy · {o.assigned_designer_name}
                                   </span>
                                 ) : null
                               )}
