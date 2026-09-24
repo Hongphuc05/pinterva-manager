@@ -17,7 +17,8 @@ DIM = 4
 
 def _cfg(tmp_path: Path, **over) -> agent.AgentConfig:
     values = dict(
-        api_url="https://api.test", web_url="https://web.test", machine_name="Mac Test", home=tmp_path,
+        api_url="https://api.test", web_url="https://web.test", machine_name="Mac Test",
+        allowed_origins=("https://web.test",), port=0,
         model_name="m", model_version="m", embedding_dim=DIM, batch_size=2, top_k=3, fetch_timeout=1.0,
         poll_seconds=0.01, heartbeat_seconds=0.05, pool_page_size=2,
     )
@@ -212,56 +213,118 @@ def test_search_on_an_empty_pool_fails_the_search(tmp_path):
     assert api.search_results == [] and "Pool" in (api.failed or "")
 
 
-def test_device_login_prints_a_code_and_returns_the_token_once_approved(tmp_path):
-    class LoginApi:
-        def __init__(self):
-            self.polls = 0
-
-        def start_login(self, name):
-            assert name == "Mac Test"
-            return {"device_code": "d" * 20, "user_code": "ABCD-2345", "verification_uri": None, "interval": 0, "expires_in": 60}
-
-        def poll_login(self, code):
-            self.polls += 1
-            return {"status": "pending"} if self.polls < 3 else {"status": "approved", "token": "sw_tok"}
-
-    api = LoginApi()
-    assert agent.device_login(api, _cfg(tmp_path), sleep=lambda _s: None) == "sw_tok" and api.polls == 3
-
-
-def test_token_is_stored_privately_and_cleared(tmp_path):
-    cfg = _cfg(tmp_path / "home")
-    assert agent.load_token(cfg) is None
-    agent.save_token(cfg, "sw_secret")
-    assert agent.load_token(cfg) == "sw_secret"
-    assert (cfg.home / "token").stat().st_mode & 0o077 == 0
-    agent.save_token(cfg, None)
-    assert agent.load_token(cfg) is None
-
-
-def test_run_agent_relogs_in_after_a_401_and_then_processes_one_job(tmp_path, monkeypatch):
-    class LoopApi(FakeApi):
-        def __init__(self):
-            super().__init__([_pool_item(1.0, "OLD")])
-            self.token = "sw_stale"
-            self.claims = 0
-
+def test_a_revoked_token_sends_the_agent_back_to_waiting_for_the_web(tmp_path):
+    class RevokedApi(FakeApi):
         def claim(self, model_version, embedding_dim):
-            self.claims += 1
-            if self.claims == 1:
-                raise agent.ApiError(401, "revoked", "Máy đã bị thu hồi quyền")
+            raise agent.ApiError(401, "revoked", "Máy đã bị thu hồi quyền")
+
+    api = RevokedApi([_pool_item(1.0, "OLD")])
+    state = agent.AgentState(_cfg(tmp_path), "sw_stale")
+    assert agent.run_agent(_cfg(tmp_path), once=True, api=api, embedder=FakeEmbedder(), state=state) == 1
+    assert state.token is None and state.snapshot()["state"] == "waiting"
+
+
+def test_the_agent_processes_one_job_once_the_web_has_handed_over_a_token(tmp_path):
+    class JobApi(FakeApi):
+        def claim(self, model_version, embedding_dim):
             return {"kind": "job", "job": _job(2)}
 
-    api = LoopApi()
-    monkeypatch.setattr(agent, "device_login", lambda a, c, sleep=None: "sw_fresh")
-    rc = agent.run_agent(_cfg(tmp_path), once=True, api=api, embedder=FakeEmbedder())
-    assert rc == 0 and api.token == "sw_fresh" and agent.load_token(_cfg(tmp_path)) == "sw_fresh"
-    assert api.completed is not None
+    api = JobApi([_pool_item(1.0, "OLD")])
+    api.token = None
+    state = agent.AgentState(_cfg(tmp_path))
+    state.set_token("sw_fresh")
+    assert agent.run_agent(_cfg(tmp_path), once=True, api=api, embedder=FakeEmbedder(), state=state) == 0
+    assert api.token == "sw_fresh" and api.completed is not None and state.snapshot()["state"] == "ready"
 
 
-def test_run_agent_waits_while_the_web_is_closed(tmp_path):
+def test_without_a_token_the_agent_just_waits(tmp_path):
+    state = agent.AgentState(_cfg(tmp_path))
+    assert state.snapshot()["state"] == "waiting"
+    assert agent.run_agent(_cfg(tmp_path), once=True, api=agent.Api("https://api.test"), embedder=FakeEmbedder(), state=state) == 1
+
+
+def test_run_agent_pauses_while_the_web_is_closed(tmp_path):
     class PausedApi(FakeApi):
         def claim(self, model_version, embedding_dim):
             raise agent.ApiError(403, "presence_lost", "Chưa có Support mở web")
 
-    assert agent.run_agent(_cfg(tmp_path), once=True, api=PausedApi([_pool_item(1.0, "O")]), embedder=FakeEmbedder()) == 1
+    state = agent.AgentState(_cfg(tmp_path), "sw_x")
+    assert agent.run_agent(_cfg(tmp_path), once=True, api=PausedApi([_pool_item(1.0, "O")]), embedder=FakeEmbedder(), state=state) == 1
+    assert state.snapshot()["state"] == "paused" and state.token == "sw_x"  # comes back by itself
+
+
+# --------------------------------------------------------------------------- local control server
+
+
+@pytest.fixture()
+def local_agent(tmp_path):
+    import threading
+    from http.server import ThreadingHTTPServer
+
+    state = agent.AgentState(_cfg(tmp_path))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), agent.make_handler(state))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield state, f"http://127.0.0.1:{server.server_address[1]}"
+    server.shutdown()
+
+
+def _call(url, method="GET", origin="https://web.test", body=None, host=None):
+    import json
+    import urllib.error
+    import urllib.request
+
+    headers = {"Content-Type": "application/json"}
+    if origin:
+        headers["Origin"] = origin
+    if host:
+        headers["Host"] = host
+    request = urllib.request.Request(url, method=method, headers=headers, data=json.dumps(body).encode() if body is not None else None)
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            return response.status, dict(response.headers), response.read()
+    except urllib.error.HTTPError as exc:
+        return exc.code, dict(exc.headers), exc.read()
+
+
+def test_status_is_readable_by_the_allowed_web_origin_with_cors_and_private_network_headers(local_agent):
+    import json
+
+    state, base = local_agent
+    state.device, state.model_loaded = "mps", True
+    code, headers, body = _call(f"{base}/status")
+    assert code == 200 and headers["Access-Control-Allow-Origin"] == "https://web.test"
+    assert headers["Access-Control-Allow-Private-Network"] == "true"
+    assert json.loads(body) == {"agent": "support-compare", "version": 1, "name": "Mac Test", "state": "waiting", "device": "mps", "model_loaded": True}
+    code, headers, _ = _call(f"{base}/status", method="OPTIONS")
+    assert code == 204 and "POST" in headers["Access-Control-Allow-Methods"] and headers["Access-Control-Allow-Private-Network"] == "true"
+
+
+def test_other_origins_and_non_loopback_hosts_are_refused(local_agent):
+    state, base = local_agent
+    assert _call(f"{base}/status", origin="https://evil.example")[0] == 403
+    assert _call(f"{base}/status", origin=None)[0] == 403
+    assert _call(f"{base}/status", host="evil.example")[0] == 403  # DNS rebinding
+    assert _call(f"{base}/connect", method="POST", origin="https://evil.example", body={"token": "sw_abc"})[0] == 403
+    assert _call(f"{base}/status", method="OPTIONS", origin="https://evil.example")[0] == 403
+    assert state.token is None
+
+
+def test_the_web_page_hands_over_a_token_and_can_take_it_back(local_agent):
+    import json
+
+    state, base = local_agent
+    code, _, body = _call(f"{base}/connect", method="POST", body={"token": "sw_abc123"})
+    assert code == 200 and json.loads(body)["state"] == "ready" and state.token == "sw_abc123"
+    assert "sw_abc123" not in _call(f"{base}/status")[2].decode()  # the token is never echoed back
+    for bad in ({}, {"token": 5}, {"token": "abc"}, {"token": "sw_" + "x" * 300}):
+        assert _call(f"{base}/connect", method="POST", body=bad)[0] == 400
+    assert state.token == "sw_abc123"
+    code, _, body = _call(f"{base}/disconnect", method="POST", body={})
+    assert code == 200 and json.loads(body)["state"] == "waiting" and state.token is None
+
+
+def test_config_allows_the_origin_of_the_web_url_and_extra_origins():
+    cfg = agent.build_config(
+        ["--api-url", "https://tacahu.fun", "--web-url", "https://tacahu.fun/support-queue", "--allowed-origins", "http://localhost:5173/, https://tacahu.fun"]
+    )
+    assert cfg.allowed_origins == ("https://tacahu.fun", "http://localhost:5173") and cfg.port == 8765 and cfg.bind == "127.0.0.1"

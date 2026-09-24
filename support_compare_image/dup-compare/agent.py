@@ -1,14 +1,17 @@
 """Support compute agent: runs DINO comparison jobs and image searches on this machine.
 
-The agent talks to the Tacahu API over HTTPS only (no database access, no SSH tunnel):
+The agent talks to the Tacahu API over HTTPS only (no database access, no SSH tunnel) and is
+controlled by the Tacahu web page open on the same machine:
 
-1. *Device login*: it prints a short code; a signed-in Support/Admin approves it on the web
-   (Hàng đợi → "Cho phép máy này"). The API then hands the agent a token.
-2. The token works only while that user keeps the web open (presence heartbeat). Closing the
-   web, logging out or a 12 h expiry stops the agent; it then waits or asks for a new code.
-3. While allowed, the agent claims a queued job (or image search) with a lease, downloads the
-   image pool (once, then only the delta), embeds and compares on this machine's GPU/CPU and
-   posts the results. If the lease is lost the work is dropped and another machine resumes it.
+1. The agent idles and listens on 127.0.0.1 (``GET /status``). When a Support logs in on the web
+   from this machine, the web asks "let this machine's GPU/CPU run the queue?".
+2. On "Có" the web gets a token for this login from the API and hands it to the agent
+   (``POST /connect``). Only the allowed web origin may talk to the agent.
+3. The token works only while that user keeps the web open (presence heartbeat) and is revoked on
+   logout, so the machine stops as soon as the session ends. While allowed, the agent claims a
+   queued job (or image search) with a lease, downloads the image pool (once, then only the
+   delta), embeds and compares on this machine's GPU/CPU and posts the results. If the lease is
+   lost the work is dropped and another machine resumes it.
 """
 
 from __future__ import annotations
@@ -28,7 +31,7 @@ import urllib.request
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 import numpy as np
@@ -63,7 +66,6 @@ class AgentConfig:
     api_url: str
     web_url: str
     machine_name: str
-    home: Path
     model_name: str
     model_version: str
     embedding_dim: int
@@ -73,6 +75,9 @@ class AgentConfig:
     poll_seconds: float
     heartbeat_seconds: float = 30.0
     pool_page_size: int = 2000
+    bind: str = "127.0.0.1"
+    port: int = 8765  # 0 = do not listen (tests, --once)
+    allowed_origins: tuple[str, ...] = ()
 
 
 # --------------------------------------------------------------------------- HTTP
@@ -117,12 +122,6 @@ class Api:
                 pass
             raise ApiError(exc.code, code, str(message)) from exc
         return payload if raw else json.loads(payload)
-
-    def start_login(self, machine_name: str) -> dict:
-        return self._call("POST", "/device/start", body={"machine_name": machine_name}, auth=False)
-
-    def poll_login(self, device_code: str) -> dict:
-        return self._call("POST", "/device/poll", body={"device_code": device_code}, auth=False)
 
     def claim(self, model_version: str, embedding_dim: int) -> dict:
         return self._call("POST", "/claim", body={"model_version": model_version, "embedding_dim": embedding_dim})
@@ -459,103 +458,215 @@ def run_search(api: Api, embedder, pool: Pool, cfg: AgentConfig, search: dict) -
         _report_failure(api.search_fail, search_id, f"{type(exc).__name__}: {exc}")
 
 
-# --------------------------------------------------------------------------- login / main loop
+# --------------------------------------------------------------------------- local control (web page)
 
 
-def _token_file(cfg: AgentConfig) -> Path:
-    return cfg.home / "token"
+class AgentState:
+    """What the local server reports and the token the web page hands over (thread-safe)."""
+
+    def __init__(self, cfg: AgentConfig, token: str | None = None):
+        self.cfg = cfg
+        self._lock = threading.Lock()
+        self._token = token
+        self.status = "waiting" if token is None else "ready"
+        self.device: str | None = None
+        self.model_loaded = False
+
+    @property
+    def token(self) -> str | None:
+        with self._lock:
+            return self._token
+
+    def set_token(self, token: str | None) -> None:
+        with self._lock:
+            self._token = token
+            self.status = "waiting" if token is None else "ready"
+
+    def set_status(self, status: str) -> None:
+        with self._lock:
+            if self._token is not None or status == "waiting":
+                self.status = status
+
+    def snapshot(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "agent": "support-compare",
+                "version": 1,
+                "name": self.cfg.machine_name,
+                "state": self.status,  # waiting (not allowed) | ready | busy | paused
+                "device": self.device,
+                "model_loaded": self.model_loaded,
+            }
 
 
-def load_token(cfg: AgentConfig) -> str | None:
-    try:
-        return _token_file(cfg).read_text().strip() or None
-    except OSError:
+def origin_of(url: str) -> str | None:
+    parsed = urllib.parse.urlparse(url.strip())
+    return f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else None
+
+
+def make_handler(state: AgentState):
+    """HTTP handler for the web page on this machine: /status, /connect, /disconnect.
+
+    Only the allowed web origins may call it (browsers always send Origin), and only with a
+    loopback Host header (blocks DNS rebinding). The token never leaves this process.
+    """
+
+    class Handler(BaseHTTPRequestHandler):
+        server_version = "support-compare-agent"
+
+        def log_message(self, *_args) -> None:  # quiet
+            return
+
+        def _origin_ok(self) -> str | None:
+            origin = self.headers.get("Origin")
+            return origin if origin in state.cfg.allowed_origins else None
+
+        def _host_ok(self) -> bool:
+            host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]")
+            return host in {"127.0.0.1", "localhost", "::1"}
+
+        def _send(self, code: int, body: dict | None = None, origin: str | None = None) -> None:
+            payload = json.dumps(body).encode() if body is not None else b""
+            self.send_response(code)
+            if origin:
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Vary", "Origin")
+                self.send_header("Access-Control-Allow-Private-Network", "true")
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def do_OPTIONS(self) -> None:  # CORS / private-network preflight
+            origin = self._origin_ok()
+            if not (origin and self._host_ok()):
+                return self._send(403, {"error": "forbidden"})
+            self.send_response(204)
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.send_header("Access-Control-Allow-Private-Network", "true")
+            self.send_header("Access-Control-Max-Age", "600")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def do_GET(self) -> None:
+            origin = self._origin_ok()
+            if not (origin and self._host_ok()):
+                return self._send(403, {"error": "forbidden"})
+            if self.path != "/status":
+                return self._send(404, {"error": "not found"}, origin)
+            self._send(200, state.snapshot(), origin)
+
+        def do_POST(self) -> None:
+            origin = self._origin_ok()
+            if not (origin and self._host_ok()):
+                return self._send(403, {"error": "forbidden"})
+            if self.path == "/disconnect":
+                state.set_token(None)
+                return self._send(200, state.snapshot(), origin)
+            if self.path != "/connect":
+                return self._send(404, {"error": "not found"}, origin)
+            try:
+                length = min(int(self.headers.get("Content-Length") or 0), 4096)
+                token = json.loads(self.rfile.read(length) or b"{}").get("token")
+            except (ValueError, AttributeError):
+                token = None
+            if not isinstance(token, str) or not token.startswith("sw_") or len(token) > 200:
+                return self._send(400, {"error": "invalid token"}, origin)
+            state.set_token(token)
+            logger.info("web page connected this machine (token received)")
+            self._send(200, state.snapshot(), origin)
+
+    return Handler
+
+
+def start_local_server(state: AgentState) -> ThreadingHTTPServer | None:
+    cfg = state.cfg
+    if not cfg.port:
         return None
+    server = ThreadingHTTPServer((cfg.bind, cfg.port), make_handler(state))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    logger.info("listening for the web page on http://%s:%s (origins: %s)", cfg.bind, cfg.port, ", ".join(cfg.allowed_origins) or "none")
+    return server
 
 
-def save_token(cfg: AgentConfig, token: str | None) -> None:
-    path = _token_file(cfg)
-    if token is None:
-        path.unlink(missing_ok=True)
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(token)
-    path.chmod(0o600)
+# --------------------------------------------------------------------------- main loop
 
 
-def device_login(api: Api, cfg: AgentConfig, sleep: Callable[[float], None] = time.sleep) -> str:
-    """Show a code, wait until a signed-in Support allows this machine, return the token."""
-    while True:
-        start = api.start_login(cfg.machine_name)
-        base = start.get("verification_uri") or (f"{cfg.web_url.rstrip('/')}/support-queue" if cfg.web_url else "")
-        link = f"{base}?code={start['user_code']}" if base else "(mở web Tacahu → Hàng đợi)"
-        logger.info("=" * 64)
-        logger.info("Cho phép máy này chạy job: mở %s", link)
-        logger.info("Mã kết nối: %s  (hết hạn sau %s giây)", start["user_code"], start["expires_in"])
-        logger.info("=" * 64)
-        deadline = time.time() + int(start["expires_in"])
-        while time.time() < deadline:
-            sleep(float(start.get("interval", 3)))
-            result = api.poll_login(start["device_code"])
-            if result["status"] == "approved":
-                logger.info("Đã được cho phép, bắt đầu nhận job.")
-                return result["token"]
-            if result["status"] in ("denied", "expired"):
-                break
-        logger.info("Mã hết hạn, lấy mã mới...")
-
-
-def run_agent(cfg: AgentConfig, *, once: bool = False, api: Api | None = None, embedder=None) -> int:
-    api = api or Api(cfg.api_url, load_token(cfg))
+def run_agent(
+    cfg: AgentConfig,
+    *,
+    once: bool = False,
+    api: Api | None = None,
+    embedder=None,
+    state: AgentState | None = None,
+) -> int:
+    api = api or Api(cfg.api_url)
+    state = state or AgentState(cfg, api.token)
     pool = Pool(cfg.model_version, cfg.embedding_dim, cfg.pool_page_size)
-    waiting_note = ""
-    while True:
-        try:
-            if not api.token:
-                api.token = device_login(api, cfg)
-                save_token(cfg, api.token)
-            if embedder is None:
-                embedder = get_cached_embedder(cfg.model_name)
-            if not pool.synced_once:
-                logger.info("đồng bộ pool ảnh lần đầu...")
-                pool.sync(api)
-                logger.info("pool: %s ảnh", len(pool))
-            work = api.claim(cfg.model_version, cfg.embedding_dim)
-            waiting_note = ""
-        except ApiError as exc:
-            if exc.status == 401:
-                logger.warning("token không còn hiệu lực (%s); kết nối lại", exc.message)
-                api.token = None
-                save_token(cfg, None)
+    server = start_local_server(state)
+    note = ""
+    try:
+        if embedder is None:
+            embedder = get_cached_embedder(cfg.model_name)
+        state.device = getattr(embedder, "device", None)
+        state.model_loaded = True
+        while True:
+            api.token = state.token
+            if api.token is None:
+                if once:
+                    return 1
+                time.sleep(cfg.poll_seconds)
                 continue
-            note = f"{exc.code}: {exc.message}"
-            if note != waiting_note:
-                logger.info("Tạm dừng: %s", exc.message)
-                waiting_note = note
-            if once:
-                return 1
-            time.sleep(cfg.poll_seconds)
-            continue
-        except LeaseLost:
-            time.sleep(cfg.poll_seconds)
-            continue
-        except OSError as exc:
-            logger.warning("mất kết nối tới API: %s", exc)
-            if once:
-                return 1
-            time.sleep(cfg.poll_seconds)
-            continue
+            try:
+                if not pool.synced_once:
+                    logger.info("đồng bộ pool ảnh lần đầu...")
+                    pool.sync(api)
+                    logger.info("pool: %s ảnh", len(pool))
+                work = api.claim(cfg.model_version, cfg.embedding_dim)
+                note = ""
+                state.set_status("ready")
+            except ApiError as exc:
+                if exc.status == 401:
+                    logger.warning("token không còn hiệu lực (%s); chờ web cho phép lại", exc.message)
+                    state.set_token(None)
+                    continue
+                if f"{exc.code}: {exc.message}" != note:
+                    logger.info("Tạm dừng: %s", exc.message)
+                    note = f"{exc.code}: {exc.message}"
+                state.set_status("paused")
+                if once:
+                    return 1
+                time.sleep(cfg.poll_seconds)
+                continue
+            except LeaseLost:
+                time.sleep(cfg.poll_seconds)
+                continue
+            except OSError as exc:
+                logger.warning("mất kết nối tới API: %s", exc)
+                if once:
+                    return 1
+                time.sleep(cfg.poll_seconds)
+                continue
 
-        if work["kind"] == "job":
-            run_job(api, embedder, pool, cfg, work["job"])
-        elif work["kind"] == "search":
-            run_search(api, embedder, pool, cfg, work["search"])
-        elif once:
-            return 0
-        else:
-            time.sleep(cfg.poll_seconds)
-        if once:
-            return 0
+            if work["kind"] == "job":
+                state.set_status("busy")
+                run_job(api, embedder, pool, cfg, work["job"])
+            elif work["kind"] == "search":
+                state.set_status("busy")
+                run_search(api, embedder, pool, cfg, work["search"])
+            elif once:
+                return 0
+            else:
+                time.sleep(cfg.poll_seconds)
+            state.set_status("ready")
+            if once:
+                return 0
+    finally:
+        if server:
+            server.shutdown()
 
 
 # --------------------------------------------------------------------------- CLI
@@ -565,12 +676,11 @@ def _env_int(name: str, default: int) -> int:
     return int(os.environ.get(name, str(default)))
 
 
-def build_config(argv: list[str] | None = None) -> tuple[AgentConfig, bool]:
+def build_config(argv: list[str] | None = None) -> AgentConfig:
     parser = argparse.ArgumentParser(description="Support compute agent (DINO on this machine)")
     parser.add_argument("--api-url", default=os.environ.get("SUPPORT_API_URL", ""))
     parser.add_argument("--web-url", default=os.environ.get("SUPPORT_WEB_URL", ""))
     parser.add_argument("--name", default=os.environ.get("AGENT_NAME") or socket.gethostname())
-    parser.add_argument("--home", default=os.environ.get("AGENT_HOME") or str(Path.home() / ".support-agent"))
     parser.add_argument("--model", default=os.environ.get("EMBEDDING_MODEL_NAME", "facebook/dinov2-base"))
     parser.add_argument("--model-version", default=os.environ.get("MODEL_VERSION"))
     parser.add_argument("--embedding-dim", type=int, default=_env_int("EMBEDDING_DIM", 768))
@@ -578,15 +688,21 @@ def build_config(argv: list[str] | None = None) -> tuple[AgentConfig, bool]:
     parser.add_argument("--top-k", type=int, default=_env_int("TOP_K_CANDIDATES", 10))
     parser.add_argument("--timeout", type=float, default=float(os.environ.get("IMAGE_FETCH_TIMEOUT_SECONDS", "30")))
     parser.add_argument("--poll-seconds", type=float, default=float(os.environ.get("AGENT_POLL_SECONDS", "5")))
-    parser.add_argument("--once", action="store_true", help="claim at most one item, then exit")
+    parser.add_argument("--bind", default=os.environ.get("AGENT_BIND", "127.0.0.1"))
+    parser.add_argument("--port", type=int, default=_env_int("AGENT_PORT", 8765))
+    parser.add_argument(
+        "--allowed-origins",
+        default=os.environ.get("AGENT_ALLOWED_ORIGINS", ""),
+        help="extra comma-separated web origins (the origin of SUPPORT_WEB_URL is always allowed)",
+    )
     args = parser.parse_args(argv)
     if not args.api_url:
         parser.error("SUPPORT_API_URL (hoặc --api-url) là bắt buộc")
+    origins = [origin_of(args.web_url)] + [o.strip().rstrip("/") for o in args.allowed_origins.split(",")]
     cfg = AgentConfig(
         api_url=args.api_url,
         web_url=args.web_url,
         machine_name=args.name,
-        home=Path(args.home),
         model_name=args.model,
         model_version=args.model_version or args.model,
         embedding_dim=args.embedding_dim,
@@ -594,14 +710,16 @@ def build_config(argv: list[str] | None = None) -> tuple[AgentConfig, bool]:
         top_k=args.top_k,
         fetch_timeout=args.timeout,
         poll_seconds=args.poll_seconds,
+        bind=args.bind,
+        port=args.port,
+        allowed_origins=tuple(dict.fromkeys(o for o in origins if o)),
     )
-    return cfg, args.once
+    return cfg
 
 
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    cfg, once = build_config(argv)
-    return run_agent(cfg, once=once)
+    return run_agent(build_config(argv))
 
 
 if __name__ == "__main__":
