@@ -14,7 +14,8 @@ SPA/API local thường ở `http://localhost:8000`. Xem cấu hình compose th�
 
 - `compose.production.yaml` là runtime production tách biệt.
 - Chạy migration service trước API/worker, sau đó xác minh health, migration head, worker
-  queue (`celery-general`, `celery-assignment`, `celery-compare`) và Cloudflare Tunnel.
+  queue (`celery-general`, `celery-assignment`) và Cloudflare Tunnel. DINO local worker
+  không chạy trong production Compose.
 - Migration service chạy cả Alembic root và migration riêng của
   `support_compare_image`. Kiểm tra `support_compare_image.comparison_runs` tồn tại trước
   khi bật runner.
@@ -44,20 +45,24 @@ PostgreSQL. Kiểm tra `group_last_error`, log API và Bot API trước khi kế
 
 ### Chạy thử image comparison bằng order Review
 
-Phase 1 dùng model Hugging Face `facebook/dinov2-base`; chạy runner trên máy có đủ
-`torch/transformers` và kết nối PostgreSQL qua private network/SSH tunnel:
+Phase 1 dùng model Hugging Face `facebook/dinov2-base`; chỉ chạy local worker trên máy Support
+có đủ `torch/transformers` và kết nối PostgreSQL qua private network/SSH tunnel:
 
 ```bash
-cd support_compare_image/dup-compare
-python compare_orders.py --source review --limit 10 --confirm
+cd support_compare_image
+cp .env.local-worker.example .env.local-worker
+# mở SSH tunnel ở một terminal khác, sau đó nạp biến môi trường:
+ssh -N -L 15432:127.0.0.1:5432 USER@VPS_HOST
+set -a; source .env.local-worker; set +a
+pip install -r requirements.txt -r requirements.compare-runtime.txt
+python dup-compare/local_worker.py --once
 ```
 
-Kiểm tra `comparison_runs` và `comparison_candidates` trước khi bật
-`SUPPORT_COMPARE_ENABLED=true`. Source `review` không promote embedding vào pool và không cho
-Support mutate order qua callback. Sau khi model/threshold được kiểm chứng, scheduler dùng source
-`support_unchecked`, quét toàn bộ Waiting + Doing chưa phân loại mỗi 30 phút. Không cấu hình
-`SUPPORT_COMPARE_SCAN_LIMIT` thì không giới hạn số order; `SUPPORT_COMPARE_BATCH_LIMIT` chỉ giới
-hạn số candidate Telegram được gửi trong một lần notification task.
+Migration `support_compare_image` phải ở `head` trước khi bật
+`SUPPORT_COMPARE_ENABLED=true`. Khi bật, VPS tạo job `support_unchecked` mỗi 30 phút; máy local
+chạy `python dup-compare/local_worker.py` liên tục để claim job. Không cấu hình
+`SUPPORT_COMPARE_SCAN_LIMIT` thì local worker quét toàn bộ order phù hợp; `SUPPORT_COMPARE_BATCH_LIMIT`
+chỉ giới hạn số report/candidate Telegram được gửi trong một lần notification task.
 
 Candidate top-1 bị model xác định `TRUNG` mới được gửi Telegram. Candidate `KHONG_TRUNG` không
 đổi `duplicate_check_status`, vì vậy order vẫn ở tab **Chưa kiểm tra** và sẽ được so sánh lại ở
@@ -66,7 +71,7 @@ vòng sau. Khi Support chọn kết quả, callback mới chuyển order sang ta
 
 Support cũng có thể chủ động gửi `/check` cho bot Telegram. Bot đếm đúng các order Waiting và
 Doing chưa phân loại của platform Support, hỏi xác nhận bằng hai nút **Có, bắt đầu**/**Không**;
-chỉ nút **Có** mới enqueue một batch `support_unchecked` không giới hạn. Sau khi task kết thúc,
+chỉ nút **Có** mới enqueue một job `support_unchecked` cho local worker. Sau khi worker kết thúc,
 bot gửi số order đã xử lý, số candidate duplicate và số lỗi; các candidate top-1 dương tính vẫn
 được gửi qua luồng notification Telegram hiện có. `/check` yêu cầu tài khoản Support active đã
 link Telegram, có platform và `SUPPORT_COMPARE_ENABLED=true`.

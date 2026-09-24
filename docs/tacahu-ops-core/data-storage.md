@@ -54,8 +54,11 @@ private_work_note_assets/ screenshot/ảnh private của Note làm việc; QR ng
 platform_data/        dữ liệu runtime platform
 playwright_evidence/  evidence browser automation
 chrome_profiles/      Chrome profile/session
-huggingface_cache/    Hugging Face checkpoint cache; có thể tải lại, không phải business source of truth
 ```
+
+`support_compare_image.comparison_jobs` là hàng đợi durable để máy Support local claim job; model
+checkpoint Hugging Face và cache của nó nằm trên máy Support, không nằm trong `DATA_DIR` production.
+Máy local nên dùng SSH tunnel/private VPN; không mở port PostgreSQL ra Internet.
 
 Port PostgreSQL chỉ bind `127.0.0.1` của VPS, không public Internet theo compose hiện hành.
 Vì vậy không có dấu hiệu từ cấu hình rằng production dùng managed PostgreSQL riêng; database

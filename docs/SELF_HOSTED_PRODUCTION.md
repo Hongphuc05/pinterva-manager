@@ -18,7 +18,7 @@ Production Compose is [compose.yaml](../compose.yaml). It deliberately contains 
 | `redis` | Celery broker/result backend with AOF persistence. |
 | `celery-general` | General queue jobs. |
 | `celery-assignment` | Serialized external Printerval Designer/Status writes. |
-| `celery-compare` | Serialized DINOv2 comparison and Support candidate notifications; kept separate from the general queue. |
+| `celery-general` | General jobs, local-worker job reports and Support candidate notifications. The DINO model itself runs outside this VPS. |
 | `celery-beat` | Scheduled status synchronization; exactly one instance. |
 | `cloudflared` | Optional `tunnel` profile, enabled by `DEPLOY_WITH_TUNNEL=true`. |
 | `migrate` | One-shot Alembic service invoked by `scripts/deploy.sh`, never left running. |

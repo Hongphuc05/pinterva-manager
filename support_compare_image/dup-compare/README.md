@@ -276,11 +276,32 @@ python compare_orders.py \
   --confirm
 ```
 
-Trong production, bật `SUPPORT_COMPARE_ENABLED=true` sẽ để Celery Beat enqueue vào queue
-`support-compare`; worker `celery-compare` xử lý tuần tự, tách khỏi queue general/assignment.
+Trong production, bật `SUPPORT_COMPARE_ENABLED=true` để Celery Beat trên VPS tạo job
+`support_unchecked` vào bảng `support_compare_image.comparison_jobs` mỗi 30 phút. VPS chỉ tạo
+job và gửi Telegram; nó không cài hoặc load DINO. `local_worker.py` trên máy Support mới claim
+job, load Hugging Face model và ghi kết quả.
 Review chỉ là nguồn test: candidate được lưu để kiểm tra, nhưng callback Telegram bị chặn không
 cho đổi trạng thái order. Candidate live `support_unchecked` mới được phép đi qua command Support;
 Doing chỉ được phân loại qua callback Telegram, còn command web vẫn Waiting-only.
+
+### Chạy local worker cho job `/check` hoặc lịch 30 phút
+
+```bash
+cd support_compare_image
+cp .env.local-worker.example .env.local-worker
+
+# Terminal 1: giữ tunnel tới PostgreSQL trên VPS
+ssh -N -L 15432:127.0.0.1:5432 USER@VPS_HOST
+
+# Terminal 2: cài dependency và chạy worker trên máy Support
+set -a; source .env.local-worker; set +a
+python -m pip install -r requirements.txt -r requirements.compare-runtime.txt
+python dup-compare/local_worker.py
+```
+
+Smoke test một job rồi thoát bằng `python dup-compare/local_worker.py --once`. Worker giữ model
+trong RAM giữa các job; nếu máy Support dừng, job còn `queued` sẽ chạy tiếp khi worker lên lại.
+Không mở PostgreSQL public Internet chỉ để phục vụ worker.
 
 ## 4. Chuyển sang weight fine-tune ở phase 2
 

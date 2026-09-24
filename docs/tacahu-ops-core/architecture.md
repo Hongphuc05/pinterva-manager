@@ -26,10 +26,10 @@ React SPA ── /api ── FastAPI command/query layer ── PostgreSQL
   optimistic concurrency và audit event.
 - `app/adapters/db/`: SQLAlchemy model và Alembic migration.
 - `app/workers/`: Celery cho crawl, status sync, external assignment/review writes,
-  Google Sheet backup, Telegram notification và duplicate-image comparison.
+  Google Sheet backup, Telegram notification và tạo/điều phối job duplicate-image.
 - `compose.yaml` / `compose.production.yaml`: API, migration, Redis, PostgreSQL,
-  general worker, serialized assignment worker, dedicated `celery-compare` worker,
-  Celery Beat và Cloudflare Tunnel.
+  general worker, serialized assignment worker, Celery Beat và Cloudflare Tunnel.
+  DINO không chạy trong Compose production.
 
 ### Telegram management boundary
 
@@ -45,23 +45,23 @@ Admin vẫn dùng chat riêng hiện hành và các state/approval vẫn do API/
 
 ### Support duplicate-image comparison
 
-Runner trong `support_compare_image/dup-compare` dùng Hugging Face DINOv2 ở phase 1. Nó đọc
-order mẫu/live từ `public.orders`, đọc baseline vector từ `support_compare_image.image_embeddings`
-và ghi run/item/candidate vào cùng schema. Với source `review`, candidate cùng
-`external_order_id` bị loại để tránh self-match vì historical crawl đã chứa các order Review.
+`support_compare_image/dup-compare/local_worker.py` là process duy nhất sở hữu runtime Hugging
+Face DINOv2. Nó chạy trên máy riêng của Support, kết nối PostgreSQL qua SSH tunnel/private VPN,
+đọc job trong `support_compare_image.comparison_jobs`, lấy order `Waiting`/`Doing` chưa phân
+loại từ `public.orders`, đọc baseline từ `image_embeddings` và ghi run/item/candidate vào cùng
+schema. Model được cache trong process local giữa các job; production VPS không cài `torch`,
+`transformers` hay tải checkpoint Hugging Face.
 
-Source runtime `support_unchecked` quét cả order đang `Waiting` và `Doing` có
-`duplicate_check_status=uncheck` mỗi 30 phút. Top-1 theo cosine similarity là cặp được gửi
-Telegram; nếu Support chọn **Trùng** hoặc **Không trùng**, callback gọi
-`set_orders_duplicate_status` và ghi audit/version như command hiện có. Doing chỉ được phân loại
-qua callback scoped này; command web vẫn Waiting-only. Nếu top-1 là `KHONG_TRUNG`, item không gửi
-Telegram và order vẫn `uncheck` trong tab **Chưa kiểm tra**. Ảnh đã compare thành công được
-promote vào historical pool để các vòng sau có thêm baseline; order uncheck không duplicate sẽ
-được quét lại khi pool tiếp tục tăng.
+Celery Beat trên VPS chỉ tạo tối đa một job active cho mỗi platform mỗi 30 phút và chạy notifier
+mỗi phút. Lệnh `/check` của Support cũng tạo cùng loại job queue này. Local worker claim bằng
+`FOR UPDATE SKIP LOCKED`, embedding/compare/promote ảnh, rồi ghi `completed` hoặc `failed`; VPS
+đọc trạng thái đó để báo cáo và gửi candidate top-1 qua Telegram. Nếu top-1 là `KHONG_TRUNG`,
+order vẫn `uncheck` trong tab **Chưa kiểm tra**; nếu Support chọn **Trùng** hoặc **Không trùng**,
+callback mới gọi `set_orders_duplicate_status`. Doing chỉ được phân loại qua callback này; command
+web vẫn Waiting-only.
 
-Runner fail-closed với model: không dùng HOG fallback để so với baseline DINOv2. Celery Beat chỉ
-enqueue khi `SUPPORT_COMPARE_ENABLED=true`; task chạy trên queue `support-compare` và worker solo
-riêng để không chặn các tác vụ status sync/assignment.
+Runner fail-closed với model: không dùng HOG fallback để so với baseline DINOv2. Hàng đợi là
+PostgreSQL source of truth; Redis/Celery chỉ lo lịch tạo job và gửi Telegram, không chạy ML.
 
 ## Dữ liệu và side effect
 
@@ -70,6 +70,7 @@ riêng để không chặn các tác vụ status sync/assignment.
 | PostgreSQL | order state, assignment, result version, workflow event, operation, work note, finance và quyền truy cập |
 | Redis/Celery | hàng đợi và schedule; không là source of truth |
 | Printerval | hệ thống ngoài để crawl/đọc status và nhận external write có kiểm chứng |
+| Support local worker | máy riêng giữ model DINO, claim `comparison_jobs`, tải preview và ghi kết quả; không phải production runtime |
 | Local/private volumes | crawled assets, source/order assets, platform/browser profile và Playwright evidence; xem trạng thái persistence từng loại tại [data-storage.md](data-storage.md) |
 | Google Sheet | backup/export tùy cấu hình, không quyết định state |
 

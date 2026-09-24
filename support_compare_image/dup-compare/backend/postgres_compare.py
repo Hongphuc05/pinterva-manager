@@ -58,6 +58,7 @@ IMAGE_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
 )
+_EMBEDDER_CACHE: dict[str, DinoV2Embedder] = {}
 
 
 @dataclass(frozen=True)
@@ -774,6 +775,16 @@ def compare_image_to_pool(
     return overall, is_duplicate, new_phash, new_lab, candidate_results
 
 
+def _get_embedder(model_name: str) -> DinoV2Embedder:
+    """Keep the model resident while the local worker processes multiple jobs."""
+    embedder = _EMBEDDER_CACHE.get(model_name)
+    if embedder is None:
+        logger.info("loading Hugging Face model %s", model_name)
+        embedder = DinoV2Embedder(model_name)
+        _EMBEDDER_CACHE[model_name] = embedder
+    return embedder
+
+
 def run_comparison(
     database_url: str,
     *,
@@ -800,8 +811,7 @@ def run_comparison(
     if embedding_batch_size <= 0:
         raise ValueError("embedding_batch_size must be positive")
 
-    logger.info("loading Hugging Face model %s", model_name)
-    embedder = DinoV2Embedder(model_name)
+    embedder = _get_embedder(model_name)
     resolved_model_version = model_version or embedder.name
     if resolved_model_version != embedder.name:
         logger.warning(

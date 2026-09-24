@@ -13,7 +13,6 @@ FROM python:3.12-slim-bookworm AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    HF_HOME=/home/app/.cache/huggingface \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     PLAYWRIGHT_BROWSER_CHANNEL="" \
     PLAYWRIGHT_PROFILE_ROOT=/app/chrome-profiles \
@@ -30,8 +29,7 @@ RUN python -c "import tomllib; f = open('pyproject.toml', 'rb'); data = tomllib.
     && useradd --uid 10001 --gid app --create-home --shell /usr/sbin/nologin app \
     && mkdir -p /app/crawled_assets /app/order_assets /app/platform_data \
         /app/playwright-evidence /app/chrome-profiles /app/credentials /app/frontend \
-        /home/app/.cache/huggingface \
-    && chown -R app:app /app /home/app/.cache /ms-playwright
+    && chown -R app:app /app /ms-playwright
 
 COPY --chown=app:app alembic.ini ./
 COPY --chown=app:app migrations ./migrations
@@ -39,8 +37,6 @@ COPY --chown=app:app app ./app
 COPY --chown=app:app CopyImage ./CopyImage
 COPY --chown=app:app support_compare_image ./support_compare_image
 COPY --chown=app:app --from=frontend-build /frontend/dist ./frontend/dist
-COPY support_compare_image/requirements.compare-runtime.txt /tmp/support-compare-requirements.txt
-RUN pip install -r /tmp/support-compare-requirements.txt && rm /tmp/support-compare-requirements.txt
 RUN pip install --no-deps .
 
 USER app

@@ -782,6 +782,62 @@ class SupportCompareRun(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class SupportCompareJob(Base):
+    """Queue entry claimed by the Support machine that owns the DINO runtime."""
+
+    __tablename__ = "comparison_jobs"
+    __table_args__ = (
+        Index("ix_support_compare_jobs_claim", "status", "created_at"),
+        Index(
+            "ix_support_compare_jobs_notification",
+            "status",
+            "notification_sent_at",
+            "finished_at",
+        ),
+        Index(
+            "uq_support_compare_jobs_active_platform",
+            "platform_id",
+            unique=True,
+            postgresql_where=text("status IN ('queued', 'running')"),
+        ),
+        CheckConstraint(
+            "source_kind IN ('support_unchecked')",
+            name="ck_support_compare_job_source_kind",
+        ),
+        CheckConstraint(
+            "status IN ('queued', 'running', 'completed', 'failed')",
+            name="ck_support_compare_job_status",
+        ),
+        {"schema": SUPPORT_COMPARE_SCHEMA},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    source_kind: Mapped[str] = mapped_column(String(32), nullable=False, default="support_unchecked")
+    platform_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    requested_by_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    chat_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    requested_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="queued", server_default=text("'queued'")
+    )
+    worker_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    run_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    model_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    processed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    duplicate_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    error_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    summary: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    notification_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class SupportCompareItem(Base):
     """One source order/preview image processed by a comparison run."""
 

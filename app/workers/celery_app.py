@@ -31,8 +31,6 @@ celery_app = Celery(
 celery_app.conf.task_queues = (
     Queue("celery"),
     Queue("assignment", max_priority=10),
-    # DINOv2 is CPU/GPU-heavy and must not block status sync or Telegram jobs.
-    Queue("support-compare"),
 )
 celery_app.conf.task_routes = {
     "app.workers.assignment_sync_tasks.sync_printerval_assignment_request": {
@@ -47,11 +45,9 @@ celery_app.conf.task_routes = {
     },
     "app.workers.sync_job_tasks.run_status_sync_job": {"queue": "celery"},
     "app.workers.order_sheet_backup_tasks.export_order_sheet_backup": {"queue": "celery"},
-    "app.workers.support_compare_tasks.run_support_compare_batch": {
-        "queue": "support-compare"
-    },
+    "app.workers.support_compare_tasks.enqueue_support_compare_jobs": {"queue": "celery"},
     "app.workers.support_compare_tasks.notify_support_duplicate_candidates": {
-        "queue": "support-compare"
+        "queue": "celery"
     },
 }
 celery_app.conf.worker_prefetch_multiplier = 1
@@ -92,10 +88,9 @@ def build_beat_schedule(settings):
             ),
         }
     if settings.support_compare_enabled:
-        schedule["support-compare-unchecked"] = {
-            "task": "app.workers.support_compare_tasks.run_support_compare_batch",
+        schedule["support-compare-local-jobs"] = {
+            "task": "app.workers.support_compare_tasks.enqueue_support_compare_jobs",
             "schedule": settings.support_compare_interval_seconds,
-            "kwargs": {"source_kind": "support_unchecked"},
         }
         schedule["support-compare-telegram"] = {
             "task": "app.workers.support_compare_tasks.notify_support_duplicate_candidates",

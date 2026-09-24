@@ -35,6 +35,9 @@ def engine():
     alembic_cfg = Config("alembic.ini")
     alembic_cfg.set_main_option("sqlalchemy.url", TEST_DATABASE_URL)
     command.upgrade(alembic_cfg, "head")
+    support_alembic_cfg = Config("support_compare_image/alembic.ini")
+    support_alembic_cfg.set_main_option("sqlalchemy.url", TEST_DATABASE_URL)
+    command.upgrade(support_alembic_cfg, "head")
     yield eng
     eng.dispose()
 
@@ -75,3 +78,12 @@ def _truncate_tables(engine):
         ).scalars().all()
         if tables:
             conn.execute(text(f"TRUNCATE TABLE {', '.join(tables)} RESTART IDENTITY CASCADE"))
+        support_tables = conn.execute(
+            text(
+                "SELECT tablename FROM pg_tables "
+                "WHERE schemaname = 'support_compare_image' AND tablename != 'alembic_version'"
+            )
+        ).scalars().all()
+        if support_tables:
+            qualified = ", ".join(f"support_compare_image.{table}" for table in support_tables)
+            conn.execute(text(f"TRUNCATE TABLE {qualified} RESTART IDENTITY CASCADE"))

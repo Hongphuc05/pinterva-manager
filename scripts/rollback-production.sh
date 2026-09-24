@@ -47,7 +47,7 @@ compose=(docker compose --project-directory "$ROOT_DIR" --env-file "$temporary_e
 
 # Application rollback deliberately does not run Alembic downgrade. Database schema
 # changes require a tested restore plan, not an automated destructive downgrade.
-"${compose[@]}" up -d --no-build api celery-general celery-assignment celery-compare celery-beat
+"${compose[@]}" up -d --no-build api celery-general celery-assignment celery-beat
 [[ "$WITH_TUNNEL" == true ]] && "${compose[@]}" up -d --no-build cloudflared
 
 for _ in $(seq 1 30); do

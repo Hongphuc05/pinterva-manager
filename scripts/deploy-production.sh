@@ -36,9 +36,7 @@ fi
 
 data_dir="$(awk -F= '$1 == "DATA_DIR" { sub(/^[^=]*=/, ""); print; exit }' "$ENV_FILE")"
 work_note_assets_dir="$data_dir/private_work_note_assets"
-hf_cache_dir="$data_dir/huggingface_cache"
 mkdir -p "$work_note_assets_dir"
-mkdir -p "$hf_cache_dir"
 existing_api_container="$("${compose[@]}" ps -q api 2>/dev/null || true)"
 existing_api_image=""
 has_legacy_work_note_assets=false
@@ -80,10 +78,9 @@ api_image="$("${compose[@]}" config --images | awk '/^tacahu-ops:/ { print; exit
 [[ -n "$api_image" ]] || { echo "Could not resolve the production API image." >&2; exit 1; }
 docker image inspect "$api_image" >/dev/null
 docker run --rm --user 0:0 -v "$work_note_assets_dir:/assets" --entrypoint chown "$api_image" -R 10001:10001 /assets
-docker run --rm --user 0:0 -v "$hf_cache_dir:/cache" --entrypoint chown "$api_image" -R 10001:10001 /cache
 "${compose[@]}" up -d postgres redis
 "${compose[@]}" --profile migration run --rm migrate
-"${compose[@]}" up -d --no-build api celery-general celery-assignment celery-compare celery-beat
+"${compose[@]}" up -d --no-build api celery-general celery-assignment celery-beat
 if [[ "$WITH_TUNNEL" == true ]]; then
   "${compose[@]}" up -d --no-build cloudflared
 fi

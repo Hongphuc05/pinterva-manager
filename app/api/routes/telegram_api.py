@@ -44,6 +44,7 @@ from app.application.support_compare import (
 )
 from app.application.support_compare import (
     count_support_unchecked_orders,
+    create_support_compare_job,
     execute_support_duplicate_decision,
     new_support_check_actions,
     supersede_support_check_siblings,
@@ -514,17 +515,16 @@ async def api_telegram_webhook(
                 return {"ok": True}
 
             try:
-                from app.workers.support_compare_tasks import run_support_compare_batch
-
-                task = run_support_compare_batch.delay(
-                    source_kind="support_unchecked",
-                    limit=None,
-                    platform_id=str(support_user.platform_id),
-                    notify_chat_id=user_chat_id,
+                job = create_support_compare_job(
+                    db,
+                    platform_id=support_user.platform_id,
+                    requested_by_id=support_user.id,
+                    chat_id=user_chat_id,
+                    requested_count=int(payload.get("order_count") or 0),
                 )
             except Exception:
                 db.rollback()
-                logger.exception("failed to enqueue Support /check comparison for %s", user_chat_id)
+                logger.exception("failed to queue local Support /check comparison for %s", user_chat_id)
                 send_message(user_chat_id, "❌ Không thể bắt đầu kiểm tra trùng lúc này. Vui lòng thử lại.")
                 return {"ok": True}
 
@@ -533,7 +533,7 @@ async def api_telegram_webhook(
             action_log.actor_id = support_user.id
             action_log.payload = {
                 **payload,
-                "task_id": getattr(task, "id", None),
+                "job_id": str(job.id),
             }
             supersede_support_check_siblings(db, action_log)
             db.commit()
@@ -543,8 +543,9 @@ async def api_telegram_webhook(
             order_count = payload.get("order_count", 0)
             send_message(
                 user_chat_id,
-                f"✅ Đã bắt đầu kiểm tra trùng cho <b>{order_count}</b> đơn trong tab <b>Chưa kiểm tra</b>.\n"
-                "Bot sẽ gửi kết quả và các cặp nghi trùng khi xử lý xong.",
+                f"✅ Đã xếp <b>{order_count}</b> đơn trong tab <b>Chưa kiểm tra</b> "
+                "vào hàng đợi máy local để embedding và kiểm tra trùng.\n"
+                "Bot sẽ báo cáo và gửi các cặp nghi trùng khi máy local xử lý xong.",
             )
             return {"ok": True}
 

@@ -6,6 +6,7 @@ import logging
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
+from html import escape
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -14,6 +15,7 @@ from app.adapters.db.models import (
     Order,
     SupportCompareCandidate,
     SupportCompareItem,
+    SupportCompareJob,
     SupportCompareRun,
     TelegramActionLog,
     User,
@@ -71,6 +73,116 @@ def count_support_unchecked_orders(session: Session, *, platform_id: uuid.UUID) 
         )
         .count()
     )
+
+
+def create_support_compare_job(
+    session: Session,
+    *,
+    platform_id: uuid.UUID,
+    requested_by_id: uuid.UUID,
+    chat_id: str,
+    requested_count: int,
+) -> SupportCompareJob:
+    """Queue a comparison request for the separately-run local ML worker."""
+    active_job = (
+        session.query(SupportCompareJob)
+        .filter(
+            SupportCompareJob.platform_id == platform_id,
+            SupportCompareJob.status.in_(("queued", "running")),
+        )
+        .with_for_update()
+        .first()
+    )
+    if active_job is not None:
+        return active_job
+    job = SupportCompareJob(
+        platform_id=platform_id,
+        requested_by_id=requested_by_id,
+        chat_id=chat_id,
+        requested_count=requested_count,
+    )
+    session.add(job)
+    session.flush()
+    return job
+
+
+def enqueue_scheduled_support_compare_jobs(session: Session) -> int:
+    """Create one local-worker job for each platform with unchecked Support orders."""
+    platform_rows = (
+        session.query(Order.platform_id)
+        .filter(Order.platform_id.isnot(None))
+        .distinct()
+        .all()
+    )
+    created = 0
+    for (platform_id,) in platform_rows:
+        recipients = _support_recipients(session, platform_id)
+        if not recipients:
+            continue
+        requested_count = count_support_unchecked_orders(session, platform_id=platform_id)
+        if requested_count == 0:
+            continue
+        active_job = (
+            session.query(SupportCompareJob)
+            .filter(
+                SupportCompareJob.platform_id == platform_id,
+                SupportCompareJob.status.in_(("queued", "running")),
+            )
+            .with_for_update()
+            .first()
+        )
+        if active_job is not None:
+            continue
+        session.add(
+            SupportCompareJob(
+                platform_id=platform_id,
+                requested_by_id=None,
+                chat_id=str(recipients[0].telegram_chat_id),
+                requested_count=requested_count,
+            )
+        )
+        created += 1
+    session.commit()
+    return created
+
+
+def notify_completed_support_compare_jobs(session: Session, *, limit: int = 20) -> int:
+    """Send local-worker completion/failure reports through the server-side bot."""
+    jobs = (
+        session.query(SupportCompareJob)
+        .filter(
+            SupportCompareJob.status.in_(("completed", "failed")),
+            SupportCompareJob.notification_sent_at.is_(None),
+        )
+        .order_by(SupportCompareJob.finished_at.asc(), SupportCompareJob.created_at.asc())
+        .with_for_update(skip_locked=True)
+        .limit(max(1, limit))
+        .all()
+    )
+    notified = 0
+    for job in jobs:
+        if job.status == "completed":
+            summary = job.summary or {}
+            text = (
+                f"✅ Đã quét xong <b>{job.requested_count}</b> đơn trong tab "
+                "<b>Chưa kiểm tra</b> bằng máy local.\n"
+                f"• Đã embedding/so sánh: <b>{summary.get('processed_count', job.processed_count)}</b>\n"
+                f"• Phát hiện candidate duplicate: <b>{summary.get('duplicate_count', job.duplicate_count)}</b>\n"
+                f"• Lỗi: <b>{summary.get('error_count', job.error_count)}</b>\n\n"
+                "Các cặp duplicate (nếu có) sẽ được gửi qua các tin nhắn Telegram riêng."
+            )
+        else:
+            error = escape((job.last_error or "Không rõ lỗi")[:1000])
+            text = (
+                "❌ Máy local không hoàn tất được luồng kiểm tra trùng.\n"
+                f"• Số đơn yêu cầu: <b>{job.requested_count}</b>\n"
+                f"• Lỗi: <code>{error}</code>"
+            )
+        if send_message(job.chat_id, text) is not None:
+            job.notification_sent_at = datetime.now(UTC)
+            notified += 1
+    session.commit()
+    return notified
 
 
 def new_support_check_actions(

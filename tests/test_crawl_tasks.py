@@ -39,27 +39,32 @@ def test_celery_app_includes_telegram_tasks():
     assert "app.workers.telegram_tasks" in celery_app.conf.include
 
 
-def test_celery_app_includes_support_compare_tasks_on_dedicated_queue():
+def test_celery_app_includes_support_compare_notifier_on_general_queue():
     assert "app.workers.support_compare_tasks" in celery_app.conf.include
     assert celery_app.conf.task_routes[
-        "app.workers.support_compare_tasks.run_support_compare_batch"
-    ] == {"queue": "support-compare"}
+        "app.workers.support_compare_tasks.enqueue_support_compare_jobs"
+    ] == {"queue": "celery"}
+    assert celery_app.conf.task_routes[
+        "app.workers.support_compare_tasks.notify_support_duplicate_candidates"
+    ] == {"queue": "celery"}
 
 
-def test_support_compare_beat_scans_waiting_and_doing_every_30_minutes():
+def test_support_compare_beat_queues_local_jobs_and_delivers_reports_and_candidates():
     from app.config import Settings
 
     schedule = build_beat_schedule(
         Settings(secret_key="test", cookie_secure=False, support_compare_enabled=True)
     )
 
-    entry = schedule["support-compare-unchecked"]
-    assert entry["task"] == "app.workers.support_compare_tasks.run_support_compare_batch"
-    assert entry["schedule"] == 1800
-    assert entry["kwargs"] == {"source_kind": "support_unchecked"}
+    job_entry = schedule["support-compare-local-jobs"]
+    assert job_entry["task"] == "app.workers.support_compare_tasks.enqueue_support_compare_jobs"
+    assert job_entry["schedule"] == 1800
+    entry = schedule["support-compare-telegram"]
+    assert entry["task"] == "app.workers.support_compare_tasks.notify_support_duplicate_candidates"
+    assert entry["schedule"] == 60.0
     assert celery_app.conf.task_routes[
         "app.workers.support_compare_tasks.notify_support_duplicate_candidates"
-    ] == {"queue": "support-compare"}
+    ] == {"queue": "celery"}
 
 
 def test_celery_app_includes_the_scheduled_status_sync_task():
