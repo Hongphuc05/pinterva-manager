@@ -15,7 +15,7 @@ const TABS: { key: TabKey; label: string }[] = [
 ]
 
 const jobLabel = (j: Job) =>
-  `${j.created_at ? new Date(j.created_at).toLocaleString('vi-VN') : ''} · ${j.processed_count}/${j.requested_count} đơn · ${j.duplicate_count} nghi trùng`
+  `${j.created_at ? new Date(j.created_at).toLocaleString('vi-VN') : ''} · ${j.status === 'running' ? 'đang chạy · ' : ''}${j.processed_count}/${j.requested_count} đơn · ${j.duplicate_count} nghi trùng`
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
@@ -71,6 +71,14 @@ export default function App() {
   useEffect(() => {
     void loadJobs()
   }, [loadJobs])
+
+  // A running job fills in as the worker goes: refresh quietly until it completes.
+  const running = job?.status === 'running'
+  useEffect(() => {
+    if (!running) return
+    const timer = setInterval(() => void loadJob(jobId), 8000)
+    return () => clearInterval(timer)
+  }, [running, jobId, loadJob])
 
   const groups = useMemo(
     () => ({ todo: items.filter(isTodo), done: items.filter(isDone), nomatch: items.filter(isNoMatch) }),
@@ -184,7 +192,7 @@ export default function App() {
         </div>
         {job && (
           <span className="text-xs text-dim">
-            Job {job.status} · {job.processed_count}/{job.requested_count} đơn
+            {running ? <b className="text-warn">Đang chạy</b> : `Job ${job.status}`} · {job.processed_count}/{job.requested_count} đơn đã so
             {job.error_count > 0 && <b className="text-bad"> · {job.error_count} lỗi</b>}
           </span>
         )}

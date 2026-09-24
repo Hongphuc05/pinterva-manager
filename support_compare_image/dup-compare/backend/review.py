@@ -79,13 +79,24 @@ def get_job(job_id: uuid.UUID) -> dict[str, Any]:
     with _connect() as conn:
         job = conn.execute(
             f"""SELECT id, status, requested_count, processed_count, duplicate_count,
-                       error_count, run_id, created_at, finished_at
+                       error_count, run_id, created_at, finished_at,
+                       platform_id, source_kind, claimed_at
                 FROM {S}.comparison_jobs WHERE id = %s""",
             (job_id,),
         ).fetchone()
         if job is None:
             raise HTTPException(404, "Không tìm thấy job")
+        out = _job_row(job[:9])
         run_id = job[6]
+        if run_id is None and job[1] == "running" and job[11] is not None:
+            # The worker only writes run_id/counters on completion: find its run and show live progress.
+            run = conn.execute(
+                f"""SELECT id FROM {S}.comparison_runs
+                    WHERE platform_id = %s AND source_kind = %s AND started_at >= %s
+                    ORDER BY started_at DESC LIMIT 1""",
+                (job[9], job[10], job[11]),
+            ).fetchone()
+            run_id = run[0] if run else None
         items: list[dict[str, Any]] = []
         if run_id:
             item_rows = conn.execute(
@@ -123,7 +134,14 @@ def get_job(job_id: uuid.UUID) -> dict[str, Any]:
                     "reviewed_at": r[7].isoformat() if r[7] else None,
                     "candidates": by_item.get(r[0], []),
                 })
-    return {"job": _job_row(job), "items": items}
+            if job[1] == "running":
+                out["processed_count"] = len(items)
+                out["duplicate_count"] = sum(1 for i in items if i["model_says_duplicate"])
+                out["error_count"] = conn.execute(
+                    f"SELECT count(*) FROM {S}.comparison_items WHERE run_id = %s AND processing_status = 'failed'",
+                    (run_id,),
+                ).fetchone()[0]
+    return {"job": out, "items": items}
 
 
 def _load_reviewable(conn: psycopg.Connection, item_id: uuid.UUID) -> tuple:

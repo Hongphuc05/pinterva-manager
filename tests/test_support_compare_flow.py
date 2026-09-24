@@ -524,3 +524,23 @@ def test_selected_pair_message_includes_both_custom_configurations(db_session, s
     assert "<b>Color</b>: Black" in config_text  # falls back to the original entries
     # the confirmation buttons still come last
     assert "reply_markup" in msg.call_args_list[-1].kwargs
+
+
+def test_review_shows_live_progress_of_a_running_job(db_session, setup, review_client):
+    from app.adapters.db.models import SupportCompareJob
+
+    order = _order(db_session, setup, "DJ-LIVE-1")
+    item = _item(db_session, setup, order, "pending_review", is_duplicate=True)
+    _candidate(db_session, item, 1)
+    # The worker sets run_id and the counters only on completion; the run row exists from the start.
+    job = SupportCompareJob(
+        platform_id=setup.platform.id, chat_id=CHAT_ID, status="running", requested_count=5,
+        claimed_at=setup.run.started_at, run_id=None,
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    data = review_client.get(f"/review/jobs/{job.id}").json()
+    assert data["job"]["status"] == "running"
+    assert (data["job"]["processed_count"], data["job"]["duplicate_count"], data["job"]["requested_count"]) == (1, 1, 5)
+    assert [i["order_code"] for i in data["items"]] == ["DJ-LIVE-1"]
