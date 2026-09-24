@@ -513,17 +513,36 @@ def test_selected_pair_message_includes_both_custom_configurations(db_session, s
     item.review_status, item.selected_candidate_id, item.reviewed_at = "selected_duplicate", candidate.id, datetime.now(UTC)
     db_session.commit()
 
-    with patch("app.application.support_compare.send_media_group", return_value=[{}]), \
+    with patch("app.application.support_compare.send_media_group", return_value=[{}]) as media, \
             patch("app.application.support_compare.send_message", return_value={"message_id": 7}) as msg:
         assert notify_pending_duplicate_candidates(db_session) == 1
 
-    config_text = next(c.args[1] for c in msg.call_args_list if "Cấu hình đơn mới" in c.args[1])
-    assert "DJ-CFG-NEW" in config_text and "OLD-1" in config_text
-    assert "<b>Tên</b>: Bố &lt;3" in config_text  # Vietnamese preferred, HTML-escaped
-    assert "extra_discount" not in config_text and "url_xem" not in config_text
-    assert "<b>Color</b>: Black" in config_text  # falls back to the original entries
+    # One message: the album carries both order captions and both configurations.
+    photos = media.call_args.args[1]
+    caption = photos[0]["caption"]
+    assert "caption" not in photos[1]
+    assert "DJ-CFG-NEW" in caption and "OLD-1" in caption
+    assert "<b>Tên</b>: Bố &lt;3" in caption  # Vietnamese preferred, HTML-escaped
+    assert "<b>Color</b>: Black" in caption  # falls back to the original entries
+    assert "extra_discount" not in caption and "url_xem" not in caption
+    assert len(caption) <= 1024
+    assert len(msg.call_args_list) == 1  # only the confirmation prompt is a separate message
     # the confirmation buttons still come last
     assert "reply_markup" in msg.call_args_list[-1].kwargs
+
+
+def test_album_caption_stays_under_the_telegram_limit_with_long_configurations(db_session, setup):
+    from app.application.support_compare import CAPTION_LIMIT, _combined_caption
+
+    order = _order(db_session, setup, "DJ-LONG")
+    order.custom_config = {"original": [{"key": f"Option {n}", "value": "x" * 120} for n in range(30)], "translated_vn": []}
+    db_session.commit()
+    item = _item(db_session, setup, order, "pending_review", is_duplicate=True)
+    candidate = _candidate(db_session, item, 1)
+
+    caption = _combined_caption(db_session, item, candidate)
+    assert len(caption) <= CAPTION_LIMIT
+    assert "Cấu hình đơn mới DJ-LONG" in caption and "…" in caption
 
 
 def test_review_shows_live_progress_of_a_running_job(db_session, setup, review_client):

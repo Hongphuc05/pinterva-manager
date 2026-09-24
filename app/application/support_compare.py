@@ -343,8 +343,11 @@ _CONFIG_VALUE_LIMIT = 300
 _CONFIG_BLOCK_LIMIT = 1700
 
 
-def format_custom_config(config: dict | None) -> str:
-    """Telegram-HTML lines for an order's custom configuration (Vietnamese if present)."""
+def format_custom_config(config: dict | None, limit: int = _CONFIG_BLOCK_LIMIT) -> str:
+    """Telegram-HTML lines for an order's custom configuration (Vietnamese if present).
+
+    ``limit`` caps the text (markup included, so it is conservative); longer configurations end with "…".
+    """
     if not isinstance(config, dict):
         return "<i>Không có cấu hình</i>"
     entries = config.get("translated_vn") or config.get("original") or []
@@ -359,7 +362,7 @@ def format_custom_config(config: dict | None) -> str:
         if len(value) > _CONFIG_VALUE_LIMIT:
             value = value[:_CONFIG_VALUE_LIMIT] + "…"
         line = f"• <b>{escape(str(entry['key']))}</b>: {escape(value)}"
-        if total + len(line) > _CONFIG_BLOCK_LIMIT:
+        if total + len(line) > limit:
             lines.append("…")
             break
         lines.append(line)
@@ -392,13 +395,27 @@ def _config_for_old(session: Session, candidate: SupportCompareCandidate, platfo
     return None
 
 
-def _config_message(session: Session, item: SupportCompareItem, candidate: SupportCompareCandidate) -> str:
-    return (
-        f"🧩 <b>Cấu hình đơn mới {escape(item.external_order_id)}</b>\n"
-        f"{format_custom_config(_config_for_new(session, item))}\n\n"
-        f"🧩 <b>Cấu hình đơn cũ {escape(candidate.matched_external_order_id or 'không rõ')}</b>\n"
-        f"{format_custom_config(_config_for_old(session, candidate, item.platform_id))}"
+CAPTION_LIMIT = 1000  # Telegram allows 1024 characters in a media caption
+
+
+def _combined_caption(session: Session, item: SupportCompareItem, candidate: SupportCompareCandidate) -> str:
+    """One caption for the album: new order, matched order and both custom configurations.
+
+    Telegram shows only one caption per album and cuts it at 1024 characters, so the
+    configurations share whatever room the two order captions leave (full data is on the web).
+    """
+    head = f"{_caption_for_new(session, item)}\n\n{_caption_for_old(session, candidate)}"
+    titles = (
+        f"🧩 <b>Cấu hình đơn mới {escape(item.external_order_id)}</b>",
+        f"🧩 <b>Cấu hình đơn cũ {escape(candidate.matched_external_order_id or 'không rõ')}</b>",
     )
+    configs = (_config_for_new(session, item), _config_for_old(session, candidate, item.platform_id))
+    room = CAPTION_LIMIT - len(head) - sum(len(t) for t in titles) - 6
+    per_block = room // 2
+    if per_block < 60:  # order captions alone are nearly full: skip the details
+        return head
+    blocks = [f"{title}\n{format_custom_config(config, per_block)}" for title, config in zip(titles, configs)]
+    return f"{head}\n\n" + "\n\n".join(blocks)
 
 
 def _keyboard(confirm_token: str, reject_token: str) -> dict:
@@ -487,37 +504,32 @@ def notify_duplicate_candidate(session: Session, candidate_id: uuid.UUID) -> boo
     delivered = False
     try:
         for confirm, reject, chat_id in action_rows:
-            new_caption = _caption_for_new(session, item)
-            old_caption = _caption_for_old(session, candidate)
+            caption = _combined_caption(session, item, candidate)
             album = None
             if (
                 item.image_url.startswith(("http://", "https://"))
                 and candidate.matched_image_url.startswith(("http://", "https://"))
             ):
-                # Telegram albums render the two previews as one visual card.
+                # One album = one message: both previews plus the combined caption (Telegram
+                # shows only the first caption of an album).
                 album = send_media_group(
                     chat_id,
                     [
-                        {"media": item.image_url, "caption": new_caption},
-                        {"media": candidate.matched_image_url, "caption": old_caption},
+                        {"media": item.image_url, "caption": caption},
+                        {"media": candidate.matched_image_url},
                     ],
                 )
 
             if album is None:
                 # Keep a graceful fallback for private/invalid URLs.  Buttons
                 # are attached to the separate prompt below in both paths.
-                new_message = send_photo(chat_id, item.image_url, caption=new_caption)
-                old_message = send_photo(chat_id, candidate.matched_image_url, caption=old_caption)
+                new_message = send_photo(chat_id, item.image_url, caption=caption)
+                old_message = send_photo(
+                    chat_id, candidate.matched_image_url, caption=_caption_for_old(session, candidate)
+                )
                 if new_message is None or old_message is None:
                     logger.warning("failed to deliver duplicate candidate %s to %s", candidate.id, chat_id)
                     continue
-
-            try:
-                config_text = _config_message(session, item, candidate)
-                if send_message(chat_id, config_text) is None:
-                    logger.warning("custom configuration message for %s was not delivered", item.external_order_id)
-            except Exception:
-                logger.exception("could not send custom configuration for %s", item.external_order_id)
 
             prompt = send_message(
                 chat_id,
