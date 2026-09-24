@@ -156,3 +156,30 @@ def test_watchdog_reclaims_only_sync_jobs_without_a_fresh_heartbeat(db_session):
     assert stale.progress_phase == "failed"
     assert "heartbeat" in stale.error_summary
     assert fresh.status == "running"
+
+
+def test_support_can_start_a_platform_status_sync_but_a_plain_designer_cannot(client, db_session, monkeypatch):
+    """The topbar shows the Đồng bộ button to Support, so the API must accept it (read-only mirror)."""
+    from app.api.routes import sync_jobs_api
+
+    monkeypatch.setattr(sync_jobs_api, "_dispatch_status_job", lambda job_id: None)
+    platform = Platform(
+        name="Support sync platform", account_username="support-sync@printerval.com",
+        session_cookie="server-only-cookie", team_outsource="team-support-sync",
+    )
+    db_session.add(platform)
+    db_session.flush()
+    for role in ("support", "designer"):
+        db_session.add(User(
+            username=f"sync_{role}", full_name=role, role=role, password_hash=hash_password("pass123"),
+            active=True, platform_id=platform.id,
+        ))
+    db_session.commit()
+
+    def headers(role):
+        token = client.post("/api/login", json={"username": f"sync_{role}", "password": "pass123"}).json()["access_token"]
+        return {"Authorization": f"Bearer {token}", "X-Platform-Id": str(platform.id)}
+
+    ok = client.post("/api/sync-jobs", json={"type": "status_sync"}, headers=headers("support"))
+    assert ok.status_code == 202, ok.text
+    assert client.post("/api/sync-jobs", json={"type": "status_sync"}, headers=headers("designer")).status_code == 403

@@ -22,7 +22,7 @@ from app.application.sync_jobs import (
     create_or_get_status_sync_job,
     run_status_sync_job,
 )
-from app.domain.access import ROLE_ADMIN, ROLE_DESIGNER_TRELLO
+from app.domain.access import ROLE_ADMIN, ROLE_DESIGNER_TRELLO, ROLE_SUPPORT
 
 router = APIRouter(prefix="/sync-jobs", tags=["sync-jobs"])
 
@@ -94,7 +94,7 @@ def _dispatch_status_job(job_id: uuid.UUID) -> None:
 @router.post("", response_model=SyncJobOut, status_code=status.HTTP_202_ACCEPTED)
 def create_sync_job(
     payload: CreateSyncJobRequest,
-    user: User = Depends(require_any_role(ROLE_ADMIN, ROLE_DESIGNER_TRELLO)),
+    user: User = Depends(require_any_role(ROLE_ADMIN, ROLE_SUPPORT, ROLE_DESIGNER_TRELLO)),
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
