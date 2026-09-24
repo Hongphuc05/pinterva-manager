@@ -62,7 +62,7 @@ cặp ảnh Support đã chọn.
 
 Kết quả từng order nằm ở `comparison_items.review_status`: `pending_review` (model nghi trùng),
 `no_match` (không thấy trùng), rồi `selected_duplicate` hoặc `ai_wrong` sau khi Support duyệt trên
-giao diện localhost của `dup-compare` (`/review.html`). Giao diện này chỉ ghi vào schema
+giao diện localhost của `dup-compare` (`/`, app React trong `review-ui/`). Giao diện này chỉ ghi vào schema
 `support_compare_image`, không đổi order. Với `selected_duplicate`, notifier gửi cặp (ảnh gốc, ảnh
 đã chọn, kèm mã đơn) qua Telegram; **Xác nhận** gọi `set_orders_duplicate_status` để gắn Trùng lặp,
 **Từ chối** chuyển order sang Không trùng lặp. Các order `no_match`/`ai_wrong` vẫn nằm ở tab **Chưa

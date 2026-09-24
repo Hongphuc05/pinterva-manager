@@ -4,3 +4,5 @@
 **/.venv
 dup-compare/pool_cache
 dup-compare/reports
+**/node_modules
+**/dist

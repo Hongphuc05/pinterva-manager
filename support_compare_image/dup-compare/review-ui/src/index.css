@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+/* Design tokens: UI_style.md (same as the Tacahu Ops dashboard) */
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 210 10% 18%;
+    --card: 0 0% 100%;
+    --primary: 218 100% 40%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 218 90% 52%;
+    --tertiary: 210 16% 96%;
+    --muted: 210 14% 90%;
+    --muted-foreground: 210 10% 30%;
+    --accent: 148 48% 40%;
+    --warning: 38 90% 50%;
+    --destructive: 0 84% 60%;
+    --border: 210 14% 90%;
+    --ring: 218 100% 40%;
+    --radius: 0.5rem;
+  }
+}
+
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-tertiary: hsl(var(--tertiary));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-warning: hsl(var(--warning));
+  --color-destructive: hsl(var(--destructive));
+  --color-border: hsl(var(--border));
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+}

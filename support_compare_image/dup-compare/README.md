@@ -253,7 +253,7 @@ Migration `0004_support_unchecked_source.py` mở source runtime `support_unchec
 quét order `uncheck` chưa từng có kết quả so sánh (state Waiting hoặc Doing); ảnh preview được
 embedding và so với pool Postgres. Các order trong cùng lô **không so chéo nhau**; cả lô được
 thêm vào pool sau khi so xong. Mỗi order ghi `review_status`: `pending_review` (model nghi trùng)
-hoặc `no_match`. Không có cặp nào tự gửi Telegram: Support duyệt ở trang `review.html` (mục dưới).
+hoặc `no_match`. Không có cặp nào tự gửi Telegram: Support duyệt ở giao diện `review-ui` (mục dưới).
 
 Có thể chạy pilot thủ công toàn bộ queue (nên dùng `--limit` nhỏ khi test):
 
@@ -311,18 +311,20 @@ Một lệnh chạy cả tunnel SSH tới Postgres, worker DINOv2 và trang duy�
 ```bash
 cd support_compare_image
 docker compose up -d           # lần đầu build image (~5 phút), model DINOv2 tải khi có job đầu tiên
-# duyệt tại http://127.0.0.1:8000/review.html
+# duyệt tại http://127.0.0.1:8000/
 docker compose logs -f worker  # xem tiến trình embedding/so sánh
 docker compose down            # tắt
 ```
 
 Cần `.env.local-worker` (giữ `DATABASE_URL=...@127.0.0.1:15432/...`; tunnel, worker và review dùng chung
 network nên địa chỉ này vẫn đúng). Tunnel dùng `~/.ssh/id_ed25519` (đổi bằng `SSH_KEY=...`) và
-`~/.ssh/known_hosts`; khóa phải không có passphrase. Code `dup-compare/` được mount vào container,
-sau khi `git pull` chỉ cần `docker compose restart worker review`; build lại khi đổi requirements.
+`~/.ssh/known_hosts`; khóa phải không có passphrase. Code Python `dup-compare/` được mount vào
+container, sau khi `git pull` chỉ cần `docker compose restart worker review`. Giao diện duyệt
+(`review-ui/`, React + Vite + Tailwind) được build vào image, nên khi đổi giao diện hoặc requirements
+thì chạy `docker compose up -d --build`.
 Đừng chạy song song worker/tunnel thủ công với compose.
 
-### Duyệt kết quả trên localhost (`review.html`)
+### Duyệt kết quả trên localhost (`review-ui/`)
 
 Sau khi worker so sánh xong một job, Support duyệt các order nghi trùng:
 
@@ -330,8 +332,14 @@ Sau khi worker so sánh xong một job, Support duyệt các order nghi trùng:
 cd support_compare_image/dup-compare
 set -a; source ../.env.local-worker; set +a      # cần tunnel tới Postgres đang mở
 ../../.venv/bin/python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
-# mở http://127.0.0.1:8000/review.html
+# mở http://127.0.0.1:8000/
 ```
+
+Giao diện là app React 19 + Vite 8 + Tailwind 4 + TypeScript trong `review-ui/` (cùng stack và design
+token với dashboard Tacahu Ops). Muốn chạy không dùng Docker: `cd review-ui && npm ci && npm run build`
+trước khi chạy `uvicorn`. Phát triển giao diện: chạy `uvicorn` ở cổng 8000 rồi `npm run dev` trong
+`review-ui/` (Vite proxy `/review/*` về cổng 8000); test bằng `npm test`. Hai công cụ cũ vẫn ở
+`/index.html` (so sánh 1-1) và `/scan.html` (quét pool).
 
 Mỗi thẻ hiện ảnh gốc và top-5 candidate, tất cả kèm mã đơn:
 

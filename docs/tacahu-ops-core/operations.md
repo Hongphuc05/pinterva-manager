@@ -70,7 +70,7 @@ Luồng vận hành một lô (ví dụ 100 order admin vừa crawl về Waiting
    so sánh rồi hỏi **Có**/**Không**. Gõ lại `/check` hoặc `/handle` sẽ thay prompt còn chờ trước đó.
 2. Bấm **Có** khi giao diện localhost và worker đang chạy: job được queue, worker so sánh cả lô rồi
    thêm cả lô vào pool. Bot báo số order đã so, số nghi trùng, số không thấy trùng và số lỗi.
-3. Support mở `http://127.0.0.1:8000/review.html` (chạy `uvicorn backend.main:app` trong
+3. Support mở `http://127.0.0.1:8000/` (chạy `uvicorn backend.main:app` trong
    `support_compare_image/dup-compare` với `.env.local-worker` đã nạp). Với mỗi order nghi trùng:
    **Chọn ảnh này là trùng** (Telegram gửi cặp ảnh kèm mã đơn trong ≤60 giây) hoặc **Model sai**.
 4. Trên Telegram: **Xác nhận trùng** gắn tag Trùng lặp và chuyển order sang tab Trùng lặp;

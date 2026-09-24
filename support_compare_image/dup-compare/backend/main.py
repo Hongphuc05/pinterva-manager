@@ -13,11 +13,13 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 import time
+from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
@@ -203,4 +205,27 @@ def admin_get_image(image_id: int):
 
 # Serve frontend tĩnh tại "/" (index.html = so 1-1, scan.html = pool tăng dần).
 app.include_router(review_router)  # before the static mount, which catches every path
+
+# The review UI (React + Vite, see review-ui/) is served at "/". Docker builds it into the
+# image (REVIEW_UI_DIST); otherwise run `npm ci && npm run build` inside review-ui/.
+_UI_DIST = Path(os.environ.get("REVIEW_UI_DIST") or Path(__file__).resolve().parent.parent / "review-ui" / "dist")
+if (_UI_DIST / "index.html").is_file():
+    app.mount("/assets", StaticFiles(directory=_UI_DIST / "assets"), name="review-assets")
+
+    @app.get("/", include_in_schema=False)
+    @app.get("/review.html", include_in_schema=False)
+    def review_ui():
+        return FileResponse(_UI_DIST / "index.html")
+else:
+
+    @app.get("/", include_in_schema=False)
+    def review_ui_missing():
+        return PlainTextResponse(
+            "Chưa build giao diện duyệt. Chạy: cd review-ui && npm ci && npm run build "
+            "(hoặc dùng docker compose up -d --build).",
+            status_code=503,
+        )
+
+
+# Legacy tools (1-1 compare at /index.html, pool scan at /scan.html).
 app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")

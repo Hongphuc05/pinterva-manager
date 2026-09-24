@@ -1,7 +1,7 @@
 # Local Support stack: SSH tunnel to the production Postgres + DINOv2 worker + review UI.
 #
 #   cd support_compare_image && docker compose up -d
-#   open http://127.0.0.1:8000/review.html
+#   open http://127.0.0.1:8000/
 #
 # Needs .env.local-worker (DATABASE_URL uses 127.0.0.1:15432, exactly as for the manual run;
 # worker and review share the tunnel's network namespace, so it resolves to the tunnel).
