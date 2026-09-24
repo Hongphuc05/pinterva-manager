@@ -38,6 +38,7 @@ dist/
 credentials/
 
 # runtime temporary data & profiles
+/backup/
 chrome-profile-*/
 crawled_assets/
 crawled_orders.csv
