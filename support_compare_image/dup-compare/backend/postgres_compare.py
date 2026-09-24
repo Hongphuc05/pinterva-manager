@@ -540,10 +540,9 @@ class PostgresComparisonRepository:
             INSERT INTO {COMPARISON_SCHEMA}.historical_jobs
                 (id, source_system, source_job_id, external_order_id, status,
                  team_outsource, job_type, order_id, product_name, preview_url,
-                 preview_missing, source_payload_hash, ingest_source,
-                 last_seen_run_id)
+                 preview_missing, source_payload_hash, ingest_source)
             VALUES (%s, %s, %s, %s, %s, %s, 'all', %s, %s, %s, false, %s,
-                    'live_waiting', %s)
+                    'live_waiting')
             ON CONFLICT (source_system, source_job_id) DO UPDATE SET
                 external_order_id = EXCLUDED.external_order_id,
                 status = EXCLUDED.status,
@@ -554,8 +553,7 @@ class PostgresComparisonRepository:
                 preview_missing = false,
                 source_payload_hash = EXCLUDED.source_payload_hash,
                 ingest_source = EXCLUDED.ingest_source,
-                last_seen_at = now(),
-                last_seen_run_id = EXCLUDED.last_seen_run_id
+                last_seen_at = now()
             RETURNING id
             """,
             (
@@ -569,7 +567,6 @@ class PostgresComparisonRepository:
                 product_name,
                 image_url,
                 payload_hash,
-                run_id,
             ),
         ).fetchone()
         if not job_row:
