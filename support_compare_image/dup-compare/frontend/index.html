@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Duplicate Design Compare (MVP)</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --panel: #171a22;
+    --border: #262a35;
+    --text: #e6e8ee;
+    --muted: #9aa1b1;
+    --accent: #5b8def;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  .layout { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 1100px; }
+  @media (max-width: 800px) { .layout { grid-template-columns: 1fr; } }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+  }
+  .drop {
+    border: 1.5px dashed var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    text-align: center;
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 13px;
+    position: relative;
+    min-height: 220px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .drop.dragover { border-color: var(--accent); color: var(--accent); }
+  .drop img { max-width: 100%; max-height: 220px; border-radius: 6px; object-fit: contain; }
+  .drop input { display: none; }
+  label.title { display: block; font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+  .actions { max-width: 1100px; margin: 18px 0; display: flex; gap: 10px; align-items: center; }
+  button {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 18px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .hint { font-size: 12px; color: var(--muted); }
+  #result { max-width: 1100px; }
+  .badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 999px;
+    font-weight: 600;
+    font-size: 13px;
+  }
+  .badge.TRUNG { background: #4a1620; color: #ff8fa3; }
+  .badge.KHONG_TRUNG { background: #16351f; color: #7fe0a0; }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+  td, th { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; }
+  .reasons { margin-top: 12px; padding-left: 18px; font-size: 13px; color: var(--text); }
+  .reasons li { margin-bottom: 4px; }
+  .warn {
+    background: #4a3416;
+    color: #ffb066;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 13px;
+    margin-bottom: 14px;
+  }
+  .conf-bar-bg { background: var(--border); border-radius: 6px; height: 8px; overflow: hidden; margin-top: 6px; }
+  .conf-bar-fill { background: var(--accent); height: 100%; }
+  .meta { font-size: 12px; color: var(--muted); margin-top: 10px; }
+</style>
+</head>
+<body>
+  <h1>Duplicate Design Compare — MVP so sánh 2 ảnh</h1>
+  <div class="sub">
+    Công cụ test riêng cho model khuyến nghị (visual embedding + pHash + SSIM + color ΔE),
+    tách khỏi pipeline production đầy đủ. Kéo/thả hoặc chọn 1 ảnh CŨ và 1 ảnh MỚI để so sánh.
+    Muốn quét 1 ảnh mới với TOÀN BỘ kho ảnh cũ (pool tăng dần)? Xem
+    <a href="/scan.html" style="color:#5b8def;">trang quét pool</a>.
+  </div>
+
+  <div class="layout">
+    <div class="panel">
+      <label class="title">Ảnh CŨ (trong kho)</label>
+      <div class="drop" id="drop-old">
+        <span>Kéo/thả hoặc bấm để chọn ảnh</span>
+        <input type="file" id="input-old" accept="image/*" />
+      </div>
+    </div>
+    <div class="panel">
+      <label class="title">Ảnh MỚI (đơn hàng vừa về)</label>
+      <div class="drop" id="drop-new">
+        <span>Kéo/thả hoặc bấm để chọn ảnh</span>
+        <input type="file" id="input-new" accept="image/*" />
+      </div>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button id="btn-compare" disabled>So sánh</button>
+    <span class="hint" id="status-hint">Chọn đủ 2 ảnh để bắt đầu.</span>
+  </div>
+
+  <div id="result"></div>
+
+  <script>
+    const state = { old: null, new: null };
+
+    function wireDrop(dropId, inputId, key) {
+      const drop = document.getElementById(dropId);
+      const input = document.getElementById(inputId);
+
+      const setFile = (file) => {
+        if (!file) return;
+        state[key] = file;
+        const url = URL.createObjectURL(file);
+        drop.innerHTML = `<img src="${url}" alt="${key}" />`;
+        updateReady();
+      };
+
+      drop.addEventListener("click", () => input.click());
+      input.addEventListener("change", (e) => setFile(e.target.files[0]));
+      drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("dragover"); });
+      drop.addEventListener("dragleave", () => drop.classList.remove("dragover"));
+      drop.addEventListener("drop", (e) => {
+        e.preventDefault();
+        drop.classList.remove("dragover");
+        setFile(e.dataTransfer.files[0]);
+      });
+    }
+
+    function updateReady() {
+      const btn = document.getElementById("btn-compare");
+      const hint = document.getElementById("status-hint");
+      const ready = state.old && state.new;
+      btn.disabled = !ready;
+      hint.textContent = ready ? "Sẵn sàng so sánh." : "Chọn đủ 2 ảnh để bắt đầu.";
+    }
+
+    wireDrop("drop-old", "input-old", "old");
+    wireDrop("drop-new", "input-new", "new");
+
+    function pct(x) { return Math.round(x * 1000) / 10; }
+
+    async function runCompare() {
+      const btn = document.getElementById("btn-compare");
+      const resultEl = document.getElementById("result");
+      btn.disabled = true;
+      btn.textContent = "Đang xử lý...";
+      resultEl.innerHTML = "";
+
+      try {
+        const form = new FormData();
+        form.append("old_image", state.old);
+        form.append("new_image", state.new);
+
+        const res = await fetch("/compare", { method: "POST", body: form });
+        if (!res.ok) throw new Error(`Server trả lỗi ${res.status}`);
+        const data = await res.json();
+        render(data);
+      } catch (err) {
+        resultEl.innerHTML = `<div class="warn">Lỗi khi gọi API: ${err.message}. Kiểm tra backend (uvicorn) đang chạy chưa.</div>`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "So sánh";
+      }
+    }
+
+    function render(data) {
+      const resultEl = document.getElementById("result");
+      const s = data.signals;
+      const isFallback = (data.meta.embedding_backend || "").toLowerCase().includes("fallback");
+
+      let html = "";
+
+      if (isFallback) {
+        html += `<div class="warn">
+          ⚠️ Model embedding khuyến nghị (DINOv2/DINOv3) chưa tải được ở môi trường này
+          (thường do không có mạng ra Hugging Face) — kết quả visual_similarity đang dùng
+          <b>fallback cổ điển (HOG)</b>, KHÔNG phản ánh đúng chất lượng model thật. Chạy backend
+          này trên máy có internet ra huggingface.co để test đúng model khuyến nghị.
+        </div>`;
+      }
+
+      html += `<div class="panel">
+        <span class="badge ${data.is_duplicate ? 'TRUNG' : 'KHONG_TRUNG'}">${data.is_duplicate ? 'TRÙNG' : 'KHÔNG TRÙNG'}</span>
+
+        <div style="margin-top:14px;">
+          <label class="title" style="margin-bottom:2px;">Confidence: ${pct(data.confidence)}%</label>
+          <div class="conf-bar-bg"><div class="conf-bar-fill" style="width:${pct(data.confidence)}%;"></div></div>
+        </div>
+
+        <table>
+          <tr><th>Signal</th><th>Giá trị</th></tr>
+          <tr><td>Visual similarity (embedding)</td><td>${s.visual_similarity}</td></tr>
+          <tr><td>pHash distance</td><td>${s.phash_distance} / ${s.phash_max_distance}</td></tr>
+          <tr><td>SSIM</td><td>${s.ssim}</td></tr>
+          <tr><td>Color ΔE (LAB)</td><td>${s.color_delta_e}</td></tr>
+          <tr><td>OCR similarity</td><td>${s.ocr_similarity === null ? "chưa tích hợp trong MVP" : s.ocr_similarity}</td></tr>
+        </table>
+
+        <ul class="reasons">
+          ${data.reasons.map(r => `<li>${r}</li>`).join("")}
+        </ul>
+
+        <div class="meta">
+          embedding_backend: ${data.meta.embedding_backend} · model_version: ${data.meta.model_version} ·
+          processing_version: ${data.meta.processing_version} · ${data.meta.elapsed_ms} ms
+        </div>
+      </div>`;
+
+      resultEl.innerHTML = html;
+    }
+
+    document.getElementById("btn-compare").addEventListener("click", runCompare);
+  </script>
+</body>
+</html>

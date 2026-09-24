@@ -1,0 +1,17 @@
+fastapi
+uvicorn[standard]
+python-multipart
+pillow
+numpy
+imagehash
+scikit-image
+
+# Model khuyến nghị (visual embedding). Cần máy có internet ra huggingface.co
+# để tải checkpoint lần đầu (~300-400MB cho dinov2-base).
+torch
+torchvision
+transformers
+
+# embed_backfill.py (ghi Postgres VPS qua SSH tunnel)
+psycopg[binary]
+tqdm
