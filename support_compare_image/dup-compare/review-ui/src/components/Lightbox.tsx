@@ -13,10 +13,10 @@ export function Lightbox({ src, onClose }: { src: string | null; onClose: () => 
     <div
       role="dialog"
       aria-label="Xem ảnh lớn"
-      className="fixed inset-0 z-[90] flex cursor-zoom-out items-center justify-center bg-gray-900/80 p-6"
+      className="fixed inset-0 z-[90] flex cursor-zoom-out items-center justify-center bg-black/85 p-6"
       onClick={onClose}
     >
-      <img src={src} alt="" className="max-h-full max-w-full rounded-xl bg-white" />
+      <img src={src} alt="" className="max-h-full max-w-full rounded-lg bg-white" />
     </div>
   )
 }

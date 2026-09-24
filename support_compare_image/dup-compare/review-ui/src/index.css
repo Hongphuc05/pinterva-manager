@@ -1,40 +1,24 @@
 @import "tailwindcss";
 
-/* Design tokens: UI_style.md (same as the Tacahu Ops dashboard) */
-@layer base {
-  :root {
-    --background: 0 0% 100%;
-    --foreground: 210 10% 18%;
-    --card: 0 0% 100%;
-    --primary: 218 100% 40%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 218 90% 52%;
-    --tertiary: 210 16% 96%;
-    --muted: 210 14% 90%;
-    --muted-foreground: 210 10% 30%;
-    --accent: 148 48% 40%;
-    --warning: 38 90% 50%;
-    --destructive: 0 84% 60%;
-    --border: 210 14% 90%;
-    --ring: 218 100% 40%;
-    --radius: 0.5rem;
-  }
-}
-
-@theme inline {
-  --color-background: hsl(var(--background));
-  --color-foreground: hsl(var(--foreground));
-  --color-card: hsl(var(--card));
-  --color-primary: hsl(var(--primary));
-  --color-primary-foreground: hsl(var(--primary-foreground));
-  --color-secondary: hsl(var(--secondary));
-  --color-tertiary: hsl(var(--tertiary));
-  --color-muted: hsl(var(--muted));
-  --color-muted-foreground: hsl(var(--muted-foreground));
-  --color-accent: hsl(var(--accent));
-  --color-warning: hsl(var(--warning));
-  --color-destructive: hsl(var(--destructive));
-  --color-border: hsl(var(--border));
+/* Minimal dark theme. */
+@theme {
+  --color-bg: #0d0f14;
+  --color-surface: #14171d;
+  --color-raised: #1b1f27;
+  --color-line: #262b34;
+  --color-fg: #e6e8ee;
+  --color-dim: #8b93a3;
+  --color-brand: #4f8cff;
+  --color-ok: #3fb27f;
+  --color-warn: #d9a441;
+  --color-bad: #e5606b;
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+}
+
+@layer base {
+  html { color-scheme: dark; }
+  ::selection { background: #4f8cff55; }
+  ::-webkit-scrollbar { height: 8px; width: 8px; }
+  ::-webkit-scrollbar-thumb { background: #2c323d; border-radius: 4px; }
 }

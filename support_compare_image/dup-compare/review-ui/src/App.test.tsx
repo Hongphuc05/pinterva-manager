@@ -71,11 +71,20 @@ describe('review page', () => {
   it('selects a candidate and reloads the job', async () => {
     renderApp()
     const card = await screen.findByTestId('order-DJ0001')
-    await userEvent.click(within(card).getAllByRole('button', { name: 'Chọn ảnh này là trùng' })[1])
+    await userEvent.click(within(card).getAllByRole('button', { name: 'Chọn trùng' })[1])
     await waitFor(() =>
       expect(calls.some((c) => c.url === '/review/items/i1/select' && c.init?.body === JSON.stringify({ candidate_id: 'i1-c2' }))).toBe(true),
     )
     await waitFor(() => expect(calls.filter((c) => c.url === '/review/jobs/j1').length).toBe(2))
+  })
+
+  it('picks a candidate with the number keys and marks the model wrong with X', async () => {
+    renderApp()
+    await screen.findByTestId('order-DJ0001')
+    await userEvent.keyboard('2')
+    await waitFor(() => expect(calls.some((c) => c.url === '/review/items/i1/select' && c.init?.body === JSON.stringify({ candidate_id: 'i1-c2' }))).toBe(true))
+    await userEvent.keyboard('x')
+    await waitFor(() => expect(calls.some((c) => c.url === '/review/items/i1/reject')).toBe(true))
   })
 
   it('marks the model wrong', async () => {
@@ -92,13 +101,13 @@ describe('review page', () => {
     const card = await screen.findByTestId('order-DJ0002')
     expect(within(card).getByText('Đã gửi Telegram')).toBeInTheDocument()
     expect(within(card).queryByRole('button', { name: /Model sai/ })).not.toBeInTheDocument()
-    expect(within(card).queryByRole('button', { name: 'Chọn ảnh này là trùng' })).not.toBeInTheDocument()
+    expect(within(card).queryByRole('button', { name: 'Chọn trùng' })).not.toBeInTheDocument()
   })
 
   it('shows an error state when the database cannot be reached', async () => {
     vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: false, statusText: 'x', json: async () => ({ detail: 'Thiếu DATABASE_URL' }) })))
     renderApp()
     expect(await screen.findByText('Thiếu DATABASE_URL')).toBeInTheDocument()
-    expect(screen.getByText('Mất kết nối DB')).toBeInTheDocument()
+    expect(screen.getByText('Mất kết nối')).toBeInTheDocument()
   })
 })

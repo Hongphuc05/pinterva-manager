@@ -16,19 +16,19 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const show = useCallback((message: string, kind: Kind = 'success') => {
     const id = Date.now() + Math.random()
     setToasts((prev) => [...prev, { id, kind, message }])
-    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4500)
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4000)
   }, [])
 
   return (
     <ToastContext.Provider value={show}>
       {children}
-      <div className="fixed bottom-5 right-5 z-[80] flex flex-col gap-2" role="status" aria-live="polite">
+      <div className="fixed bottom-4 right-4 z-[80] flex flex-col gap-2" role="status" aria-live="polite">
         {toasts.map((t) => (
           <div
             key={t.id}
-            className={`max-w-sm rounded-lg border border-l-4 bg-white px-3.5 py-2.5 text-[13px] shadow-xl ${
-              t.kind === 'error' ? 'border-l-destructive' : 'border-l-accent'
-            } border-border`}
+            className={`max-w-xs rounded-md border border-line border-l-2 bg-raised px-3 py-2 text-xs shadow-lg ${
+              t.kind === 'error' ? 'border-l-bad' : 'border-l-ok'
+            }`}
           >
             {t.message}
           </div>

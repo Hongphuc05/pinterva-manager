@@ -1,76 +1,58 @@
-import { Loader2, X } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { isDone, isSent, isTodo, type Item } from '../types'
-import { Badge } from './StatusBadge'
 import { StatusBadge } from './StatusBadge'
 import { CandidateCard } from './CandidateCard'
 import { Figure } from './Figure'
 
 interface Props {
   item: Item
+  active: boolean
   busy: boolean
   onSelect: (itemId: string, candidateId: string) => void
   onReject: (itemId: string) => void
   onZoom: (src: string) => void
+  onFocus: () => void
 }
 
-export function OrderCard({ item, busy, onSelect, onReject, onZoom }: Props) {
+export function OrderCard({ item, active, busy, onSelect, onReject, onZoom, onFocus }: Props) {
   const canAct = !isSent(item) && (isTodo(item) || isDone(item))
   return (
     <article
       data-testid={`order-${item.order_code}`}
-      className="mb-4 overflow-hidden rounded-xl border border-border bg-card shadow-sm"
+      onMouseDown={onFocus}
+      className={`mb-3 rounded-lg border bg-surface ${active ? 'border-brand/60' : 'border-line'}`}
     >
-      <div className="flex flex-wrap items-center gap-3 border-b border-border/70 bg-muted/50 px-5 py-3">
-        <span className="rounded-md border border-border bg-white px-2 py-0.5 font-mono text-[13px] font-medium text-primary">
-          {item.order_code}
-        </span>
-        <span className="min-w-40 flex-1 text-[13px] text-muted-foreground">{item.product_name}</span>
+      <div className="flex items-center gap-2.5 border-b border-line px-3 py-2">
+        <span className="font-mono text-[13px] font-medium text-brand">{item.order_code}</span>
+        <span className="min-w-0 flex-1 truncate text-dim" title={item.product_name ?? ''}>{item.product_name}</span>
         <StatusBadge status={item.review_status} />
-      </div>
-
-      <div className="flex flex-col gap-5 p-5 md:flex-row md:items-start">
-        <Figure
-          imageUrl={item.image_url}
-          code={item.order_code}
-          onZoom={onZoom}
-          tag={<Badge tone="info">Ảnh gốc</Badge>}
-        />
-        <div className="hidden w-px self-stretch bg-border md:block" />
-        <div className="flex min-w-0 flex-1 gap-3.5 overflow-x-auto pb-1">
-          {item.candidates.length ? (
-            item.candidates.map((c) => (
-              <CandidateCard
-                key={c.id}
-                item={item}
-                candidate={c}
-                canAct={canAct}
-                busy={busy}
-                onSelect={onSelect}
-                onZoom={onZoom}
-              />
-            ))
-          ) : (
-            <div className="py-6 text-sm text-muted-foreground">Không có candidate</div>
-          )}
-        </div>
-      </div>
-
-      {canAct && (
-        <div className="flex items-center justify-end gap-2.5 border-t border-border/70 px-5 py-3">
-          <span className="mr-auto text-xs text-muted-foreground">
-            Model đoán sai? Đơn {item.order_code} sẽ nằm cùng nhóm "không thấy trùng" cho tới khi bạn gõ /handle.
-          </span>
+        {canAct && (
           <button
             type="button"
             disabled={busy}
+            title="Model đoán sai: đơn nằm cùng nhóm không thấy trùng cho tới khi gõ /handle (phím X)"
             onClick={() => onReject(item.id)}
-            className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border border-destructive/50 bg-white px-3 text-xs font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex h-6 cursor-pointer items-center gap-1 rounded border border-line bg-raised px-2 text-[11px] font-medium text-bad transition hover:border-bad/60 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {busy ? <Loader2 className="size-3.5 animate-spin" /> : <X className="size-3.5" />}
+            {busy && <Loader2 className="size-3 animate-spin" />}
             Model sai
           </button>
+        )}
+      </div>
+
+      <div className="flex gap-3 p-3">
+        <Figure imageUrl={item.image_url} code={item.order_code} onZoom={onZoom} tag={<span className="rounded bg-brand px-1 text-[11px] font-medium text-white">Gốc</span>} />
+        <div className="w-px flex-none bg-line" />
+        <div className="flex min-w-0 flex-1 gap-3 overflow-x-auto pb-1">
+          {item.candidates.length ? (
+            item.candidates.map((c) => (
+              <CandidateCard key={c.id} item={item} candidate={c} canAct={canAct} busy={busy} onSelect={onSelect} onZoom={onZoom} />
+            ))
+          ) : (
+            <div className="py-6 text-dim">Không có candidate</div>
+          )}
         </div>
-      )}
+      </div>
     </article>
   )
 }

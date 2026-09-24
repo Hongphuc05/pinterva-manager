@@ -1,4 +1,4 @@
-import { Loader2, Send } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import type { Candidate, Item } from '../types'
 import { Badge } from './StatusBadge'
 import { Figure } from './Figure'
@@ -21,42 +21,28 @@ export function CandidateCard({ item, candidate: c, canAct, busy, onSelect, onZo
       name={c.product_name}
       chosen={chosen}
       onZoom={onZoom}
-      tag={<Badge tone="muted">#{c.rank}</Badge>}
+      tag={<span className="rounded bg-black/70 px-1 font-mono text-[11px] text-white">{c.rank}</span>}
     >
-      <div className="flex justify-between">
-        <span className="text-muted-foreground">Độ giống</span>
-        <b className="font-mono">{c.similarity.toFixed(3)}</b>
-      </div>
-      <div className="flex justify-between">
-        <span className="text-muted-foreground">pHash / SSIM</span>
-        <span className="font-mono">
-          {c.phash_distance ?? '-'} / {c.ssim == null ? '-' : c.ssim.toFixed(2)}
+      <div className="flex items-center justify-between font-mono text-[11px] text-dim">
+        <b className="text-[13px] font-semibold text-fg">{c.similarity.toFixed(3)}</b>
+        <span title="pHash / SSIM">
+          {c.phash_distance ?? '-'} · {c.ssim == null ? '-' : c.ssim.toFixed(2)}
         </span>
       </div>
-      <div>
-        {c.classification === 'TRUNG' ? (
-          <Badge tone="pending">Model: TRÙNG</Badge>
-        ) : (
-          <Badge tone="muted">Model: khác</Badge>
-        )}
+      <div className="flex min-h-[18px] flex-wrap gap-1">
+        {c.classification === 'TRUNG' && <Badge tone="warn">Model: trùng</Badge>}
+        {chosen && <Badge tone="ok">{c.sent_to_telegram ? 'Đã gửi Telegram' : 'Chờ gửi (≤60s)'}</Badge>}
       </div>
-      {chosen && (
-        <div>
-          <Badge tone="success">
-            <Send className="size-3" />
-            {c.sent_to_telegram ? 'Đã gửi Telegram' : 'Chờ gửi Telegram (≤60s)'}
-          </Badge>
-        </div>
-      )}
       {canAct && !c.sent_to_telegram && (
         <button
           type="button"
           disabled={busy}
+          title={`Chọn ảnh này là trùng (phím ${c.rank})`}
           onClick={() => onSelect(item.id, c.id)}
-          className="mt-1.5 inline-flex h-8 w-full cursor-pointer items-center justify-center gap-1.5 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground shadow-sm transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+          className="mt-1 inline-flex h-6 cursor-pointer items-center justify-center gap-1 rounded bg-brand px-2 text-[11px] font-medium text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {busy && <Loader2 className="size-3.5 animate-spin" />}
-          Chọn ảnh này là trùng
+          {busy && <Loader2 className="size-3 animate-spin" />}
+          Chọn trùng
         </button>
       )}
     </Figure>
