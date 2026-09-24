@@ -12,6 +12,8 @@ import {
   Globe,
   FolderGit2,
   Bot,
+  ScanSearch,
+  ListChecks,
   X,
 } from 'lucide-react'
 
@@ -38,6 +40,8 @@ export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
         { label: 'Tiến Độ Team', path: '/designer-board', icon: UserCheck },
         { label: 'Lưu Link Nộp Bài', path: '/designer-submissions', icon: FolderGit2 },
         { label: 'Board Đơn trùng lặp', path: '/kanban', icon: Columns3 },
+        { label: 'Duyệt trùng', path: '/duplicate-review', icon: ScanSearch },
+        { label: 'Hàng đợi so sánh', path: '/support-queue', icon: ListChecks },
         { label: 'Mở Hệ Thống Mẹ', path: '/platform-hub', icon: Globe },
       ],
     },
@@ -62,6 +66,8 @@ export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
       label: 'Vận hành',
       items: [
         { label: 'Đơn Hàng', path: '/orders', icon: ListOrdered },
+        { label: 'Duyệt trùng', path: '/duplicate-review', icon: ScanSearch },
+        { label: 'Hàng đợi so sánh', path: '/support-queue', icon: ListChecks },
         { label: 'Lưu Link Nộp Bài', path: '/designer-submissions', icon: FolderGit2 },
         { label: 'Tài Chính', path: '/finance', icon: Coins },
       ],

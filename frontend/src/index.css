@@ -1,5 +1,19 @@
 @import "tailwindcss";
 
+/* Dark palette of the duplicate-review pages (classes prefixed dup-, e.g. bg-dup-surface). */
+@theme {
+  --color-dup-bg: #0d0f14;
+  --color-dup-surface: #14171d;
+  --color-dup-raised: #1b1f27;
+  --color-dup-line: #262b34;
+  --color-dup-fg: #e6e8ee;
+  --color-dup-dim: #8b93a3;
+  --color-dup-brand: #4f8cff;
+  --color-dup-ok: #3fb27f;
+  --color-dup-warn: #d9a441;
+  --color-dup-bad: #e5606b;
+}
+
 ::selection {
   background-color: #0052CC;
   color: #ffffff;

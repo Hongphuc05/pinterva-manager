@@ -15,6 +15,8 @@ import { FinancePage } from './pages/FinancePage'
 import { DuplicateBoardPage } from './pages/DuplicateBoardPage'
 import { PlatformHubPage } from './pages/PlatformHubPage'
 import { TelegramManagementPage } from './pages/TelegramManagementPage'
+import { DuplicateReviewPage } from './pages/DuplicateReviewPage'
+import { SupportQueuePage } from './pages/SupportQueuePage'
 
 function App() {
   return (
@@ -98,6 +100,22 @@ function App() {
             element={
               <ProtectedRoute allowedRoles={['admin']}>
                 <TelegramManagementPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/duplicate-review"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'support']}>
+                <DuplicateReviewPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/support-queue"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'support']}>
+                <SupportQueuePage />
               </ProtectedRoute>
             }
           />

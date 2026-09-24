@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 import { MobileBottomNavigation } from './MobileBottomNavigation'
+import { useWorkerPresence } from '../features/dupReview/usePresence'
 
 interface DashboardLayoutProps {
   children: ReactNode
@@ -9,6 +10,7 @@ interface DashboardLayoutProps {
 
 export function DashboardLayout({ children }: DashboardLayoutProps) {
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false)
+  useWorkerPresence()
 
   return (
     <div className="h-[100dvh] bg-[hsl(var(--tertiary))] text-[hsl(var(--foreground))] md:flex">
