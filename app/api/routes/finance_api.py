@@ -101,6 +101,16 @@ class DesignerSummaryOut(BaseModel):
     paid_amount: int = 0
 
 
+class SupportOrderOut(BaseModel):
+    """One order a Support tagged Trùng lặp (the detail behind the count)."""
+
+    id: str
+    external_order_id: str
+    product_name: str | None = None
+    thumbnail_url: str | None = None
+    classified_at: datetime | None = None
+
+
 class SupportSummaryOut(BaseModel):
     support_id: str
     support_name: str
@@ -161,6 +171,8 @@ class FinanceStatsResponse(BaseModel):
     # the Support's workload, while Support sees only their own count.
     support_classified_count: int = 0
     support_summary: list[SupportSummaryOut] = Field(default_factory=list)
+    # Only filled for a Support looking at their own work.
+    support_orders: list[SupportOrderOut] = Field(default_factory=list)
 
 
 class OrderRatesUpdate(BaseModel):
@@ -416,6 +428,11 @@ def get_finance_stats(
         own_summary = [
             item for item in support_summary if item.support_id == str(user.id)
         ]
+        own_orders = sorted(
+            (order for order in support_classified_orders if order.support_classified_by_id == user.id),
+            key=lambda order: order.support_classified_at,
+            reverse=True,
+        )
         return FinanceStatsResponse(
             total_credited_tasks=0,
             total_unpaid_tasks=0,
@@ -437,6 +454,16 @@ def get_finance_stats(
             total_pages=1,
             support_classified_count=own_count,
             support_summary=own_summary,
+            support_orders=[
+                SupportOrderOut(
+                    id=str(order.id),
+                    external_order_id=order.external_order_id,
+                    product_name=order.product_name,
+                    thumbnail_url=order.thumbnail_url,
+                    classified_at=order.support_classified_at,
+                )
+                for order in own_orders
+            ],
         )
 
     if not orders:

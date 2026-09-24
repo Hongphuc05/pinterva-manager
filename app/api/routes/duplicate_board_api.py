@@ -20,6 +20,7 @@ from app.application.duplicate_board import (
     set_orders_duplicate_status,
     set_orders_work_domain,
 )
+from app.application.support_return import return_orders_to_unchecked
 from app.application.support_take import take_duplicate_orders
 from app.domain.access import ROLE_ADMIN, ROLE_DESIGNER_TRELLO, ROLE_SUPPORT
 
@@ -204,6 +205,33 @@ def api_set_orders_duplicate_check_status(
         db.rollback()
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     return {"changed_count": changed_count, "status": payload.status}
+
+
+class ReturnToUncheckedRequest(BaseModel):
+    order_ids: list[uuid.UUID] = Field(min_length=1, max_length=100)
+    expected_versions: dict[uuid.UUID, int] | None = None
+
+
+@router.post("/orders/return-to-unchecked")
+def api_return_orders_to_unchecked(
+    payload: ReturnToUncheckedRequest,
+    user: User = Depends(require_any_role(ROLE_ADMIN, ROLE_SUPPORT)),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    """Put classified orders without a designer back into Chưa kiểm tra (they can be checked again)."""
+    try:
+        changed = return_orders_to_unchecked(
+            db,
+            actor=user,
+            platform_id=platform_id,
+            order_ids=payload.order_ids,
+            expected_versions=payload.expected_versions,
+        )
+    except DuplicateBoardError as exc:
+        db.rollback()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    return {"changed_count": changed}
 
 
 @router.put("/duplicate-board/settings")

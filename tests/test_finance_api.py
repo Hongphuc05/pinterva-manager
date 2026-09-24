@@ -119,6 +119,9 @@ def test_support_finance_is_scoped_to_own_classification_count(client, db_sessio
     assert payload["total_tasks_count"] == 0
     assert [item["support_name"] for item in payload["support_summary"]] == ["Support Owner"]
     assert payload["support_summary"][0]["classified_tasks"] == 1
+    # The detail behind the count: exactly the orders this Support tagged duplicate.
+    assert [item["external_order_id"] for item in payload["support_orders"]] == ["SUPPORT-FIN-OWN"]
+    assert payload["support_orders"][0]["classified_at"] is not None
 
     admin = User(
         username="support_finance_admin",
@@ -140,6 +143,7 @@ def test_support_finance_is_scoped_to_own_classification_count(client, db_sessio
     assert admin_response.status_code == 200
     admin_payload = admin_response.json()
     assert admin_payload["support_classified_count"] == 2
+    assert admin_payload["support_orders"] == []  # Admin sees the per-Support totals only
     assert {
         (item["support_name"], item["classified_tasks"])
         for item in admin_payload["support_summary"]
