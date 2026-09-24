@@ -1,0 +1,21 @@
+# Local Support machine image: DINOv2 worker, localhost review UI and SSH tunnel.
+# Code is bind-mounted by compose.yaml, so this image only holds dependencies.
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    HF_HOME=/models
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssh-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# CPU wheels first; the runtime requirements below are then already satisfied.
+RUN pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+
+COPY requirements.txt requirements.compare-runtime.txt ./
+RUN pip install -r requirements.txt -r requirements.compare-runtime.txt \
+    fastapi "uvicorn[standard]" python-multipart
+
+WORKDIR /app/dup-compare

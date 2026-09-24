@@ -304,6 +304,24 @@ Smoke test một job rồi thoát bằng `python dup-compare/local_worker.py --o
 trong RAM giữa các job; nếu máy Support dừng, job còn `queued` sẽ chạy tiếp khi worker lên lại.
 Không mở PostgreSQL public Internet chỉ để phục vụ worker.
 
+### Chạy bằng Docker (khuyên dùng trên máy Support)
+
+Một lệnh chạy cả tunnel SSH tới Postgres, worker DINOv2 và trang duyệt, không cần mở nhiều terminal:
+
+```bash
+cd support_compare_image
+docker compose up -d           # lần đầu build image (~5 phút), model DINOv2 tải khi có job đầu tiên
+# duyệt tại http://127.0.0.1:8000/review.html
+docker compose logs -f worker  # xem tiến trình embedding/so sánh
+docker compose down            # tắt
+```
+
+Cần `.env.local-worker` (giữ `DATABASE_URL=...@127.0.0.1:15432/...`; tunnel, worker và review dùng chung
+network nên địa chỉ này vẫn đúng). Tunnel dùng `~/.ssh/id_ed25519` (đổi bằng `SSH_KEY=...`) và
+`~/.ssh/known_hosts`; khóa phải không có passphrase. Code `dup-compare/` được mount vào container,
+sau khi `git pull` chỉ cần `docker compose restart worker review`; build lại khi đổi requirements.
+Đừng chạy song song worker/tunnel thủ công với compose.
+
 ### Duyệt kết quả trên localhost (`review.html`)
 
 Sau khi worker so sánh xong một job, Support duyệt các order nghi trùng:

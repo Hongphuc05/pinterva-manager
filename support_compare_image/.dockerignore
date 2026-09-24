@@ -1,0 +1,6 @@
+.env*
+**/__pycache__
+**/.pytest_cache
+**/.venv
+dup-compare/pool_cache
+dup-compare/reports
