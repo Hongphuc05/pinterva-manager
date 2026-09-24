@@ -333,14 +333,16 @@ async def api_telegram_webhook(
                 )
                 .all()
             )
-            has_pending_prompt = any(
-                str((action.payload or {}).get("chat_id") or "") == chat_id
-                and _action_is_pending_and_valid(action, action.action_type)
-                for action in pending_check_actions
-            )
-            if has_pending_prompt:
-                send_message(chat_id, "⚠️ Bạn đã có một yêu cầu kiểm tra đang chờ xác nhận.")
-                return {"ok": True}
+            # A new /check replaces any prompt still waiting for an answer:
+            # close its buttons in the DB and delete the stale Telegram message.
+            stale_message_ids: dict[int, None] = {}
+            for action in pending_check_actions:
+                payload = action.payload or {}
+                if str(payload.get("chat_id") or "") != chat_id:
+                    continue
+                action.status = "superseded"
+                if payload.get("message_id") is not None:
+                    stale_message_ids[int(payload["message_id"])] = None
 
             yes_action, no_action = new_support_check_actions(
                 platform_id=support_user.platform_id,
@@ -349,6 +351,8 @@ async def api_telegram_webhook(
             )
             db.add_all([yes_action, no_action])
             db.commit()
+            if stale_message_ids:
+                delete_messages(chat_id, list(stale_message_ids))
             try:
                 prompt = send_message(
                     chat_id,

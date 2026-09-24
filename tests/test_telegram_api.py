@@ -279,6 +279,49 @@ def test_support_check_command_counts_scope_and_enqueues_full_scan(client: TestC
     assert executed.payload["job_id"] == str(job.id)
 
 
+def test_support_check_again_replaces_pending_prompt(client: TestClient, db_session):
+    platform = Platform(name="Plat check again", account_username="check-again@print.com", is_active=True)
+    db_session.add(platform)
+    db_session.flush()
+    db_session.add_all([
+        User(
+            username="support-check-again", full_name="Support", role="support",
+            password_hash=hash_password("pass"), telegram_chat_id="998899",
+            active=True, platform_id=platform.id,
+        ),
+        Order(
+            external_order_id="DJ-CHECK-AGAIN", platform_id=platform.id,
+            state=OrderState.WAITING.value, duplicate_check_status="uncheck", work_domain="standard",
+        ),
+    ])
+    db_session.commit()
+
+    message_ids = iter([701, 702])
+    with (
+        patch(
+            "app.api.routes.telegram_api.get_settings",
+            return_value=SimpleNamespace(support_compare_enabled=True, telegram_webhook_secret=None),
+        ),
+        patch(
+            "app.api.routes.telegram_api.send_message",
+            side_effect=lambda *a, **k: {"message_id": next(message_ids)},
+        ),
+        patch("app.api.routes.telegram_api.delete_messages") as delete,
+    ):
+        for _ in range(2):
+            response = client.post(
+                "/api/telegram/webhook",
+                json={"message": {"chat": {"id": 998899}, "from": {"id": 998899}, "text": "/check"}},
+            )
+            assert response.status_code == 200
+
+    delete.assert_called_with("998899", [701])
+    actions = db_session.query(TelegramActionLog).filter(
+        TelegramActionLog.action_type.in_(("SUPPORT_COMPARE_CHECK_YES", "SUPPORT_COMPARE_CHECK_NO"))
+    ).all()
+    assert sorted(a.status for a in actions) == ["pending", "pending", "superseded", "superseded"]
+
+
 def test_scheduled_support_compare_creates_one_job_per_platform(db_session):
     platform = Platform(name="Plat scheduled compare", account_username="scheduled@print.com", is_active=True)
     db_session.add(platform)
