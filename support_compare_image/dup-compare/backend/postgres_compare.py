@@ -259,27 +259,16 @@ class PostgresComparisonRepository:
                     "AND ci.pool_promoted_at IS NOT NULL)"
                 )
                 params.append(model_version)
-            elif model_version and source_kind == "support_unchecked":
-                # Unclassified non-duplicates deliberately remain in the
-                # Support tab and are checked again on the next tick as the
-                # historical pool grows.  An item with an outstanding positive
-                # candidate is the exception: do not create a second Telegram
-                # review card while Support is deciding the first one.
+            elif source_kind == "support_unchecked":
+                # Each order is compared once per batch flow: an order with any
+                # completed comparison is handled by the localhost review,
+                # the Telegram confirmation or Support's /handle, never re-queued.
+                # Failed items stay eligible so they are retried.
                 clauses.append(
                     f"NOT EXISTS ("
                     f"SELECT 1 FROM {COMPARISON_SCHEMA}.comparison_items ci "
-                    f"JOIN {COMPARISON_SCHEMA}.comparison_runs cr ON cr.id = ci.run_id "
-                    f"JOIN {COMPARISON_SCHEMA}.comparison_candidates cc "
-                    "ON cc.comparison_item_id = ci.id "
-                    "WHERE ci.order_id = o.id "
-                    "AND cr.source_kind = 'support_unchecked' "
-                    "AND ci.model_version = %s "
-                    "AND ci.processing_status = 'completed' "
-                    "AND ci.is_duplicate IS TRUE "
-                    "AND cc.rank = 1 "
-                    "AND cc.decision_status = 'pending')"
+                    "WHERE ci.order_id = o.id AND ci.processing_status = 'completed')"
                 )
-                params.append(model_version)
         if platform_id is not None:
             clauses.append("o.platform_id = %s")
             params.append(platform_id)
@@ -454,6 +443,7 @@ class PostgresComparisonRepository:
             SET embedding = %s, embedding_dim = %s, phash = %s,
                 color_l = %s, color_a = %s, color_b = %s,
                 classification = %s, is_duplicate = %s,
+                review_status = CASE WHEN %s THEN 'pending_review' ELSE 'no_match' END,
                 processing_status = 'completed', last_error = NULL,
                 updated_at = now()
             WHERE id = %s
@@ -466,6 +456,7 @@ class PostgresComparisonRepository:
                 color_lab[1],
                 color_lab[2],
                 classification,
+                is_duplicate,
                 is_duplicate,
                 item_id,
             ),
@@ -636,6 +627,17 @@ class PostgresComparisonRepository:
             WHERE id = %s
             """,
             (item_id,),
+        )
+        self.connection.commit()
+
+    def record_promotion_error(self, item_id: uuid.UUID, message: str) -> None:
+        self.connection.execute(
+            f"""
+            UPDATE {COMPARISON_SCHEMA}.comparison_items
+            SET pool_promotion_error = %s, updated_at = now()
+            WHERE id = %s
+            """,
+            (message[:2000], item_id),
         )
         self.connection.commit()
 
@@ -845,6 +847,9 @@ def run_comparison(
         completed = 0
         failed = 0
         duplicate_count = 0
+        # Orders of one batch never match each other; they are added to the
+        # pool together once the whole batch has been compared.
+        to_promote: list[tuple[uuid.UUID, SourceOrder, np.ndarray, str, tuple[float, float, float]]] = []
 
         try:
             for start in range(0, len(orders), embedding_batch_size):
@@ -906,16 +911,7 @@ def run_comparison(
                             candidates=candidates,
                         )
                         if promote_new_images:
-                            repository.promote_item(
-                                item_id=item_id,
-                                run_id=run_id,
-                                order=order,
-                                image_url=order.image_url,
-                                embedding=embedding,
-                                phash=phash,
-                                color_lab=lab,
-                                model_version=resolved_model_version,
-                            )
+                            to_promote.append((item_id, order, embedding, phash, lab))
                         completed += 1
                         duplicate_count += int(is_duplicate)
                         logger.info(
@@ -930,6 +926,23 @@ def run_comparison(
                         connection.rollback()
                         repository.fail_item(item_id, f"{type(exc).__name__}: {exc}")
                         logger.exception("comparison failed for order %s", order.external_order_id)
+
+            for item_id, order, embedding, phash, lab in to_promote:
+                try:
+                    repository.promote_item(
+                        item_id=item_id,
+                        run_id=run_id,
+                        order=order,
+                        image_url=order.image_url,
+                        embedding=embedding,
+                        phash=phash,
+                        color_lab=lab,
+                        model_version=resolved_model_version,
+                    )
+                except Exception as exc:
+                    connection.rollback()
+                    repository.record_promotion_error(item_id, f"{type(exc).__name__}: {exc}")
+                    logger.exception("pool promotion failed for order %s", order.external_order_id)
 
             repository.finish_run(run_id, status="completed")
         except Exception as exc:

@@ -250,10 +250,10 @@ Không dùng `--include-self` trong test thông thường. Không bật `SUPPORT
 cho production trước khi kiểm tra kết quả thực tế và Telegram recipient.
 
 Migration `0004_support_unchecked_source.py` mở source runtime `support_unchecked`. Source này
-quét order `uncheck` ở cả Waiting và Doing; ảnh preview được embedding, so sánh với pool rồi
-promote vào pool sau khi xử lý thành công. Top-1 theo similarity mới được dùng làm cặp Telegram.
-Nếu top-1 là `KHONG_TRUNG`, order không bị đổi status và vẫn nằm trong tab Chưa kiểm tra để
-được quét lại khi pool tăng.
+quét order `uncheck` chưa từng có kết quả so sánh (state Waiting hoặc Doing); ảnh preview được
+embedding và so với pool Postgres. Các order trong cùng lô **không so chéo nhau**; cả lô được
+thêm vào pool sau khi so xong. Mỗi order ghi `review_status`: `pending_review` (model nghi trùng)
+hoặc `no_match`. Không có cặp nào tự gửi Telegram: Support duyệt ở trang `review.html` (mục dưới).
 
 Có thể chạy pilot thủ công toàn bộ queue (nên dùng `--limit` nhỏ khi test):
 
@@ -276,10 +276,11 @@ python compare_orders.py \
   --confirm
 ```
 
-Trong production, bật `SUPPORT_COMPARE_ENABLED=true` để Celery Beat trên VPS tạo job
-`support_unchecked` vào bảng `support_compare_image.comparison_jobs` mỗi 30 phút. VPS chỉ tạo
-job và gửi Telegram; nó không cài hoặc load DINO. `local_worker.py` trên máy Support mới claim
-job, load Hugging Face model và ghi kết quả.
+Trong production, bật `SUPPORT_COMPARE_ENABLED=true`. Job `support_unchecked` chỉ được tạo khi
+Support xác nhận `/check` trên Telegram (hoặc nút **Kiểm tra trùng** trên web) vào bảng
+`support_compare_image.comparison_jobs`; **không có job tự động theo lịch**. VPS chỉ tạo job và
+gửi Telegram; nó không cài hoặc load DINO. `local_worker.py` trên máy Support mới claim job,
+load Hugging Face model và ghi kết quả.
 Review chỉ là nguồn test: candidate được lưu để kiểm tra, nhưng callback Telegram bị chặn không
 cho đổi trạng thái order. Candidate live `support_unchecked` mới được phép đi qua command Support;
 Doing chỉ được phân loại qua callback Telegram, còn command web vẫn Waiting-only.
@@ -302,6 +303,29 @@ python dup-compare/local_worker.py
 Smoke test một job rồi thoát bằng `python dup-compare/local_worker.py --once`. Worker giữ model
 trong RAM giữa các job; nếu máy Support dừng, job còn `queued` sẽ chạy tiếp khi worker lên lại.
 Không mở PostgreSQL public Internet chỉ để phục vụ worker.
+
+### Duyệt kết quả trên localhost (`review.html`)
+
+Sau khi worker so sánh xong một job, Support duyệt các order nghi trùng:
+
+```bash
+cd support_compare_image/dup-compare
+set -a; source ../.env.local-worker; set +a      # cần tunnel tới Postgres đang mở
+../../.venv/bin/python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
+# mở http://127.0.0.1:8000/review.html
+```
+
+Mỗi thẻ hiện ảnh gốc và top-5 candidate, tất cả kèm mã đơn:
+
+- **Chọn ảnh này là trùng**: ghi `selected_duplicate`; VPS gửi cặp (ảnh gốc, ảnh đã chọn) lên
+  Telegram trong ≤60 giây. **Xác nhận trùng** gắn tag Trùng lặp và chuyển tab; **Từ chối** đưa order
+  vào Không trùng lặp.
+- **Model sai**: ghi `ai_wrong`; order nằm cùng nhóm với các order `no_match`, vẫn ở tab Chưa kiểm
+  tra cho tới khi Support gõ `/handle` trên Telegram.
+- Sau khi cặp đã gửi Telegram thì lựa chọn không đổi được nữa.
+
+Trang này chỉ ghi vào schema `support_compare_image`, chỉ nhận request same-origin tới
+`127.0.0.1`/`localhost`, và không bao giờ đổi order. Không mở cổng ra ngoài (`--host 127.0.0.1`).
 
 ## 4. Chuyển sang weight fine-tune ở phase 2
 

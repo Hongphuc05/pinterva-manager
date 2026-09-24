@@ -64,7 +64,6 @@ class Settings(BaseSettings):
     # Notification batch size for server-side Telegram delivery. The local
     # comparison worker has its own model/scan settings.
     support_compare_batch_limit: int = 100
-    support_compare_interval_seconds: int = 1800
 
     @field_validator("order_sheet_backup_hour")
     @classmethod
@@ -98,7 +97,6 @@ class Settings(BaseSettings):
 
     @field_validator(
         "support_compare_batch_limit",
-        "support_compare_interval_seconds",
     )
     @classmethod
     def _validate_support_compare_settings(cls, value: int) -> int:

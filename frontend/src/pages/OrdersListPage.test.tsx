@@ -700,6 +700,13 @@ describe('OrdersListPage', () => {
         if (url.includes('/api/platforms')) {
           return Promise.resolve({ ok: true, status: 200, json: async () => ({ platforms: [] }) })
         }
+        if (url.includes('/api/support-compare/status')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ enabled: true, new_orders: 2, handleable_orders: 0 }),
+          })
+        }
         if (url.includes('/api/orders')) {
           return Promise.resolve({
             ok: true,
@@ -772,6 +779,8 @@ describe('OrdersListPage', () => {
     // Support can classify both on the web; Doing is no longer Telegram-only.
     expect(screen.queryByText('Chờ kiểm tra qua Telegram')).not.toBeInTheDocument()
     expect(screen.getAllByTitle('Đánh dấu đơn này là Trùng lặp')).toHaveLength(2)
+    // Web entry for the same job as Telegram /check.
+    expect(await screen.findByRole('button', { name: /Kiểm tra trùng \(2\)/ })).toBeInTheDocument()
     // Classified non_duplicate order is NOT in Tab 1 ("Chưa kiểm tra")
     expect(screen.queryByText('DJ-REVIEW')).not.toBeInTheDocument()
 

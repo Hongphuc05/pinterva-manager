@@ -58,23 +58,29 @@ pip install -r requirements.txt -r requirements.compare-runtime.txt
 python dup-compare/local_worker.py --once
 ```
 
-Migration `support_compare_image` phải ở `head` trước khi bật
-`SUPPORT_COMPARE_ENABLED=true`. Khi bật, VPS tạo job `support_unchecked` mỗi 30 phút; máy local
-chạy `python dup-compare/local_worker.py` liên tục để claim job. Không cấu hình
-`SUPPORT_COMPARE_SCAN_LIMIT` thì local worker quét toàn bộ order phù hợp; `SUPPORT_COMPARE_BATCH_LIMIT`
-chỉ giới hạn số report/candidate Telegram được gửi trong một lần notification task.
+Migration `support_compare_image` phải ở `head` (tới `0007_item_review_status`) trước khi bật
+`SUPPORT_COMPARE_ENABLED=true`. Cờ này bật lệnh `/check`, `/handle`, nút web và notifier; **không
+có job tự động theo lịch** nên không còn `SUPPORT_COMPARE_INTERVAL_SECONDS`. Máy local chạy
+`python dup-compare/local_worker.py` liên tục để claim job. `SUPPORT_COMPARE_SCAN_LIMIT` giới hạn
+số order mỗi lô; `SUPPORT_COMPARE_BATCH_LIMIT` giới hạn số tin Telegram gửi mỗi lần notifier chạy.
 
-Candidate top-1 bị model xác định `TRUNG` mới được gửi Telegram. Candidate `KHONG_TRUNG` không
-đổi `duplicate_check_status`, vì vậy order vẫn ở tab **Chưa kiểm tra** và sẽ được so sánh lại ở
-vòng sau. Khi Support chọn kết quả, callback mới chuyển order sang tab **Trùng lặp** hoặc
-**Không trùng lặp**.
+Luồng vận hành một lô (ví dụ 100 order admin vừa crawl về Waiting):
 
-Support cũng có thể chủ động gửi `/check` cho bot Telegram. Bot đếm đúng các order Waiting và
-Doing chưa phân loại của platform Support, hỏi xác nhận bằng hai nút **Có, bắt đầu**/**Không**;
-chỉ nút **Có** mới enqueue một job `support_unchecked` cho local worker. Sau khi worker kết thúc,
-bot gửi số order đã xử lý, số candidate duplicate và số lỗi; các candidate top-1 dương tính vẫn
-được gửi qua luồng notification Telegram hiện có. `/check` yêu cầu tài khoản Support active đã
-link Telegram, có platform và `SUPPORT_COMPARE_ENABLED=true`.
+1. Support gõ `/check` (hoặc bấm **Kiểm tra trùng (N)** trên web). Bot báo số order chưa từng được
+   so sánh rồi hỏi **Có**/**Không**. Gõ lại `/check` hoặc `/handle` sẽ thay prompt còn chờ trước đó.
+2. Bấm **Có** khi giao diện localhost và worker đang chạy: job được queue, worker so sánh cả lô rồi
+   thêm cả lô vào pool. Bot báo số order đã so, số nghi trùng, số không thấy trùng và số lỗi.
+3. Support mở `http://127.0.0.1:8000/review.html` (chạy `uvicorn backend.main:app` trong
+   `support_compare_image/dup-compare` với `.env.local-worker` đã nạp). Với mỗi order nghi trùng:
+   **Chọn ảnh này là trùng** (Telegram gửi cặp ảnh kèm mã đơn trong ≤60 giây) hoặc **Model sai**.
+4. Trên Telegram: **Xác nhận trùng** gắn tag Trùng lặp và chuyển order sang tab Trùng lặp;
+   **Từ chối** chuyển sang Không trùng lặp.
+5. `/handle` đếm các order đã so mà không trùng (không thấy trùng hoặc **Model sai**, không còn
+   review đang mở), hỏi xác nhận rồi chuyển chúng sang Không trùng lặp. `/help` liệt kê lệnh.
+
+Mỗi order chỉ được so sánh một lần; order đã có kết quả không được đưa vào `/check` lần sau. Order
+lỗi được thử lại. Mọi ảnh, tin nhắn và màn hình đều kèm mã đơn. Localhost chỉ nhận request
+same-origin tới `127.0.0.1`/`localhost` và không bao giờ ghi vào `public.orders`.
 
 Weight fine-tune ở phase 2 phải có `MODEL_VERSION` riêng. Nếu đổi dimension, preprocessing hoặc
 model space, re-embed toàn bộ baseline trước khi so sánh; không trộn vector DINOv2 gốc với vector

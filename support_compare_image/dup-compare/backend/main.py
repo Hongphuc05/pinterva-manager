@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
 from . import db, scan
+from .review import router as review_router
 from .classifier import classify
 from .config import (
     DB_PATH,
@@ -201,4 +202,5 @@ def admin_get_image(image_id: int):
 
 
 # Serve frontend tĩnh tại "/" (index.html = so 1-1, scan.html = pool tăng dần).
+app.include_router(review_router)  # before the static mount, which catches every path
 app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")

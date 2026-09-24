@@ -4,7 +4,6 @@ import logging
 
 from app.adapters.db.session import SessionLocal
 from app.application.support_compare import (
-    enqueue_scheduled_support_compare_jobs,
     notify_completed_support_compare_jobs,
     notify_pending_duplicate_candidates,
 )
@@ -12,25 +11,6 @@ from app.config import get_settings
 from app.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
-
-
-@celery_app.task(name="app.workers.support_compare_tasks.enqueue_support_compare_jobs")
-def enqueue_support_compare_jobs() -> int:
-    """Create durable jobs; the Support machine performs the actual ML work."""
-    settings = get_settings()
-    if not settings.support_compare_enabled:
-        return 0
-    session = SessionLocal()
-    try:
-        count = enqueue_scheduled_support_compare_jobs(session)
-        logger.info("queued %s local Support comparison jobs", count)
-        return count
-    except Exception:
-        session.rollback()
-        logger.exception("failed to queue scheduled Support comparison jobs")
-        return 0
-    finally:
-        session.close()
 
 
 @celery_app.task(name="app.workers.support_compare_tasks.notify_support_duplicate_candidates")

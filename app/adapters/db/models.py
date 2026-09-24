@@ -185,7 +185,7 @@ class Order(Base):
     duplicate_check_status: Mapped[str] = mapped_column(
         String(32), nullable=False, default="uncheck", server_default=text("'uncheck'")
     )
-    # Attribution for Support's duplicate classification work. This is
+    # Attribution for Support's positive duplicate classification work. This is
     # intentionally separate from workflow_events so Finance can count the
     # current classification owner after the order moves to Doing/Review/Done.
     support_classified_by_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -884,6 +884,13 @@ class SupportCompareItem(Base):
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     pool_promoted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     pool_promotion_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # pending_review: model flagged a duplicate, waiting for the localhost review.
+    # selected_duplicate: reviewer picked a candidate (Telegram confirmation next).
+    # ai_wrong / no_match: model wrong / nothing found; order stays in Chưa kiểm tra
+    # until Support runs /handle.
+    review_status: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    selected_candidate_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 

@@ -8,7 +8,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from html import escape
 
-from sqlalchemy import or_
+from sqlalchemy import exists, or_
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import (
@@ -47,33 +47,84 @@ ACTION_CHECK_YES = "SUPPORT_COMPARE_CHECK_YES"
 ACTION_CHECK_NO = "SUPPORT_COMPARE_CHECK_NO"
 CALLBACK_CHECK_YES_PREFIX = "sccheck_yes"
 CALLBACK_CHECK_NO_PREFIX = "sccheck_no"
+ACTION_HANDLE_YES = "SUPPORT_COMPARE_HANDLE_YES"
+ACTION_HANDLE_NO = "SUPPORT_COMPARE_HANDLE_NO"
+CALLBACK_HANDLE_YES_PREFIX = "schandle_yes"
+CALLBACK_HANDLE_NO_PREFIX = "schandle_no"
 ACTION_EXPIRY = timedelta(hours=24)
 
 
-def count_support_unchecked_orders(session: Session, *, platform_id: uuid.UUID) -> int:
-    """Count the orders shown in Support's current "Chưa kiểm tra" scope.
+def _unchecked_scope(platform_id: uuid.UUID) -> list:
+    """Orders shown in Support's "Chưa kiểm tra" tab (state based, see Order visibility)."""
+    return [
+        Order.platform_id == platform_id,
+        or_(
+            Order.state.in_(SUPPORT_CLASSIFICATION_STATES),
+            Order.state.in_(SUPPORT_READ_ONLY_DOING_STATES),
+        ),
+        or_(
+            Order.duplicate_check_status.is_(None),
+            Order.duplicate_check_status == DUPLICATE_CHECK_UNCHECK,
+        ),
+        or_(
+            Order.work_domain.is_(None),
+            Order.work_domain != WORK_DOMAIN_DUPLICATE,
+        ),
+    ]
 
+
+def _has_item(*review_statuses: str):
+    """EXISTS: the order has a completed comparison item in one of the statuses."""
+    return exists().where(
+        SupportCompareItem.order_id == Order.id,
+        SupportCompareItem.processing_status == "completed",
+        SupportCompareItem.review_status.in_(review_statuses),
+    )
+
+
+def count_support_unchecked_orders(session: Session, *, platform_id: uuid.UUID) -> int:
+    """Count the orders a /check would send to the local worker.
+
+    The Chưa kiểm tra tab scope, minus orders that already have a completed
+    comparison (those wait for the localhost review, Telegram or /handle).
     State only: Support's web view has no ``printerval_status`` (it is stripped),
     so a stale "doing" mirror on a QC_PENDING/DONE order must not be counted.
     """
-    return (
-        session.query(Order)
-        .filter(
-            Order.platform_id == platform_id,
-            or_(
-                Order.state.in_(SUPPORT_CLASSIFICATION_STATES),
-                Order.state.in_(SUPPORT_READ_ONLY_DOING_STATES),
-            ),
-            or_(
-                Order.duplicate_check_status.is_(None),
-                Order.duplicate_check_status == DUPLICATE_CHECK_UNCHECK,
-            ),
-            or_(
-                Order.work_domain.is_(None),
-                Order.work_domain != WORK_DOMAIN_DUPLICATE,
-            ),
-        )
-        .count()
+    never_compared = ~exists().where(
+        SupportCompareItem.order_id == Order.id,
+        SupportCompareItem.processing_status == "completed",
+    )
+    return session.query(Order).filter(*_unchecked_scope(platform_id), never_compared).count()
+
+
+def _handleable_filters(platform_id: uuid.UUID) -> list:
+    return [
+        *_unchecked_scope(platform_id),
+        _has_item("no_match", "ai_wrong"),
+        ~_has_item("pending_review", "selected_duplicate"),
+    ]
+
+
+def count_handleable_orders(session: Session, *, platform_id: uuid.UUID) -> int:
+    """Compared orders with no duplicate found (or model judged wrong) still in the tab."""
+    return session.query(Order).filter(*_handleable_filters(platform_id)).count()
+
+
+def handle_unchecked_orders(session: Session, *, actor: User, platform_id: uuid.UUID) -> int:
+    """/handle: move compared-and-not-duplicate orders to Không trùng lặp."""
+    order_ids = [
+        row[0]
+        for row in session.query(Order.id).filter(*_handleable_filters(platform_id)).all()
+    ]
+    if not order_ids:
+        return 0
+    return set_orders_duplicate_status(
+        session,
+        actor=actor,
+        platform_id=platform_id,
+        order_ids=order_ids,
+        duplicate_status=DUPLICATE_CHECK_NON_DUPLICATE,
+        allow_support_unclassified_doing=True,
     )
 
 
@@ -108,46 +159,6 @@ def create_support_compare_job(
     return job
 
 
-def enqueue_scheduled_support_compare_jobs(session: Session) -> int:
-    """Create one local-worker job for each platform with unchecked Support orders."""
-    platform_rows = (
-        session.query(Order.platform_id)
-        .filter(Order.platform_id.isnot(None))
-        .distinct()
-        .all()
-    )
-    created = 0
-    for (platform_id,) in platform_rows:
-        recipients = _support_recipients(session, platform_id)
-        if not recipients:
-            continue
-        requested_count = count_support_unchecked_orders(session, platform_id=platform_id)
-        if requested_count == 0:
-            continue
-        active_job = (
-            session.query(SupportCompareJob)
-            .filter(
-                SupportCompareJob.platform_id == platform_id,
-                SupportCompareJob.status.in_(("queued", "running")),
-            )
-            .with_for_update()
-            .first()
-        )
-        if active_job is not None:
-            continue
-        session.add(
-            SupportCompareJob(
-                platform_id=platform_id,
-                requested_by_id=None,
-                chat_id=str(recipients[0].telegram_chat_id),
-                requested_count=requested_count,
-            )
-        )
-        created += 1
-    session.commit()
-    return created
-
-
 def notify_completed_support_compare_jobs(session: Session, *, limit: int = 20) -> int:
     """Send local-worker completion/failure reports through the server-side bot."""
     jobs = (
@@ -165,13 +176,16 @@ def notify_completed_support_compare_jobs(session: Session, *, limit: int = 20) 
     for job in jobs:
         if job.status == "completed":
             summary = job.summary or {}
+            processed = int(summary.get("processed_count", job.processed_count) or 0)
+            duplicates = int(summary.get("duplicate_count", job.duplicate_count) or 0)
+            errors = int(summary.get("error_count", job.error_count) or 0)
             text = (
-                f"✅ Đã quét xong <b>{job.requested_count}</b> đơn trong tab "
-                "<b>Chưa kiểm tra</b> bằng máy local.\n"
-                f"• Đã embedding/so sánh: <b>{summary.get('processed_count', job.processed_count)}</b>\n"
-                f"• Phát hiện candidate duplicate: <b>{summary.get('duplicate_count', job.duplicate_count)}</b>\n"
-                f"• Lỗi: <b>{summary.get('error_count', job.error_count)}</b>\n\n"
-                "Các cặp duplicate (nếu có) sẽ được gửi qua các tin nhắn Telegram riêng."
+                f"✅ Đã so sánh xong <b>{processed}</b> đơn bằng máy local.\n"
+                f"• Nghi trùng (cần duyệt trên localhost): <b>{duplicates}</b>\n"
+                f"• Không thấy trùng: <b>{max(processed - duplicates, 0)}</b>\n"
+                f"• Lỗi: <b>{errors}</b>\n\n"
+                "Mở giao diện localhost để duyệt các đơn nghi trùng. "
+                "Cặp ảnh bạn chọn sẽ được gửi lại ở đây để xác nhận."
             )
         else:
             error = escape((job.last_error or "Không rõ lỗi")[:1000])
@@ -187,13 +201,15 @@ def notify_completed_support_compare_jobs(session: Session, *, limit: int = 20) 
     return notified
 
 
-def new_support_check_actions(
+def _new_confirm_actions(
+    yes_type: str,
+    no_type: str,
     *,
     platform_id: uuid.UUID,
     chat_id: str,
     order_count: int,
 ) -> tuple[TelegramActionLog, TelegramActionLog]:
-    """Create the two opaque callback records for a /check confirmation prompt."""
+    """Create the two opaque callback records for a yes/no confirmation prompt."""
     request_id = str(uuid.uuid4())
     payload = {
         "chat_id": chat_id,
@@ -202,21 +218,53 @@ def new_support_check_actions(
         "request_id": request_id,
     }
     expires_at = datetime.now(UTC) + ACTION_EXPIRY
-    yes_action = TelegramActionLog(
-        order_id=None,
-        action_type=ACTION_CHECK_YES,
-        callback_token=secrets.token_urlsafe(16),
-        payload=payload.copy(),
-        expires_at=expires_at,
+    return tuple(  # type: ignore[return-value]
+        TelegramActionLog(
+            order_id=None,
+            action_type=action_type,
+            callback_token=secrets.token_urlsafe(16),
+            payload=payload.copy(),
+            expires_at=expires_at,
+        )
+        for action_type in (yes_type, no_type)
     )
-    no_action = TelegramActionLog(
-        order_id=None,
-        action_type=ACTION_CHECK_NO,
-        callback_token=secrets.token_urlsafe(16),
-        payload=payload.copy(),
-        expires_at=expires_at,
+
+
+def new_support_check_actions(
+    *,
+    platform_id: uuid.UUID,
+    chat_id: str,
+    order_count: int,
+) -> tuple[TelegramActionLog, TelegramActionLog]:
+    """Callback records for a /check confirmation prompt."""
+    return _new_confirm_actions(
+        ACTION_CHECK_YES, ACTION_CHECK_NO,
+        platform_id=platform_id, chat_id=chat_id, order_count=order_count,
     )
-    return yes_action, no_action
+
+
+def new_support_handle_actions(
+    *,
+    platform_id: uuid.UUID,
+    chat_id: str,
+    order_count: int,
+) -> tuple[TelegramActionLog, TelegramActionLog]:
+    """Callback records for a /handle confirmation prompt."""
+    return _new_confirm_actions(
+        ACTION_HANDLE_YES, ACTION_HANDLE_NO,
+        platform_id=platform_id, chat_id=chat_id, order_count=order_count,
+    )
+
+
+def support_handle_keyboard(yes_token: str, no_token: str) -> dict:
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "✅ Có, chuyển hết", "callback_data": f"{CALLBACK_HANDLE_YES_PREFIX}:{yes_token}"},
+                {"text": "❌ Không", "callback_data": f"{CALLBACK_HANDLE_NO_PREFIX}:{no_token}"},
+            ]
+        ]
+    }
 
 
 def support_check_keyboard(yes_token: str, no_token: str) -> dict:
@@ -231,7 +279,7 @@ def support_check_keyboard(yes_token: str, no_token: str) -> dict:
 
 
 def supersede_support_check_siblings(session: Session, action_log: TelegramActionLog) -> None:
-    """Close the other button from the same /check prompt."""
+    """Close the other button from the same /check or /handle prompt."""
     request_id = str((action_log.payload or {}).get("request_id") or "")
     if not request_id:
         return
@@ -239,7 +287,9 @@ def supersede_support_check_siblings(session: Session, action_log: TelegramActio
         session.query(TelegramActionLog)
         .filter(
             TelegramActionLog.status == "pending",
-            TelegramActionLog.action_type.in_((ACTION_CHECK_YES, ACTION_CHECK_NO)),
+            TelegramActionLog.action_type.in_(
+                (ACTION_CHECK_YES, ACTION_CHECK_NO, ACTION_HANDLE_YES, ACTION_HANDLE_NO)
+            ),
         )
         .all()
     )
@@ -292,8 +342,8 @@ def _keyboard(confirm_token: str, reject_token: str) -> dict:
     return {
         "inline_keyboard": [
             [
-                {"text": "✅ Trùng", "callback_data": f"{CALLBACK_CONFIRM_PREFIX}:{confirm_token}"},
-                {"text": "❌ Không trùng", "callback_data": f"{CALLBACK_REJECT_PREFIX}:{reject_token}"},
+                {"text": "✅ Xác nhận trùng", "callback_data": f"{CALLBACK_CONFIRM_PREFIX}:{confirm_token}"},
+                {"text": "❌ Từ chối", "callback_data": f"{CALLBACK_REJECT_PREFIX}:{reject_token}"},
             ]
         ]
     }
@@ -321,20 +371,24 @@ def _new_action(
 
 
 def notify_duplicate_candidate(session: Session, candidate_id: uuid.UUID) -> bool:
-    """Send one best positive candidate to the linked Support Telegram account(s).
+    """Send the candidate Support picked on the localhost review to Telegram.
 
-    Only the highest-scoring candidate of an item marked duplicate is sent.
     The candidate itself remains pending until a Support callback invokes the
     existing duplicate application service.
     """
     candidate = session.get(SupportCompareCandidate, candidate_id)
-    if candidate is None or candidate.rank != 1:
+    if candidate is None:
         return False
     if candidate.decision_status != "pending" or candidate.telegram_notified_at is not None:
         return False
 
     item = session.get(SupportCompareItem, candidate.comparison_item_id)
-    if item is None or item.processing_status != "completed" or item.is_duplicate is not True:
+    if (
+        item is None
+        or item.processing_status != "completed"
+        or item.review_status != "selected_duplicate"
+        or item.selected_candidate_id != candidate.id
+    ):
         return False
     order = session.get(Order, item.order_id)
     if order is None or order.platform_id != item.platform_id:
@@ -397,7 +451,11 @@ def notify_duplicate_candidate(session: Session, candidate_id: uuid.UUID) -> boo
 
             prompt = send_message(
                 chat_id,
-                "👉 Support chọn kết quả cho cặp ảnh ở trên:",
+                (
+                    f"👉 Đơn <b>{escape(item.external_order_id)}</b> trùng với đơn "
+                    f"<b>{escape(candidate.matched_external_order_id or 'không rõ')}</b>? "
+                    "Xác nhận để gắn tag Trùng lặp, Từ chối để đưa vào Không trùng lặp."
+                ),
                 reply_markup=_keyboard(confirm.callback_token, reject.callback_token),
             )
             if prompt is None:
@@ -421,34 +479,27 @@ def notify_duplicate_candidate(session: Session, candidate_id: uuid.UUID) -> boo
 
 
 def notify_pending_duplicate_candidates(session: Session, *, limit: int = 20) -> int:
-    """Notify at most one top-ranked positive candidate per source order item."""
+    """Send every candidate Support selected on the localhost review."""
     candidates = (
         session.query(SupportCompareCandidate)
         .join(
             SupportCompareItem,
-            SupportCompareItem.id == SupportCompareCandidate.comparison_item_id,
+            SupportCompareItem.selected_candidate_id == SupportCompareCandidate.id,
         )
         .filter(
-            SupportCompareCandidate.rank == 1,
+            SupportCompareItem.review_status == "selected_duplicate",
+            SupportCompareItem.processing_status == "completed",
             SupportCompareCandidate.decision_status == "pending",
             SupportCompareCandidate.telegram_notified_at.is_(None),
-            SupportCompareItem.processing_status == "completed",
-            SupportCompareItem.is_duplicate.is_(True),
         )
-        .order_by(SupportCompareItem.created_at.asc(), SupportCompareCandidate.rank.asc())
-        .limit(max(1, limit * 5))
+        .order_by(SupportCompareItem.reviewed_at.asc())
+        .limit(max(1, limit))
         .all()
     )
     notified = 0
-    seen_items: set[uuid.UUID] = set()
     for candidate in candidates:
-        if candidate.comparison_item_id in seen_items:
-            continue
-        seen_items.add(candidate.comparison_item_id)
         if notify_duplicate_candidate(session, candidate.id):
             notified += 1
-            if notified >= limit:
-                break
     return notified
 
 
@@ -481,8 +532,8 @@ def execute_support_duplicate_decision(
     run = session.get(SupportCompareRun, item.run_id)
     if run is None or run.source_kind not in {"waiting", "support_unchecked"}:
         raise ValueError("Candidate từ source test Review chỉ được xem, chưa được phép thao tác")
-    if item.is_duplicate is not True or candidate.rank != 1:
-        raise ValueError("Candidate không phải kết quả duplicate top-1 cần Support xác nhận")
+    if item.review_status != "selected_duplicate" or item.selected_candidate_id != candidate.id:
+        raise ValueError("Candidate này chưa được Support chọn trên giao diện localhost")
     if order.platform_id != item.platform_id:
         raise ValueError("Candidate không cùng platform với order")
 

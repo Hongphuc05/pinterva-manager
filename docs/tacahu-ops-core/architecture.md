@@ -52,13 +52,22 @@ loại từ `public.orders`, đọc baseline từ `image_embeddings` và ghi run
 schema. Model được cache trong process local giữa các job; production VPS không cài `torch`,
 `transformers` hay tải checkpoint Hugging Face.
 
-Celery Beat trên VPS chỉ tạo tối đa một job active cho mỗi platform mỗi 30 phút và chạy notifier
-mỗi phút. Lệnh `/check` của Support cũng tạo cùng loại job queue này. Local worker claim bằng
-`FOR UPDATE SKIP LOCKED`, embedding/compare/promote ảnh, rồi ghi `completed` hoặc `failed`; VPS
-đọc trạng thái đó để báo cáo và gửi candidate top-1 qua Telegram. Nếu top-1 là `KHONG_TRUNG`,
-order vẫn `uncheck` trong tab **Chưa kiểm tra**; nếu Support chọn **Trùng** hoặc **Không trùng**,
-callback mới gọi `set_orders_duplicate_status`. Doing chỉ được phân loại qua callback này; command
-web vẫn Waiting-only.
+Job chỉ được tạo khi Support xác nhận: lệnh `/check` trên Telegram (hoặc nút **Kiểm tra trùng**
+trên tab **Chưa kiểm tra**) đếm các order chưa từng được so sánh, hỏi **Có**/**Không**, rồi
+enqueue tối đa một job active cho mỗi platform. Không còn job tự động theo lịch. Local worker
+claim bằng `FOR UPDATE SKIP LOCKED`, embedding/compare tất cả order của lô với baseline Postgres
+(các order trong cùng lô không so chéo với nhau), rồi thêm cả lô vào pool sau khi so xong và ghi
+`completed` hoặc `failed`. Celery Beat trên VPS chỉ chạy notifier mỗi phút để báo cáo job và gửi
+cặp ảnh Support đã chọn.
+
+Kết quả từng order nằm ở `comparison_items.review_status`: `pending_review` (model nghi trùng),
+`no_match` (không thấy trùng), rồi `selected_duplicate` hoặc `ai_wrong` sau khi Support duyệt trên
+giao diện localhost của `dup-compare` (`/review.html`). Giao diện này chỉ ghi vào schema
+`support_compare_image`, không đổi order. Với `selected_duplicate`, notifier gửi cặp (ảnh gốc, ảnh
+đã chọn, kèm mã đơn) qua Telegram; **Xác nhận** gọi `set_orders_duplicate_status` để gắn Trùng lặp,
+**Từ chối** chuyển order sang Không trùng lặp. Các order `no_match`/`ai_wrong` vẫn nằm ở tab **Chưa
+kiểm tra** cho tới khi Support gõ `/handle` để chuyển chúng sang Không trùng lặp. Doing chỉ được
+phân loại qua các đường này và nút trên web cho đơn chưa phân loại.
 
 Runner fail-closed với model: không dùng HOG fallback để so với baseline DINOv2. Hàng đợi là
 PostgreSQL source of truth; Redis/Celery chỉ lo lịch tạo job và gửi Telegram, không chạy ML.

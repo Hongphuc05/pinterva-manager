@@ -49,16 +49,15 @@ def test_celery_app_includes_support_compare_notifier_on_general_queue():
     ] == {"queue": "celery"}
 
 
-def test_support_compare_beat_queues_local_jobs_and_delivers_reports_and_candidates():
+def test_support_compare_beat_only_delivers_reports_and_selected_candidates():
     from app.config import Settings
 
     schedule = build_beat_schedule(
         Settings(secret_key="test", cookie_secure=False, support_compare_enabled=True)
     )
 
-    job_entry = schedule["support-compare-local-jobs"]
-    assert job_entry["task"] == "app.workers.support_compare_tasks.enqueue_support_compare_jobs"
-    assert job_entry["schedule"] == 1800
+    # Jobs are created only by Support's /check confirmation, never by the scheduler.
+    assert "support-compare-local-jobs" not in schedule
     entry = schedule["support-compare-telegram"]
     assert entry["task"] == "app.workers.support_compare_tasks.notify_support_duplicate_candidates"
     assert entry["schedule"] == 60.0

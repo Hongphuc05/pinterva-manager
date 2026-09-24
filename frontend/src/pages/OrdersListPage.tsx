@@ -290,6 +290,8 @@ export function OrdersListPage() {
 
   // Search & Filter State
   const { showToast } = useToast()
+  const [supportCompare, setSupportCompare] = useState<{ enabled: boolean; new_orders: number; handleable_orders: number } | null>(null)
+  const [startingSupportCompare, setStartingSupportCompare] = useState(false)
   const { syncStatusMap } = useGallerySync()
   const [statusFilter, setStatusFilter] = useState(String(restoreAdminFilters ? restoredViewState.statusFilter || '' : ''))
   const [platformStatusFilter, setPlatformStatusFilter] = useState(String(restoreAdminFilters ? restoredViewState.platformStatusFilter || '' : ''))
@@ -663,6 +665,35 @@ export function OrdersListPage() {
     next.set('support_tab', tab)
     next.delete('page')
     setSearchParams(next, { replace: true })
+  }
+
+  const loadSupportCompareStatus = useCallback(() => {
+    if (!isSupport) return
+    apiFetch<{ enabled: boolean; new_orders: number; handleable_orders: number }>('/support-compare/status')
+      .then(setSupportCompare)
+      .catch(() => setSupportCompare(null))
+  }, [isSupport])
+
+  useEffect(() => {
+    loadSupportCompareStatus()
+  }, [loadSupportCompareStatus, orders.length])
+
+  async function handleStartSupportCompare() {
+    if (!supportCompare || supportCompare.new_orders === 0 || startingSupportCompare) return
+    if (!window.confirm(
+      `Gửi ${supportCompare.new_orders} đơn mới cho máy local kiểm tra trùng?\n` +
+      'Hãy đảm bảo giao diện localhost đang chạy. Kết quả sẽ được báo qua Telegram.',
+    )) return
+    setStartingSupportCompare(true)
+    try {
+      const res = await apiFetch<{ job_id: string; requested_count: number }>('/support-compare/check', { method: 'POST' })
+      showToast(`Đã xếp ${res.requested_count} đơn vào hàng đợi kiểm tra trùng. Mở localhost để duyệt khi có kết quả.`, 'success')
+      loadSupportCompareStatus()
+    } catch (err) {
+      showToast(err instanceof ApiError ? err.message : 'Không thể bắt đầu kiểm tra trùng.', 'error')
+    } finally {
+      setStartingSupportCompare(false)
+    }
   }
 
   async function handleSetDuplicateStatus(orderIds: string[], targetStatus: 'duplicate' | 'non_duplicate' | 'uncheck') {
@@ -2556,6 +2587,19 @@ export function OrdersListPage() {
             </span>
             <span className="text-xs text-slate-500 font-medium">task</span>
           </div>
+
+          {isSupport && supportTab === 'all' && supportCompare?.enabled && (
+            <button
+              type="button"
+              onClick={handleStartSupportCompare}
+              disabled={startingSupportCompare || supportCompare.new_orders === 0}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-[#0052CC] hover:bg-[#0747A6] rounded-lg shadow-sm transition-all disabled:opacity-50 cursor-pointer"
+              title="Gửi các đơn mới chưa được so sánh cho máy local kiểm tra trùng (giống lệnh /check trên Telegram)"
+            >
+              {startingSupportCompare ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+              <span>Kiểm tra trùng ({supportCompare.new_orders})</span>
+            </button>
+          )}
 
           {/* Quick Distribute Button for Admin in Waiting tab */}
           {isAdmin && adminTab === 'waiting' && waitingOrders.length > 0 && (

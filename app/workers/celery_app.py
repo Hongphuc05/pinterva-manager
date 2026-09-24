@@ -88,10 +88,8 @@ def build_beat_schedule(settings):
             ),
         }
     if settings.support_compare_enabled:
-        schedule["support-compare-local-jobs"] = {
-            "task": "app.workers.support_compare_tasks.enqueue_support_compare_jobs",
-            "schedule": settings.support_compare_interval_seconds,
-        }
+        # Jobs are created only when Support confirms /check; this task just
+        # delivers the local worker's report and the pairs Support selected.
         schedule["support-compare-telegram"] = {
             "task": "app.workers.support_compare_tasks.notify_support_duplicate_candidates",
             "schedule": 60.0,

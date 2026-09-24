@@ -28,6 +28,12 @@ from app.application.support_compare import (
     ACTION_CONFIRM as SUPPORT_COMPARE_ACTION_CONFIRM,
 )
 from app.application.support_compare import (
+    ACTION_HANDLE_NO as SUPPORT_COMPARE_ACTION_HANDLE_NO,
+)
+from app.application.support_compare import (
+    ACTION_HANDLE_YES as SUPPORT_COMPARE_ACTION_HANDLE_YES,
+)
+from app.application.support_compare import (
     ACTION_REJECT as SUPPORT_COMPARE_ACTION_REJECT,
 )
 from app.application.support_compare import (
@@ -40,15 +46,25 @@ from app.application.support_compare import (
     CALLBACK_CONFIRM_PREFIX as SUPPORT_COMPARE_CALLBACK_CONFIRM,
 )
 from app.application.support_compare import (
+    CALLBACK_HANDLE_NO_PREFIX as SUPPORT_COMPARE_CALLBACK_HANDLE_NO,
+)
+from app.application.support_compare import (
+    CALLBACK_HANDLE_YES_PREFIX as SUPPORT_COMPARE_CALLBACK_HANDLE_YES,
+)
+from app.application.support_compare import (
     CALLBACK_REJECT_PREFIX as SUPPORT_COMPARE_CALLBACK_REJECT,
 )
 from app.application.support_compare import (
+    count_handleable_orders,
     count_support_unchecked_orders,
     create_support_compare_job,
     execute_support_duplicate_decision,
+    handle_unchecked_orders,
     new_support_check_actions,
+    new_support_handle_actions,
     supersede_support_check_siblings,
     support_check_keyboard,
+    support_handle_keyboard,
 )
 from app.application.telegram_service import (
     clear_message_keyboard,
@@ -110,6 +126,129 @@ def _action_is_pending_and_valid(action_log: TelegramActionLog, action_type: str
         and action_log.action_type == action_type
         and (action_log.expires_at is None or action_log.expires_at >= datetime.now(UTC))
     )
+
+
+SUPPORT_HELP_TEXT = (
+    "📖 <b>Lệnh dành cho Support</b>\n\n"
+    "/check — Đếm các đơn mới trong tab <b>Chưa kiểm tra</b> chưa được so sánh; bấm <b>Có</b> "
+    "để gửi cho máy local embedding và kiểm tra trùng.\n"
+    "/handle — Chuyển các đơn đã kiểm tra mà không thấy trùng (hoặc bạn đã chọn "
+    "<i>Model sai</i>) sang <b>Không trùng lặp</b>.\n"
+    "/help — Hiện danh sách lệnh này.\n\n"
+    "Sau khi máy local so sánh xong, mở giao diện localhost để duyệt các đơn nghi trùng. "
+    "Cặp ảnh bạn chọn sẽ được gửi lại ở đây: <b>Xác nhận trùng</b> gắn tag Trùng lặp, "
+    "<b>Từ chối</b> đưa đơn vào Không trùng lặp."
+)
+
+_SUPPORT_PROMPT_ACTION_TYPES = (
+    SUPPORT_COMPARE_ACTION_CHECK_YES,
+    SUPPORT_COMPARE_ACTION_CHECK_NO,
+    SUPPORT_COMPARE_ACTION_HANDLE_YES,
+    SUPPORT_COMPARE_ACTION_HANDLE_NO,
+)
+
+
+def _support_user_for_chat(db: Session, chat_id: str) -> User | None:
+    return (
+        db.query(User)
+        .filter(
+            User.telegram_chat_id == chat_id,
+            User.role == ROLE_SUPPORT,
+            User.active.is_(True),
+        )
+        .first()
+    )
+
+
+def _send_support_help(db: Session, chat_id: str) -> None:
+    if _support_user_for_chat(db, chat_id) is None:
+        send_message(chat_id, "⚠️ Lệnh này chỉ dành cho tài khoản Support đã liên kết với Telegram.")
+        return
+    send_message(chat_id, SUPPORT_HELP_TEXT)
+
+
+def _start_support_confirmation(db: Session, chat_id: str, kind: str) -> None:
+    """Handle /check and /handle: report the count first, then ask Có / Không.
+
+    A new command replaces any prompt of this chat that is still waiting for an
+    answer: its buttons are closed and its Telegram message is deleted.
+    """
+    support_user = _support_user_for_chat(db, chat_id)
+    if support_user is None:
+        send_message(chat_id, "⚠️ Lệnh này chỉ dành cho tài khoản Support đã liên kết với Telegram.")
+        return
+    if support_user.platform_id is None:
+        send_message(chat_id, "⚠️ Tài khoản Support chưa được gắn platform.")
+        return
+    if not get_settings().support_compare_enabled:
+        send_message(chat_id, "⚠️ Chức năng kiểm tra trùng đang tắt trên hệ thống.")
+        return
+
+    if kind == "check":
+        order_count = count_support_unchecked_orders(db, platform_id=support_user.platform_id)
+        empty_text = (
+            "📋 Hiện tại có <b>0</b> đơn mới cần kiểm tra trong tab <b>Chưa kiểm tra</b>. "
+            "Không có gì để kiểm tra."
+        )
+        new_actions, keyboard = new_support_check_actions, support_check_keyboard
+        prompt_text = (
+            f"📋 Hiện tại có <b>{order_count}</b> đơn mới trong tab "
+            "<b>Chưa kiểm tra</b> chưa được so sánh.\n"
+            "Bạn có muốn gửi các đơn này cho máy local kiểm tra trùng không?"
+        )
+    else:
+        order_count = count_handleable_orders(db, platform_id=support_user.platform_id)
+        empty_text = (
+            "📋 Hiện tại có <b>0</b> đơn đã kiểm tra mà không thấy trùng. Không có gì để chuyển."
+        )
+        new_actions, keyboard = new_support_handle_actions, support_handle_keyboard
+        prompt_text = (
+            f"📋 Có <b>{order_count}</b> đơn đã kiểm tra nhưng không thấy trùng "
+            "(hoặc bạn đã chọn <i>Model sai</i>) đang ở tab <b>Chưa kiểm tra</b>.\n"
+            "Chuyển toàn bộ sang <b>Không trùng lặp</b>?"
+        )
+    if order_count == 0:
+        send_message(chat_id, empty_text)
+        return
+
+    stale_message_ids: dict[int, None] = {}
+    for action in (
+        db.query(TelegramActionLog)
+        .filter(
+            TelegramActionLog.status == "pending",
+            TelegramActionLog.action_type.in_(_SUPPORT_PROMPT_ACTION_TYPES),
+        )
+        .all()
+    ):
+        payload = action.payload or {}
+        if str(payload.get("chat_id") or "") != chat_id:
+            continue
+        action.status = "superseded"
+        if payload.get("message_id") is not None:
+            stale_message_ids[int(payload["message_id"])] = None
+
+    yes_action, no_action = new_actions(
+        platform_id=support_user.platform_id, chat_id=chat_id, order_count=order_count
+    )
+    db.add_all([yes_action, no_action])
+    db.commit()
+    if stale_message_ids:
+        delete_messages(chat_id, list(stale_message_ids))
+    try:
+        prompt = send_message(
+            chat_id, prompt_text, reply_markup=keyboard(yes_action.callback_token, no_action.callback_token)
+        )
+    except Exception:
+        logger.exception("failed to send Support /%s confirmation to %s", kind, chat_id)
+        prompt = None
+    if prompt is None:
+        yes_action.status = no_action.status = "failed"
+        db.commit()
+        return
+    message_id = prompt.get("message_id") if isinstance(prompt, dict) else None
+    for action in (yes_action, no_action):
+        action.payload = {**(action.payload or {}), "message_id": message_id}
+    db.commit()
 
 
 def _supersede_sibling_fix_choices(db: Session, action_log: TelegramActionLog) -> None:
@@ -295,94 +434,12 @@ async def api_telegram_webhook(
             return {"ok": True}
 
         command = text.split(maxsplit=1)[0].lower() if text else ""
-        if command.split("@", 1)[0] == "/check":
-            support_user = (
-                db.query(User)
-                .filter(
-                    User.telegram_chat_id == chat_id,
-                    User.role == ROLE_SUPPORT,
-                    User.active.is_(True),
-                )
-                .first()
-            )
-            if not support_user:
-                send_message(chat_id, "⚠️ Lệnh này chỉ dành cho tài khoản Support đã liên kết với Telegram.")
-                return {"ok": True}
-            if support_user.platform_id is None:
-                send_message(chat_id, "⚠️ Tài khoản Support chưa được gắn platform.")
-                return {"ok": True}
-            if not settings.support_compare_enabled:
-                send_message(chat_id, "⚠️ Chức năng kiểm tra trùng đang tắt trên hệ thống.")
-                return {"ok": True}
-
-            order_count = count_support_unchecked_orders(db, platform_id=support_user.platform_id)
-            if order_count == 0:
-                send_message(
-                    chat_id,
-                    "📋 Hiện tại có <b>0</b> đơn trong tab <b>Chưa kiểm tra</b>. Không có gì để kiểm tra.",
-                )
-                return {"ok": True}
-
-            pending_check_actions = (
-                db.query(TelegramActionLog)
-                .filter(
-                    TelegramActionLog.status == "pending",
-                    TelegramActionLog.action_type.in_(
-                        (SUPPORT_COMPARE_ACTION_CHECK_YES, SUPPORT_COMPARE_ACTION_CHECK_NO)
-                    ),
-                )
-                .all()
-            )
-            # A new /check replaces any prompt still waiting for an answer:
-            # close its buttons in the DB and delete the stale Telegram message.
-            stale_message_ids: dict[int, None] = {}
-            for action in pending_check_actions:
-                payload = action.payload or {}
-                if str(payload.get("chat_id") or "") != chat_id:
-                    continue
-                action.status = "superseded"
-                if payload.get("message_id") is not None:
-                    stale_message_ids[int(payload["message_id"])] = None
-
-            yes_action, no_action = new_support_check_actions(
-                platform_id=support_user.platform_id,
-                chat_id=chat_id,
-                order_count=order_count,
-            )
-            db.add_all([yes_action, no_action])
-            db.commit()
-            if stale_message_ids:
-                delete_messages(chat_id, list(stale_message_ids))
-            try:
-                prompt = send_message(
-                    chat_id,
-                    (
-                        f"📋 Hiện tại có <b>{order_count}</b> đơn trong tab "
-                        "<b>Chưa kiểm tra</b>.\nBạn có muốn kiểm tra trùng không?"
-                    ),
-                    reply_markup=support_check_keyboard(
-                        yes_action.callback_token,
-                        no_action.callback_token,
-                    ),
-                )
-            except Exception:
-                logger.exception("failed to send Support /check confirmation to %s", chat_id)
-                yes_action.status = no_action.status = "failed"
-                db.commit()
-                return {"ok": True}
-
-            if prompt is None:
-                yes_action.status = no_action.status = "failed"
-                db.commit()
-                return {"ok": True}
-
-            message_id = prompt.get("message_id") if isinstance(prompt, dict) else None
-            for action in (yes_action, no_action):
-                action.payload = {
-                    **(action.payload or {}),
-                    "message_id": message_id,
-                }
-            db.commit()
+        base_command = command.split("@", 1)[0]
+        if base_command in ("/check", "/handle"):
+            _start_support_confirmation(db, chat_id, base_command.lstrip("/"))
+            return {"ok": True}
+        if base_command == "/help":
+            _send_support_help(db, chat_id)
             return {"ok": True}
 
         # A note typed by an Admin after choosing “soạn ghi chú” is the final
@@ -467,6 +524,14 @@ async def api_telegram_webhook(
         check_prefixes = {
             SUPPORT_COMPARE_CALLBACK_CHECK_YES,
             SUPPORT_COMPARE_CALLBACK_CHECK_NO,
+            SUPPORT_COMPARE_CALLBACK_HANDLE_YES,
+            SUPPORT_COMPARE_CALLBACK_HANDLE_NO,
+        }
+        prompt_action_types = {
+            SUPPORT_COMPARE_CALLBACK_CHECK_YES: SUPPORT_COMPARE_ACTION_CHECK_YES,
+            SUPPORT_COMPARE_CALLBACK_CHECK_NO: SUPPORT_COMPARE_ACTION_CHECK_NO,
+            SUPPORT_COMPARE_CALLBACK_HANDLE_YES: SUPPORT_COMPARE_ACTION_HANDLE_YES,
+            SUPPORT_COMPARE_CALLBACK_HANDLE_NO: SUPPORT_COMPARE_ACTION_HANDLE_NO,
         }
         if ":" in cb_data and cb_data.split(":", 1)[0] in check_prefixes:
             prefix, token = cb_data.split(":", 1)
@@ -483,11 +548,7 @@ async def api_telegram_webhook(
                 logger.warning("Unauthorized Support /check callback from chat_id %s", user_chat_id)
                 return {"ok": True}
 
-            expected_action_type = (
-                SUPPORT_COMPARE_ACTION_CHECK_YES
-                if prefix == SUPPORT_COMPARE_CALLBACK_CHECK_YES
-                else SUPPORT_COMPARE_ACTION_CHECK_NO
-            )
+            expected_action_type = prompt_action_types[prefix]
             action_log = (
                 db.query(TelegramActionLog)
                 .filter(TelegramActionLog.callback_token == token)
@@ -506,7 +567,7 @@ async def api_telegram_webhook(
                 send_message(user_chat_id, "⚠️ Platform của tài khoản Support đã thay đổi. Hãy gửi lại /check.")
                 return {"ok": True}
 
-            if prefix == SUPPORT_COMPARE_CALLBACK_CHECK_NO:
+            if prefix in (SUPPORT_COMPARE_CALLBACK_CHECK_NO, SUPPORT_COMPARE_CALLBACK_HANDLE_NO):
                 action_log.status = "executed"
                 action_log.executed_at = datetime.now(UTC)
                 action_log.actor_id = support_user.id
@@ -515,7 +576,31 @@ async def api_telegram_webhook(
                 message_id = payload.get("message_id")
                 if message_id is not None:
                     clear_message_keyboard(user_chat_id, int(message_id))
-                send_message(user_chat_id, "✅ Đã hủy kiểm tra trùng.")
+                send_message(user_chat_id, "✅ Đã hủy.")
+                return {"ok": True}
+
+            if prefix == SUPPORT_COMPARE_CALLBACK_HANDLE_YES:
+                try:
+                    handled = handle_unchecked_orders(
+                        db, actor=support_user, platform_id=support_user.platform_id
+                    )
+                except Exception:
+                    db.rollback()
+                    logger.exception("failed to run Support /handle for %s", user_chat_id)
+                    send_message(user_chat_id, "❌ Không thể chuyển đơn lúc này. Vui lòng thử lại.")
+                    return {"ok": True}
+                action_log.status = "executed"
+                action_log.executed_at = datetime.now(UTC)
+                action_log.actor_id = support_user.id
+                supersede_support_check_siblings(db, action_log)
+                db.commit()
+                message_id = payload.get("message_id")
+                if message_id is not None:
+                    clear_message_keyboard(user_chat_id, int(message_id))
+                send_message(
+                    user_chat_id,
+                    f"✅ Đã chuyển <b>{handled}</b> đơn sang <b>Không trùng lặp</b>.",
+                )
                 return {"ok": True}
 
             try:
@@ -549,7 +634,8 @@ async def api_telegram_webhook(
                 user_chat_id,
                 f"✅ Đã xếp <b>{order_count}</b> đơn trong tab <b>Chưa kiểm tra</b> "
                 "vào hàng đợi máy local để embedding và kiểm tra trùng.\n"
-                "Bot sẽ báo cáo và gửi các cặp nghi trùng khi máy local xử lý xong.",
+                "Hãy mở giao diện localhost. Bot sẽ báo cáo khi máy local so sánh xong; "
+                "sau đó bạn duyệt các đơn nghi trùng trên localhost.",
             )
             return {"ok": True}
 

@@ -17,7 +17,6 @@ from app.adapters.db.models import (
 from app.application.auth import create_session_token, hash_password
 from app.application.support_compare import (
     count_support_unchecked_orders,
-    enqueue_scheduled_support_compare_jobs,
 )
 from app.application.telegram_service import (
     notify_admin_new_fix,
@@ -337,44 +336,6 @@ def test_support_unchecked_count_ignores_stale_doing_mirror(db_session):
     db_session.commit()
 
     assert count_support_unchecked_orders(db_session, platform_id=platform.id) == 1
-
-
-def test_scheduled_support_compare_creates_one_job_per_platform(db_session):
-    platform = Platform(name="Plat scheduled compare", account_username="scheduled@print.com", is_active=True)
-    db_session.add(platform)
-    db_session.flush()
-    support = User(
-        username="support-scheduled",
-        full_name="Support Scheduled",
-        role="support",
-        password_hash=hash_password("pass"),
-        telegram_chat_id="998878",
-        active=True,
-        platform_id=platform.id,
-    )
-    waiting_order = Order(
-        external_order_id="DJ-SCHEDULED-WAITING",
-        platform_id=platform.id,
-        state=OrderState.WAITING.value,
-        duplicate_check_status="uncheck",
-        work_domain="standard",
-    )
-    doing_order = Order(
-        external_order_id="DJ-SCHEDULED-DOING",
-        platform_id=platform.id,
-        state=OrderState.IN_PROGRESS.value,
-        duplicate_check_status="uncheck",
-        work_domain="standard",
-    )
-    db_session.add_all([support, waiting_order, doing_order])
-    db_session.commit()
-
-    assert enqueue_scheduled_support_compare_jobs(db_session) == 1
-    job = db_session.query(SupportCompareJob).one()
-    assert job.requested_by_id is None
-    assert job.chat_id == "998878"
-    assert job.requested_count == 2
-    assert enqueue_scheduled_support_compare_jobs(db_session) == 0
 
 
 def test_telegram_admin_fix_notification_uses_tacahu_designer_name(db_session):
