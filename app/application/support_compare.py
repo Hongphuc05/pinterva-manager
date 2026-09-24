@@ -51,7 +51,11 @@ ACTION_EXPIRY = timedelta(hours=24)
 
 
 def count_support_unchecked_orders(session: Session, *, platform_id: uuid.UUID) -> int:
-    """Count the orders shown in Support's current "Chưa kiểm tra" scope."""
+    """Count the orders shown in Support's current "Chưa kiểm tra" scope.
+
+    State only: Support's web view has no ``printerval_status`` (it is stripped),
+    so a stale "doing" mirror on a QC_PENDING/DONE order must not be counted.
+    """
     return (
         session.query(Order)
         .filter(
@@ -59,8 +63,6 @@ def count_support_unchecked_orders(session: Session, *, platform_id: uuid.UUID) 
             or_(
                 Order.state.in_(SUPPORT_CLASSIFICATION_STATES),
                 Order.state.in_(SUPPORT_READ_ONLY_DOING_STATES),
-                Order.printerval_status.ilike("waiting"),
-                Order.printerval_status.ilike("doing"),
             ),
             or_(
                 Order.duplicate_check_status.is_(None),

@@ -15,7 +15,10 @@ from app.adapters.db.models import (
     User,
 )
 from app.application.auth import create_session_token, hash_password
-from app.application.support_compare import enqueue_scheduled_support_compare_jobs
+from app.application.support_compare import (
+    count_support_unchecked_orders,
+    enqueue_scheduled_support_compare_jobs,
+)
 from app.application.telegram_service import (
     notify_admin_new_fix,
     notify_designer_new_order,
@@ -320,6 +323,20 @@ def test_support_check_again_replaces_pending_prompt(client: TestClient, db_sess
         TelegramActionLog.action_type.in_(("SUPPORT_COMPARE_CHECK_YES", "SUPPORT_COMPARE_CHECK_NO"))
     ).all()
     assert sorted(a.status for a in actions) == ["pending", "pending", "superseded", "superseded"]
+
+
+def test_support_unchecked_count_ignores_stale_doing_mirror(db_session):
+    platform = Platform(name="Plat stale mirror", account_username="stale@print.com", is_active=True)
+    db_session.add(platform)
+    db_session.flush()
+    for code, state in (("DJ-STALE-QC", OrderState.QC_PENDING.value), ("DJ-STALE-WAIT", OrderState.WAITING.value)):
+        db_session.add(Order(
+            external_order_id=code, platform_id=platform.id, state=state,
+            printerval_status="doing", duplicate_check_status="uncheck", work_domain="standard",
+        ))
+    db_session.commit()
+
+    assert count_support_unchecked_orders(db_session, platform_id=platform.id) == 1
 
 
 def test_scheduled_support_compare_creates_one_job_per_platform(db_session):

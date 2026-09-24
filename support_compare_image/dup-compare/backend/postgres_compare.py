@@ -228,14 +228,13 @@ class PostgresComparisonRepository:
                 ]
             )
             if source_kind == "support_unchecked":
-                # This is the recurring Support queue.  Keep both the
-                # canonical internal states and the external mirror because
-                # a status sync can briefly lag behind the order state.
+                # Recurring Support queue: internal state only, matching what
+                # Support sees on the web (a stale printerval_status mirror on a
+                # QC_PENDING/DONE order must not pull it back into the queue).
                 clauses.append(
                     "(UPPER(COALESCE(o.state, '')) IN "
                     "('OPEN', 'WAITING', 'OPEN_FOR_ALLOCATION', 'DISCOVERED', 'PENDING', "
-                    "'IN_PROGRESS', 'ASSIGNED', 'DOING') "
-                    "OR LOWER(COALESCE(o.printerval_status, '')) IN ('waiting', 'doing'))"
+                    "'IN_PROGRESS', 'ASSIGNED', 'DOING'))"
                 )
                 clauses.append("COALESCE(o.work_domain, 'standard') <> 'duplicate'")
             else:
