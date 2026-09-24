@@ -32,6 +32,7 @@ function renderApp() {
 }
 
 beforeEach(() => {
+  localStorage.clear()
   window.location.hash = ''
   calls = []
   items = [item(1, 'pending_review'), item(2, 'selected_duplicate', 'i2-c2'), item(3, 'no_match')]
@@ -175,6 +176,63 @@ describe('review page', () => {
     expect(screen.getByText(/Name/)).toBeInTheDocument()
     expect(screen.queryByText(/extra_discount/)).not.toBeInTheDocument()
     expect(calls.some((c) => c.url.startsWith('/review/search') && c.init?.method === 'POST')).toBe(true)
+  })
+
+  describe('search history', () => {
+    const candidate = (code: string) => ({
+      rank: 1, order_code: code, product_name: 'Áo', image_url: `https://img.test/${code}.png`, similarity: 0.95,
+      phash_distance: 3, ssim: 0.9, color_delta_e: 1, classification: 'TRUNG', reasons: [], custom_config: null,
+    })
+    const stubSearch = () => {
+      const base = fetch as unknown as (u: string, i?: RequestInit) => Promise<unknown>
+      let n = 0
+      vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:mine', revokeObjectURL: () => {} }))
+      vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+        if (url.startsWith('/review/search')) {
+          n += 1
+          return Promise.resolve({
+            ok: true, status: 200,
+            json: async () => ({ verdict: 'TRUNG', is_duplicate: true, pool_count: 85000, model_version: 'm', elapsed_ms: 900, candidates: [candidate(`DJ-S${n}`)] }),
+          })
+        }
+        return base(url, init)
+      }))
+    }
+    const upload = async (name: string) =>
+      userEvent.upload(screen.getByTestId('search-file'), new File(['x'], name, { type: 'image/png' }))
+
+    it('keeps searches when switching tabs, lets you reopen or delete them, and restores them after a reload', async () => {
+      stubSearch()
+      const view = renderApp()
+      await userEvent.click(await screen.findByRole('tab', { name: 'Tìm ảnh' }))
+      await upload('first.png')
+      expect(await screen.findByText('DJ-S1')).toBeInTheDocument()
+      await upload('second.png')
+      expect(await screen.findByText('DJ-S2')).toBeInTheDocument()
+      expect(screen.getByText('Lịch sử (2)')).toBeInTheDocument()
+
+      // Leaving the tab and coming back must not lose anything.
+      await userEvent.click(screen.getByRole('tab', { name: 'Duyệt kết quả' }))
+      await userEvent.click(screen.getByRole('tab', { name: 'Tìm ảnh' }))
+      expect(screen.getByText('Lịch sử (2)')).toBeInTheDocument()
+      expect(screen.getByText('DJ-S2')).toBeInTheDocument()
+
+      // Reopen the older search.
+      await userEvent.click(screen.getByRole('button', { name: /^first\.png/ }))
+      expect(screen.getByText('DJ-S1')).toBeInTheDocument()
+      expect(screen.queryByText('DJ-S2')).not.toBeInTheDocument()
+
+      // A full reload restores the list from localStorage.
+      view.unmount()
+      window.location.hash = '#/search'
+      renderApp()
+      expect(await screen.findByText('Lịch sử (2)')).toBeInTheDocument()
+      expect(screen.getByText('DJ-S2')).toBeInTheDocument()
+
+      await userEvent.click(screen.getByRole('button', { name: 'Xóa second.png' }))
+      expect(screen.getByText('Lịch sử (1)')).toBeInTheDocument()
+      expect(screen.getByText('DJ-S1')).toBeInTheDocument()
+    })
   })
 
   it('shows an error state when the database cannot be reached', async () => {

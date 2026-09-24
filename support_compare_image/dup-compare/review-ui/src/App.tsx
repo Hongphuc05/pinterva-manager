@@ -4,6 +4,7 @@ import { fetchJob, fetchJobs, rejectItem, selectCandidate } from './api'
 import { isDone, isNoMatch, isSent, isTodo, type Item, type Job, type TabKey } from './types'
 import { Layout, type View } from './components/Layout'
 import { SearchPage } from './components/SearchPage'
+import { useSearchHistory } from './hooks'
 import { OrderCard } from './components/OrderCard'
 import { Empty, Loading } from './components/Empty'
 import { Lightbox } from './components/Lightbox'
@@ -35,6 +36,7 @@ export default function App() {
   const [zoom, setZoom] = useState<string | null>(null)
   const [detail, setDetail] = useState<{ itemId: string; index: number } | null>(null)
   const [active, setActive] = useState(0)
+  const searchHistory = useSearchHistory() // lives here so a search survives switching tabs
   const [view, setView] = useState<View>(() => (window.location.hash === '#/search' ? 'search' : 'review'))
 
   const changeView = (next: View) => {
@@ -185,7 +187,7 @@ export default function App() {
   return (
     <Layout connected={connected} view={view} onView={changeView} right={view === 'review' ? jobPicker : undefined}>
       {view === 'search' ? (
-        <SearchPage onZoom={setZoom} />
+        <SearchPage history={searchHistory} onZoom={setZoom} />
       ) : (
         <>
       <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2">
