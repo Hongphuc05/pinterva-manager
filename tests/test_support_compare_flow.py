@@ -500,7 +500,10 @@ def test_backfill_stores_the_custom_configuration_of_pool_jobs(db_session):
 
 def test_selected_pair_message_includes_both_custom_configurations(db_session, setup):
     order = _order(db_session, setup, "DJ-CFG-NEW")
-    order.custom_config = {"original": [{"key": "Name", "value": "Bố <3"}], "translated_vn": [{"key": "Tên", "value": "Bố <3"}]}
+    order.custom_config = {
+        "original": [{"key": "Name", "value": "Bố <3"}],
+        "translated_vn": [{"key": "Tên", "value": "Bố <3"}, {"key": "extra_discount_ab", "value": "0"}],
+    }
     db_session.commit()
     item = _item(db_session, setup, order, "pending_review", is_duplicate=True)
     candidate = _candidate(db_session, item, 1)
@@ -517,6 +520,7 @@ def test_selected_pair_message_includes_both_custom_configurations(db_session, s
     config_text = next(c.args[1] for c in msg.call_args_list if "Cấu hình đơn mới" in c.args[1])
     assert "DJ-CFG-NEW" in config_text and "OLD-1" in config_text
     assert "<b>Tên</b>: Bố &lt;3" in config_text  # Vietnamese preferred, HTML-escaped
+    assert "extra_discount" not in config_text
     assert "<b>Color</b>: Black" in config_text  # falls back to the original entries
     # the confirmation buttons still come last
     assert "reply_markup" in msg.call_args_list[-1].kwargs
