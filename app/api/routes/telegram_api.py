@@ -252,6 +252,25 @@ def _start_support_confirmation(db: Session, chat_id: str, kind: str) -> None:
     db.commit()
 
 
+def _legacy_pair_message_ids(db: Session, chat_id: str, prompt_id: int | None) -> list[int]:
+    """Message ids of a pair sent before ids were stored (album x2, configuration, then this prompt).
+
+    Those four messages were sent back to back, so the three before the prompt belong to it, except
+    ids that are the prompt of another pair.
+    """
+    if prompt_id is None:
+        return []
+    others = {
+        (a.payload or {}).get("message_id")
+        for a in db.query(TelegramActionLog)
+        .filter(TelegramActionLog.action_type.in_((SUPPORT_COMPARE_ACTION_CONFIRM, SUPPORT_COMPARE_ACTION_REJECT)))
+        .all()
+        if str((a.payload or {}).get("chat_id") or "") == chat_id
+    }
+    prompt_id = int(prompt_id)
+    return [i for i in range(prompt_id - 3, prompt_id) if i > 0 and i not in others] + [prompt_id]
+
+
 def _supersede_sibling_fix_choices(db: Session, action_log: TelegramActionLog) -> None:
     """Ensure only one of the two note choices can release a Fix."""
     parent_action_id = str((action_log.payload or {}).get("parent_action_id") or "")
@@ -695,8 +714,8 @@ async def api_telegram_webhook(
             action_log.actor_id = support_user.id
             db.commit()
             payload = action_log.payload or {}
-            message_ids = payload.get("message_ids") or (
-                [payload["message_id"]] if payload.get("message_id") is not None else []
+            message_ids = payload.get("message_ids") or _legacy_pair_message_ids(
+                db, user_chat_id, payload.get("message_id")
             )
             # Keep the chat clean: remove the album and the prompt of the order Support just decided.
             if message_ids and delete_messages(user_chat_id, [int(i) for i in message_ids]):

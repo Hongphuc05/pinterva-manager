@@ -705,3 +705,20 @@ def test_search_rejects_bad_uploads_and_foreign_hosts(search_client):
     assert search_client.post("/review/search?top_k=0", files={"file": ("a.png", _png(), "image/png")}).status_code == 400
     outside = TestClient(search_client.app, base_url="http://evil.example")
     assert outside.post("/review/search", files={"file": ("a.png", _png(), "image/png")}).status_code == 403
+
+
+def test_pairs_sent_before_ids_were_stored_still_lose_their_album_and_configuration_message(client, db_session, setup):
+    order, tokens = _notify_selected_pair(db_session, setup, "DJ-LEGACY")
+    for action in db_session.query(TelegramActionLog).filter(TelegramActionLog.order_id == order.id):
+        action.payload = {k: v for k, v in action.payload.items() if k != "message_ids"}
+        action.payload = {**action.payload, "message_id": 20}  # legacy: only the prompt id was stored
+    other = TelegramActionLog(  # the previous pair's prompt (4 messages earlier) must not be touched
+        order_id=order.id, action_type="SUPPORT_COMPARE_CONFIRM_DUPLICATE", callback_token="prev",
+        payload={"chat_id": CHAT_ID, "message_id": 18}, status="executed",
+    )
+    db_session.add(other)
+    db_session.commit()
+
+    _, _, delete, _ = _press(client, f"scdup_yes:{tokens['SUPPORT_COMPARE_CONFIRM_DUPLICATE']}", delete_ok=True)
+
+    delete.assert_called_once_with(CHAT_ID, [17, 19, 20])
