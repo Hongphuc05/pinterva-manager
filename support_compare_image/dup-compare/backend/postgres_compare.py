@@ -71,6 +71,7 @@ class SourceOrder:
     printerval_status: str | None
     version: int | None
     image_url: str
+    custom_config: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -279,7 +280,7 @@ class PostgresComparisonRepository:
         query = f"""
             SELECT o.id, o.platform_id, o.external_order_id, o.product_name,
                    o.state, o.printerval_status, o.version,
-                   o.thumbnail_url, o.product_image_urls
+                   o.thumbnail_url, o.product_image_urls, o.custom_config
             FROM public.orders o
             WHERE {' AND '.join(clauses) if clauses else 'TRUE'}
             ORDER BY o.created_at ASC, o.id ASC
@@ -308,6 +309,7 @@ class PostgresComparisonRepository:
                     printerval_status=row[5],
                     version=row[6],
                     image_url=image_url,
+                    custom_config=row[9],
                 )
             )
         return result
@@ -531,9 +533,10 @@ class PostgresComparisonRepository:
             INSERT INTO {COMPARISON_SCHEMA}.historical_jobs
                 (id, source_system, source_job_id, external_order_id, status,
                  team_outsource, job_type, order_id, product_name, preview_url,
-                 preview_missing, source_payload_hash, ingest_source)
+                 preview_missing, source_payload_hash, ingest_source,
+                 custom_config, custom_config_synced_at)
             VALUES (%s, %s, %s, %s, %s, %s, 'all', %s, %s, %s, false, %s,
-                    'live_waiting')
+                    'live_waiting', %s, now())
             ON CONFLICT (source_system, source_job_id) DO UPDATE SET
                 external_order_id = EXCLUDED.external_order_id,
                 status = EXCLUDED.status,
@@ -544,6 +547,8 @@ class PostgresComparisonRepository:
                 preview_missing = false,
                 source_payload_hash = EXCLUDED.source_payload_hash,
                 ingest_source = EXCLUDED.ingest_source,
+                custom_config = EXCLUDED.custom_config,
+                custom_config_synced_at = now(),
                 last_seen_at = now()
             RETURNING id
             """,
@@ -558,6 +563,7 @@ class PostgresComparisonRepository:
                 product_name,
                 image_url,
                 payload_hash,
+                Jsonb(order.custom_config) if order.custom_config else None,
             ),
         ).fetchone()
         if not job_row:

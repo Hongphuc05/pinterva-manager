@@ -755,6 +755,19 @@ class TelegramConfigurationAudit(Base):
 SUPPORT_COMPARE_SCHEMA = "support_compare_image"
 
 
+class SupportHistoricalJob(Base):
+    """Read model of a pool entry (one historical/live job) in the Support image pool."""
+
+    __tablename__ = "historical_jobs"
+    __table_args__ = {"schema": SUPPORT_COMPARE_SCHEMA}
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    source_system: Mapped[str] = mapped_column(String(32), nullable=False)
+    external_order_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    custom_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    custom_config_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class SupportCompareRun(Base):
     """Read model for a database-backed duplicate comparison run."""
 

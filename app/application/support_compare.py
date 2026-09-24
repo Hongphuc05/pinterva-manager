@@ -17,6 +17,7 @@ from app.adapters.db.models import (
     SupportCompareItem,
     SupportCompareJob,
     SupportCompareRun,
+    SupportHistoricalJob,
     TelegramActionLog,
     User,
 )
@@ -338,6 +339,66 @@ def _caption_for_old(session: Session, candidate: SupportCompareCandidate) -> st
     )
 
 
+_CONFIG_VALUE_LIMIT = 300
+_CONFIG_BLOCK_LIMIT = 1700
+
+
+def format_custom_config(config: dict | None) -> str:
+    """Telegram-HTML lines for an order's custom configuration (Vietnamese if present)."""
+    if not isinstance(config, dict):
+        return "<i>Không có cấu hình</i>"
+    entries = config.get("translated_vn") or config.get("original") or []
+    lines: list[str] = []
+    total = 0
+    for entry in entries:
+        if not isinstance(entry, dict) or not entry.get("key"):
+            continue
+        value = str(entry.get("value") or "").strip()
+        if len(value) > _CONFIG_VALUE_LIMIT:
+            value = value[:_CONFIG_VALUE_LIMIT] + "…"
+        line = f"• <b>{escape(str(entry['key']))}</b>: {escape(value)}"
+        if total + len(line) > _CONFIG_BLOCK_LIMIT:
+            lines.append("…")
+            break
+        lines.append(line)
+        total += len(line) + 1
+    return "\n".join(lines) or "<i>Không có cấu hình</i>"
+
+
+def _config_for_new(session: Session, item: SupportCompareItem) -> dict | None:
+    order = session.get(Order, item.order_id)
+    return order.custom_config if order is not None else None
+
+
+def _config_for_old(session: Session, candidate: SupportCompareCandidate, platform_id: uuid.UUID) -> dict | None:
+    """Prefer the tracked order (fresher), then the pool entry's stored configuration."""
+    if candidate.matched_external_order_id:
+        order = (
+            session.query(Order)
+            .filter(
+                Order.platform_id == platform_id,
+                Order.external_order_id == candidate.matched_external_order_id,
+            )
+            .first()
+        )
+        if order is not None and order.custom_config:
+            return order.custom_config
+    if candidate.historical_job_id is not None:
+        job = session.get(SupportHistoricalJob, candidate.historical_job_id)
+        if job is not None:
+            return job.custom_config
+    return None
+
+
+def _config_message(session: Session, item: SupportCompareItem, candidate: SupportCompareCandidate) -> str:
+    return (
+        f"🧩 <b>Cấu hình đơn mới {escape(item.external_order_id)}</b>\n"
+        f"{format_custom_config(_config_for_new(session, item))}\n\n"
+        f"🧩 <b>Cấu hình đơn cũ {escape(candidate.matched_external_order_id or 'không rõ')}</b>\n"
+        f"{format_custom_config(_config_for_old(session, candidate, item.platform_id))}"
+    )
+
+
 def _keyboard(confirm_token: str, reject_token: str) -> dict:
     return {
         "inline_keyboard": [
@@ -448,6 +509,13 @@ def notify_duplicate_candidate(session: Session, candidate_id: uuid.UUID) -> boo
                 if new_message is None or old_message is None:
                     logger.warning("failed to deliver duplicate candidate %s to %s", candidate.id, chat_id)
                     continue
+
+            try:
+                config_text = _config_message(session, item, candidate)
+                if send_message(chat_id, config_text) is None:
+                    logger.warning("custom configuration message for %s was not delivered", item.external_order_id)
+            except Exception:
+                logger.exception("could not send custom configuration for %s", item.external_order_id)
 
             prompt = send_message(
                 chat_id,

@@ -270,6 +270,13 @@ def _parse_custom_config(sku_data: dict[str, Any] | None) -> CustomConfig | None
     return CustomConfig(original=original, translated_vn=translated)
 
 
+def extract_custom_config(row: dict[str, Any]) -> dict[str, Any] | None:
+    """The custom configuration of a raw `design-job/find` row, as stored in
+    ``Order.custom_config`` (``{"original": [...], "translated_vn": [...]}``)."""
+    config = _parse_custom_config(_first_sku_data(_meta_data(row)))
+    return config.model_dump() if config else None
+
+
 def normalize_order_custom_config_and_sources(
     custom_config: dict[str, Any] | None,
     source_files: list[dict[str, Any]] | None,

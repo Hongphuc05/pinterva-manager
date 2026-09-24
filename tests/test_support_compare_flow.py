@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -338,6 +339,7 @@ def test_worker_repository_marks_review_status_skips_compared_orders_and_promote
 
     order = _order(db_session, setup, "DJ-WORKER")
     order.thumbnail_url = "https://example.test/worker.png"
+    order.custom_config = {"original": [{"key": "Name", "value": "Ann"}], "translated_vn": []}
     db_session.commit()
 
     with psycopg.connect(TEST_DATABASE_URL.replace("postgresql+psycopg://", "postgresql://")) as conn:
@@ -377,6 +379,13 @@ def test_worker_repository_marks_review_status_skips_compared_orders_and_promote
         )
     ).scalar_one()
     assert promoted == 1
+    stored = db_session.execute(
+        text(
+            "SELECT custom_config, custom_config_synced_at FROM support_compare_image.historical_jobs "
+            "WHERE external_order_id = 'DJ-WORKER'"
+        )
+    ).one()
+    assert stored.custom_config["original"][0]["value"] == "Ann" and stored.custom_config_synced_at is not None
 
 
 def test_run_comparison_promotes_the_whole_batch_only_after_every_order_is_compared(
@@ -431,3 +440,83 @@ def test_run_comparison_promotes_the_whole_batch_only_after_every_order_is_compa
     # finishes before the first order is added to the pool.
     assert calls == ["compare"] * 3 + ["promote"] * 3
     assert count_handleable_orders(db_session, platform_id=setup.platform.id) == 3
+
+
+def _seed_pool_job(db_session, code: str, config=None) -> uuid.UUID:
+    job_id = uuid.uuid4()
+    db_session.execute(
+        text(
+            "INSERT INTO support_compare_image.historical_jobs "
+            "(id, source_system, source_job_id, external_order_id, status, team_outsource, job_type, product_name, custom_config) "
+            "VALUES (:id, 'printerval', :code, :code, 'done', 'team', 'all', 'Áo', CAST(:cfg AS jsonb))"
+        ),
+        {"id": job_id, "code": code, "cfg": json.dumps(config) if config else None},
+    )
+    db_session.commit()
+    return job_id
+
+
+def _find_row(job_id: int, configurations: dict | None) -> dict:
+    sku = {"configurations": json.dumps(configurations)} if configurations else {}
+    return {"id": job_id, "meta_data": json.dumps({"product_skus": {"1": sku}})}
+
+
+class _FakeClient:
+    def __init__(self, pages: dict[tuple[str, int], list[dict]]):
+        self.pages = pages
+
+    def discover_page(self, *, status, page_size, page_id):
+        return SimpleNamespace(orders=self.pages.get((status, page_id), []))
+
+
+def test_backfill_stores_the_custom_configuration_of_pool_jobs(db_session):
+    from app.application.historical_config_backfill import backfill
+
+    with_cfg = _seed_pool_job(db_session, "DJ111")
+    without_cfg = _seed_pool_job(db_session, "DJ222")
+    untouched = _seed_pool_job(db_session, "DJ999")
+    client = _FakeClient({
+        ("done", 0): [_find_row(111, {"Color Choice": "Black", "Name": "Anh"}), _find_row(222, None)],
+        ("fix", 0): [_find_row(555, {"x": "y"})],  # not in the pool: ignored
+    })
+
+    dry = backfill(db_session, client, dry_run=True, sleep=lambda _: None, progress=lambda _: None)
+    assert dry["rows"] == 3 and dry["with_config"] == 2
+    assert db_session.execute(text("SELECT count(*) FROM support_compare_image.historical_jobs WHERE custom_config_synced_at IS NOT NULL")).scalar_one() == 0
+
+    stats = backfill(db_session, client, sleep=lambda _: None, progress=lambda _: None)
+    assert stats == {"pages": 2, "rows": 3, "with_config": 2}
+    rows = {
+        r.external_order_id: r
+        for r in db_session.execute(text("SELECT external_order_id, custom_config, custom_config_synced_at FROM support_compare_image.historical_jobs"))
+    }
+    entries = {e["key"].lower(): e["value"] for e in rows["DJ111"].custom_config["original"]}
+    assert entries == {"color choice": "Black", "name": "Anh"}
+    assert rows["DJ111"].custom_config_synced_at is not None
+    assert rows["DJ222"].custom_config is None and rows["DJ222"].custom_config_synced_at is not None  # looked up, none
+    assert rows["DJ999"].custom_config_synced_at is None  # never returned by Printerval
+    assert with_cfg and without_cfg and untouched
+
+
+def test_selected_pair_message_includes_both_custom_configurations(db_session, setup):
+    order = _order(db_session, setup, "DJ-CFG-NEW")
+    order.custom_config = {"original": [{"key": "Name", "value": "Bố <3"}], "translated_vn": [{"key": "Tên", "value": "Bố <3"}]}
+    db_session.commit()
+    item = _item(db_session, setup, order, "pending_review", is_duplicate=True)
+    candidate = _candidate(db_session, item, 1)
+    candidate.historical_job_id = _seed_pool_job(
+        db_session, "OLD-1", {"original": [{"key": "Color", "value": "Black"}], "translated_vn": []}
+    )
+    item.review_status, item.selected_candidate_id, item.reviewed_at = "selected_duplicate", candidate.id, datetime.now(UTC)
+    db_session.commit()
+
+    with patch("app.application.support_compare.send_media_group", return_value=[{}]), \
+            patch("app.application.support_compare.send_message", return_value={"message_id": 7}) as msg:
+        assert notify_pending_duplicate_candidates(db_session) == 1
+
+    config_text = next(c.args[1] for c in msg.call_args_list if "Cấu hình đơn mới" in c.args[1])
+    assert "DJ-CFG-NEW" in config_text and "OLD-1" in config_text
+    assert "<b>Tên</b>: Bố &lt;3" in config_text  # Vietnamese preferred, HTML-escaped
+    assert "<b>Color</b>: Black" in config_text  # falls back to the original entries
+    # the confirmation buttons still come last
+    assert "reply_markup" in msg.call_args_list[-1].kwargs
