@@ -775,3 +775,29 @@ def test_move_card_to_designer_enqueues_printerval_doing_sync(client, db_session
         assert delayed_requests[0] == str(req.id)
     finally:
         del client.app.dependency_overrides[get_current_platform_id]
+
+
+def test_support_can_classify_unchecked_doing_order_on_web(client, db_session):
+    platform = _platform(db_session)
+    _, headers = _login(client, db_session, "support", "support-doing-check-user", platform.id)
+    doing = Order(
+        external_order_id="ORD-WEB-DOING",
+        platform_id=platform.id,
+        work_domain="standard",
+        duplicate_check_status="uncheck",
+        state="IN_PROGRESS",
+    )
+    db_session.add(doing)
+    db_session.commit()
+    client.app.dependency_overrides[get_current_platform_id] = lambda: platform.id
+    try:
+        res = client.post(
+            "/api/orders/duplicate-check-status",
+            json={"order_ids": [str(doing.id)], "status": "non_duplicate"},
+            headers=headers,
+        )
+    finally:
+        client.app.dependency_overrides.pop(get_current_platform_id, None)
+    assert res.status_code == 200
+    db_session.refresh(doing)
+    assert doing.duplicate_check_status == "non_duplicate"

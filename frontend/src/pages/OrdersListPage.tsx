@@ -126,6 +126,14 @@ function isSupportClassificationEditable(order: Pick<OrderSummary, 'state' | 'pl
   return SUPPORT_CLASSIFICATION_STATES.has(state) || externalStatus === 'WAITING'
 }
 
+// Support may classify an unchecked order in Waiting or Doing on the web; a
+// classified Doing order stays read-only (the backend enforces the same rule).
+function canSupportClassify(order: Pick<OrderSummary, 'state' | 'platform_status' | 'duplicate_check_status'>) {
+  if (isSupportClassificationEditable(order)) return true
+  const unchecked = !order.duplicate_check_status || order.duplicate_check_status === 'uncheck'
+  return unchecked && isSupportDoingOrder(order)
+}
+
 function isSupportDoingOrder(order: Pick<OrderSummary, 'state' | 'platform_status'>) {
   return SUPPORT_READ_ONLY_DOING_STATES.has((order.state || '').toUpperCase()) ||
     (order.platform_status || '').toUpperCase() === 'DOING'
@@ -591,7 +599,7 @@ export function OrdersListPage() {
 
   function handleSelectAll(checked: boolean) {
     const pageOrders = paginate(filteredOrders, currentPage).filter(
-      (order) => !isSupport || isSupportClassificationEditable(order),
+      (order) => !isSupport || canSupportClassify(order),
     )
     if (checked) {
       setSelectedOrderIds(pageOrders.map((o) => o.id))
@@ -661,7 +669,7 @@ export function OrdersListPage() {
     const eligibleOrderIds = isSupport
       ? orderIds.filter((orderId) => {
           const order = orders.find((item) => item.id === orderId)
-          return order !== undefined && isSupportClassificationEditable(order)
+          return order !== undefined && canSupportClassify(order)
         })
       : orderIds
     if (eligibleOrderIds.length === 0) return
@@ -2607,11 +2615,11 @@ export function OrdersListPage() {
                       type="checkbox"
                       checked={(() => {
                         const selectableOrders = paginatedOrders.filter(
-                          (order) => !isSupport || isSupportClassificationEditable(order),
+                          (order) => !isSupport || canSupportClassify(order),
                         )
                         return selectableOrders.length > 0 && selectableOrders.every((o) => selectedOrderIds.includes(o.id))
                       })()}
-                      disabled={isSupport && !paginatedOrders.some(isSupportClassificationEditable)}
+                      disabled={isSupport && !paginatedOrders.some(canSupportClassify)}
                       onChange={(e) => handleSelectAll(e.target.checked)}
                       className="rounded border-slate-300 text-[#0052CC] focus:ring-[#0052CC] h-3.5 w-3.5 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                     />
@@ -2755,14 +2763,14 @@ export function OrdersListPage() {
                             <input
                               type="checkbox"
                               checked={isSelected}
-                              disabled={isSupport && !isSupportClassificationEditable(o)}
+                              disabled={isSupport && !canSupportClassify(o)}
                               onClick={(e) => {
                                 if (e.shiftKey && lastSelectedIndex !== null) {
                                   const start = Math.min(lastSelectedIndex, idx)
                                   const end = Math.max(lastSelectedIndex, idx)
                                   const rangeIds = paginatedOrders
                                     .slice(start, end + 1)
-                                    .filter((item) => !isSupport || isSupportClassificationEditable(item))
+                                    .filter((item) => !isSupport || canSupportClassify(item))
                                     .map((item) => item.id)
                                   setSelectedOrderIds((prev) => Array.from(new Set([...prev, ...rangeIds])))
                                 } else {
@@ -2864,11 +2872,11 @@ export function OrdersListPage() {
                             </div>
                           </td>
 
-                          {/* 4. Support Actions: Waiting is web-editable; unverified Doing is Telegram-only */}
+                          {/* 4. Support Actions: unchecked Waiting/Doing orders are web-classifiable */}
                           <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center justify-end gap-2">
                               {supportTab === 'all' && (
-                                isSupportClassificationEditable(o) ? (
+                                canSupportClassify(o) ? (
                                   <>
                                     <button
                                       type="button"

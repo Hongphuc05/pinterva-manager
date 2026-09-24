@@ -686,7 +686,7 @@ describe('OrdersListPage', () => {
     expect(screen.queryByText(/Quét Đơn Mới/i)).not.toBeInTheDocument()
   })
 
-  it('shows unchecked Waiting and Doing in the comparison queue, with Doing read-only', async () => {
+  it('shows unchecked Waiting and Doing in the comparison queue, with Doing classifiable on the web', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn((url: string) => {
@@ -769,7 +769,9 @@ describe('OrdersListPage', () => {
     // Both unchecked Waiting and Doing feed the automated comparison queue.
     await waitFor(() => expect(screen.getByText('DJ-WAITING')).toBeInTheDocument())
     expect(screen.getByText('DJ-DOING')).toBeInTheDocument()
-    expect(screen.getByText('Chờ kiểm tra qua Telegram')).toBeInTheDocument()
+    // Support can classify both on the web; Doing is no longer Telegram-only.
+    expect(screen.queryByText('Chờ kiểm tra qua Telegram')).not.toBeInTheDocument()
+    expect(screen.getAllByTitle('Đánh dấu đơn này là Trùng lặp')).toHaveLength(2)
     // Classified non_duplicate order is NOT in Tab 1 ("Chưa kiểm tra")
     expect(screen.queryByText('DJ-REVIEW')).not.toBeInTheDocument()
 
