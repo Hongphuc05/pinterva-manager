@@ -1,108 +1,124 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ToastProvider } from '../context/ToastContext'
-import type { QueueState } from '../features/dupReview/types'
+import type { AgentStatus } from '../features/worker/agentClient'
+import type { QueueOverview } from '../features/worker/queueApi'
 import { SupportQueuePage } from './SupportQueuePage'
 
 vi.mock('../components/DashboardLayout', () => ({ DashboardLayout: ({ children }: { children: React.ReactNode }) => <>{children}</> }))
+
+const worker = vi.hoisted(() => ({ value: {} as Record<string, unknown> }))
+vi.mock('../features/worker/WorkerProvider', () => ({ useWorker: () => worker.value }))
 
 const api = vi.hoisted(() => ({ apiFetch: vi.fn() }))
 vi.mock('../api/client', async (importOriginal) => ({ ...(await importOriginal<typeof import('../api/client')>()), apiFetch: api.apiFetch }))
 
 const now = new Date().toISOString()
-const emptyQueue: QueueState = { workers: { ready: 0, paused: 0, offline: 0, devices: [] }, running: [], queued: [], searches: [], recent: [] }
 const job = (over: object) => ({
-  id: 'abcdef123456', status: 'queued', requested_count: 12, processed_count: 0, duplicate_count: 0, error_count: 0,
-  requested_by: 'Support A', worker_name: null, created_at: now, started_at: null, heartbeat_at: null, finished_at: null, last_error: null,
-  ...over,
+  id: 'abcdef123456', status: 'queued', requested_count: 12, remaining_count: 12, requested_by: 'Support A',
+  created_at: now, started_at: null, worker_name: null, ...over,
 })
+const agent = (over: Partial<AgentStatus> = {}): AgentStatus => ({ agent: 'support-compare', version: 1, name: 'MacBook Phúc', state: 'ready', device: 'mps', model_loaded: true, ...over })
 
-let queue: QueueState
-let calls: { path: string; init?: RequestInit }[]
+let queue: QueueOverview
+let orders: { orders: { order_id: string; external_order_id: string; product_name: string | null; thumbnail_url: string | null }[] }
+let calls: string[]
+const allow = vi.fn()
+const stop = vi.fn()
 
-const renderPage = (entry = '/support-queue') =>
-  render(<MemoryRouter initialEntries={[entry]}><ToastProvider><SupportQueuePage /></ToastProvider></MemoryRouter>)
+function setWorker(over: Record<string, unknown>) {
+  worker.value = { agent: null, probed: true, consent: null, busy: false, allow, decline: vi.fn(), stop, ...over }
+}
 
 beforeEach(() => {
-  queue = emptyQueue
+  queue = { waiting_jobs: 0, jobs: [], machines: { ready: 0, paused: 0, offline: 0 } }
+  orders = { orders: [] }
   calls = []
-  vi.spyOn(window, 'confirm').mockReturnValue(true)
-  api.apiFetch.mockReset().mockImplementation((path: string, init?: RequestInit) => {
-    calls.push({ path, init })
-    if (path === '/support-review/queue') return Promise.resolve(queue)
-    if (path === '/support-worker/devices/lookup') return Promise.resolve({ machine_name: 'MacBook Phúc', user_code: 'ABCD-2345' })
+  allow.mockReset()
+  stop.mockReset()
+  setWorker({})
+  api.apiFetch.mockReset().mockImplementation((path: string) => {
+    calls.push(path)
+    if (path === '/support-worker/queue') return Promise.resolve(queue)
+    if (path.startsWith('/support-worker/queue/jobs/')) return Promise.resolve({ id: 'abcdef123456', status: 'queued', requested_count: 12, ...orders })
     return Promise.resolve({})
   })
 })
 afterEach(() => vi.restoreAllMocks())
 
 describe('support queue page', () => {
-  it('warns when work is waiting but no machine is ready', async () => {
-    queue = { ...emptyQueue, queued: [job({ position: 1 })] }
-    renderPage()
-    expect(await screen.findByText(/chưa có máy Support nào sẵn sàng/)).toBeInTheDocument()
-    expect(screen.getByText('Job abcdef12')).toBeInTheDocument()
-    expect(screen.getByText('#1')).toBeInTheDocument()
-    expect(screen.getByText(/12 đơn/)).toBeInTheDocument()
-  })
-
-  it('shows a running job with its progress, the machine and the machines list', async () => {
+  it('shows how many jobs are waiting and lists them oldest first', async () => {
     queue = {
-      workers: { ready: 1, paused: 0, offline: 0, devices: [{ id: 'd1', machine_name: 'MacBook Phúc', state: 'busy', user_name: 'Support A', busy_with: 'job:x', last_seen_at: now, presence_at: now }] },
-      running: [job({ status: 'running', processed_count: 6, duplicate_count: 2, worker_name: 'MacBook Phúc', heartbeat_at: now })],
-      queued: [], searches: [], recent: [],
+      waiting_jobs: 2,
+      jobs: [job({}), job({ id: 'ffff00001111', status: 'running', remaining_count: 3, requested_count: 5, worker_name: 'MacBook Phúc' })],
+      machines: { ready: 1, paused: 0, offline: 0 },
     }
-    renderPage()
-    expect(await screen.findByRole('progressbar')).toHaveAttribute('aria-valuenow', '50')
-    expect(screen.getByText('6/12 đơn đã so')).toBeInTheDocument()
-    expect(screen.getByText('máy: MacBook Phúc')).toBeInTheDocument()
-    expect(screen.getByText('Đang chạy', { selector: 'span' })).toBeInTheDocument()
-    expect(screen.queryByText(/chưa có máy Support nào sẵn sàng/)).not.toBeInTheDocument()
+    render(<SupportQueuePage />)
+    await waitFor(() => expect(screen.getByTestId('waiting-jobs')).toHaveTextContent('2'))
+    const rows = screen.getAllByRole('listitem').filter((li) => within(li).queryByRole('button', { expanded: false }))
+    expect(within(rows[0]).getByText('12 đơn chờ kiểm tra')).toBeInTheDocument()
+    expect(within(rows[0]).getByText('Đang chờ')).toBeInTheDocument()
+    expect(within(rows[1]).getByText('3 đơn chờ kiểm tra')).toBeInTheDocument()
+    expect(within(rows[1]).getByText('Đang chạy')).toBeInTheDocument()
+    expect(within(rows[1]).getByText(/máy MacBook Phúc/)).toBeInTheDocument()
   })
 
-  it('lets the user allow a machine by its code and then reloads the queue', async () => {
-    renderPage('/support-queue?code=ABCD-2345')
-    expect(await screen.findByText('MacBook Phúc')).toBeInTheDocument()
-    expect(screen.getByText(/đăng xuất hoặc đóng web thì máy tự dừng/)).toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', { name: 'Cho phép' }))
-    await waitFor(() =>
-      expect(calls.some((c) => c.path === '/support-worker/devices/approve' && c.init?.body === JSON.stringify({ user_code: 'ABCD-2345' }))).toBe(true),
-    )
+  it('says so when nothing is waiting', async () => {
+    render(<SupportQueuePage />)
+    expect(await screen.findByText('Không có job nào đang đợi.')).toBeInTheDocument()
+    expect(screen.getByTestId('waiting-jobs')).toHaveTextContent('0')
   })
 
-  it('looks the code up when it is typed instead of opened from the agent link', async () => {
-    renderPage()
-    await userEvent.type(await screen.findByLabelText(/Kết nối máy Support/), 'abcd2345')
-    await userEvent.click(screen.getByRole('button', { name: 'Kiểm tra mã' }))
-    expect(await screen.findByText('MacBook Phúc')).toBeInTheDocument()
-    expect(calls.find((c) => c.path === '/support-worker/devices/lookup')?.init?.body).toBe(JSON.stringify({ user_code: 'ABCD2345' }))
-  })
-
-  it('lets Support cancel a queued job after confirming', async () => {
-    queue = { ...emptyQueue, queued: [job({ position: 1 })] }
-    renderPage()
-    await userEvent.click(await screen.findByRole('button', { name: /Hủy/ }))
-    await waitFor(() => expect(calls.some((c) => c.path === '/support-review/jobs/abcdef123456/cancel' && c.init?.method === 'POST')).toBe(true))
-  })
-
-  it('lets Support stop a machine', async () => {
-    queue = { ...emptyQueue, workers: { ready: 1, paused: 0, offline: 0, devices: [{ id: 'd1', machine_name: 'MacBook Phúc', state: 'idle', user_name: 'Support B', busy_with: null, last_seen_at: now, presence_at: now }] } }
-    renderPage()
-    await userEvent.click(await screen.findByRole('button', { name: /Dừng máy/ }))
-    await waitFor(() => expect(calls.some((c) => c.path === '/support-worker/devices/d1/revoke' && c.init?.method === 'POST')).toBe(true))
-  })
-
-  it('lists image searches with their state and recent jobs with a link to review them', async () => {
-    queue = {
-      ...emptyQueue,
-      searches: [{ id: 's1', filename: 'cat.png', status: 'queued', requested_by: 'Support A', created_at: now, finished_at: null, last_error: null }],
-      recent: [job({ status: 'completed', processed_count: 12, duplicate_count: 3, finished_at: now })],
+  it('opens a job to show the orders still waiting for the duplicate check', async () => {
+    queue = { waiting_jobs: 1, jobs: [job({})], machines: { ready: 0, paused: 0, offline: 0 } }
+    orders = {
+      orders: [
+        { order_id: 'o1', external_order_id: 'DJ4048136', product_name: 'Áo Bố', thumbnail_url: 'https://cdn.test/a.png' },
+        { order_id: 'o2', external_order_id: 'DJ4048184', product_name: null, thumbnail_url: null },
+      ],
     }
-    renderPage()
-    const search = (await screen.findByText('cat.png')).closest('li') as HTMLElement
-    expect(within(search).getByText('đang chờ')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Job abcdef12' })).toHaveAttribute('href', '/duplicate-review?job=abcdef123456')
+    render(<SupportQueuePage />)
+    await userEvent.click(await screen.findByRole('button', { name: /12 đơn chờ kiểm tra/ }))
+    expect(await screen.findByText('DJ4048136')).toBeInTheDocument()
+    expect(screen.getByText('DJ4048184')).toBeInTheDocument()
+    expect(screen.getByText('Áo Bố')).toBeInTheDocument()
+    expect(calls).toContain('/support-worker/queue/jobs/abcdef123456/orders')
+  })
+
+  it('tells a job with nothing left to check', async () => {
+    queue = { waiting_jobs: 1, jobs: [job({ remaining_count: 0 })], machines: { ready: 0, paused: 0, offline: 0 } }
+    render(<SupportQueuePage />)
+    await userEvent.click(await screen.findByRole('button', { name: /0 đơn chờ kiểm tra/ }))
+    expect(await screen.findByText('Không còn đơn nào chờ kiểm tra trong job này.')).toBeInTheDocument()
+  })
+
+  it('offers to allow this machine when the agent is here but was not allowed yet', async () => {
+    setWorker({ agent: agent({ state: 'waiting' }), consent: 'no' })
+    render(<SupportQueuePage />)
+    expect(await screen.findByText('Bạn đã từ chối cho máy này chạy hàng đợi')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Cho phép máy này' }))
+    expect(allow).toHaveBeenCalled()
+  })
+
+  it('shows this machine running the queue and lets Support stop it', async () => {
+    setWorker({ agent: agent({ state: 'busy' }), consent: 'yes' })
+    render(<SupportQueuePage />)
+    expect(await screen.findByText('Máy này đang chạy hàng đợi')).toBeInTheDocument()
+    expect(screen.getByText(/MacBook Phúc · MPS/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Dừng máy này' }))
+    expect(stop).toHaveBeenCalled()
+  })
+
+  it('explains how to start the agent when none answers on this machine', async () => {
+    setWorker({ agent: null, probed: true })
+    render(<SupportQueuePage />)
+    expect(await screen.findByText('Máy này chưa chạy agent')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Cho phép/ })).not.toBeInTheDocument()
+  })
+
+  it('keeps working when the queue cannot be loaded', async () => {
+    api.apiFetch.mockRejectedValue(new Error('offline'))
+    render(<SupportQueuePage />)
+    expect(await screen.findByText(/Không tải được hàng đợi/)).toBeInTheDocument()
   })
 })

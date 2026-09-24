@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom'
-import { BarChart3, Columns3, ListChecks, ListOrdered, Menu, ScanSearch, UserCheck, WalletCards } from 'lucide-react'
+import { BarChart3, Columns3, ListChecks, ListOrdered, Menu, UserCheck, WalletCards } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 
 interface MobileBottomNavigationProps {
@@ -28,7 +28,6 @@ export function MobileBottomNavigation({ onOpenNavigation }: MobileBottomNavigat
     : user.role === 'support'
       ? [
           { label: 'Đơn hàng', path: '/orders', icon: ListOrdered },
-          { label: 'Duyệt trùng', path: '/duplicate-review', icon: ScanSearch },
           { label: 'Hàng đợi', path: '/support-queue', icon: ListChecks },
           { label: 'Tài chính', path: '/finance', icon: WalletCards },
         ]

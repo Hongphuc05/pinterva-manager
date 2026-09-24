@@ -99,10 +99,10 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 }
 
 /** Fetch a private binary asset with the same bearer/platform credentials as API data. */
-export async function apiFetchBlob(path: string): Promise<Blob> {
+export async function apiFetchBlob(path: string, extraHeaders: Record<string, string> = {}): Promise<Blob> {
   const token = localStorage.getItem('token')
   const activePlatformId = localStorage.getItem('activePlatformId')
-  const headers: Record<string, string> = {}
+  const headers: Record<string, string> = { ...extraHeaders }
   if (token) headers.Authorization = `Bearer ${token}`
   if (activePlatformId) headers['X-Platform-Id'] = activePlatformId
 

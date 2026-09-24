@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { apiFetchBlob } from '../../../api/client'
+import { reviewBlob } from '../access'
 
 // Third-party CDNs may block hotlinking, so images go through the API (/support-review/img), which
 // needs the bearer token: fetch them as blobs. A small pool keeps 100+ thumbnails from flooding it.
@@ -26,7 +26,7 @@ export function loadProxied(url: string): Promise<string> {
   if (!hit) {
     hit = acquire().then(async () => {
       try {
-        const blob = await apiFetchBlob(`/support-review/img?url=${encodeURIComponent(url)}`)
+        const blob = await reviewBlob(`/support-review/img?url=${encodeURIComponent(url)}`)
         return URL.createObjectURL(blob)
       } finally {
         release()

@@ -8,7 +8,7 @@ export const tones = {
   warn: 'bg-dup-warn/15 text-dup-warn',
   bad: 'bg-dup-bad/15 text-dup-bad',
   info: 'bg-dup-brand/15 text-dup-brand',
-  dim: 'bg-white/8 text-dup-dim',
+  dim: 'bg-slate-100 text-dup-dim',
 } as const
 
 export function Badge({ tone, children }: { tone: keyof typeof tones; children: ReactNode }) {

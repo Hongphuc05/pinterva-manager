@@ -1,17 +1,17 @@
 @import "tailwindcss";
 
-/* Dark palette of the duplicate-review pages (classes prefixed dup-, e.g. bg-dup-surface). */
+/* Palette of the duplicate-review area (classes prefixed dup-, e.g. bg-dup-surface): the site's light style. */
 @theme {
-  --color-dup-bg: #0d0f14;
-  --color-dup-surface: #14171d;
-  --color-dup-raised: #1b1f27;
-  --color-dup-line: #262b34;
-  --color-dup-fg: #e6e8ee;
-  --color-dup-dim: #8b93a3;
-  --color-dup-brand: #4f8cff;
-  --color-dup-ok: #3fb27f;
-  --color-dup-warn: #d9a441;
-  --color-dup-bad: #e5606b;
+  --color-dup-bg: #f8fafc;
+  --color-dup-surface: #ffffff;
+  --color-dup-raised: #f1f5f9;
+  --color-dup-line: #e2e8f0;
+  --color-dup-fg: #0f172a;
+  --color-dup-dim: #64748b;
+  --color-dup-brand: #0052cc;
+  --color-dup-ok: #059669;
+  --color-dup-warn: #b45309;
+  --color-dup-bad: #dc2626;
 }
 
 ::selection {

@@ -2,8 +2,10 @@
 # no database access) and computes only while a signed-in Support allows this machine on the web.
 #
 #   cp .env.agent.example .env.agent      # set SUPPORT_API_URL / SUPPORT_WEB_URL / AGENT_NAME
-#   docker compose up -d --build          # then: docker compose logs -f agent
-#   # the log prints a code -> open the link (web: Hàng đợi) and press "Cho phép"
+#   docker compose up -d --build          # runs in the background and restarts with Docker
+#   # then just log in on the web from this machine: it asks "Cho phép dùng máy này?" -> Có
+#
+# The agent listens on 127.0.0.1:8765 only, for the web page open on this same machine.
 #
 # 1-1 compare tool (optional):  docker compose --profile tools up -d compare  -> http://127.0.0.1:8000
 name: dup-compare-local
@@ -23,11 +25,9 @@ services:
     <<: *app
     env_file: .env.agent
     environment:
-      AGENT_HOME: /agent-data
-    volumes:
-      - ./dup-compare:/app/dup-compare:ro
-      - hf-cache:/models
-      - agent-data:/agent-data
+      AGENT_BIND: 0.0.0.0   # inside the container; the port below is published on localhost only
+    ports:
+      - "127.0.0.1:8765:8765"
     command: python agent.py
     restart: unless-stopped
 
@@ -40,4 +40,3 @@ services:
 
 volumes:
   hf-cache:
-  agent-data:

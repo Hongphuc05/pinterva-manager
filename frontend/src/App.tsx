@@ -17,6 +17,8 @@ import { PlatformHubPage } from './pages/PlatformHubPage'
 import { TelegramManagementPage } from './pages/TelegramManagementPage'
 import { DuplicateReviewPage } from './pages/DuplicateReviewPage'
 import { SupportQueuePage } from './pages/SupportQueuePage'
+import { WorkerProvider } from './features/worker/WorkerProvider'
+import { ConsentDialog } from './features/worker/ConsentDialog'
 
 function App() {
   return (
@@ -25,6 +27,7 @@ function App() {
         <PlatformProvider>
           <ToastProvider>
             <GallerySyncProvider>
+              <WorkerProvider ConsentDialog={ConsentDialog}>
               <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route
@@ -137,6 +140,7 @@ function App() {
           />
           <Route path="/" element={<Navigate to="/orders" replace />} />
         </Routes>
+              </WorkerProvider>
             </GallerySyncProvider>
           </ToastProvider>
         </PlatformProvider>

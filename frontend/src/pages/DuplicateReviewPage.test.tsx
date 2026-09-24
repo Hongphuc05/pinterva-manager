@@ -2,13 +2,12 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { LOCKED_EVENT, getReviewToken, setReviewToken } from '../features/dupReview/access'
 import { ApiError } from '../api/client'
 import { ToastProvider } from '../context/ToastContext'
 import type { Item, Job } from '../features/dupReview/types'
 import { clearProxiedCache } from '../features/dupReview/components/ProxiedImg'
 import { DuplicateReviewPage } from './DuplicateReviewPage'
-
-vi.mock('../components/DashboardLayout', () => ({ DashboardLayout: ({ children }: { children: React.ReactNode }) => <>{children}</> }))
 
 const mocks = vi.hoisted(() => ({ apiFetch: vi.fn(), apiFetchBlob: vi.fn() }))
 vi.mock('../api/client', async (importOriginal) => ({
@@ -49,6 +48,8 @@ const searchResult = (code: string) => ({
   }],
 })
 
+let access: { has_password: boolean; unlocked: boolean }
+
 function renderPage(entry = '/duplicate-review') {
   return render(
     <MemoryRouter initialEntries={[entry]}>
@@ -60,6 +61,9 @@ function renderPage(entry = '/duplicate-review') {
 beforeEach(() => {
   clearProxiedCache()
   localStorage.clear()
+  sessionStorage.clear()
+  setReviewToken('tok')
+  access = { has_password: true, unlocked: true }
   calls = []
   searchN = 0
   items = [item(1, 'pending_review'), item(2, 'selected_duplicate', 'i2-c2'), item(3, 'no_match')]
@@ -68,7 +72,8 @@ beforeEach(() => {
   mocks.apiFetchBlob.mockReset().mockResolvedValue(new Blob(['x']))
   mocks.apiFetch.mockReset().mockImplementation((path: string, init?: RequestInit) => {
     calls.push({ path, init })
-    if (path === '/support-review/jobs') return Promise.resolve({ jobs: [job] })
+    if (path === '/support-review/access') return Promise.resolve(access)
+    if (path.startsWith('/support-review/jobs?')) return Promise.resolve({ jobs: [job] })
     if (path === '/support-review/jobs/j1') return Promise.resolve({ job, items })
     if (path.startsWith('/support-review/search?')) return Promise.resolve({ id: `s${++searchN}` })
     if (path.startsWith('/support-review/search/s')) {
@@ -129,7 +134,7 @@ describe('duplicate review page', () => {
     await waitFor(() => expect(within(card).getByText('Không tải được ảnh')).toBeInTheDocument())
     expect(within(card).getByRole('link', { name: 'Mở link gốc' })).toHaveAttribute('href', 'https://img.test/11.png')
     expect(within(card).getByAltText('OLD-12')).toHaveAttribute('src', expect.stringMatching(/^blob:img-/))
-    expect(mocks.apiFetchBlob).toHaveBeenCalledWith('/support-review/img?url=' + encodeURIComponent('https://img.test/12.png'))
+    expect(mocks.apiFetchBlob).toHaveBeenCalledWith('/support-review/img?url=' + encodeURIComponent('https://img.test/12.png'), { 'X-Review-Token': 'tok' })
   })
 
   it('opens a side-by-side detail modal, walks the top list with the arrows and closes with Esc', async () => {
@@ -192,22 +197,24 @@ describe('duplicate review page', () => {
 
   it('says so while no machine has picked the search up yet', async () => {
     mocks.apiFetch.mockImplementation((path: string) => {
-      if (path === '/support-review/jobs') return Promise.resolve({ jobs: [] })
+      if (path === '/support-review/access') return Promise.resolve(access)
+      if (path.startsWith('/support-review/jobs?')) return Promise.resolve({ jobs: [] })
       if (path.startsWith('/support-review/search?')) return Promise.resolve({ id: 's1' })
       return Promise.resolve({ id: 's1', status: 'queued', result: null, error: null })
     })
-    renderPage('/duplicate-review?view=search')
+    renderPage('/duplicate-review?tab=search')
     await userEvent.upload(await screen.findByTestId('search-file'), new File(['x'], 'wait.png', { type: 'image/png' }))
     expect(await screen.findByText(/Đang chờ một máy Support nhận việc/)).toBeInTheDocument()
   })
 
   it('shows the machine error when a search fails', async () => {
     mocks.apiFetch.mockImplementation((path: string) => {
-      if (path === '/support-review/jobs') return Promise.resolve({ jobs: [] })
+      if (path === '/support-review/access') return Promise.resolve(access)
+      if (path.startsWith('/support-review/jobs?')) return Promise.resolve({ jobs: [] })
       if (path.startsWith('/support-review/search?')) return Promise.resolve({ id: 's1' })
       return Promise.resolve({ id: 's1', status: 'failed', result: null, error: 'Pool chưa có embedding' })
     })
-    renderPage('/duplicate-review?view=search')
+    renderPage('/duplicate-review?tab=search')
     await userEvent.upload(await screen.findByTestId('search-file'), new File(['x'], 'bad.png', { type: 'image/png' }))
     expect(await screen.findByText('Pool chưa có embedding')).toBeInTheDocument()
   })
@@ -231,7 +238,7 @@ describe('duplicate review page', () => {
     expect(screen.queryByText('DJ-S2')).not.toBeInTheDocument()
 
     view.unmount()
-    renderPage('/duplicate-review?view=search')
+    renderPage('/duplicate-review?tab=search')
     expect(await screen.findByText('Lịch sử (2)')).toBeInTheDocument()
     expect(screen.getByText('DJ-S2')).toBeInTheDocument()
 
@@ -246,9 +253,138 @@ describe('duplicate review page', () => {
     expect(calls.some((c) => c.path === '/support-review/jobs/j1')).toBe(true)
   })
 
-  it('shows an error state when the API cannot be reached', async () => {
-    mocks.apiFetch.mockRejectedValue(new ApiError(500, 'Máy chủ lỗi'))
+  it('shows an error state when the jobs cannot be loaded', async () => {
+    mocks.apiFetch.mockImplementation((path: string) =>
+      path === '/support-review/access' ? Promise.resolve(access) : Promise.reject(new ApiError(500, 'Máy chủ lỗi')),
+    )
     renderPage()
     expect(await screen.findByText('Máy chủ lỗi')).toBeInTheDocument()
+  })
+
+  it('lists the jobs on the left and switches job with a click', async () => {
+    const older = { ...job, id: 'j0', created_at: '2026-09-23T08:00:00Z', processed_count: 1, requested_count: 1, duplicate_count: 0 }
+    mocks.apiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      calls.push({ path, init })
+      if (path === '/support-review/access') return Promise.resolve(access)
+      if (path.startsWith('/support-review/jobs?')) return Promise.resolve({ jobs: [job, older] })
+      if (path === '/support-review/jobs/j1') return Promise.resolve({ job, items })
+      if (path === '/support-review/jobs/j0') return Promise.resolve({ job: older, items: [] })
+      return Promise.reject(new Error(`unexpected ${path}`))
+    })
+    renderPage()
+    await screen.findByTestId('order-DJ0001')
+    const rail = screen.getByRole('complementary', { name: 'Danh sách job' })
+    expect(within(rail).getAllByRole('button', { name: /đơn/ })).toHaveLength(2)
+    await userEvent.click(within(rail).getAllByRole('button', { name: /đơn/ })[1])
+    await waitFor(() => expect(calls.some((c) => c.path === '/support-review/jobs/j0')).toBe(true))
+    expect(await screen.findByText('Không có đơn nào trong mục này')).toBeInTheDocument()
+  })
+})
+
+describe('hidden area password', () => {
+  it('asks for the password first and opens the console with it', async () => {
+    setReviewToken(null)
+    access = { has_password: true, unlocked: false }
+    mocks.apiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      calls.push({ path, init })
+      if (path === '/support-review/access') return Promise.resolve(access)
+      if (path === '/support-review/access/unlock') return Promise.resolve({ token: 'fresh' })
+      if (path.startsWith('/support-review/jobs?')) return Promise.resolve({ jobs: [job] })
+      if (path === '/support-review/jobs/j1') return Promise.resolve({ job, items })
+      return Promise.reject(new Error(`unexpected ${path}`))
+    })
+    renderPage()
+    await userEvent.type(await screen.findByLabelText('Mật khẩu'), 'secret1')
+    await userEvent.click(screen.getByRole('button', { name: 'Mở' }))
+    expect(await screen.findByTestId('order-DJ0001')).toBeInTheDocument()
+    expect(getReviewToken()).toBe('fresh')
+    expect(calls.find((c) => c.path === '/support-review/access/unlock')?.init?.body).toBe(JSON.stringify({ password: 'secret1' }))
+    expect(screen.queryByText('Nhập mật khẩu để mở')).not.toBeInTheDocument()
+  })
+
+  it('shows the server message on a wrong password and stays locked', async () => {
+    setReviewToken(null)
+    access = { has_password: true, unlocked: false }
+    mocks.apiFetch.mockImplementation((path: string) =>
+      path === '/support-review/access' ? Promise.resolve(access) : Promise.reject(new ApiError(403, 'Mật khẩu không đúng.')),
+    )
+    renderPage()
+    await userEvent.type(await screen.findByLabelText('Mật khẩu'), 'nope')
+    await userEvent.click(screen.getByRole('button', { name: 'Mở' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Mật khẩu không đúng.')
+    expect(getReviewToken()).toBeNull()
+  })
+
+  it('the first visit chooses the password (twice) before entering', async () => {
+    setReviewToken(null)
+    access = { has_password: false, unlocked: false }
+    mocks.apiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      calls.push({ path, init })
+      if (path === '/support-review/access') return Promise.resolve(access)
+      if (path === '/support-review/access/setup') return Promise.resolve({ token: 'first' })
+      if (path.startsWith('/support-review/jobs?')) return Promise.resolve({ jobs: [] })
+      return Promise.reject(new Error(`unexpected ${path}`))
+    })
+    renderPage()
+    await userEvent.type(await screen.findByLabelText('Mật khẩu mới'), 'secret1')
+    await userEvent.type(screen.getByLabelText('Nhập lại mật khẩu'), 'different')
+    await userEvent.click(screen.getByRole('button', { name: 'Đặt mật khẩu và vào' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('chưa giống nhau')
+    expect(calls.some((c) => c.path === '/support-review/access/setup')).toBe(false)
+
+    await userEvent.clear(screen.getByLabelText('Nhập lại mật khẩu'))
+    await userEvent.type(screen.getByLabelText('Nhập lại mật khẩu'), 'secret1')
+    await userEvent.click(screen.getByRole('button', { name: 'Đặt mật khẩu và vào' }))
+    expect(await screen.findByText('Chưa có job nào')).toBeInTheDocument()
+    expect(getReviewToken()).toBe('first')
+  })
+
+  it('locks again from the header button and when the API says the session is locked', async () => {
+    renderPage()
+    await screen.findByTestId('order-DJ0001')
+    await userEvent.click(screen.getByRole('button', { name: /^Khóa$/ }))
+    expect(await screen.findByText('Nhập mật khẩu để mở')).toBeInTheDocument()
+    expect(getReviewToken()).toBeNull()
+  })
+
+  it('goes back to the password screen when a request is refused as locked', async () => {
+    renderPage()
+    await screen.findByTestId('order-DJ0001')
+    window.dispatchEvent(new Event(LOCKED_EVENT))
+    expect(await screen.findByText('Nhập mật khẩu để mở')).toBeInTheDocument()
+  })
+
+  it('changes the password from Cài đặt and keeps the new token', async () => {
+    mocks.apiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      calls.push({ path, init })
+      if (path === '/support-review/access') return Promise.resolve(access)
+      if (path === '/support-review/access/change') return Promise.resolve({ token: 'renewed' })
+      if (path.startsWith('/support-review/jobs?')) return Promise.resolve({ jobs: [] })
+      return Promise.reject(new Error(`unexpected ${path}`))
+    })
+    renderPage('/duplicate-review?tab=settings')
+    await userEvent.type(await screen.findByLabelText('Mật khẩu hiện tại'), 'secret1')
+    await userEvent.type(screen.getByLabelText('Mật khẩu mới'), 'newpass2')
+    await userEvent.type(screen.getByLabelText('Nhập lại mật khẩu mới'), 'newpass2')
+    await userEvent.click(screen.getByRole('button', { name: 'Đổi mật khẩu' }))
+    await waitFor(() => expect(getReviewToken()).toBe('renewed'))
+    expect(calls.find((c) => c.path === '/support-review/access/change')?.init?.body).toBe(
+      JSON.stringify({ current_password: 'secret1', new_password: 'newpass2' }),
+    )
+  })
+
+  it('sends the review token with every review request', async () => {
+    renderPage()
+    await screen.findByTestId('order-DJ0001')
+    const withHeaders = mocks.apiFetch.mock.calls.filter(([path]) => String(path).startsWith('/support-review/jobs'))
+    expect(withHeaders.length).toBeGreaterThan(0)
+    for (const [, init] of withHeaders) expect((init as RequestInit).headers).toMatchObject({ 'X-Review-Token': 'tok' })
+  })
+
+  it('lists every job in the history tab and opens one for review', async () => {
+    renderPage('/duplicate-review?tab=jobs')
+    const row = (await screen.findByText('3/3')).closest('tr') as HTMLElement
+    await userEvent.click(within(row).getByRole('button', { name: 'Mở duyệt' }))
+    expect(await screen.findByTestId('order-DJ0001')).toBeInTheDocument()
   })
 })
