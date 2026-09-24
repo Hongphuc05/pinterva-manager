@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
@@ -85,6 +85,16 @@ describe('review page', () => {
     await waitFor(() => expect(calls.some((c) => c.url === '/review/items/i1/select' && c.init?.body === JSON.stringify({ candidate_id: 'i1-c2' }))).toBe(true))
     await userEvent.keyboard('x')
     await waitFor(() => expect(calls.some((c) => c.url === '/review/items/i1/reject')).toBe(true))
+  })
+
+  it('loads images through the local proxy and falls back to a link when one cannot load', async () => {
+    renderApp()
+    const card = await screen.findByTestId('order-DJ0001')
+    const img = within(card).getByAltText('OLD-11')
+    expect(img).toHaveAttribute('src', '/review/img?url=' + encodeURIComponent('https://img.test/11.png'))
+    fireEvent.error(img)
+    expect(within(card).getByText('Không tải được ảnh')).toBeInTheDocument()
+    expect(within(card).getByRole('link', { name: 'Mở link gốc' })).toHaveAttribute('href', 'https://img.test/11.png')
   })
 
   it('marks the model wrong', async () => {

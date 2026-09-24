@@ -13,12 +13,17 @@ Every item, candidate and message carries the order code (``external_order_id``)
 """
 from __future__ import annotations
 
+import ipaddress
 import os
+import socket
+import urllib.error
+import urllib.request
 import uuid
 from typing import Any, Optional
+from urllib.parse import urljoin, urlparse
 
 import psycopg
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
 S = "support_compare_image"
@@ -45,6 +50,58 @@ def _connect() -> psycopg.Connection:
     if not url:
         raise HTTPException(503, "Thiếu biến môi trường DATABASE_URL (nạp .env.local-worker)")
     return psycopg.connect(url)
+
+
+IMAGE_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+)
+MAX_IMAGE_BYTES = 25_000_000
+
+
+def _is_public_host(host: str) -> bool:
+    """Image URLs come from customer data: never let the proxy reach private/loopback addresses."""
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        return False
+    return bool(infos) and all(ipaddress.ip_address(i[4][0]).is_global for i in infos)
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):  # follow redirects by hand, validating each hop
+        return None
+
+
+def _fetch_image(url: str, hops: int = 3) -> tuple[bytes, str]:
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname or not _is_public_host(parsed.hostname):
+        raise HTTPException(400, "URL ảnh không hợp lệ")
+    opener = urllib.request.build_opener(_NoRedirect)
+    req = urllib.request.Request(url, headers={"User-Agent": IMAGE_USER_AGENT, "Accept": "image/*,*/*;q=0.8"})
+    try:
+        with opener.open(req, timeout=15) as resp:
+            content_type = resp.headers.get_content_type()
+            if not content_type.startswith("image/"):
+                raise HTTPException(415, "Không phải ảnh")
+            data = resp.read(MAX_IMAGE_BYTES + 1)
+    except urllib.error.HTTPError as exc:
+        if exc.code in (301, 302, 303, 307, 308) and hops > 0 and exc.headers.get("Location"):
+            return _fetch_image(urljoin(url, exc.headers["Location"]), hops - 1)
+        raise HTTPException(502, f"Nguồn ảnh trả về {exc.code}") from exc
+    except (urllib.error.URLError, OSError) as exc:
+        raise HTTPException(502, "Không tải được ảnh từ nguồn") from exc
+    if len(data) > MAX_IMAGE_BYTES:
+        raise HTTPException(413, "Ảnh quá lớn")
+    return data, content_type
+
+
+@router.get("/img", dependencies=[Depends(_local_only)])
+def proxy_image(url: str) -> Response:
+    """Serve a product image through the local server: sends the same headers as the worker
+    (no Referer, browser User-Agent) so hotlink protection on third-party CDNs does not break it."""
+    data, content_type = _fetch_image(url)
+    return Response(content=data, media_type=content_type, headers={"Cache-Control": "private, max-age=86400"})
 
 
 class SelectBody(BaseModel):

@@ -544,3 +544,16 @@ def test_review_shows_live_progress_of_a_running_job(db_session, setup, review_c
     assert data["job"]["status"] == "running"
     assert (data["job"]["processed_count"], data["job"]["duplicate_count"], data["job"]["requested_count"]) == (1, 1, 5)
     assert [i["order_code"] for i in data["items"]] == ["DJ-LIVE-1"]
+
+
+def test_review_image_proxy_serves_public_images_only(review_client, monkeypatch):
+    from backend import review
+
+    assert review._is_public_host("127.0.0.1") is False
+    assert review._is_public_host("192.168.1.10") is False
+    assert review_client.get("/review/img", params={"url": "http://127.0.0.1:5432/x.png"}).status_code == 400
+    assert review_client.get("/review/img", params={"url": "file:///etc/passwd"}).status_code == 400
+
+    monkeypatch.setattr(review, "_fetch_image", lambda url: (b"RIFFwebp", "image/webp"))
+    res = review_client.get("/review/img", params={"url": "https://cdn.example/x.jpg"})
+    assert res.status_code == 200 and res.content == b"RIFFwebp" and res.headers["content-type"] == "image/webp"
