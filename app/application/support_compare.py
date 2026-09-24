@@ -629,14 +629,18 @@ def execute_support_duplicate_decision(
     # has produced a positive candidate and Support has clicked a button.
     # No expected order version here: the order legitimately changes between the notification and
     # Support's click (status sync bumps it), and the service re-checks scope under a row lock.
-    set_orders_duplicate_status(
-        session,
-        actor=actor,
-        platform_id=item.platform_id,
-        order_ids=[order.id],
-        duplicate_status=decision_status,
-        allow_support_unclassified_doing=True,
-    )
+    # Idempotent: a previous click may have changed the order and then been interrupted (deploy
+    # restart) before the candidate/action were closed. Finish that instead of failing on the
+    # "already classified" check, which would leave the buttons stuck.
+    if (order.duplicate_check_status or DUPLICATE_CHECK_UNCHECK) != decision_status:
+        set_orders_duplicate_status(
+            session,
+            actor=actor,
+            platform_id=item.platform_id,
+            order_ids=[order.id],
+            duplicate_status=decision_status,
+            allow_support_unclassified_doing=True,
+        )
 
     candidate.decision_status = decision_status
     candidate.decided_by_id = actor.id

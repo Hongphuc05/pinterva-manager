@@ -749,3 +749,20 @@ def test_pressing_a_used_button_shows_a_toast_instead_of_a_chat_message(client, 
     send.assert_not_called()
     delete.assert_not_called()
     assert "đã được xử lý" in answer.call_args.args[1]
+
+
+def test_a_decision_interrupted_after_the_order_changed_is_finished_by_the_next_click(client, db_session, setup):
+    order, tokens = _notify_selected_pair(db_session, setup, "DJ-INTERRUPTED")
+    # first click changed the order, then the process was killed before the action/candidate were closed
+    order.duplicate_check_status = "duplicate"
+    db_session.commit()
+
+    send, _, delete, answer = _press(client, f"scdup_yes:{tokens['SUPPORT_COMPARE_CONFIRM_DUPLICATE']}", delete_ok=True)
+
+    delete.assert_called_once()
+    assert "Đã xác nhận trùng" in answer.call_args.args[1]
+    send.assert_not_called()
+    statuses = {a.action_type: a.status for a in db_session.query(TelegramActionLog).filter(TelegramActionLog.order_id == order.id)}
+    assert statuses["SUPPORT_COMPARE_CONFIRM_DUPLICATE"] == "executed"
+    candidate = db_session.query(SupportCompareCandidate).one()
+    assert candidate.decision_status == "duplicate"
