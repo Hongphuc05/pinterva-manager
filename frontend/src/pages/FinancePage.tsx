@@ -202,6 +202,67 @@ export type FinanceStatsResponse = {
   total_pages: number
   support_classified_count?: number
   support_summary?: SupportSummary[]
+  support_orders?: SupportOrder[]
+}
+
+export type SupportOrder = {
+  id: string
+  external_order_id: string
+  product_name: string | null
+  thumbnail_url: string | null
+  classified_at: string | null
+}
+
+function SupportClassifiedOrders({ orders }: { orders: SupportOrder[] }) {
+  const [query, setQuery] = useState('')
+  const needle = query.trim().toLowerCase()
+  const shown = needle
+    ? orders.filter((o) => o.external_order_id.toLowerCase().includes(needle) || (o.product_name ?? '').toLowerCase().includes(needle))
+    : orders
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-2xs overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-3">
+        <div>
+          <h3 className="text-sm font-bold text-slate-900">Chi tiết các đơn đã gắn Trùng lặp</h3>
+          <p className="text-xs text-slate-500">{orders.length} đơn, mới nhất ở trên.</p>
+        </div>
+        {orders.length > 0 && (
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Tìm mã đơn hoặc tên sản phẩm"
+            aria-label="Tìm trong các đơn đã gắn Trùng lặp"
+            className="w-64 rounded-lg border border-slate-300 px-3 py-1.5 text-xs outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
+          />
+        )}
+      </div>
+      {orders.length === 0 ? (
+        <p className="px-5 py-10 text-center text-sm text-slate-500">Bạn chưa gắn tag Trùng lặp cho đơn nào.</p>
+      ) : shown.length === 0 ? (
+        <p className="px-5 py-8 text-center text-sm text-slate-500">Không có đơn nào khớp.</p>
+      ) : (
+        <ul className="divide-y divide-slate-100">
+          {shown.map((order) => (
+            <li key={order.id} className="flex items-center gap-4 px-5 py-2.5">
+              {order.thumbnail_url ? (
+                <img src={resolveAssetUrl(order.thumbnail_url)} alt="" loading="lazy" referrerPolicy="no-referrer" className="size-12 flex-none rounded-lg border border-slate-200 bg-white object-contain" />
+              ) : (
+                <span className="size-12 flex-none rounded-lg border border-slate-200 bg-slate-50" />
+              )}
+              <div className="min-w-0 flex-1">
+                <CopyableOrderCode code={order.external_order_id} />
+                <p className="truncate text-xs text-slate-500" title={order.product_name ?? ''}>{order.product_name ?? '—'}</p>
+              </div>
+              <span className="flex-none text-xs font-medium text-slate-500">
+                {order.classified_at ? new Date(order.classified_at).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
 }
 
 export type SupportSummary = {
@@ -1130,6 +1191,7 @@ export function FinancePage() {
         <div className="space-y-6">
           {canManageBankQr && <BankQrManager />}
           {isSupport ? (
+            <div className="space-y-4">
             <div className="rounded-2xl border border-blue-200 bg-blue-50/60 p-6 shadow-xs">
               <div className="flex items-center justify-between gap-4 flex-wrap">
                 <div>
@@ -1141,6 +1203,8 @@ export function FinancePage() {
                 </div>
                 <CheckCircle2 className="h-10 w-10 text-[#0052CC]" />
               </div>
+            </div>
+            <SupportClassifiedOrders orders={data?.support_orders ?? []} />
             </div>
           ) : (
             <>

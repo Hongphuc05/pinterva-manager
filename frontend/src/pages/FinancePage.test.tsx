@@ -202,6 +202,10 @@ describe('FinancePage', () => {
               first_classified_at: null,
               latest_classified_at: null,
             }],
+            support_orders: [
+              { id: 'o1', external_order_id: 'DJ4048241', product_name: 'Wests Tigers Jersey', thumbnail_url: null, classified_at: '2026-09-24T10:03:00Z' },
+              { id: 'o2', external_order_id: 'DJ4033320', product_name: 'Atlanta Falcons Dress', thumbnail_url: 'https://cdn.test/a.png', classified_at: '2026-09-23T08:00:00Z' },
+            ],
           }),
         })
       }
@@ -228,6 +232,15 @@ describe('FinancePage', () => {
     await waitFor(() => expect(screen.getByText('Công Việc Phân Loại Của Tôi')).toBeInTheDocument())
     expect(screen.getByText('Tổng đơn đã phân loại')).toBeInTheDocument()
     await waitFor(() => expect(screen.getByText('7')).toBeInTheDocument())
+    // The orders behind the count are listed (newest first), and can be filtered.
+    expect(screen.getByText('Chi tiết các đơn đã gắn Trùng lặp')).toBeInTheDocument()
+    expect(screen.getByText('DJ4048241')).toBeInTheDocument()
+    expect(screen.getByText('Atlanta Falcons Dress')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Tìm trong các đơn đã gắn Trùng lặp'), { target: { value: 'falcons' } })
+    expect(screen.queryByText('DJ4048241')).not.toBeInTheDocument()
+    expect(screen.getByText('DJ4033320')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Tìm trong các đơn đã gắn Trùng lặp'), { target: { value: 'zzz' } })
+    expect(screen.getByText('Không có đơn nào khớp.')).toBeInTheDocument()
     expect(screen.queryByText('Tổng Đơn Tính Công')).not.toBeInTheDocument()
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/finance/stats') && String(url).includes('is_paid='))).toBe(false)
   })

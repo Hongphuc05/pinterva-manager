@@ -135,6 +135,15 @@ function canSupportClassify(order: Pick<OrderSummary, 'state' | 'platform_status
   return unchecked && isSupportDoingOrder(order)
 }
 
+// Support may put a classified order back into "Chưa xử lý" until a designer has taken it.
+function canReturnToUnchecked(
+  order: Pick<OrderSummary, 'state' | 'platform_status' | 'duplicate_check_status' | 'work_domain' | 'assigned_designer_name'>,
+) {
+  if (order.assigned_designer_name) return false
+  if (order.duplicate_check_status === 'duplicate') return order.work_domain === 'duplicate' // still on the board
+  return isSupportClassificationEditable(order)
+}
+
 function isSupportDoingOrder(order: Pick<OrderSummary, 'state' | 'platform_status'>) {
   return SUPPORT_READ_ONLY_DOING_STATES.has((order.state || '').toUpperCase()) ||
     (order.platform_status || '').toUpperCase() === 'DOING'
@@ -682,13 +691,13 @@ export function OrdersListPage() {
   async function handleStartSupportCompare() {
     if (!supportCompare || supportCompare.new_orders === 0 || startingSupportCompare) return
     if (!window.confirm(
-      `Gửi ${supportCompare.new_orders} đơn mới cho máy local kiểm tra trùng?\n` +
-      'Hãy đảm bảo giao diện localhost đang chạy. Kết quả sẽ được báo qua Telegram.',
+      `Xếp ${supportCompare.new_orders} đơn mới vào hàng đợi kiểm tra trùng?\n` +
+      'Job chạy khi có một Support cho phép máy của mình. Kết quả được báo qua Telegram.',
     )) return
     setStartingSupportCompare(true)
     try {
       const res = await apiFetch<{ job_id: string; requested_count: number }>('/support-compare/check', { method: 'POST' })
-      showToast(`Đã xếp ${res.requested_count} đơn vào hàng đợi kiểm tra trùng. Mở localhost để duyệt khi có kết quả.`, 'success')
+      showToast(`Đã xếp ${res.requested_count} đơn vào hàng đợi kiểm tra trùng. Xem tiến độ ở mục Hàng đợi kiểm tra.`, 'success')
       loadSupportCompareStatus()
     } catch (err) {
       showToast(err instanceof ApiError ? err.message : 'Không thể bắt đầu kiểm tra trùng.', 'error')
@@ -749,6 +758,36 @@ export function OrdersListPage() {
       await loadOrders()
     } catch (err: any) {
       showToast(err?.message || 'Không thể cập nhật trạng thái trùng lặp.', 'error')
+    } finally {
+      setUpdatingDuplicateStatus(false)
+    }
+  }
+
+  async function handleReturnToUnchecked(targets: OrderSummary[]) {
+    const eligible = targets.filter(canReturnToUnchecked)
+    if (eligible.length === 0) return
+    const what = eligible.length === 1 ? `đơn ${eligible[0].external_order_id}` : `${eligible.length} đơn đã chọn`
+    if (!window.confirm(
+      `Bạn có chắc muốn đưa ${what} về lại tab Chưa xử lý không?\n` +
+      'Đơn sẽ chờ được xử lý lại; gõ /check trên Telegram vẫn sẽ thấy đơn này.',
+    )) return
+    const ids = eligible.map((order) => order.id)
+    setUpdatingDuplicateStatus(true)
+    try {
+      const res = await apiFetch<{ changed_count: number }>('/orders/return-to-unchecked', {
+        method: 'POST',
+        body: JSON.stringify({
+          order_ids: ids,
+          expected_versions: Object.fromEntries(eligible.map((order) => [order.id, order.version])),
+        }),
+      })
+      showToast(`Đã đưa ${res.changed_count} đơn về tab Chưa xử lý.`, 'success')
+      markTabMoved(ids)
+      setSelectedOrderIds((prev) => prev.filter((id) => !ids.includes(id)))
+      await loadOrders()
+      loadSupportCompareStatus()
+    } catch (err: any) {
+      showToast(err?.message || 'Không thể đưa đơn về Chưa xử lý.', 'error')
     } finally {
       setUpdatingDuplicateStatus(false)
     }
@@ -2580,7 +2619,11 @@ export function OrdersListPage() {
             {supportTab !== 'all' && (
               <button
                 type="button"
-                onClick={() => handleSetDuplicateStatus(selectedOrderIds, 'uncheck')}
+                onClick={() =>
+                  isSupport
+                    ? handleReturnToUnchecked(orders.filter((order) => selectedOrderIds.includes(order.id)))
+                    : handleSetDuplicateStatus(selectedOrderIds, 'uncheck')
+                }
                 disabled={updatingDuplicateStatus}
                 className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-slate-800 bg-white hover:bg-slate-100 rounded-lg shadow-sm transition-all disabled:opacity-50 cursor-pointer"
                 title="Chuyển về trạng thái Chưa kiểm tra"
@@ -3001,45 +3044,45 @@ export function OrdersListPage() {
                                 ) : null
                               )}
 
-                              {supportTab === 'duplicate' && (
-                                <div className="inline-flex items-center gap-1.5 rounded-lg bg-purple-100 border border-purple-300 px-3 py-1.5 text-xs font-bold text-purple-900 shadow-2xs group">
-                                  <Layers className="h-3.5 w-3.5 text-purple-700" />
-                                  <span>Trùng lặp</span>
-                                  {isSupportClassificationEditable(o) ? (
+                              {(supportTab === 'duplicate' || supportTab === 'non_duplicate') && (() => {
+                                const isDuplicateTab = supportTab === 'duplicate'
+                                const returnable = canReturnToUnchecked(o)
+                                const tone = isDuplicateTab
+                                  ? 'bg-purple-100 border-purple-300 text-purple-900 hover:bg-purple-200'
+                                  : 'bg-emerald-100 border-emerald-300 text-emerald-900 hover:bg-emerald-200'
+                                const TagIcon = isDuplicateTab ? Layers : CheckCircle2
+                                return (
+                                  <>
+                                    {!isDuplicateTab && o.assigned_designer_name && (
+                                      <span
+                                        className="inline-flex items-center rounded-lg bg-blue-50 border border-blue-200 px-2.5 py-1.5 text-blue-900"
+                                        title={`Đã lấy · ${o.assigned_designer_name}`}
+                                        aria-label={`Đã lấy · ${o.assigned_designer_name}`}
+                                      >
+                                        <UserCheck className="h-3.5 w-3.5" />
+                                      </span>
+                                    )}
                                     <button
                                       type="button"
-                                      onClick={() => handleSetDuplicateStatus([o.id], 'uncheck')}
-                                      disabled={updatingDuplicateStatus}
-                                      className="ml-1 p-0.5 rounded-full hover:bg-purple-200 text-purple-700 hover:text-purple-950 transition-all cursor-pointer hover:scale-110"
-                                      title="Hủy tag Trùng lặp (quay lại tab Chưa kiểm tra)"
+                                      onClick={() => handleReturnToUnchecked([o])}
+                                      disabled={!returnable || updatingDuplicateStatus}
+                                      className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-bold shadow-2xs transition-all ${tone} ${
+                                        returnable ? 'cursor-pointer' : 'cursor-not-allowed opacity-40 hover:bg-inherit'
+                                      } disabled:opacity-40`}
+                                      title={
+                                        returnable
+                                          ? 'Bấm để đưa đơn về tab Chưa xử lý'
+                                          : o.assigned_designer_name
+                                            ? 'Đơn đã có designer đảm nhận nên không đưa về Chưa xử lý được'
+                                            : 'Đơn đã sang bước xử lý khác nên không đưa về Chưa xử lý được'
+                                      }
                                     >
-                                      <X className="h-3.5 w-3.5 stroke-[2.5]" />
+                                      <TagIcon className={`h-3.5 w-3.5 ${isDuplicateTab ? 'text-purple-700' : 'text-emerald-700'}`} />
+                                      <span>{isDuplicateTab ? 'Trùng lặp' : 'Không trùng lặp'}</span>
                                     </button>
-                                  ) : (
-                                    <span className="ml-1 text-[10px] font-semibold text-purple-700">Chỉ xem</span>
-                                  )}
-                                </div>
-                              )}
-
-                              {supportTab === 'non_duplicate' && (
-                                <div className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-100 border border-emerald-300 px-3 py-1.5 text-xs font-bold text-emerald-900 shadow-2xs group">
-                                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700" />
-                                  <span>Không trùng lặp</span>
-                                  {isSupportClassificationEditable(o) ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleSetDuplicateStatus([o.id], 'uncheck')}
-                                      disabled={updatingDuplicateStatus}
-                                      className="ml-1 p-0.5 rounded-full hover:bg-emerald-200 text-emerald-700 hover:text-emerald-950 transition-all cursor-pointer hover:scale-110"
-                                      title="Hủy tag Không trùng lặp (quay lại tab Chưa kiểm tra)"
-                                    >
-                                      <X className="h-3.5 w-3.5 stroke-[2.5]" />
-                                    </button>
-                                  ) : (
-                                    <span className="ml-1 text-[10px] font-semibold text-emerald-700">Chỉ xem</span>
-                                  )}
-                                </div>
-                              )}
+                                  </>
+                                )
+                              })()}
 
                               {supportTab === 'doing' && (
                                 <span className="inline-flex items-center gap-1.5 rounded-lg bg-blue-100 border border-blue-300 px-3 py-1.5 text-xs font-bold text-blue-900">

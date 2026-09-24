@@ -788,8 +788,9 @@ describe('OrdersListPage', () => {
     // Waiting, but their Support controls are read-only.
     fireEvent.click(screen.getByRole('button', { name: /^Trùng lặp1$/i }))
     expect(await screen.findByText('DJ-DUP-DOING')).toBeInTheDocument()
-    expect(screen.getByText('Chỉ xem')).toBeInTheDocument()
-    expect(screen.queryByTitle('Hủy tag Trùng lặp (quay lại tab Chưa kiểm tra)')).not.toBeInTheDocument()
+    // No "Chỉ xem" text any more: a duplicate card nobody has taken can be put back (button lit).
+    expect(screen.queryByText('Chỉ xem')).not.toBeInTheDocument()
+    expect(screen.getByTitle('Bấm để đưa đơn về tab Chưa xử lý')).toBeEnabled()
     // A free duplicate card can be taken for the in-house designer ("Lấy").
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     fireEvent.click(screen.getByRole('button', { name: 'Lấy' }))
@@ -804,14 +805,72 @@ describe('OrdersListPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Không trùng lặp2$/i }))
     expect(await screen.findByText('DJ-REVIEW')).toBeInTheDocument()
     expect(screen.getByText('DJ-DOING')).toBeInTheDocument()
-    expect(screen.getAllByText('Chỉ xem').length).toBeGreaterThanOrEqual(1)
-    expect(screen.queryByTitle('Hủy tag Không trùng lặp (quay lại tab Chưa kiểm tra)')).not.toBeInTheDocument()
+    // Orders that already moved on (QC / Doing) show the tag dimmed and disabled, without any text.
+    expect(screen.queryByText('Chỉ xem')).not.toBeInTheDocument()
+    const dimmed = screen.getAllByTitle('Đơn đã sang bước xử lý khác nên không đưa về Chưa xử lý được')
+    expect(dimmed.length).toBeGreaterThanOrEqual(2)
+    dimmed.forEach((button) => expect(button).toBeDisabled())
 
     fireEvent.click(screen.getByRole('button', { name: /^Đang làm2$/i }))
     expect(await screen.findByText('DJ-DOING')).toBeInTheDocument()
     expect(screen.getByText('DJ-DUP-DOING')).toBeInTheDocument()
-    expect(screen.getAllByText('Chỉ xem').length).toBeGreaterThanOrEqual(2)
+    expect(screen.getAllByText('Chỉ xem').length).toBeGreaterThanOrEqual(2)  // the Doing tab keeps its label
     expect(screen.queryByTitle('Đánh dấu đơn này là Trùng lặp')).not.toBeInTheDocument()
+  })
+
+  it('lets Support put an untaken classified order back into Chưa xử lý after a confirmation, and dims the taken ones', async () => {
+    const orders = [
+      { id: 'o-free', external_order_id: 'DJ-FREE', product_name: 'Free', state: 'WAITING', work_domain: 'standard', duplicate_check_status: 'non_duplicate', assigned_designer_name: null, version: 3, created_at: '2026-09-18T00:00:00Z' },
+      { id: 'o-mine', external_order_id: 'DJ-TAKEN', product_name: 'Taken', state: 'WAITING', work_domain: 'standard', duplicate_check_status: 'non_duplicate', assigned_designer_name: 'Lan Anh', version: 1, created_at: '2026-09-18T00:00:00Z' },
+    ]
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, init?: RequestInit) => {
+        const ok = (body: unknown) => Promise.resolve({ ok: true, status: 200, json: async () => body })
+        if (url.includes('/api/me')) return ok({ id: 'supp1', role: 'support', full_name: 'Support User' })
+        if (url.includes('/api/platforms')) return ok({ platforms: [] })
+        if (url.includes('/api/support-compare/status')) return ok({ enabled: true, new_orders: 0, handleable_orders: 0 })
+        if (url.includes('/api/orders/return-to-unchecked') && init?.method === 'POST') return ok({ changed_count: 1 })
+        if (url.includes('/api/orders')) return ok({ orders })
+        return Promise.reject(new Error(`unexpected fetch: ${url}`))
+      }),
+    )
+    window.history.pushState({}, '', '/orders?support_tab=non_duplicate')
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+
+    render(
+      <BrowserRouter>
+        <AuthProvider>
+          <PlatformProvider>
+            <ToastProvider>
+              <GallerySyncProvider>
+                <OrdersListPage />
+              </GallerySyncProvider>
+            </ToastProvider>
+          </PlatformProvider>
+        </AuthProvider>
+      </BrowserRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByText('DJ-FREE')).toBeInTheDocument())
+    // A taken order: the designer icon is shown (name only in the tooltip) and the tag is dimmed.
+    expect(screen.getByTitle('Đã lấy · Lan Anh')).toBeInTheDocument()
+    expect(screen.queryByText(/Đã lấy/)).not.toBeInTheDocument()
+    expect(screen.getByTitle('Đơn đã có designer đảm nhận nên không đưa về Chưa xử lý được')).toBeDisabled()
+
+    // A free order: lit and clickable; it asks first, and cancelling changes nothing.
+    const free = screen.getByTitle('Bấm để đưa đơn về tab Chưa xử lý')
+    expect(free).toBeEnabled()
+    const posts = () =>
+      (fetch as unknown as { mock: { calls: [string, RequestInit?][] } }).mock.calls.filter(([url]) => url.includes('/api/orders/return-to-unchecked'))
+    fireEvent.click(free)
+    expect(confirm).toHaveBeenLastCalledWith(expect.stringContaining('Bạn có chắc muốn đưa đơn DJ-FREE về lại tab Chưa xử lý không?'))
+    expect(posts()).toHaveLength(0)
+
+    confirm.mockReturnValue(true)
+    fireEvent.click(free)
+    await waitFor(() => expect(posts()).toHaveLength(1))
+    expect(JSON.parse(String(posts()[0][1]?.body))).toEqual({ order_ids: ['o-free'], expected_versions: { 'o-free': 3 } })
   })
 
   it('renders orange exclamation badge on Admin across all tabs when uncheck, and supports Hủy chia', async () => {
