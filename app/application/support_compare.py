@@ -353,7 +353,7 @@ def format_custom_config(config: dict | None) -> str:
     for entry in entries:
         if not isinstance(entry, dict) or not entry.get("key"):
             continue
-        if str(entry["key"]).lower().startswith("extra_discount"):  # internal pricing flag, not a design option
+        if str(entry["key"]).lower().startswith(("extra_discount", "url_")):  # internal flags, not design options
             continue
         value = str(entry.get("value") or "").strip()
         if len(value) > _CONFIG_VALUE_LIMIT:
