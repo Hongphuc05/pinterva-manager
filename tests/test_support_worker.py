@@ -308,8 +308,8 @@ def test_search_is_queued_and_answered_by_an_agent(client, ctx, db_session):
     db_session.execute(
         text(
             "INSERT INTO support_compare_image.historical_jobs "
-            "(id, source_system, source_job_id, external_order_id, status, team_outsource, job_type, preview_missing, custom_config) "
-            "VALUES (:id, 'test', 'S1', 'OLD-S1', 'doing', 't', 'all', false, CAST('{\"text\": \"hi\"}' AS jsonb))"
+            "(id, source_system, source_job_id, external_order_id, status, team_outsource, job_type, product_name, preview_missing, custom_config) "
+            "VALUES (:id, 'test', 'S1', 'OLD-S1', 'doing', 't', 'all', 'P', false, CAST('{\"text\": \"hi\"}' AS jsonb))"
         ),
         {"id": hist},
     )
