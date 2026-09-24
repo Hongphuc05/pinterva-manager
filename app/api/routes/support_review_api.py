@@ -463,10 +463,26 @@ def get_search(
     job = db.get(SupportSearchJob, search_id)
     if job is None or job.platform_id != platform_id:
         raise HTTPException(404, "Không tìm thấy yêu cầu tìm ảnh")
+    result = job.result
+    if result and result.get("candidates"):
+        job_ids = [c["historical_job_id"] for c in result["candidates"] if c.get("historical_job_id")]
+        configs = {
+            str(row[0]): row[1]
+            for row in db.execute(
+                text(f"SELECT id, custom_config FROM {S}.historical_jobs WHERE id = ANY(CAST(:ids AS uuid[]))"),
+                {"ids": job_ids},
+            ).fetchall()
+        } if job_ids else {}
+        result = {
+            **result,
+            "candidates": [
+                {**c, "custom_config": configs.get(c.get("historical_job_id") or "")} for c in result["candidates"]
+            ],
+        }
     return {
         "id": str(job.id),
         "status": job.status,
-        "result": job.result,
+        "result": result,
         "error": job.last_error,
         "created_at": _iso(job.created_at),
         "finished_at": _iso(job.finished_at),

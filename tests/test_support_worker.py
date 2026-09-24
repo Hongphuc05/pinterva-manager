@@ -223,7 +223,13 @@ def test_job_round_trip_stores_items_and_promotes_the_batch_to_the_pool(client, 
         params={"model_version": MODEL, "embedding_dim": DIM, "limit": 5, "after": pool["next_cursor"]},
         headers=_agent(token),
     ).json()
-    assert len(rest["items"]) == 1 and rest["next_cursor"] is None
+    assert len(rest["items"]) == 1 and rest["next_cursor"] is None and rest["cursor"]
+    delta = client.get(
+        "/api/support-worker/pool",
+        params={"model_version": MODEL, "embedding_dim": DIM, "after": rest["cursor"]},
+        headers=_agent(token),
+    ).json()
+    assert delta["items"] == [] and delta["cursor"] is None
     seen = {pool["items"][0]["external_order_id"], rest["items"][0]["external_order_id"]}
     assert seen == {"DJ-1", "DJ-2"}
     assert np.frombuffer(base64.b64decode(rest["items"][0]["embedding"]), dtype="<f4").tolist() == [1, 0, 0, 0]
@@ -298,12 +304,26 @@ def test_search_is_queued_and_answered_by_an_agent(client, ctx, db_session):
     image = client.get(f"/api/support-worker/search/{search_id}/image", headers=_agent(token))
     assert image.content == b"\x89PNG-bytes"
 
-    result = {"verdict": "KHONG_TRUNG", "is_duplicate": False, "candidates": []}
+    hist = uuid.uuid4()
+    db_session.execute(
+        text(
+            "INSERT INTO support_compare_image.historical_jobs "
+            "(id, source_system, source_job_id, external_order_id, status, team_outsource, job_type, preview_missing, custom_config) "
+            "VALUES (:id, 'test', 'S1', 'OLD-S1', 'doing', 't', 'all', false, CAST('{\"text\": \"hi\"}' AS jsonb))"
+        ),
+        {"id": hist},
+    )
+    db_session.commit()
+    result = {
+        "verdict": "KHONG_TRUNG", "is_duplicate": False,
+        "candidates": [{"rank": 1, "historical_job_id": str(hist)}, {"rank": 2, "historical_job_id": None}],
+    }
     assert client.post(
         f"/api/support-worker/search/{search_id}/result", json={"result": result}, headers=_agent(token)
     ).status_code == 200
     done = client.get(f"/api/support-review/search/{search_id}", headers=_auth(ctx.support)).json()
     assert done["status"] == "completed" and done["result"]["verdict"] == "KHONG_TRUNG"
+    assert [c["custom_config"] for c in done["result"]["candidates"]] == [{"text": "hi"}, None]
     assert db_session.execute(text("SELECT image FROM support_compare_image.search_jobs")).scalar() is None
 
 

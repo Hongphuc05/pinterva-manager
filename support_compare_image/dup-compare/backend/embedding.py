@@ -60,7 +60,13 @@ class DinoV2Embedder(VisualEmbedder):
         self.name = model_name
         self._torch = torch
         self.processor = AutoImageProcessor.from_pretrained(model_name)
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        import os
+
+        mps = getattr(torch.backends, "mps", None)
+        # cuda (NVIDIA) -> mps (Apple GPU, native Python only: Docker on macOS has no GPU) -> cpu.
+        self.device = os.environ.get("EMBEDDING_DEVICE") or (
+            "cuda" if torch.cuda.is_available() else "mps" if mps and mps.is_available() else "cpu"
+        )
         self.model = AutoModel.from_pretrained(model_name).to(self.device)
         self.model.eval()
 

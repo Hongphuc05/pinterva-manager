@@ -132,11 +132,11 @@ def _action_is_pending_and_valid(action_log: TelegramActionLog, action_type: str
 SUPPORT_HELP_TEXT = (
     "📖 <b>Lệnh dành cho Support</b>\n\n"
     "/check — Đếm các đơn mới trong tab <b>Chưa kiểm tra</b> chưa được so sánh; bấm <b>Có</b> "
-    "để gửi cho máy local embedding và kiểm tra trùng.\n"
+    "để xếp vào hàng đợi; máy Support đang được cho phép trên web sẽ embedding và kiểm tra trùng.\n"
     "/handle — Chuyển các đơn đã kiểm tra mà không thấy trùng (hoặc bạn đã chọn "
     "<i>Model sai</i>) sang <b>Không trùng lặp</b>.\n"
     "/help — Hiện danh sách lệnh này.\n\n"
-    "Sau khi máy local so sánh xong, mở giao diện localhost để duyệt các đơn nghi trùng. "
+    "Sau khi so sánh xong, mở trang <b>Duyệt trùng</b> trên web để duyệt các đơn nghi trùng. "
     "Cặp ảnh bạn chọn sẽ được gửi lại ở đây: <b>Xác nhận trùng</b> gắn tag Trùng lặp, "
     "<b>Từ chối</b> đưa đơn vào Không trùng lặp."
 )
@@ -195,7 +195,7 @@ def _start_support_confirmation(db: Session, chat_id: str, kind: str) -> None:
         prompt_text = (
             f"📋 Hiện tại có <b>{order_count}</b> đơn mới trong tab "
             "<b>Chưa kiểm tra</b> chưa được so sánh.\n"
-            "Bạn có muốn gửi các đơn này cho máy local kiểm tra trùng không?"
+            "Bạn có muốn xếp các đơn này vào hàng đợi kiểm tra trùng không?"
         )
     else:
         order_count = count_handleable_orders(db, platform_id=support_user.platform_id)
@@ -661,9 +661,10 @@ async def api_telegram_webhook(
             send_message(
                 user_chat_id,
                 f"✅ Đã xếp <b>{order_count}</b> đơn trong tab <b>Chưa kiểm tra</b> "
-                "vào hàng đợi máy local để embedding và kiểm tra trùng.\n"
-                "Hãy mở giao diện localhost. Bot sẽ báo cáo khi máy local so sánh xong; "
-                "sau đó bạn duyệt các đơn nghi trùng trên localhost.",
+                "vào hàng đợi để embedding và kiểm tra trùng.\n"
+                "Job chạy khi có một Support mở web và cho phép máy của mình dùng CPU/GPU "
+                "(trang <b>Hàng đợi</b>). Bot sẽ báo cáo khi so sánh xong; sau đó bạn duyệt "
+                "các đơn nghi trùng ở trang <b>Duyệt trùng</b>.",
             )
             return {"ok": True}
 

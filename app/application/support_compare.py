@@ -85,7 +85,7 @@ def count_support_unchecked_orders(session: Session, *, platform_id: uuid.UUID) 
     """Count the orders a /check would send to the local worker.
 
     The Chưa kiểm tra tab scope, minus orders that already have a completed
-    comparison (those wait for the localhost review, Telegram or /handle).
+    comparison (those wait for the web review, Telegram or /handle).
     State only: Support's web view has no ``printerval_status`` (it is stripped),
     so a stale "doing" mirror on a QC_PENDING/DONE order must not be counted.
     """
@@ -179,17 +179,17 @@ def notify_completed_support_compare_jobs(session: Session, *, limit: int = 20) 
             duplicates = int(summary.get("duplicate_count", job.duplicate_count) or 0)
             errors = int(summary.get("error_count", job.error_count) or 0)
             text = (
-                f"✅ Đã so sánh xong <b>{processed}</b> đơn bằng máy local.\n"
-                f"• Nghi trùng (cần duyệt trên localhost): <b>{duplicates}</b>\n"
+                f"✅ Đã so sánh xong <b>{processed}</b> đơn.\n"
+                f"• Nghi trùng (cần duyệt ở trang Duyệt trùng): <b>{duplicates}</b>\n"
                 f"• Không thấy trùng: <b>{max(processed - duplicates, 0)}</b>\n"
                 f"• Lỗi: <b>{errors}</b>\n\n"
-                "Mở giao diện localhost để duyệt các đơn nghi trùng. "
+                "Mở trang Duyệt trùng trên web để duyệt các đơn nghi trùng. "
                 "Cặp ảnh bạn chọn sẽ được gửi lại ở đây để xác nhận."
             )
         else:
             error = escape((job.last_error or "Không rõ lỗi")[:1000])
             text = (
-                "❌ Máy local không hoàn tất được luồng kiểm tra trùng.\n"
+                "❌ Không hoàn tất được luồng kiểm tra trùng.\n"
                 f"• Số đơn yêu cầu: <b>{job.requested_count}</b>\n"
                 f"• Lỗi: <code>{error}</code>"
             )
@@ -449,7 +449,7 @@ def _new_action(
 
 
 def notify_duplicate_candidate(session: Session, candidate_id: uuid.UUID) -> bool:
-    """Send the candidate Support picked on the localhost review to Telegram.
+    """Send the candidate Support picked on the web review to Telegram.
 
     The candidate itself remains pending until a Support callback invokes the
     existing duplicate application service.
@@ -564,7 +564,7 @@ def notify_duplicate_candidate(session: Session, candidate_id: uuid.UUID) -> boo
 
 
 def notify_pending_duplicate_candidates(session: Session, *, limit: int = 20) -> int:
-    """Send every candidate Support selected on the localhost review."""
+    """Send every candidate Support selected on the web review."""
     candidates = (
         session.query(SupportCompareCandidate)
         .join(
@@ -618,7 +618,7 @@ def execute_support_duplicate_decision(
     if run is None or run.source_kind not in {"waiting", "support_unchecked"}:
         raise ValueError("Candidate từ source test Review chỉ được xem, chưa được phép thao tác")
     if item.review_status != "selected_duplicate" or item.selected_candidate_id != candidate.id:
-        raise ValueError("Candidate này chưa được Support chọn trên giao diện localhost")
+        raise ValueError("Candidate này chưa được Support chọn trên trang Duyệt trùng")
     if order.platform_id != item.platform_id:
         raise ValueError("Candidate không cùng platform với order")
 
