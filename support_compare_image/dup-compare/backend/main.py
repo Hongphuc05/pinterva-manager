@@ -4,7 +4,9 @@ tích hợp vào pipeline production đầy đủ.
 
 Endpoint:
 - POST /compare            : so 1-1, ad-hoc, upload trực tiếp 2 ảnh.
-- /review/*                : duyệt kết quả job và tìm ảnh trong pool (review.py, search.py).
+
+Duyệt kết quả, hàng đợi và tìm ảnh nằm trong web Tacahu (API /api/support-review, agent.py); server này
+chỉ còn công cụ so sánh 1-1 (docker compose --profile tools up compare).
 
 Chạy: uvicorn backend.main:app --reload --port 8000
 """
@@ -12,18 +14,13 @@ from __future__ import annotations
 
 import io
 import logging
-import os
 import time
-from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from .review import router as review_router
-from .search import router as search_router
 from .classifier import classify
 from .config import (
     MODEL_CONFIG,
@@ -121,29 +118,5 @@ def compare(old_image: UploadFile = File(...), new_image: UploadFile = File(...)
     }
 
 
-app.include_router(review_router)  # before the static mount, which catches every path
-app.include_router(search_router)
-
-# The review UI (React + Vite, see review-ui/) is served at "/". Docker builds it into the
-# image (REVIEW_UI_DIST); otherwise run `npm ci && npm run build` inside review-ui/.
-_UI_DIST = Path(os.environ.get("REVIEW_UI_DIST") or Path(__file__).resolve().parent.parent / "review-ui" / "dist")
-if (_UI_DIST / "index.html").is_file():
-    app.mount("/assets", StaticFiles(directory=_UI_DIST / "assets"), name="review-assets")
-
-    @app.get("/", include_in_schema=False)
-    @app.get("/review.html", include_in_schema=False)
-    def review_ui():
-        return FileResponse(_UI_DIST / "index.html")
-else:
-
-    @app.get("/", include_in_schema=False)
-    def review_ui_missing():
-        return PlainTextResponse(
-            "Chưa build giao diện duyệt. Chạy: cd review-ui && npm ci && npm run build "
-            "(hoặc dùng docker compose up -d --build).",
-            status_code=503,
-        )
-
-
-# Legacy 1-1 compare tool at /index.html.
+# 1-1 compare tool at /.
 app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")

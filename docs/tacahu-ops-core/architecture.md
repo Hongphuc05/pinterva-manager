@@ -45,28 +45,32 @@ Admin vẫn dùng chat riêng hiện hành và các state/approval vẫn do API/
 
 ### Support duplicate-image comparison
 
-`support_compare_image/dup-compare/local_worker.py` là process duy nhất sở hữu runtime Hugging
-Face DINOv2. Nó chạy trên máy riêng của Support, kết nối PostgreSQL qua SSH tunnel/private VPN,
-đọc job trong `support_compare_image.comparison_jobs`, lấy order `Waiting` chưa phân
-loại từ `public.orders`, đọc baseline từ `image_embeddings` và ghi run/item/candidate vào cùng
-schema. Model được cache trong process local giữa các job; production VPS không cài `torch`,
-`transformers` hay tải checkpoint Hugging Face.
+`support_compare_image/dup-compare/agent.py` là process duy nhất sở hữu runtime Hugging Face
+DINOv2. Nó chạy trên máy của Support và chỉ nói chuyện với API (`/api/support-worker/*`) bằng HTTPS:
+không có quyền vào PostgreSQL. Máy được nối bằng *device login*: agent hiện một mã, một Support đã
+đăng nhập bấm **Cho phép** trên trang Hàng đợi, API cấp token của máy. Token chỉ dùng được khi trang
+web của người đó còn gửi tín hiệu có mặt (`POST /support-worker/presence` mỗi 20 giây, hết hiệu lực
+sau 90 giây); đăng xuất thu hồi mọi máy của người đó và token hết hạn sau 12 giờ. Model được cache
+trong process giữa các job; production VPS không cài `torch`, `transformers` hay tải checkpoint.
 
-Job chỉ được tạo khi Support xác nhận: lệnh `/check` trên Telegram (hoặc nút **Kiểm tra trùng**
-trên tab **Chưa kiểm tra**) đếm các order chưa từng được so sánh, hỏi **Có**/**Không**, rồi
-enqueue tối đa một job active cho mỗi platform. Không còn job tự động theo lịch. Local worker
-claim bằng `FOR UPDATE SKIP LOCKED`, embedding/compare tất cả order của lô với baseline Postgres
-(các order trong cùng lô không so chéo với nhau), rồi thêm cả lô vào pool sau khi so xong và ghi
-`completed` hoặc `failed`. Celery Beat trên VPS chỉ chạy notifier mỗi phút để báo cáo job và gửi
-cặp ảnh Support đã chọn.
+Job chỉ được tạo khi Support xác nhận: lệnh `/check` trên Telegram (hoặc nút **Kiểm tra trùng** trên
+tab **Chưa kiểm tra**) đếm các order chưa từng được so sánh, hỏi **Có**/**Không**, rồi enqueue tối đa
+một job active cho mỗi platform (`comparison_jobs`). Hàng đợi (job và yêu cầu tìm ảnh
+`search_jobs`) nằm trong PostgreSQL. Agent claim bằng lease (`FOR UPDATE SKIP LOCKED`, heartbeat 30
+giây, hết hạn 3 phút): job có lease hết hạn được máy khác nhận tiếp với các order chưa có kết quả.
+Agent tải pool (`GET /support-worker/pool`, phân trang keyset; lần sau chỉ phần mới), embedding và so
+sánh từng order trên máy, gửi từng lô kết quả. Các order trong cùng lô không so chéo với nhau; khi
+job xong VPS thêm cả lô vào pool từ chính embedding đã lưu. Celery Beat trên VPS chỉ chạy notifier mỗi
+phút để báo cáo job và gửi cặp ảnh Support đã chọn.
 
 Kết quả từng order nằm ở `comparison_items.review_status`: `pending_review` (model nghi trùng),
-`no_match` (không thấy trùng), rồi `selected_duplicate` hoặc `ai_wrong` sau khi Support duyệt trên
-giao diện localhost của `dup-compare` (`/`, app React trong `review-ui/`). Giao diện này chỉ ghi vào schema
-`support_compare_image`, không đổi order. Với `selected_duplicate`, notifier gửi cặp (ảnh gốc, ảnh
-đã chọn, kèm mã đơn) qua Telegram; **Xác nhận** gọi `set_orders_duplicate_status` để gắn Trùng lặp,
-**Từ chối** chuyển order sang Không trùng lặp. Các order `no_match`/`ai_wrong` vẫn nằm ở tab **Chưa
-kiểm tra** cho tới khi Support gõ `/handle` để chuyển chúng sang Không trùng lặp.
+`no_match` (không thấy trùng), rồi `selected_duplicate` hoặc `ai_wrong` sau khi Support duyệt ở
+trang **Duyệt trùng** trong dashboard (`/duplicate-review`, API `/api/support-review/*`, giới hạn
+theo platform). Trang này chỉ ghi vào schema `support_compare_image`, không đổi order. Mục **Tìm ảnh**
+đưa một ảnh upload vào hàng đợi để agent trả top-10 gần nhất. Với `selected_duplicate`, notifier gửi
+cặp (ảnh gốc, ảnh đã chọn, kèm mã đơn) qua Telegram; **Xác nhận** gọi `set_orders_duplicate_status`
+để gắn Trùng lặp, **Từ chối** chuyển order sang Không trùng lặp. Các order `no_match`/`ai_wrong` vẫn
+nằm ở tab **Chưa kiểm tra** cho tới khi Support gõ `/handle` để chuyển chúng sang Không trùng lặp.
 
 Đơn đã sang `Doing` mà chưa phân loại được coi là **Không trùng lặp** trên giao diện Support (tab
 Không trùng lặp, không còn ở Chưa kiểm tra) và không nằm trong `/check`, `/handle` hay job so sánh.
@@ -78,8 +82,8 @@ Printerval Doing), `work_domain` chuyển về `standard` nên rời board và �
 tag Trùng lặp. Khi hủy chia (`/assignments/revoke`), đơn có tag Trùng lặp quay lại cột Đơn hàng của board
 (`work_domain=duplicate`, `IN_PROGRESS`) thay vì về Waiting.
 
-Runner fail-closed với model: không dùng HOG fallback để so với baseline DINOv2. Hàng đợi là
-PostgreSQL source of truth; Redis/Celery chỉ lo lịch tạo job và gửi Telegram, không chạy ML.
+Agent fail-closed với model: không dùng HOG fallback để so với baseline DINOv2. Hàng đợi là
+PostgreSQL source of truth; Redis/Celery chỉ lo gửi Telegram, không chạy ML.
 
 ## Dữ liệu và side effect
 
@@ -88,7 +92,7 @@ PostgreSQL source of truth; Redis/Celery chỉ lo lịch tạo job và gửi Tel
 | PostgreSQL | order state, assignment, result version, workflow event, operation, work note, finance và quyền truy cập |
 | Redis/Celery | hàng đợi và schedule; không là source of truth |
 | Printerval | hệ thống ngoài để crawl/đọc status và nhận external write có kiểm chứng |
-| Support local worker | máy riêng giữ model DINO, claim `comparison_jobs`, tải preview và ghi kết quả; không phải production runtime |
+| Support agent | máy Support giữ model DINO; claim job qua API bằng token thiết bị, tải preview và gửi kết quả; không có quyền DB, không phải production runtime |
 | Local/private volumes | crawled assets, source/order assets, platform/browser profile và Playwright evidence; xem trạng thái persistence từng loại tại [data-storage.md](data-storage.md) |
 | Google Sheet | backup/export tùy cấu hình, không quyết định state |
 

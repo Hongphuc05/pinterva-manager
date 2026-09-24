@@ -12,5 +12,4 @@ torch
 torchvision
 transformers
 
-# Postgres access (local worker, review API)
-psycopg[binary]
+

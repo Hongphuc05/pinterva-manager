@@ -43,44 +43,43 @@ Không gán một group cho hai Designer. Khi group bị xóa, mode group tự c
 không tự tạo kết nối chat riêng; mọi thay đổi mapping/mode/template được lưu audit trong
 PostgreSQL. Kiểm tra `group_last_error`, log API và Bot API trước khi kết luận worker bị lỗi.
 
-### Chạy thử image comparison bằng order Review
+### Image comparison: agent trên máy Support
 
-Phase 1 dùng model Hugging Face `facebook/dinov2-base`; chỉ chạy local worker trên máy Support
-có đủ `torch/transformers` và kết nối PostgreSQL qua private network/SSH tunnel:
+Phase 1 dùng model Hugging Face `facebook/dinov2-base`. VPS không chạy DINO: máy Support chạy
+**agent** (`support_compare_image/dup-compare/agent.py`, Docker hoặc trực tiếp) và chỉ nói chuyện
+với API bằng HTTPS, không có SSH tunnel hay quyền vào database. Cài đặt và chạy: xem
+`support_compare_image/dup-compare/README.md`.
 
-```bash
-cd support_compare_image
-cp .env.local-worker.example .env.local-worker
-# mở SSH tunnel ở một terminal khác, sau đó nạp biến môi trường:
-ssh -N -L 15432:127.0.0.1:5432 USER@VPS_HOST
-set -a; source .env.local-worker; set +a
-pip install -r requirements.txt -r requirements.compare-runtime.txt
-python dup-compare/local_worker.py --once
-```
-
-Migration `support_compare_image` phải ở `head` (tới `0007_item_review_status`) trước khi bật
+Migration `support_compare_image` phải ở `head` (tới `0009_worker_devices_search_jobs`) trước khi bật
 `SUPPORT_COMPARE_ENABLED=true`. Cờ này bật lệnh `/check`, `/handle`, nút web và notifier; **không
-có job tự động theo lịch** nên không còn `SUPPORT_COMPARE_INTERVAL_SECONDS`. Máy local chạy
-`python dup-compare/local_worker.py` liên tục để claim job. `SUPPORT_COMPARE_SCAN_LIMIT` giới hạn
-số order mỗi lô; `SUPPORT_COMPARE_BATCH_LIMIT` giới hạn số tin Telegram gửi mỗi lần notifier chạy.
+có job tự động theo lịch**. Đặt `PUBLIC_WEB_URL` (địa chỉ web, ví dụ `https://tacahu-ops.vercel.app`)
+trong `.env.production` để agent in link cho phép máy. `SUPPORT_COMPARE_BATCH_LIMIT` giới hạn số tin
+Telegram gửi mỗi lần notifier chạy.
 
 Luồng vận hành một lô (ví dụ 100 order admin vừa crawl về Waiting):
 
 1. Support gõ `/check` (hoặc bấm **Kiểm tra trùng (N)** trên web). Bot báo số order chưa từng được
    so sánh rồi hỏi **Có**/**Không**. Gõ lại `/check` hoặc `/handle` sẽ thay prompt còn chờ trước đó.
-2. Bấm **Có** khi giao diện localhost và worker đang chạy: job được queue, worker so sánh cả lô rồi
-   thêm cả lô vào pool. Bot báo số order đã so, số nghi trùng, số không thấy trùng và số lỗi.
-3. Support mở `http://127.0.0.1:8000/` (chạy `uvicorn backend.main:app` trong
-   `support_compare_image/dup-compare` với `.env.local-worker` đã nạp). Với mỗi order nghi trùng:
-   **Chọn ảnh này là trùng** (Telegram gửi cặp ảnh kèm mã đơn trong ≤60 giây) hoặc **Model sai**.
-4. Trên Telegram: **Xác nhận trùng** gắn tag Trùng lặp và chuyển order sang tab Trùng lặp;
+2. Bấm **Có**: job vào hàng đợi (xem trang **Hàng đợi** trên web). Job đứng chờ tới khi có máy Support
+   được cho phép.
+3. Một Support chạy agent trên máy mình; agent in mã kết nối. Support đăng nhập web, mở **Hàng đợi**,
+   nhập mã (hoặc mở link agent in) rồi bấm **Cho phép**. Máy chỉ chạy khi người đó còn đăng nhập và
+   mở web: đăng xuất thu hồi máy, đóng web thì máy tạm dừng sau ≤90 giây và việc dở được máy khác
+   nhận tiếp (lease 3 phút). Token của máy hết hạn sau 12 giờ; Admin hoặc chính người cho phép có
+   thể **Dừng máy** ở trang Hàng đợi.
+4. Agent so sánh cả lô rồi VPS thêm cả lô vào pool. Bot báo số order đã so, số nghi trùng, số không
+   thấy trùng và số lỗi.
+5. Support mở **Duyệt trùng** trên web. Với mỗi order nghi trùng: **Chọn trùng** (Telegram gửi cặp
+   ảnh kèm mã đơn trong ≤60 giây) hoặc **Model sai**.
+6. Trên Telegram: **Xác nhận trùng** gắn tag Trùng lặp và chuyển order sang tab Trùng lặp;
    **Từ chối** chuyển sang Không trùng lặp.
-5. `/handle` đếm các order đã so mà không trùng (không thấy trùng hoặc **Model sai**, không còn
+7. `/handle` đếm các order đã so mà không trùng (không thấy trùng hoặc **Model sai**, không còn
    review đang mở), hỏi xác nhận rồi chuyển chúng sang Không trùng lặp. `/help` liệt kê lệnh.
 
 Mỗi order chỉ được so sánh một lần; order đã có kết quả không được đưa vào `/check` lần sau. Order
-lỗi được thử lại. Mọi ảnh, tin nhắn và màn hình đều kèm mã đơn. Localhost chỉ nhận request
-same-origin tới `127.0.0.1`/`localhost` và không bao giờ ghi vào `public.orders`.
+lỗi được thử lại. Mọi ảnh, tin nhắn và màn hình đều kèm mã đơn. Trang Duyệt trùng chỉ dành cho
+Support/Admin, chỉ đọc theo platform của tài khoản và không bao giờ ghi vào `public.orders`. Admin
+hủy được job đang chờ ở trang Hàng đợi.
 
 Weight fine-tune ở phase 2 phải có `MODEL_VERSION` riêng. Nếu đổi dimension, preprocessing hoặc
 model space, re-embed toàn bộ baseline trước khi so sánh; không trộn vector DINOv2 gốc với vector

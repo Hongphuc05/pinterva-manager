@@ -21,6 +21,7 @@ from app.adapters.db.models import (
 )
 from app.application import support_worker as sw
 from app.application.auth import create_session_token, hash_password
+from app.application.support_compare import count_handleable_orders
 
 DIM = 4
 MODEL = "test-model"
@@ -211,6 +212,17 @@ def test_job_round_trip_stores_items_and_promotes_the_batch_to_the_pool(client, 
     db_session.expire_all()
     assert db_session.get(SupportCompareJob, job.id).status == "completed"
     assert db_session.execute(text("SELECT count(*) FROM support_compare_image.image_embeddings")).scalar() == 2
+    stored_job = db_session.execute(
+        text(
+            "SELECT custom_config, custom_config_synced_at, team_outsource, last_seen_run_id "
+            "FROM support_compare_image.historical_jobs WHERE external_order_id = 'DJ-1'"
+        )
+    ).one()
+    assert stored_job.custom_config == {"text": "hello"} and stored_job.custom_config_synced_at is not None
+    assert stored_job.team_outsource == "thuyhuong" and stored_job.last_seen_run_id is None
+    # Compared once: the orders leave the queue for good and wait for the review or /handle.
+    assert sw.pending_job_orders(db_session, ctx.platform.id) == []
+    assert count_handleable_orders(db_session, platform_id=ctx.platform.id) == 1  # DJ-2 (no match)
 
     pool = client.get(
         "/api/support-worker/pool",

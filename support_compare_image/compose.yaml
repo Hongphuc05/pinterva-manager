@@ -1,52 +1,43 @@
-# Local Support stack: SSH tunnel to the production Postgres + DINOv2 worker + review UI.
+# Support machine: the compute agent. It talks to the Tacahu API over HTTPS only (no SSH tunnel,
+# no database access) and computes only while a signed-in Support allows this machine on the web.
 #
-#   cd support_compare_image && docker compose up -d
-#   open http://127.0.0.1:8000/
+#   cp .env.agent.example .env.agent      # set SUPPORT_API_URL / SUPPORT_WEB_URL / AGENT_NAME
+#   docker compose up -d --build          # then: docker compose logs -f agent
+#   # the log prints a code -> open the link (web: Hàng đợi) and press "Cho phép"
 #
-# Needs .env.local-worker (DATABASE_URL uses 127.0.0.1:15432, exactly as for the manual run;
-# worker and review share the tunnel's network namespace, so it resolves to the tunnel).
+# 1-1 compare tool (optional):  docker compose --profile tools up -d compare  -> http://127.0.0.1:8000
 name: dup-compare-local
 
 x-app: &app
   image: dup-compare-local:latest
-  env_file: .env.local-worker
+  build:
+    context: .
+    dockerfile: Dockerfile.local
   working_dir: /app/dup-compare
   volumes:
     - ./dup-compare:/app/dup-compare:ro
     - hf-cache:/models
-  restart: unless-stopped
-  network_mode: "service:tunnel"
-  depends_on:
-    - tunnel
 
 services:
-  tunnel:
-    build:
-      context: .
-      dockerfile: Dockerfile.local
-    image: dup-compare-local:latest
-    # Only the key and known_hosts are mounted (not the whole ~/.ssh, whose config
-    # may hold macOS-only options). The key must have no passphrase.
+  agent:
+    <<: *app
+    env_file: .env.agent
+    environment:
+      AGENT_HOME: /agent-data
     volumes:
-      - ${SSH_KEY:-~/.ssh/id_ed25519}:/root/.ssh/id_key:ro
-      - ${SSH_KNOWN_HOSTS:-~/.ssh/known_hosts}:/root/.ssh/known_hosts:ro
-    command: >
-      ssh -N -F /dev/null -i /root/.ssh/id_key -o IdentitiesOnly=yes
-      -o UserKnownHostsFile=/root/.ssh/known_hosts -o BatchMode=yes
-      -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3
-      -L 127.0.0.1:15432:127.0.0.1:5432 ${TUNNEL_SSH:-tacahu@221.132.19.222}
-    # Published here because review shares this container's network.
-    ports:
-      - "127.0.0.1:8000:8000"
+      - ./dup-compare:/app/dup-compare:ro
+      - hf-cache:/models
+      - agent-data:/agent-data
+    command: python agent.py
     restart: unless-stopped
 
-  worker:
+  compare:
     <<: *app
-    command: python local_worker.py
-
-  review:
-    <<: *app
+    profiles: ["tools"]
     command: uvicorn backend.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "127.0.0.1:8000:8000"
 
 volumes:
   hf-cache:
+  agent-data:

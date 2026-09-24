@@ -32,12 +32,12 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from backend.postgres_compare import (
+from backend.compare_core import (
     HistoricalImage,
-    _fetch_image,
-    _get_embedder,
-    _ImageCache,
+    ImageCache,
     compare_image_to_pool,
+    fetch_image,
+    get_cached_embedder,
 )
 from PIL import Image
 
@@ -301,9 +301,9 @@ def process_orders(
     api: Api, embedder, pool: Pool, cfg: AgentConfig, job: dict, lease: Lease, fetch=None
 ) -> dict[str, int]:
     """Embed and compare the job's orders against the pool snapshot taken now, batch by batch."""
-    fetch = fetch or _fetch_image
+    fetch = fetch or fetch_image
     rows, matrix = pool.snapshot()
-    cache = _ImageCache()
+    cache = ImageCache()
     counts = {"stored": 0, "failed": 0, "skipped": 0}
     orders = job["orders"]
     done = 0
@@ -383,17 +383,17 @@ def run_job(api: Api, embedder, pool: Pool, cfg: AgentConfig, job: dict, fetch=N
         if exc.status in LEASE_LOST_STATUSES:
             logger.warning("job %s dropped: %s", job_id, exc)
             return
-        _report_failure(lambda: api.fail_job(job_id, str(exc)), job_id)
+        _report_failure(api.fail_job, job_id, str(exc))
     except Exception as exc:
         logger.exception("job %s failed", job_id)
-        _report_failure(lambda: api.fail_job(job_id, f"{type(exc).__name__}: {exc}"), job_id)
+        _report_failure(api.fail_job, job_id, f"{type(exc).__name__}: {exc}")
 
 
-def _report_failure(send: Callable[[], None], what: str) -> None:
+def _report_failure(send: Callable[[str, str], None], item_id: str, message: str) -> None:
     try:
-        send()
+        send(item_id, message)
     except Exception:
-        logger.exception("cannot report the failure of %s", what)
+        logger.exception("cannot report the failure of %s", item_id)
 
 
 def run_search(api: Api, embedder, pool: Pool, cfg: AgentConfig, search: dict) -> None:
@@ -416,7 +416,7 @@ def run_search(api: Api, embedder, pool: Pool, cfg: AgentConfig, search: dict) -
                 pool=rows,
                 pool_matrix=matrix,
                 top_k=int(search["top_k"]),
-                old_image_cache=_ImageCache(),
+                old_image_cache=ImageCache(),
                 fetch_timeout=cfg.fetch_timeout,
                 exclude_self=False,
             )
@@ -453,10 +453,10 @@ def run_search(api: Api, embedder, pool: Pool, cfg: AgentConfig, search: dict) -
         if exc.status in LEASE_LOST_STATUSES:
             logger.warning("search %s dropped: %s", search_id, exc)
             return
-        _report_failure(lambda: api.search_fail(search_id, str(exc)), search_id)
+        _report_failure(api.search_fail, search_id, str(exc))
     except Exception as exc:
         logger.exception("search %s failed", search_id)
-        _report_failure(lambda: api.search_fail(search_id, f"{type(exc).__name__}: {exc}"), search_id)
+        _report_failure(api.search_fail, search_id, f"{type(exc).__name__}: {exc}")
 
 
 # --------------------------------------------------------------------------- login / main loop
@@ -515,7 +515,7 @@ def run_agent(cfg: AgentConfig, *, once: bool = False, api: Api | None = None, e
                 api.token = device_login(api, cfg)
                 save_token(cfg, api.token)
             if embedder is None:
-                embedder = _get_embedder(cfg.model_name)
+                embedder = get_cached_embedder(cfg.model_name)
             if not pool.synced_once:
                 logger.info("đồng bộ pool ảnh lần đầu...")
                 pool.sync(api)

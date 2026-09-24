@@ -98,10 +98,10 @@ class FakeEmbedder:
 @pytest.fixture(autouse=True)
 def _no_network(monkeypatch):
     image = Image.new("RGB", (32, 32), (200, 30, 30))
-    monkeypatch.setattr(agent, "_fetch_image", lambda url, timeout=1.0: image)
-    import backend.postgres_compare as pc
+    monkeypatch.setattr(agent, "fetch_image", lambda url, timeout=1.0: image)
+    import backend.compare_core as pc
 
-    monkeypatch.setattr(pc, "_fetch_image", lambda url, timeout=1.0: image)
+    monkeypatch.setattr(pc, "fetch_image", lambda url, timeout=1.0: image)
 
 
 def _job(count: int = 3) -> dict:
@@ -162,7 +162,7 @@ def test_a_broken_image_is_reported_per_order_without_stopping_the_job(tmp_path,
             raise OSError("404")
         return image
 
-    monkeypatch.setattr(agent, "_fetch_image", fetch)
+    monkeypatch.setattr(agent, "fetch_image", fetch)
     api = FakeApi([_pool_item(1.0, "OLD")])
     pool = agent.Pool("m", DIM, page_size=10)
     agent.run_job(api, FakeEmbedder(), pool, _cfg(tmp_path), _job(3), fetch=fetch)

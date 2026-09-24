@@ -1,33 +1,19 @@
-# Local Support machine image: DINOv2 worker, localhost review UI and SSH tunnel.
-# Python code is bind-mounted by compose.yaml, so this image holds dependencies plus the
-# built review UI (React + Vite + Tailwind, rebuilt with `docker compose up -d --build`).
-
-FROM node:22-alpine AS review-ui
-WORKDIR /ui
-COPY dup-compare/review-ui/package.json dup-compare/review-ui/package-lock.json ./
-RUN npm ci
-COPY dup-compare/review-ui/ ./
-RUN npm run build
+# Support machine image: the DINOv2 compute agent (agent.py) and, optionally, the 1-1 compare tool.
+# Python code is bind-mounted by compose.yaml, so this image holds dependencies only.
+# Docker on macOS has no GPU access: for Apple-GPU (MPS) speed run the agent natively (see README).
 
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    HF_HOME=/models \
-    REVIEW_UI_DIST=/app/review-dist
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends openssh-client \
-    && rm -rf /var/lib/apt/lists/*
+    HF_HOME=/models
 
 # CPU wheels first; the runtime requirements below are then already satisfied.
 RUN pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
-COPY requirements.txt requirements.compare-runtime.txt ./
-RUN pip install -r requirements.txt -r requirements.compare-runtime.txt \
+COPY requirements.compare-runtime.txt ./
+RUN pip install -r requirements.compare-runtime.txt \
     fastapi "uvicorn[standard]" python-multipart
-
-COPY --from=review-ui /ui/dist /app/review-dist
 
 WORKDIR /app/dup-compare

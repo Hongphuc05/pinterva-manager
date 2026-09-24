@@ -253,26 +253,13 @@ def test_web_check_queues_a_job_for_the_never_compared_orders(client, db_session
         assert res.json()["requested_count"] == 2
 
 
-@pytest.fixture()
-def review_client(monkeypatch):
-    """The localhost review router mounted on its own app, pointed at the test DB."""
-    import sys
-    from pathlib import Path
+def _bearer(user: User) -> dict[str, str]:
+    from app.application.auth import create_session_token
 
-    from fastapi import FastAPI
-
-    from tests.conftest import TEST_DATABASE_URL
-
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "support_compare_image" / "dup-compare"))
-    from backend.review import router
-
-    monkeypatch.setenv("DATABASE_URL", TEST_DATABASE_URL)
-    app = FastAPI()
-    app.include_router(router)
-    return TestClient(app, base_url="http://127.0.0.1:8000")
+    return {"Authorization": f"Bearer {create_session_token(str(user.id), user.role)}"}
 
 
-def test_localhost_review_selects_a_candidate_or_marks_the_model_wrong(db_session, setup, review_client):
+def test_web_review_selects_a_candidate_or_marks_the_model_wrong(client, db_session, setup):
     from app.adapters.db.models import SupportCompareJob
 
     picked = _order(db_session, setup, "DJ-REV-PICK")
@@ -288,158 +275,48 @@ def test_localhost_review_selects_a_candidate_or_marks_the_model_wrong(db_sessio
     )
     db_session.add(job)
     db_session.commit()
+    headers = _bearer(setup.support)
 
-    data = review_client.get(f"/review/jobs/{job.id}").json()
+    data = client.get(f"/api/support-review/jobs/{job.id}", headers=headers).json()
     by_code = {i["order_code"]: i for i in data["items"]}
     assert set(by_code) == {"DJ-REV-PICK", "DJ-REV-WRONG", "DJ-REV-QUIET"}
     assert [c["order_code"] for c in by_code["DJ-REV-PICK"]["candidates"]] == ["OLD-1", "OLD-2"]
 
-    res = review_client.post(f"/review/items/{picked_item.id}/select", json={"candidate_id": str(cand_b.id)})
+    res = client.post(
+        f"/api/support-review/items/{picked_item.id}/select", json={"candidate_id": str(cand_b.id)}, headers=headers
+    )
     assert res.status_code == 200
-    assert review_client.post(f"/review/items/{wrong_item.id}/reject").status_code == 200
+    assert client.post(f"/api/support-review/items/{wrong_item.id}/reject", headers=headers).status_code == 200
     db_session.expire_all()
     assert (picked_item.review_status, picked_item.selected_candidate_id) == ("selected_duplicate", cand_b.id)
     assert wrong_item.review_status == "ai_wrong"
 
     # The choice can be changed until the pair has gone to Telegram, then it is frozen.
-    assert review_client.post(
-        f"/review/items/{picked_item.id}/select", json={"candidate_id": str(cand_a.id)}
+    assert client.post(
+        f"/api/support-review/items/{picked_item.id}/select", json={"candidate_id": str(cand_a.id)}, headers=headers
     ).status_code == 200
     cand_a.telegram_notified_at = datetime.now(UTC)
     db_session.commit()
-    assert review_client.post(f"/review/items/{picked_item.id}/reject").status_code == 409
+    assert client.post(f"/api/support-review/items/{picked_item.id}/reject", headers=headers).status_code == 409
 
     # A candidate of another item is refused, and no-match items are not reviewable.
-    assert review_client.post(
-        f"/review/items/{wrong_item.id}/select", json={"candidate_id": str(cand_a.id)}
+    assert client.post(
+        f"/api/support-review/items/{wrong_item.id}/select", json={"candidate_id": str(cand_a.id)}, headers=headers
     ).status_code == 400
     quiet_item_id = by_code["DJ-REV-QUIET"]["id"]
-    assert review_client.post(f"/review/items/{quiet_item_id}/reject").status_code == 409
+    assert client.post(f"/api/support-review/items/{quiet_item_id}/reject", headers=headers).status_code == 409
 
 
-def test_localhost_review_rejects_other_origins_and_hosts(review_client):
-    from fastapi.testclient import TestClient
-
-    assert review_client.get("/review/jobs", headers={"Origin": "https://evil.example"}).status_code == 403
-    outside = TestClient(review_client.app, base_url="http://evil.example")
-    assert outside.get("/review/jobs").status_code == 403
-
-
-def test_worker_repository_marks_review_status_skips_compared_orders_and_promotes(db_session, setup):
-    import sys
-    from pathlib import Path
-
-    import numpy as np
-    import psycopg
-
-    from tests.conftest import TEST_DATABASE_URL
-
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "support_compare_image" / "dup-compare"))
-    from backend.postgres_compare import PostgresComparisonRepository
-
-    order = _order(db_session, setup, "DJ-WORKER")
-    order.thumbnail_url = "https://example.test/worker.png"
-    order.custom_config = {"original": [{"key": "Name", "value": "Ann"}], "translated_vn": []}
-    db_session.commit()
-
-    with psycopg.connect(TEST_DATABASE_URL.replace("postgresql+psycopg://", "postgresql://")) as conn:
-        repo = PostgresComparisonRepository(conn)
-        queue = lambda: repo.list_source_orders(  # noqa: E731
-            source_kind="support_unchecked", model_version="m", limit=None, platform_id=setup.platform.id
-        )
-        [source] = queue()
-        run_id = repo.create_run(
-            source_kind="support_unchecked", platform_id=setup.platform.id, model_version="m",
-            embedding_dim=3, classifier_version="c", baseline_count=0, requested_count=1,
-            promote_new_images=True,
-        )
-        item_id = repo.create_item(run_id, source, "m")
-        embedding = np.array([1.0, 0.0, 0.0], dtype=np.float32)
-        repo.complete_item(
-            item_id=item_id, embedding=embedding, phash="0" * 64, color_lab=(1.0, 2.0, 3.0),
-            classification="KHONG_TRUNG", is_duplicate=False, candidates=[],
-        )
-        # Compared once: it leaves the queue (it waits for /handle instead of being re-checked).
-        assert queue() == []
-        # Promotion into the pool works (no comparison run id written into crawl_runs' FK).
-        repo.promote_item(
-            item_id=item_id, run_id=run_id, order=source, image_url=source.image_url,
-            embedding=embedding, phash="0" * 64, color_lab=(1.0, 2.0, 3.0), model_version="m",
-        )
-
-    review = db_session.execute(
-        text("SELECT review_status FROM support_compare_image.comparison_items WHERE id = :i"), {"i": item_id}
-    ).scalar_one()
-    assert review == "no_match"
-    assert count_handleable_orders(db_session, platform_id=setup.platform.id) == 1
-    promoted = db_session.execute(
-        text(
-            "SELECT count(*) FROM support_compare_image.historical_jobs "
-            "WHERE external_order_id = 'DJ-WORKER' AND last_seen_run_id IS NULL"
-        )
-    ).scalar_one()
-    assert promoted == 1
-    stored = db_session.execute(
-        text(
-            "SELECT custom_config, custom_config_synced_at FROM support_compare_image.historical_jobs "
-            "WHERE external_order_id = 'DJ-WORKER'"
-        )
-    ).one()
-    assert stored.custom_config["original"][0]["value"] == "Ann" and stored.custom_config_synced_at is not None
-
-
-def test_run_comparison_promotes_the_whole_batch_only_after_every_order_is_compared(
-    db_session, setup, monkeypatch
-):
-    import sys
-    from pathlib import Path
-
-    import numpy as np
-    from PIL import Image
-
-    from tests.conftest import TEST_DATABASE_URL
-
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "support_compare_image" / "dup-compare"))
-    from backend import postgres_compare as pc
-
-    for code in ("DJ-B1", "DJ-B2", "DJ-B3"):
-        order = _order(db_session, setup, code)
-        order.thumbnail_url = f"https://example.test/{code}.png"
-    db_session.commit()
-
-    class FakeEmbedder:
-        name = "m"
-
-        def encode_batch(self, images):
-            return [np.array([1.0, 0.0, 0.0], dtype=np.float32) for _ in images]
-
-    calls: list[str] = []
-    real_complete, real_promote = pc.PostgresComparisonRepository.complete_item, pc.PostgresComparisonRepository.promote_item
-
-    def complete(self, **kw):
-        calls.append("compare")
-        return real_complete(self, **kw)
-
-    def promote(self, **kw):
-        calls.append("promote")
-        return real_promote(self, **kw)
-
-    monkeypatch.setattr(pc, "_get_embedder", lambda name: FakeEmbedder())
-    monkeypatch.setattr(pc, "_fetch_image", lambda url, **kw: Image.new("RGB", (8, 8), "white"))
-    monkeypatch.setattr(pc.PostgresComparisonRepository, "complete_item", complete)
-    monkeypatch.setattr(pc.PostgresComparisonRepository, "promote_item", promote)
-
-    summary = pc.run_comparison(
-        TEST_DATABASE_URL, source_kind="support_unchecked", model_name="m", model_version="m",
-        embedding_dim=3, platform_id=setup.platform.id, limit=None, embedding_batch_size=2,
-        promote_new_images=True,
+def test_web_review_requires_a_support_or_admin_session(client, db_session, setup):
+    assert client.get("/api/support-review/jobs").status_code == 401
+    designer = User(
+        username="des-review", full_name="D", role="designer", password_hash=hash_password("pass"),
+        active=True, platform_id=setup.platform.id,
     )
-
-    assert summary["processed_count"] == 3 and summary["error_count"] == 0
-    # No order of the batch is compared against another one: every comparison
-    # finishes before the first order is added to the pool.
-    assert calls == ["compare"] * 3 + ["promote"] * 3
-    assert count_handleable_orders(db_session, platform_id=setup.platform.id) == 3
+    db_session.add(designer)
+    db_session.commit()
+    assert client.get("/api/support-review/jobs", headers=_bearer(designer)).status_code == 403
+    assert client.get("/api/support-review/queue", headers=_bearer(designer)).status_code == 403
 
 
 def _seed_pool_job(db_session, code: str, config=None) -> uuid.UUID:
@@ -545,39 +422,6 @@ def test_album_caption_stays_under_the_telegram_limit_with_long_configurations(d
     assert "Cấu hình đơn mới DJ-LONG" in caption and "…" in caption
 
 
-def test_review_shows_live_progress_of_a_running_job(db_session, setup, review_client):
-    from app.adapters.db.models import SupportCompareJob
-
-    order = _order(db_session, setup, "DJ-LIVE-1")
-    item = _item(db_session, setup, order, "pending_review", is_duplicate=True)
-    _candidate(db_session, item, 1)
-    # The worker sets run_id and the counters only on completion; the run row exists from the start.
-    job = SupportCompareJob(
-        platform_id=setup.platform.id, chat_id=CHAT_ID, status="running", requested_count=5,
-        claimed_at=setup.run.started_at, run_id=None,
-    )
-    db_session.add(job)
-    db_session.commit()
-
-    data = review_client.get(f"/review/jobs/{job.id}").json()
-    assert data["job"]["status"] == "running"
-    assert (data["job"]["processed_count"], data["job"]["duplicate_count"], data["job"]["requested_count"]) == (1, 1, 5)
-    assert [i["order_code"] for i in data["items"]] == ["DJ-LIVE-1"]
-
-
-def test_review_image_proxy_serves_public_images_only(review_client, monkeypatch):
-    from backend import review
-
-    assert review._is_public_host("127.0.0.1") is False
-    assert review._is_public_host("192.168.1.10") is False
-    assert review_client.get("/review/img", params={"url": "http://127.0.0.1:5432/x.png"}).status_code == 400
-    assert review_client.get("/review/img", params={"url": "file:///etc/passwd"}).status_code == 400
-
-    monkeypatch.setattr(review, "_fetch_image", lambda url: (b"RIFFwebp", "image/webp"))
-    res = review_client.get("/review/img", params={"url": "https://cdn.example/x.jpg"})
-    assert res.status_code == 200 and res.content == b"RIFFwebp" and res.headers["content-type"] == "image/webp"
-
-
 def _notify_selected_pair(db_session, setup, code: str):
     order = _order(db_session, setup, code)
     item = _item(db_session, setup, order, "pending_review", is_duplicate=True)
@@ -631,80 +475,6 @@ def test_when_the_messages_cannot_be_deleted_the_prompt_is_closed_and_the_result
     clear.assert_called_once_with(CHAT_ID, 13)
     assert order.external_order_id in send.call_args.args[1]
     answer.assert_not_called()
-
-
-@pytest.fixture()
-def search_client(monkeypatch):
-    import sys
-    from pathlib import Path
-
-    from fastapi import FastAPI
-
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "support_compare_image" / "dup-compare"))
-    from backend.search import router
-
-    app = FastAPI()
-    app.include_router(router)
-    return TestClient(app, base_url="http://127.0.0.1:8000")
-
-
-def _png(color="white") -> bytes:
-    import io
-
-    from PIL import Image
-
-    buffer = io.BytesIO()
-    Image.new("RGB", (16, 16), color).save(buffer, format="PNG")
-    return buffer.getvalue()
-
-
-def test_search_by_uploaded_image_returns_pool_matches_with_codes_and_configs(search_client, monkeypatch):
-    import numpy as np
-    from backend import postgres_compare as pc
-    from backend import search
-    from PIL import Image
-
-    def hist(code, vec, job):
-        vec = np.array(vec, dtype=np.float32)
-        vec /= np.linalg.norm(vec)
-        return pc.HistoricalImage(
-            asset_id=uuid.uuid4(), job_id=job, external_order_id=code, product_name=f"Áo {code}",
-            image_url=f"https://cdn.test/{code}.png", embedding=vec, embedding_dim=3, model_version="m",
-            phash="0" * 64, color_lab=(50.0, 0.0, 0.0),
-        )
-
-    job_near = uuid.uuid4()
-    rows = [hist("DJ-NEAR", [1, 0.01, 0], job_near), hist("DJ-FAR", [0, 1, 0], uuid.uuid4())]
-    matrix = np.stack([r.embedding for r in rows])
-
-    class FakeEmbedder:
-        def encode_batch(self, images):
-            return [np.array([1.0, 0.0, 0.0], dtype=np.float32) for _ in images]
-
-    monkeypatch.setattr(search, "_get_pool", lambda force=False: (rows, matrix))
-    monkeypatch.setattr(search, "_get_embedder", lambda name: FakeEmbedder())
-    monkeypatch.setattr(search, "_configs", lambda ids: {str(job_near): {"original": [{"key": "Name", "value": "Ann"}], "translated_vn": []}})
-    monkeypatch.setattr(pc, "_fetch_image", lambda url, **kw: Image.new("RGB", (16, 16), "white"))
-
-    res = search_client.post("/review/search", files={"file": ("mine.png", _png(), "image/png")})
-
-    assert res.status_code == 200
-    body = res.json()
-    assert body["pool_count"] == 2
-    assert [c["order_code"] for c in body["candidates"]] == ["DJ-NEAR", "DJ-FAR"]  # nearest first, with codes
-    near = body["candidates"][0]
-    assert near["similarity"] > 0.99 and near["classification"] == "TRUNG" and body["is_duplicate"] is True
-    assert near["custom_config"]["original"][0]["value"] == "Ann"
-    assert body["candidates"][1]["custom_config"] is None
-
-
-def test_search_rejects_bad_uploads_and_foreign_hosts(search_client):
-    from fastapi.testclient import TestClient
-
-    assert search_client.post("/review/search", files={"file": ("x.txt", b"not an image", "text/plain")}).status_code == 415
-    assert search_client.post("/review/search?top_k=0", files={"file": ("a.png", _png(), "image/png")}).status_code == 400
-    outside = TestClient(search_client.app, base_url="http://evil.example")
-    assert outside.post("/review/search", files={"file": ("a.png", _png(), "image/png")}).status_code == 403
 
 
 def test_pairs_sent_before_ids_were_stored_still_lose_their_album_and_configuration_message(client, db_session, setup):
@@ -768,7 +538,7 @@ def test_a_decision_interrupted_after_the_order_changed_is_finished_by_the_next_
     assert candidate.decision_status == "duplicate"
 
 
-def test_review_api_returns_the_custom_configuration_of_the_order_and_of_each_candidate(db_session, setup, review_client):
+def test_review_api_returns_the_custom_configuration_of_the_order_and_of_each_candidate(client, db_session, setup):
     from app.adapters.db.models import SupportCompareJob
 
     order = _order(db_session, setup, "DJ-REV-CFG")
@@ -781,7 +551,49 @@ def test_review_api_returns_the_custom_configuration_of_the_order_and_of_each_ca
     db_session.add(job)
     db_session.commit()
 
-    data = review_client.get(f"/review/jobs/{job.id}").json()
+    data = client.get(f"/api/support-review/jobs/{job.id}", headers=_bearer(setup.support)).json()
     [entry] = data["items"]
     assert entry["custom_config"]["original"][0]["value"] == "Ann"
     assert entry["candidates"][0]["custom_config"]["original"][0]["value"] == "Red"
+
+
+def test_review_shows_live_progress_of_a_running_job(client, db_session, setup):
+    from app.adapters.db.models import SupportCompareJob
+
+    order = _order(db_session, setup, "DJ-LIVE-1")
+    item = _item(db_session, setup, order, "pending_review", is_duplicate=True)
+    _candidate(db_session, item, 1)
+    # The run row is created when a machine claims the job, so items show up while it is still running.
+    job = SupportCompareJob(
+        platform_id=setup.platform.id, chat_id=CHAT_ID, status="running", requested_count=5, run_id=setup.run.id,
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    data = client.get(f"/api/support-review/jobs/{job.id}", headers=_bearer(setup.support)).json()
+    assert data["job"]["status"] == "running"
+    assert (data["job"]["processed_count"], data["job"]["duplicate_count"], data["job"]["requested_count"]) == (1, 1, 5)
+    assert [i["order_code"] for i in data["items"]] == ["DJ-LIVE-1"]
+
+
+def test_review_image_proxy_serves_public_images_only(client, setup, monkeypatch):
+    from app.api.routes import support_review_api as review
+
+    assert review._is_public_host("127.0.0.1") is False
+    assert review._is_public_host("192.168.1.10") is False
+    headers = _bearer(setup.support)
+    assert client.get("/api/support-review/img", params={"url": "http://127.0.0.1:5432/x.png"}, headers=headers).status_code == 400
+    assert client.get("/api/support-review/img", params={"url": "file:///etc/passwd"}, headers=headers).status_code == 400
+    assert client.get("/api/support-review/img", params={"url": "https://cdn.example/x.jpg"}).status_code == 401
+
+    monkeypatch.setattr(review, "_fetch_image", lambda url: (b"RIFFwebp", "image/webp"))
+    res = client.get("/api/support-review/img", params={"url": "https://cdn.example/x.jpg"}, headers=headers)
+    assert res.status_code == 200 and res.content == b"RIFFwebp" and res.headers["content-type"] == "image/webp"
+
+
+def test_search_rejects_empty_and_out_of_range_requests(client, setup):
+    headers = _bearer(setup.support)
+    png = ("a.png", b"\x89PNG", "image/png")
+    assert client.post("/api/support-review/search?top_k=0", files={"file": png}, headers=headers).status_code == 400
+    assert client.post("/api/support-review/search", files={"file": ("e.png", b"", "image/png")}, headers=headers).status_code == 400
+    assert client.post("/api/support-review/search", files={"file": png}).status_code == 401

@@ -1,11 +1,10 @@
 from uuid import uuid4
 
 import numpy as np
-from backend.postgres_compare import (
+from backend.compare_core import (
     CandidateResult,
     HistoricalImage,
     _candidate_indexes,
-    _first_image_url,
     _pick_overall,
 )
 
@@ -25,11 +24,6 @@ def _historical(external_order_id: str, value: float) -> HistoricalImage:
         phash="0" * 64,
         color_lab=(50.0, 0.0, 0.0),
     )
-
-
-def test_primary_preview_prefers_thumbnail_then_gallery() -> None:
-    assert _first_image_url("https://cdn.test/thumb.png", ["https://cdn.test/gallery.png"]) == "https://cdn.test/thumb.png"
-    assert _first_image_url(None, ["/gallery.png"]) == "https://printerval.com/gallery.png"
 
 
 def test_candidate_selection_excludes_same_external_order() -> None:
