@@ -78,7 +78,7 @@ function Console({ onLock }: { onLock: () => void }) {
   }
 
   return (
-    <div className="min-h-[100dvh] bg-slate-50 text-slate-900">
+    <div className="min-h-[100dvh] bg-slate-50 text-[13px] text-slate-900">
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-slate-200 bg-white px-4 shadow-sm md:px-6">
         <div className="flex items-center gap-3">
           <div className="rounded-lg bg-blue-600 p-2 text-white shadow-sm">

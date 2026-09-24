@@ -15,35 +15,39 @@ có thể khác custom text) nằm trong `reasons`.
 
 Module có 3 phần:
 
-1. **Agent** (`agent.py`, chạy trên máy Support): embedding DINOv2 và so sánh với pool 85k ảnh lịch
+1. **Agent** (`agent.py`, chạy nền trên máy Support): embedding DINOv2 và so sánh với pool 85k ảnh lịch
    sử, cho job `/check` và cho mục **Tìm ảnh** trên web. Chỉ nói chuyện với API Tacahu qua HTTPS.
-2. **Trang web** (trong dashboard Tacahu, `frontend/src/pages/DuplicateReviewPage.tsx`,
-   `SupportQueuePage.tsx`): duyệt kết quả, tìm ảnh, xem hàng đợi và cho phép máy chạy.
+2. **Trang web** (trong dashboard Tacahu, `frontend/src/pages/SupportQueuePage.tsx` và khu vực ẩn
+   `DuplicateReviewPage.tsx`): hàng đợi, xin phép dùng máy, duyệt kết quả, tìm ảnh.
 3. **So 1-1** (`frontend/index.html`, `backend/main.py`): công cụ dev, upload 2 ảnh rồi xem từng tín hiệu.
 
 ## Luồng
 
 ```
-Support: /check → Có ──► VPS xếp job vào hàng đợi (PostgreSQL)
-Máy Support: chạy agent → hiện mã ──► Support đăng nhập web, Hàng đợi → nhập mã → "Cho phép"
+Support: /check → Có ──► VPS tạo 1 job (danh sách đơn được chốt lúc bấm Có) vào hàng đợi
+Support: đăng nhập web trên máy có agent ──► web hỏi "Cho phép dùng máy này?" ──► Có
+Web: xin token cho phiên đăng nhập ──► giao token cho agent ở 127.0.0.1:8765
 Agent: nhận job (có lease), tải pool (lần đầu, sau đó chỉ phần mới), embedding + so sánh trên
        CPU/GPU của máy, gửi từng lô kết quả ──► VPS thêm cả lô vào pool khi job xong
-Support: trang "Duyệt trùng" → chọn ảnh trùng / "Model sai" ──► Telegram xác nhận
+Support: khu vực ẩn "Quản lý trùng lặp" (nhập mật khẩu) ──► chọn ảnh trùng / "Model sai" ──► Telegram
 ```
 
-- Máy chỉ chạy khi người đã cho phép còn **mở web** (web gửi tín hiệu "có mặt" mỗi 20 giây; quá
-  90 giây không thấy thì API từ chối agent). **Đăng xuất** thu hồi mọi máy của người đó; token hết
-  hạn sau 12 giờ. Việc đang làm dở quay lại hàng đợi (hết lease 3 phút) và máy khác làm tiếp các
-  đơn còn lại.
-- Agent không có quyền vào database: nó chỉ giữ token của máy, thu hồi được bất cứ lúc nào
-  (Hàng đợi → Dừng máy).
+- **Nhiều job:** mỗi lần bấm **Có** là một job riêng với danh sách đơn cố định; các job chờ theo thứ
+  tự, mỗi đơn chỉ thuộc một job. Máy nào rảnh nhận job cũ nhất.
+- **Máy chỉ chạy trong phiên đăng nhập.** Web gửi tín hiệu "có mặt" mỗi 20 giây; quá 90 giây không
+  thấy thì API từ chối agent. **Đăng xuất** thu hồi mọi máy của người đó, token hết hạn sau 12 giờ.
+  Việc dở quay lại hàng đợi (hết lease 3 phút) và máy khác làm tiếp các đơn còn lại.
+- Agent không có quyền vào database, chỉ giữ token của máy (thu hồi được: nút **Dừng máy** ở trang
+  Hàng đợi). Chỉ trang web thuộc `SUPPORT_WEB_URL` được điều khiển agent (kiểm tra `Origin` và `Host`).
 - Các order trong cùng lô **không so chéo nhau**; cả lô được thêm vào pool sau khi so xong.
   Mỗi order ghi `review_status`: `pending_review` (model nghi trùng) hoặc `no_match`.
 
 ## Cài đặt và chạy agent
 
-Cần `.env.agent` (mẫu: `../.env.agent.example`): `SUPPORT_API_URL` (domain API, không có `/api`),
-`SUPPORT_WEB_URL`, `AGENT_NAME`, và `MODEL_VERSION` khớp `model_version` của pool.
+Cài một lần trên mỗi máy Support muốn góp CPU/GPU; agent chạy nền và tự bật cùng Docker. Cần
+`.env.agent` (mẫu: `../.env.agent.example`): `SUPPORT_API_URL` (domain API, không có `/api`),
+`SUPPORT_WEB_URL` (web của Tacahu), `AGENT_NAME`, và `MODEL_VERSION` khớp `model_version` của pool.
+Không cần mã hay thao tác gì thêm: chỉ cần đăng nhập web trên máy đó và bấm **Có** khi được hỏi.
 
 ### Docker (mọi hệ điều hành; trên macOS chỉ chạy CPU)
 
@@ -51,12 +55,12 @@ Cần `.env.agent` (mẫu: `../.env.agent.example`): `SUPPORT_API_URL` (domain A
 cd support_compare_image
 cp .env.agent.example .env.agent      # rồi điền
 docker compose up -d --build
-docker compose logs -f agent          # xem mã kết nối, tiến độ
+docker compose logs -f agent          # xem tiến độ
 docker compose down                   # tắt
 ```
 
 Code Python `dup-compare/` được mount vào container: sau `git pull` chỉ cần `docker compose restart agent`.
-Model Hugging Face và token của máy nằm trong volume (`hf-cache`, `agent-data`).
+Model Hugging Face nằm trong volume `hf-cache`. Agent chỉ mở cổng `127.0.0.1:8765`.
 
 ### Chạy trực tiếp (khuyên dùng trên Mac Apple Silicon để dùng GPU/MPS, hoặc máy có NVIDIA)
 
@@ -65,26 +69,36 @@ cd support_compare_image
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.compare-runtime.txt
 set -a; source .env.agent; set +a
-cd dup-compare && python agent.py     # --once: nhận tối đa một việc rồi thoát
+cd dup-compare && python agent.py
 ```
 
 Thiết bị tự chọn `cuda` → `mps` → `cpu` (đặt `EMBEDDING_DEVICE` để ép). Docker trên macOS không
 truyền được GPU vào container.
 
-Lần đầu agent tải model (~350MB) và toàn bộ pool (~85k vector, vài trăm MB); các lần sau chỉ tải
-phần mới thêm vào pool.
+Lần đầu sau khi được cho phép, agent tải model (~350MB) và toàn bộ pool (~85k vector, vài trăm MB);
+các lần sau chỉ tải phần mới thêm vào pool.
 
-## Trên web
+**Trình duyệt:** web (HTTPS) nói chuyện với agent ở `http://127.0.0.1:8765`. Dùng Chrome/Edge/Firefox.
+Chrome bản mới hỏi một lần "kết nối tới thiết bị trên mạng cục bộ" cho địa chỉ web: bấm Cho phép.
+Safari chặn kiểu kết nối này nên không dùng được để cho phép máy.
 
-- **Hàng đợi** (`/support-queue`): máy đang kết nối, job đang chạy (tiến độ, máy nào), job đang chờ,
-  yêu cầu tìm ảnh, job gần đây. Nhập mã của agent để cho phép máy; Support dừng máy hoặc hủy job đang chờ ở đây. Chỉ role Support dùng các trang này (Admin không).
-- **Duyệt trùng** (`/duplicate-review`): mỗi thẻ hiện ảnh gốc và top-10 candidate, đều kèm mã đơn.
-  **Chọn trùng** ghi `selected_duplicate` (VPS gửi cặp ảnh lên Telegram trong ≤60 giây; **Xác nhận
-  trùng** gắn tag Trùng lặp, **Từ chối** đưa đơn vào Không trùng lặp). **Model sai** ghi `ai_wrong`
-  (đơn ở lại Chưa kiểm tra cho tới khi gõ `/handle`). Cặp đã gửi Telegram thì không đổi được nữa.
-  Phím tắt: J/K chuyển đơn, 1-9/0 chọn ảnh, D chi tiết, X model sai.
-- **Tìm ảnh** (cùng trang): tải một ảnh lên, ảnh vào hàng đợi, agent trả 10 ảnh gần nhất kèm mã
-  đơn, độ giống, pHash/SSIM và custom configuration. Lịch sử tìm lưu trong trình duyệt.
+## Trên web (chỉ role Support)
+
+- **Hàng đợi** (`/support-queue`, có trong menu): số job đang đợi (mỗi lần bấm Có trên Telegram là
+  một job), bấm vào job để xem các đơn còn chờ kiểm tra trùng; trạng thái máy này và nút cho phép/dừng.
+  Khi đăng nhập trên máy có agent, web hỏi "Cho phép dùng GPU/CPU của máy này?".
+- **Quản lý trùng lặp** (`/duplicate-review`, không có trong menu, cần mật khẩu riêng): lần đầu mở
+  sẽ đặt mật khẩu (dùng chung cho nhóm Support), đổi được ở mục **Cài đặt**; nhập sai 5 lần thì khóa
+  10 phút. Có 4 mục:
+  - **Duyệt kết quả**: danh sách job bên trái; mỗi order hiện ảnh gốc và top-10 candidate kèm mã đơn.
+    **Chọn trùng** ghi `selected_duplicate` (VPS gửi cặp ảnh lên Telegram trong ≤60 giây; **Xác nhận
+    trùng** gắn tag Trùng lặp, **Từ chối** đưa đơn vào Không trùng lặp). **Model sai** ghi `ai_wrong`
+    (đơn ở lại Chưa kiểm tra cho tới khi gõ `/handle`). Cặp đã gửi Telegram thì không đổi được nữa.
+    Phím tắt: J/K chuyển đơn, 1-9/0 chọn ảnh, D chi tiết, X model sai.
+  - **Tìm ảnh**: tải một ảnh lên, ảnh vào hàng đợi, agent trả 10 ảnh gần nhất kèm mã đơn, độ giống,
+    pHash/SSIM và custom configuration. Lịch sử tìm lưu trong trình duyệt.
+  - **Lịch sử job**: mọi job kèm trạng thái, số đơn, nghi trùng, lỗi; mở duyệt hoặc hủy job đang chờ.
+  - **Cài đặt**: đổi mật khẩu, khóa ngay.
 
 ## Test
 
@@ -142,7 +156,7 @@ thêm dữ liệu thật** (dùng `calibrate_dataset.py`).
 
 ```
 dup-compare/
-  agent.py          # agent trên máy Support: device login, pool, job/search, heartbeat
+  agent.py          # agent trên máy Support: server cục bộ cho web, pool, job/search, heartbeat
   backend/
     config.py       # threshold, model (đọc từ biến môi trường)
     embedding.py    # DinoV2Embedder (cuda/mps/cpu) + fallback HOG cho công cụ 1-1
@@ -154,5 +168,6 @@ dup-compare/
   test_agent.py, test_compare_core.py, test_pipeline.py
 ```
 
-Phía server: `app/api/routes/support_worker_api.py` (agent), `support_review_api.py` (web),
-`app/application/support_worker.py` (device login, lease, pool, lưu kết quả, đưa lô vào pool).
+Phía server: `app/api/routes/support_worker_api.py` (agent + hàng đợi), `support_review_api.py` (khu vực
+ẩn + mật khẩu), `app/application/support_worker.py` (cấp quyền máy, lease, pool, lưu kết quả, đưa lô
+vào pool), `support_review_access.py` (mật khẩu).

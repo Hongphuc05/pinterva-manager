@@ -62,7 +62,9 @@ export function WorkerProvider({ children, ConsentDialog }: { children: ReactNod
   const granting = useRef(false)
   const failures = useRef(0)
   const agentRef = useRef<AgentStatus | null>(null)
-  agentRef.current = agent
+  useEffect(() => {
+    agentRef.current = agent
+  }, [agent])
 
   const refresh = useCallback(async () => {
     const status = await probeAgent()

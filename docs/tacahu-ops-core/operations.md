@@ -50,36 +50,39 @@ Phase 1 dùng model Hugging Face `facebook/dinov2-base`. VPS không chạy DINO:
 với API bằng HTTPS, không có SSH tunnel hay quyền vào database. Cài đặt và chạy: xem
 `support_compare_image/dup-compare/README.md`.
 
-Migration `support_compare_image` phải ở `head` (tới `0009_worker_devices_search_jobs`) trước khi bật
+Migration `support_compare_image` phải ở `head` (tới `0010_review_access_job_orders`) trước khi bật
 `SUPPORT_COMPARE_ENABLED=true`. Cờ này bật lệnh `/check`, `/handle`, nút web và notifier; **không
-có job tự động theo lịch**. Đặt `PUBLIC_WEB_URL` (địa chỉ web, ví dụ `https://tacahu-ops.vercel.app`)
-trong `.env.production` để agent in link cho phép máy. `SUPPORT_COMPARE_BATCH_LIMIT` giới hạn số tin
-Telegram gửi mỗi lần notifier chạy.
+có job tự động theo lịch**. `SUPPORT_COMPARE_BATCH_LIMIT` giới hạn số tin Telegram gửi mỗi lần
+notifier chạy.
 
 Luồng vận hành một lô (ví dụ 100 order admin vừa crawl về Waiting):
 
 1. Support gõ `/check` (hoặc bấm **Kiểm tra trùng (N)** trên web). Bot báo số order chưa từng được
-   so sánh rồi hỏi **Có**/**Không**. Gõ lại `/check` hoặc `/handle` sẽ thay prompt còn chờ trước đó.
-2. Bấm **Có**: job vào hàng đợi (xem trang **Hàng đợi** trên web). Job đứng chờ tới khi có máy Support
-   được cho phép.
-3. Một Support chạy agent trên máy mình; agent in mã kết nối. Support đăng nhập web, mở **Hàng đợi**,
-   nhập mã (hoặc mở link agent in) rồi bấm **Cho phép**. Máy chỉ chạy khi người đó còn đăng nhập và
-   mở web: đăng xuất thu hồi máy, đóng web thì máy tạm dừng sau ≤90 giây và việc dở được máy khác
-   nhận tiếp (lease 3 phút). Token của máy hết hạn sau 12 giờ; Admin hoặc chính người cho phép có
-   thể **Dừng máy** ở trang Hàng đợi.
+   so sánh và chưa nằm trong job nào rồi hỏi **Có**/**Không**. Gõ lại `/check` hoặc `/handle` sẽ
+   thay prompt còn chờ trước đó.
+2. Bấm **Có**: tạo **một job** với danh sách đơn được chốt lúc đó (mỗi lần bấm Có là một job; nhiều
+   job có thể cùng chờ, mỗi đơn chỉ thuộc một job). Xem ở trang **Hàng đợi** trên web: số job đang
+   đợi, bấm vào job để xem các đơn còn chờ kiểm tra.
+3. Khi một Support đăng nhập web trên máy đang chạy agent, web hỏi "Cho phép dùng GPU/CPU của máy
+   này để chạy hàng đợi?". **Có** thì web xin token cho phiên đăng nhập và giao cho agent (chạy ở
+   `127.0.0.1:8765`, chỉ nhận lệnh từ web của Tacahu). Máy chạy miễn là phiên còn sống: đăng xuất thu
+   hồi máy, đóng web thì máy tạm dừng sau ≤90 giây và việc dở được máy khác nhận tiếp (lease 3 phút).
+   Token của máy hết hạn sau 12 giờ; Support dừng máy bất cứ lúc nào ở trang Hàng đợi.
 4. Agent so sánh cả lô rồi VPS thêm cả lô vào pool. Bot báo số order đã so, số nghi trùng, số không
    thấy trùng và số lỗi.
-5. Support mở **Duyệt trùng** trên web. Với mỗi order nghi trùng: **Chọn trùng** (Telegram gửi cặp
-   ảnh kèm mã đơn trong ≤60 giây) hoặc **Model sai**.
+5. Support mở khu vực ẩn **Quản lý trùng lặp** (`/duplicate-review`, không có trong menu; mật khẩu riêng,
+   lần đầu mở thì đặt, đổi ở mục Cài đặt; khóa 10 phút sau 5 lần nhập sai). Với mỗi order nghi trùng:
+   **Chọn trùng** (Telegram gửi cặp ảnh kèm mã đơn trong ≤60 giây) hoặc **Model sai**. Quên mật khẩu:
+   xóa dòng của platform trong `support_compare_image.review_access` để đặt lại ở lần mở sau.
 6. Trên Telegram: **Xác nhận trùng** gắn tag Trùng lặp và chuyển order sang tab Trùng lặp;
    **Từ chối** chuyển sang Không trùng lặp.
 7. `/handle` đếm các order đã so mà không trùng (không thấy trùng hoặc **Model sai**, không còn
    review đang mở), hỏi xác nhận rồi chuyển chúng sang Không trùng lặp. `/help` liệt kê lệnh.
 
 Mỗi order chỉ được so sánh một lần; order đã có kết quả không được đưa vào `/check` lần sau. Order
-lỗi được thử lại. Mọi ảnh, tin nhắn và màn hình đều kèm mã đơn. Các trang Duyệt trùng và Hàng đợi chỉ dành
+lỗi được thử lại. Mọi ảnh, tin nhắn và màn hình đều kèm mã đơn. Hàng đợi và khu vực Quản lý trùng lặp chỉ dành
 cho role Support (Admin không dùng), giới hạn theo platform của tài khoản và không bao giờ ghi vào
-`public.orders`. Support dừng máy và hủy job đang chờ ở trang Hàng đợi.
+`public.orders`. Support hủy job đang chờ ở mục Lịch sử job của khu vực ẩn.
 
 Weight fine-tune ở phase 2 phải có `MODEL_VERSION` riêng. Nếu đổi dimension, preprocessing hoặc
 model space, re-embed toàn bộ baseline trước khi so sánh; không trộn vector DINOv2 gốc với vector

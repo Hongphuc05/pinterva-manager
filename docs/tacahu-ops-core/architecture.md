@@ -47,16 +47,19 @@ Admin vẫn dùng chat riêng hiện hành và các state/approval vẫn do API/
 
 `support_compare_image/dup-compare/agent.py` là process duy nhất sở hữu runtime Hugging Face
 DINOv2. Nó chạy trên máy của Support và chỉ nói chuyện với API (`/api/support-worker/*`) bằng HTTPS:
-không có quyền vào PostgreSQL. Máy được nối bằng *device login*: agent hiện một mã, một Support đã
-đăng nhập bấm **Cho phép** trên trang Hàng đợi, API cấp token của máy. Token chỉ dùng được khi trang
-web của người đó còn gửi tín hiệu có mặt (`POST /support-worker/presence` mỗi 20 giây, hết hiệu lực
-sau 90 giây); đăng xuất thu hồi mọi máy của người đó và token hết hạn sau 12 giờ. Model được cache
+không có quyền vào PostgreSQL. Máy được cấp quyền từ chính phiên đăng nhập: khi Support đăng nhập trên máy có agent, web hỏi
+"Cho phép dùng GPU/CPU của máy này?"; **Có** thì web gọi `POST /support-worker/devices/grant`, nhận
+token của máy và giao cho agent qua `http://127.0.0.1:8765/connect` (agent chỉ nhận từ `Origin` của
+web Tacahu và `Host` loopback). Token chỉ dùng được khi trang web của người đó còn gửi tín hiệu có
+mặt (`POST /support-worker/presence` mỗi 20 giây, hết hiệu lực sau 90 giây); đăng xuất thu hồi mọi
+máy của người đó và token hết hạn sau 12 giờ. Model được cache
 trong process giữa các job; production VPS không cài `torch`, `transformers` hay tải checkpoint.
 
 Job chỉ được tạo khi Support xác nhận: lệnh `/check` trên Telegram (hoặc nút **Kiểm tra trùng** trên
-tab **Chưa kiểm tra**) đếm các order chưa từng được so sánh, hỏi **Có**/**Không**, rồi enqueue tối đa
-một job active cho mỗi platform (`comparison_jobs`). Hàng đợi (job và yêu cầu tìm ảnh
-`search_jobs`) nằm trong PostgreSQL. Agent claim bằng lease (`FOR UPDATE SKIP LOCKED`, heartbeat 30
+tab **Chưa kiểm tra**) đếm các order chưa từng được so sánh, hỏi **Có**/**Không**, rồi tạo một job
+(`comparison_jobs`) cho **mỗi lần bấm Có**, kèm danh sách order được chốt lúc đó (`order_ids`, loại các
+order đã nằm trong job khác); nhiều job có thể cùng chờ. Hàng đợi (job và yêu cầu tìm ảnh
+`search_jobs`) nằm trong PostgreSQL; web đọc qua `GET /support-worker/queue`. Agent claim bằng lease (`FOR UPDATE SKIP LOCKED`, heartbeat 30
 giây, hết hạn 3 phút): job có lease hết hạn được máy khác nhận tiếp với các order chưa có kết quả.
 Agent tải pool (`GET /support-worker/pool`, phân trang keyset; lần sau chỉ phần mới), embedding và so
 sánh từng order trên máy, gửi từng lô kết quả. Các order trong cùng lô không so chéo với nhau; khi
@@ -65,8 +68,11 @@ phút để báo cáo job và gửi cặp ảnh Support đã chọn.
 
 Kết quả từng order nằm ở `comparison_items.review_status`: `pending_review` (model nghi trùng),
 `no_match` (không thấy trùng), rồi `selected_duplicate` hoặc `ai_wrong` sau khi Support duyệt ở
-trang **Duyệt trùng** trong dashboard (`/duplicate-review`, API `/api/support-review/*`, giới hạn
-theo platform). Trang này chỉ ghi vào schema `support_compare_image`, không đổi order. Mục **Tìm ảnh**
+khu vực ẩn **Quản lý trùng lặp** của dashboard (`/duplicate-review`, không có trong menu, API
+`/api/support-review/*`, giới hạn theo platform). Khu vực này có mật khẩu riêng (một mật khẩu cho mỗi
+platform trong `review_access`, đổi được bên trong; mở khóa cấp token có chữ ký gửi qua header
+`X-Review-Token`, hết hạn sau 12 giờ hoặc khi đổi mật khẩu, khóa 10 phút sau 5 lần sai). Nó chỉ ghi vào
+schema `support_compare_image`, không đổi order. Mục **Tìm ảnh**
 đưa một ảnh upload vào hàng đợi để agent trả top-10 gần nhất. Với `selected_duplicate`, notifier gửi
 cặp (ảnh gốc, ảnh đã chọn, kèm mã đơn) qua Telegram; **Xác nhận** gọi `set_orders_duplicate_status`
 để gắn Trùng lặp, **Từ chối** chuyển order sang Không trùng lặp. Các order `no_match`/`ai_wrong` vẫn
