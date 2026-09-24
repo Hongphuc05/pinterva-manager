@@ -11,12 +11,15 @@ interface FigureProps {
   tag?: ReactNode
   chosen?: boolean
   onZoom: (src: string) => void
+  /** The image is a local blob: URL (an upload), not something to fetch through the proxy. */
+  rawSrc?: boolean
   children?: ReactNode
 }
 
 /** An image with its order code underneath. Every image in the tool carries a code. */
-export function Figure({ imageUrl, code, name, tag, chosen, onZoom, children }: FigureProps) {
-  const src = safeUrl(imageUrl)
+export function Figure({ imageUrl, code, name, tag, chosen, onZoom, rawSrc, children }: FigureProps) {
+  const src = rawSrc ? imageUrl : safeUrl(imageUrl)
+  const show = (u: string) => (rawSrc ? u : proxied(u))
   const [failed, setFailed] = useState(false)
   return (
     <div className="w-36 flex-none">
@@ -24,13 +27,13 @@ export function Figure({ imageUrl, code, name, tag, chosen, onZoom, children }: 
         <button
           type="button"
           title="Bấm để phóng to"
-          onClick={() => onZoom(proxied(src))}
+          onClick={() => onZoom(show(src))}
           className={`relative block size-36 cursor-zoom-in overflow-hidden rounded-md border bg-white p-0 ${
             chosen ? 'border-ok ring-2 ring-ok/40' : 'border-line'
           }`}
         >
           <img
-            src={proxied(src)}
+            src={show(src)}
             alt={code}
             loading="lazy"
             onError={() => setFailed(true)}

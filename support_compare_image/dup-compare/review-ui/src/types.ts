@@ -48,3 +48,41 @@ export const isNoMatch = (i: Item) => i.review_status === 'no_match'
 /** A pair already sent to Telegram is frozen. */
 export const isSent = (i: Item) =>
   i.candidates.some((c) => c.id === i.selected_candidate_id && c.sent_to_telegram)
+
+export interface ConfigEntry {
+  key: string
+  value: string
+}
+export interface CustomConfig {
+  original?: ConfigEntry[]
+  translated_vn?: ConfigEntry[]
+}
+
+export interface SearchCandidate {
+  rank: number
+  order_code: string | null
+  product_name: string | null
+  image_url: string
+  similarity: number
+  phash_distance: number | null
+  ssim: number | null
+  color_delta_e: number | null
+  classification: string
+  reasons: string[]
+  custom_config: CustomConfig | null
+}
+
+export interface SearchResult {
+  verdict: string
+  is_duplicate: boolean
+  pool_count: number
+  model_version: string
+  elapsed_ms: number
+  candidates: SearchCandidate[]
+}
+
+/** Design options worth showing: Vietnamese if present, minus internal pricing/preview keys. */
+export function configEntries(config: CustomConfig | null | undefined): ConfigEntry[] {
+  const list = (config?.translated_vn?.length ? config.translated_vn : config?.original) ?? []
+  return list.filter((e) => e.key && !/^(extra_discount|url_)/i.test(e.key))
+}

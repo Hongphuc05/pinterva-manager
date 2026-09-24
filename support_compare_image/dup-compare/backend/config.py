@@ -6,7 +6,6 @@ dataset thật, không hard-code trong logic classifier.
 """
 import os
 from dataclasses import dataclass
-from pathlib import Path
 
 
 def _f(name: str, default: float) -> float:
@@ -58,18 +57,6 @@ class ModelConfig:
     model_version: str = os.environ.get("MODEL_VERSION", "dinov2-base-v1")
     processing_version: str = os.environ.get("PROCESSING_VERSION", "mvp-0.2.0")
 
-
-# --- Đường dẫn dữ liệu & DB cho luồng "pool tăng dần" (old/new folder) ---
-# Mặc định: backend/ nằm trong dup-compare/, data/ là folder anh em cùng cấp
-# với dup-compare/ (D:\Project\dup-product\data\...). Override qua env var
-# nếu cấu trúc thư mục của mày khác.
-_DEFAULT_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-_DEFAULT_DATA_DIR = _DEFAULT_PROJECT_ROOT / "data"
-
-DATA_DIR = Path(os.environ.get("DATA_DIR", str(_DEFAULT_DATA_DIR)))
-OLD_IMAGES_DIR = Path(os.environ.get("OLD_IMAGES_DIR", str(DATA_DIR / "old")))
-NEW_IMAGES_DIR = Path(os.environ.get("NEW_IMAGES_DIR", str(DATA_DIR / "new")))
-DB_PATH = Path(os.environ.get("DB_PATH", str(DATA_DIR / "dup_detection.db")))
 
 # Top-K candidate lấy ra từ vector search (brute-force ở quy mô nhỏ) để chạy
 # comparison sâu (pHash/SSIM/color). Không hard-code trong logic, đọc ở đây.

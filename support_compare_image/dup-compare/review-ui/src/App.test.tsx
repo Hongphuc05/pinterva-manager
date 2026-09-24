@@ -32,6 +32,7 @@ function renderApp() {
 }
 
 beforeEach(() => {
+  window.location.hash = ''
   calls = []
   items = [item(1, 'pending_review'), item(2, 'selected_duplicate', 'i2-c2'), item(3, 'no_match')]
   vi.stubGlobal(
@@ -112,6 +113,34 @@ describe('review page', () => {
     expect(within(card).getByText('Đã gửi Telegram')).toBeInTheDocument()
     expect(within(card).queryByRole('button', { name: /Model sai/ })).not.toBeInTheDocument()
     expect(within(card).queryByRole('button', { name: 'Chọn trùng' })).not.toBeInTheDocument()
+  })
+
+  it('finds an uploaded picture in the pool and lists the matches with their codes and configuration', async () => {
+    const result = {
+      verdict: 'TRUNG', is_duplicate: true, pool_count: 85000, model_version: 'm', elapsed_ms: 1500,
+      candidates: [{
+        rank: 1, order_code: 'DJ777', product_name: 'Áo trùng', image_url: 'https://img.test/a.png',
+        similarity: 0.97, phash_distance: 4, ssim: 0.9, color_delta_e: 1, classification: 'TRUNG', reasons: [],
+        custom_config: { original: [{ key: 'Name', value: 'Ann' }, { key: 'extra_discount_ab', value: '0' }], translated_vn: [] },
+      }],
+    }
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:mine', revokeObjectURL: () => {} }))
+    const base = fetch as unknown as (u: string, i?: RequestInit) => Promise<unknown>
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+      if (url.startsWith('/review/search')) {
+        calls.push({ url, init })
+        return Promise.resolve({ ok: true, status: 200, json: async () => result })
+      }
+      return base(url, init)
+    }))
+    renderApp()
+    await userEvent.click(await screen.findByRole('tab', { name: 'Tìm ảnh' }))
+    await userEvent.upload(screen.getByTestId('search-file'), new File(['x'], 'mine.png', { type: 'image/png' }))
+    expect(await screen.findByText('DJ777')).toBeInTheDocument()
+    expect(screen.getByText('Model: có ảnh trùng')).toBeInTheDocument()
+    expect(screen.getByText(/Name/)).toBeInTheDocument()
+    expect(screen.queryByText(/extra_discount/)).not.toBeInTheDocument()
+    expect(calls.some((c) => c.url.startsWith('/review/search') && c.init?.method === 'POST')).toBe(true)
   })
 
   it('shows an error state when the database cannot be reached', async () => {

@@ -631,3 +631,77 @@ def test_when_the_messages_cannot_be_deleted_the_prompt_is_closed_and_the_result
     clear.assert_called_once_with(CHAT_ID, 13)
     assert order.external_order_id in send.call_args.args[1]
     answer.assert_not_called()
+
+
+@pytest.fixture()
+def search_client(monkeypatch):
+    import sys
+    from pathlib import Path
+
+    from fastapi import FastAPI
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "support_compare_image" / "dup-compare"))
+    from backend.search import router
+
+    app = FastAPI()
+    app.include_router(router)
+    return TestClient(app, base_url="http://127.0.0.1:8000")
+
+
+def _png(color="white") -> bytes:
+    import io
+
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (16, 16), color).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def test_search_by_uploaded_image_returns_pool_matches_with_codes_and_configs(search_client, monkeypatch):
+    import numpy as np
+    from backend import postgres_compare as pc
+    from backend import search
+    from PIL import Image
+
+    def hist(code, vec, job):
+        vec = np.array(vec, dtype=np.float32)
+        vec /= np.linalg.norm(vec)
+        return pc.HistoricalImage(
+            asset_id=uuid.uuid4(), job_id=job, external_order_id=code, product_name=f"Áo {code}",
+            image_url=f"https://cdn.test/{code}.png", embedding=vec, embedding_dim=3, model_version="m",
+            phash="0" * 64, color_lab=(50.0, 0.0, 0.0),
+        )
+
+    job_near = uuid.uuid4()
+    rows = [hist("DJ-NEAR", [1, 0.01, 0], job_near), hist("DJ-FAR", [0, 1, 0], uuid.uuid4())]
+    matrix = np.stack([r.embedding for r in rows])
+
+    class FakeEmbedder:
+        def encode_batch(self, images):
+            return [np.array([1.0, 0.0, 0.0], dtype=np.float32) for _ in images]
+
+    monkeypatch.setattr(search, "_get_pool", lambda force=False: (rows, matrix))
+    monkeypatch.setattr(search, "_get_embedder", lambda name: FakeEmbedder())
+    monkeypatch.setattr(search, "_configs", lambda ids: {str(job_near): {"original": [{"key": "Name", "value": "Ann"}], "translated_vn": []}})
+    monkeypatch.setattr(pc, "_fetch_image", lambda url, **kw: Image.new("RGB", (16, 16), "white"))
+
+    res = search_client.post("/review/search", files={"file": ("mine.png", _png(), "image/png")})
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["pool_count"] == 2
+    assert [c["order_code"] for c in body["candidates"]] == ["DJ-NEAR", "DJ-FAR"]  # nearest first, with codes
+    near = body["candidates"][0]
+    assert near["similarity"] > 0.99 and near["classification"] == "TRUNG" and body["is_duplicate"] is True
+    assert near["custom_config"]["original"][0]["value"] == "Ann"
+    assert body["candidates"][1]["custom_config"] is None
+
+
+def test_search_rejects_bad_uploads_and_foreign_hosts(search_client):
+    from fastapi.testclient import TestClient
+
+    assert search_client.post("/review/search", files={"file": ("x.txt", b"not an image", "text/plain")}).status_code == 415
+    assert search_client.post("/review/search?top_k=0", files={"file": ("a.png", _png(), "image/png")}).status_code == 400
+    outside = TestClient(search_client.app, base_url="http://evil.example")
+    assert outside.post("/review/search", files={"file": ("a.png", _png(), "image/png")}).status_code == 403

@@ -1,4 +1,4 @@
-import type { Item, Job } from './types'
+import type { Item, Job, SearchResult } from './types'
 
 export class ApiError extends Error {}
 
@@ -29,3 +29,9 @@ export const selectCandidate = (itemId: string, candidateId: string) =>
 
 export const rejectItem = (itemId: string) =>
   request(`/review/items/${itemId}/reject`, { method: 'POST' })
+
+export const searchByImage = (file: File, refresh = false) => {
+  const form = new FormData()
+  form.append('file', file)
+  return request<SearchResult>(`/review/search?top_k=10${refresh ? '&refresh=true' : ''}`, { method: 'POST', body: form })
+}

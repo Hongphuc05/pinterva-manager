@@ -16,10 +16,9 @@ có thể khác custom text) nằm trong `reasons`.
 Module có 3 phần (pool 85k ảnh lịch sử đã được crawl và embedding một lần trước đó, nay chỉ tăng thêm qua luồng `/check`):
 
 1. **So 1-1** (`frontend/index.html`): upload 2 ảnh rồi xem ngay từng tín hiệu.
-2. **Quét pool tăng dần** (`frontend/scan.html`): ingest kho `data/old/` một lần,
-   sau đó quét `data/new/` lần lượt theo tên file. Mỗi ảnh mới được so với toàn bộ
-   pool (gồm ảnh cũ và ảnh mới đã quét trước nó), gắn nhãn, rồi được thêm vào pool.
-   Dữ liệu lưu trong SQLite.
+2. **Tìm ảnh trong pool** (`review-ui`, mục "Tìm ảnh"): tải 1 ảnh từ máy lên (kéo thả, dán hoặc chọn),
+   tìm 10 ảnh gần nhất trong pool Postgres kèm mã đơn, độ giống, pHash/SSIM, kết luận của model và
+   custom configuration.
 3. **So sánh với PostgreSQL** (`compare_orders.py`): lấy ảnh preview của order từ
    `public.orders`, đọc pool DINOv2 cũ từ `support_compare_image.image_embeddings`,
    tính candidate và ghi kết quả vào các bảng `comparison_*`. Có thể chạy thử với
@@ -40,54 +39,14 @@ nên máy cần có mạng. Có GPU CUDA thì dùng GPU, không thì chạy CPU.
 > `meta.embedding_backend` ghi rõ backend đang dùng. Fallback chỉ để demo cho chạy được,
 > **không dùng số liệu của nó để đánh giá hay calibrate**.
 
-## 1. Chạy server (so 1-1 + quét pool)
+## 1. Chạy server (so 1-1, duyệt kết quả, tìm ảnh)
 
 ```bash
 uvicorn backend.main:app --reload --port 8000
 ```
 
-- `http://127.0.0.1:8000/`: so 1-1
-- `http://127.0.0.1:8000/scan.html`: quét pool
-
-### Quét pool
-
-Mặc định thư mục `data/` nằm cạnh `dup-compare/`:
-
-```
-dup-product/
-  data/
-    old/               <- kho ảnh gốc
-    new/               <- ảnh mới, chờ kiểm tra
-    dup_detection.db   <- SQLite, tự tạo
-    labeled_examples/  <- dataset gán nhãn tay (cho calibrate_dataset.py)
-  dup-compare/
-```
-
-Nếu thư mục nằm chỗ khác, đặt biến môi trường trước khi chạy uvicorn
-(`DATA_DIR`, hoặc chỉ định riêng `OLD_IMAGES_DIR`, `NEW_IMAGES_DIR`, `DB_PATH`):
-
-```powershell
-$env:DATA_DIR = "D:\Project\dup-product\data"
-```
-
-Trên `scan.html`:
-
-1. **Ingest kho ảnh cũ**: encode và lưu các ảnh trong `old/`. Chạy lại nhiều lần không
-   bị trùng, ảnh đã có sẽ được bỏ qua.
-2. **Quét ảnh mới tuần tự**: với mỗi ảnh trong `new/`, lấy Top-K ứng viên gần nhất theo
-   embedding (`TOP_K_CANDIDATES`, mặc định 5), tính pHash/SSIM/ΔE cho từng ứng viên rồi
-   gắn nhãn. Chỉ cần 1 ứng viên `TRUNG` là ảnh bị gắn `TRUNG`. Bấm vào card để xem
-   tất cả ứng viên.
-3. **Reset DB**: xóa file SQLite. File ảnh trong `old/` và `new/` không bị đụng tới.
-
-Tìm Top-K bằng cách nhân ma trận numpy trong RAM, không dùng index. Khoảng 100k ảnh
-× 768 chiều tốn chừng 300MB RAM. Nếu lên tới hàng triệu ảnh thì cần vector index
-(pgvector/HNSW), chỗ cần thay là `db.get_pool()`.
-
-> **Embedding chỉ so sánh được với nhau khi dùng cùng model.** Ảnh trong DB được lưu
-> kèm tên model. Khi đổi `EMBEDDING_MODEL_NAME`, hoặc đổi qua lại giữa fallback và
-> DINOv2, các ảnh của model cũ sẽ bị loại khỏi pool (`scan.html` có hiện cảnh báo).
-> Muốn cả pool dùng model mới thì Reset DB rồi Ingest lại.
+- `http://127.0.0.1:8000/`: duyệt kết quả và tìm ảnh (cần đã build `review-ui`, xem mục Docker)
+- `http://127.0.0.1:8000/index.html`: so 1-1 hai ảnh
 
 ### API
 
@@ -96,11 +55,6 @@ Tìm Top-K bằng cách nhân ma trận numpy trong RAM, không dùng index. Kho
 | `GET` | `/health` | backend embedding đang dùng + các đường dẫn |
 | `GET` | `/config` | threshold đang áp dụng |
 | `POST` | `/compare` | so 1-1, form-data `old_image`, `new_image` |
-| `GET` | `/admin/pool` | thống kê pool + số ảnh thuộc model khác |
-| `POST` | `/admin/ingest-old` | ingest `data/old/` |
-| `POST` | `/admin/scan-new` | quét `data/new/` tuần tự |
-| `POST` | `/admin/reset` | xóa DB |
-| `GET` | `/admin/image/{id}` | trả file ảnh (hoặc redirect nếu là URL) |
 
 Ví dụ response của `/compare`:
 
@@ -280,7 +234,7 @@ Giao diện là app React 19 + Vite 8 + Tailwind 4 + TypeScript trong `review-ui
 token với dashboard Tacahu Ops). Muốn chạy không dùng Docker: `cd review-ui && npm ci && npm run build`
 trước khi chạy `uvicorn`. Phát triển giao diện: chạy `uvicorn` ở cổng 8000 rồi `npm run dev` trong
 `review-ui/` (Vite proxy `/review/*` về cổng 8000); test bằng `npm test`. Hai công cụ cũ vẫn ở
-`/index.html` (so sánh 1-1) và `/scan.html` (quét pool).
+`/index.html` (so sánh 1-1).
 
 Mỗi thẻ hiện ảnh gốc và top-5 candidate, tất cả kèm mã đơn:
 
@@ -352,24 +306,24 @@ thêm dữ liệu thật** (dùng `calibrate_dataset.py`).
 - **Chưa có OCR:** ảnh cùng thiết kế nhưng khác custom text (NAME/YEAR/NUMBER) vẫn bị
   tính là `TRUNG`.
 - **Chưa crop riêng vùng in:** vùng in chưa được đánh trọng số cao hơn phần còn lại.
-- **SQLite + tìm kiếm vét cạn:** đủ cho cỡ khoảng 100k ảnh trên một máy, chưa phải hệ
-  thống production.
+- **Tìm kiếm vét cạn (nhân ma trận numpy trong RAM):** đủ cho cỡ khoảng 100k ảnh; nhiều hơn cần vector index.
 
 ## Cấu trúc
 
 ```
 dup-compare/
   backend/
-    config.py       # threshold, model, đường dẫn (đọc từ biến môi trường)
+    config.py       # threshold, model (đọc từ biến môi trường)
     embedding.py    # VisualEmbedder: DinoV2Embedder + ClassicalFallbackEmbedder
     signals.py      # pHash, SSIM, màu LAB / ΔE
     classifier.py   # luật gắn nhãn TRUNG / KHONG_TRUNG
-    db.py           # SQLite: bảng images, matches
-    scan.py         # ingest_folder(), scan_new_sequential()
+    postgres_compare.py  # so sánh với pool Postgres (worker), promote vào pool
+    review.py       # API duyệt kết quả job + proxy ảnh
+    search.py       # API tìm ảnh tải lên trong pool
     main.py         # FastAPI
   frontend/
-    index.html      # UI so 1-1
-    scan.html       # UI quét pool
+    index.html      # UI so 1-1 (cũ)
+  review-ui/        # UI React: duyệt kết quả + tìm ảnh
   calibrate_dataset.py  # đo trên dataset gán nhãn tay
   test_pipeline.py      # smoke test bằng ảnh tổng hợp
   requirements.txt

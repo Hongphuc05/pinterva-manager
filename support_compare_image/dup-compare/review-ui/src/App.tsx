@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { fetchJob, fetchJobs, rejectItem, selectCandidate } from './api'
 import { isDone, isNoMatch, isSent, isTodo, type Item, type Job, type TabKey } from './types'
-import { Layout } from './components/Layout'
+import { Layout, type View } from './components/Layout'
+import { SearchPage } from './components/SearchPage'
 import { OrderCard } from './components/OrderCard'
 import { Empty, Loading } from './components/Empty'
 import { Lightbox } from './components/Lightbox'
@@ -32,6 +33,12 @@ export default function App() {
   const [busy, setBusy] = useState<Set<string>>(new Set())
   const [zoom, setZoom] = useState<string | null>(null)
   const [active, setActive] = useState(0)
+  const [view, setView] = useState<View>(() => (window.location.hash === '#/search' ? 'search' : 'review'))
+
+  const changeView = (next: View) => {
+    setView(next)
+    window.location.hash = next === 'search' ? '#/search' : '#/'
+  }
 
   const loadJob = useCallback(async (id: string) => {
     if (!id) return
@@ -121,7 +128,7 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement
-      if (e.metaKey || e.ctrlKey || e.altKey || zoom || ['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName)) return
+      if (view !== 'review' || e.metaKey || e.ctrlKey || e.altKey || zoom || ['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName)) return
       if (e.key === 'j' || e.key === 'ArrowDown') setActive((i) => Math.min(i + 1, Math.max(list.length - 1, 0)))
       else if (e.key === 'k' || e.key === 'ArrowUp') setActive((i) => Math.max(i - 1, 0))
       else if (current && !busy.has(current.id) && !isSent(current) && (isTodo(current) || isDone(current))) {
@@ -131,7 +138,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [list, current, busy, zoom, onSelect, onReject])
+  }, [view, list, current, busy, zoom, onSelect, onReject])
 
   useEffect(() => {
     if (current) document.querySelector(`[data-testid="order-${current.order_code}"]`)?.scrollIntoView?.({ block: 'nearest' })
@@ -171,7 +178,11 @@ export default function App() {
   )
 
   return (
-    <Layout connected={connected} right={jobPicker}>
+    <Layout connected={connected} view={view} onView={changeView} right={view === 'review' ? jobPicker : undefined}>
+      {view === 'search' ? (
+        <SearchPage onZoom={setZoom} />
+      ) : (
+        <>
       <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2">
         <div className="flex gap-1" role="tablist">
           {TABS.map(({ key, label }) => (
@@ -226,6 +237,8 @@ export default function App() {
           title="Không có đơn nào trong mục này"
           note={tab === 'todo' ? 'Bạn đã duyệt hết các đơn nghi trùng của job này.' : undefined}
         />
+      )}
+        </>
       )}
       <Lightbox src={zoom} onClose={() => setZoom(null)} />
     </Layout>
