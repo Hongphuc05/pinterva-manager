@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from html import escape
 
 from sqlalchemy import exists, or_
+from sqlalchemy import text as sql_text
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import (
@@ -81,19 +82,42 @@ def _has_item(*review_statuses: str):
     )
 
 
-def count_support_unchecked_orders(session: Session, *, platform_id: uuid.UUID) -> int:
-    """Count the orders a /check would send to the local worker.
+def _queued_order_ids(session: Session, platform_id: uuid.UUID) -> set[uuid.UUID]:
+    """Orders already frozen into a queued/running job (they must not be queued twice)."""
+    rows = (
+        session.query(SupportCompareJob.order_ids)
+        .filter(
+            SupportCompareJob.platform_id == platform_id,
+            SupportCompareJob.status.in_(("queued", "running")),
+            SupportCompareJob.order_ids.is_not(None),
+        )
+        .all()
+    )
+    return {uuid.UUID(str(order_id)) for (ids,) in rows for order_id in ids}
 
-    The Chưa kiểm tra tab scope, minus orders that already have a completed
-    comparison (those wait for the web review, Telegram or /handle).
-    State only: Support's web view has no ``printerval_status`` (it is stripped),
-    so a stale "doing" mirror on a QC_PENDING/DONE order must not be counted.
+
+def _checkable_filters(session: Session, platform_id: uuid.UUID) -> list:
+    """The orders a /check would queue now.
+
+    The Chưa kiểm tra tab scope, minus orders that already have a completed comparison (those wait
+    for the review, Telegram or /handle) and orders already waiting in another job. State only:
+    Support's web view has no ``printerval_status`` (it is stripped), so a stale "doing" mirror on a
+    QC_PENDING/DONE order must not be counted.
     """
     never_compared = ~exists().where(
         SupportCompareItem.order_id == Order.id,
         SupportCompareItem.processing_status == "completed",
     )
-    return session.query(Order).filter(*_unchecked_scope(platform_id), never_compared).count()
+    filters = [*_unchecked_scope(platform_id), never_compared]
+    queued = _queued_order_ids(session, platform_id)
+    if queued:
+        filters.append(Order.id.not_in(queued))
+    return filters
+
+
+def count_support_unchecked_orders(session: Session, *, platform_id: uuid.UUID) -> int:
+    """Count the orders a /check would put in a new job."""
+    return session.query(Order).filter(*_checkable_filters(session, platform_id)).count()
 
 
 def _handleable_filters(platform_id: uuid.UUID) -> list:
@@ -133,25 +157,31 @@ def create_support_compare_job(
     platform_id: uuid.UUID,
     requested_by_id: uuid.UUID,
     chat_id: str,
-    requested_count: int,
-) -> SupportCompareJob:
-    """Queue a comparison request for the separately-run local ML worker."""
-    active_job = (
-        session.query(SupportCompareJob)
-        .filter(
-            SupportCompareJob.platform_id == platform_id,
-            SupportCompareJob.status.in_(("queued", "running")),
-        )
-        .with_for_update()
-        .first()
+) -> SupportCompareJob | None:
+    """Queue one job (one "Có" press) with the orders that are checkable right now.
+
+    Several jobs can wait at once: the order list is frozen here and excludes orders already in
+    another queued job. Returns None when there is nothing left to check.
+    """
+    # Serialise concurrent presses of the same platform so two jobs never share an order.
+    session.execute(
+        sql_text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {"key": f"support-check:{platform_id}"}
     )
-    if active_job is not None:
-        return active_job
+    order_ids = [
+        row[0]
+        for row in session.query(Order.id)
+        .filter(*_checkable_filters(session, platform_id))
+        .order_by(Order.created_at.asc(), Order.id.asc())
+        .all()
+    ]
+    if not order_ids:
+        return None
     job = SupportCompareJob(
         platform_id=platform_id,
         requested_by_id=requested_by_id,
         chat_id=chat_id,
-        requested_count=requested_count,
+        requested_count=len(order_ids),
+        order_ids=[str(order_id) for order_id in order_ids],
     )
     session.add(job)
     session.flush()

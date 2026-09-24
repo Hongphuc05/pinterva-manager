@@ -59,15 +59,13 @@ def api_support_compare_check(
             status.HTTP_409_CONFLICT,
             "Cần liên kết Telegram: báo cáo kết quả và cặp ảnh xác nhận được gửi qua Telegram.",
         )
-    order_count = count_support_unchecked_orders(db, platform_id=user.platform_id)
-    if order_count == 0:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Không có đơn mới nào cần kiểm tra.")
     job = create_support_compare_job(
         db,
         platform_id=user.platform_id,
         requested_by_id=user.id,
         chat_id=str(user.telegram_chat_id),
-        requested_count=order_count,
     )
+    if job is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Không có đơn mới nào cần kiểm tra.")
     db.commit()
     return SupportCompareCheckOut(job_id=str(job.id), requested_count=job.requested_count)

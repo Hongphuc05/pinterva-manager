@@ -254,9 +254,25 @@ def test_web_check_queues_a_job_for_the_never_compared_orders(client, db_session
 
 
 def _bearer(user: User) -> dict[str, str]:
+    """Session of a Support who also opened the hidden review area (password set directly in the DB)."""
+    from app.application import support_review_access as access
     from app.application.auth import create_session_token
+    from tests.conftest import TEST_DATABASE_URL  # noqa: F401 (same DB as the fixtures)
 
-    return {"Authorization": f"Bearer {create_session_token(str(user.id), user.role)}"}
+    session = _bearer.session  # set by the autouse fixture below
+    record = access.get_access(session, user.platform_id)
+    token = (
+        access.issue_token(user, record)
+        if record
+        else access.set_initial_password(session, user=user, platform_id=user.platform_id, password="secret1")
+    )
+    session.commit()
+    return {"Authorization": f"Bearer {create_session_token(str(user.id), user.role)}", "X-Review-Token": token}
+
+
+@pytest.fixture(autouse=True)
+def _bearer_session(db_session):
+    _bearer.session = db_session
 
 
 def test_web_review_selects_a_candidate_or_marks_the_model_wrong(client, db_session, setup):
@@ -307,7 +323,7 @@ def test_web_review_selects_a_candidate_or_marks_the_model_wrong(client, db_sess
     assert client.post(f"/api/support-review/items/{quiet_item_id}/reject", headers=headers).status_code == 409
 
 
-def test_web_review_requires_a_support_or_admin_session(client, db_session, setup):
+def test_web_review_requires_a_support_session(client, db_session, setup):
     assert client.get("/api/support-review/jobs").status_code == 401
     designer = User(
         username="des-review", full_name="D", role="designer", password_hash=hash_password("pass"),
@@ -316,7 +332,7 @@ def test_web_review_requires_a_support_or_admin_session(client, db_session, setu
     db_session.add(designer)
     db_session.commit()
     assert client.get("/api/support-review/jobs", headers=_bearer(designer)).status_code == 403
-    assert client.get("/api/support-review/queue", headers=_bearer(designer)).status_code == 403
+    assert client.get("/api/support-worker/queue", headers=_bearer(designer)).status_code == 403
 
 
 def _seed_pool_job(db_session, code: str, config=None) -> uuid.UUID:

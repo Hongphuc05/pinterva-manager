@@ -17,18 +17,14 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
-from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.adapters.db.models import (
-    SupportCompareJob,
-    SupportSearchJob,
-    SupportWorkerDevice,
-    User,
-)
+from app.adapters.db.models import SupportCompareJob, SupportSearchJob, User
 from app.api.deps import get_current_platform_id, get_db, require_any_role
+from app.application import support_review_access as access_svc
 from app.application import support_worker as sw
 from app.domain.access import ROLE_SUPPORT
 
@@ -40,6 +36,93 @@ MAX_UPLOAD_BYTES = 10_000_000
 
 router = APIRouter(prefix="/support-review")
 _user = require_any_role(ROLE_SUPPORT)
+
+
+def require_unlock(
+    request: Request,
+    user: User = Depends(_user),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+) -> User:
+    """The review area is hidden behind its own password (X-Review-Token from /access/unlock)."""
+    if not access_svc.token_is_valid(db, user, platform_id, request.headers.get("x-review-token")):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            {"code": "review_locked", "message": "Cần nhập mật khẩu để mở giao diện duyệt trùng."},
+        )
+    return user
+
+
+def _access_error(exc: access_svc.ReviewAccessError) -> HTTPException:
+    return HTTPException(exc.status_code, {"code": exc.code, "message": exc.message})
+
+
+class PasswordIn(BaseModel):
+    password: str = Field(max_length=access_svc.MAX_PASSWORD_LENGTH)
+
+
+class ChangePasswordIn(BaseModel):
+    current_password: str = Field(max_length=access_svc.MAX_PASSWORD_LENGTH)
+    new_password: str = Field(max_length=access_svc.MAX_PASSWORD_LENGTH)
+
+
+@router.get("/access")
+def access_status(
+    request: Request,
+    user: User = Depends(_user),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    has_password = access_svc.get_access(db, platform_id) is not None
+    unlocked = has_password and access_svc.token_is_valid(db, user, platform_id, request.headers.get("x-review-token"))
+    return {"has_password": has_password, "unlocked": unlocked}
+
+
+@router.post("/access/setup")
+def access_setup(
+    payload: PasswordIn,
+    user: User = Depends(_user),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    try:
+        token = access_svc.set_initial_password(db, user=user, platform_id=platform_id, password=payload.password)
+    except access_svc.ReviewAccessError as exc:
+        raise _access_error(exc) from exc
+    db.commit()
+    return {"token": token}
+
+
+@router.post("/access/unlock")
+def access_unlock(
+    payload: PasswordIn,
+    user: User = Depends(_user),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    try:
+        token = access_svc.unlock(db, user=user, platform_id=platform_id, password=payload.password)
+    except access_svc.ReviewAccessError as exc:
+        raise _access_error(exc) from exc
+    db.commit()
+    return {"token": token}
+
+
+@router.post("/access/change")
+def access_change(
+    payload: ChangePasswordIn,
+    user: User = Depends(require_unlock),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    try:
+        token = access_svc.change_password(
+            db, user=user, platform_id=platform_id, current=payload.current_password, new=payload.new_password
+        )
+    except access_svc.ReviewAccessError as exc:
+        raise _access_error(exc) from exc
+    db.commit()
+    return {"token": token}
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -93,7 +176,7 @@ def _fetch_image(url: str, hops: int = 3) -> tuple[bytes, str]:
 
 
 @router.get("/img")
-def proxy_image(url: str, _user_: User = Depends(_user)) -> Response:
+def proxy_image(url: str, _user_: User = Depends(require_unlock)) -> Response:
     """Serve a product image through the API: same headers as the worker (no Referer, browser
     User-Agent) so hotlink protection on third-party CDNs does not break it."""
     data, content_type = _fetch_image(url)
@@ -125,7 +208,7 @@ def _job_row(row: Any) -> dict[str, Any]:
 @router.get("/jobs")
 def list_jobs(
     limit: int = 15,
-    _u: User = Depends(_user),
+    _u: User = Depends(require_unlock),
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
@@ -151,7 +234,7 @@ def _get_job_or_404(db: Session, job_id: uuid.UUID, platform_id: uuid.UUID) -> S
 @router.get("/jobs/{job_id}")
 def get_job(
     job_id: uuid.UUID,
-    _u: User = Depends(_user),
+    _u: User = Depends(require_unlock),
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
@@ -246,7 +329,7 @@ def _load_reviewable(db: Session, item_id: uuid.UUID, platform_id: uuid.UUID) ->
 def select_candidate(
     item_id: uuid.UUID,
     body: SelectBody,
-    _u: User = Depends(_user),
+    _u: User = Depends(require_unlock),
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
@@ -273,7 +356,7 @@ def select_candidate(
 @router.post("/items/{item_id}/reject")
 def reject_item(
     item_id: uuid.UUID,
-    _u: User = Depends(_user),
+    _u: User = Depends(require_unlock),
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
@@ -294,7 +377,7 @@ def reject_item(
 @router.post("/jobs/{job_id}/cancel")
 def cancel_job(
     job_id: uuid.UUID,
-    user: User = Depends(_user),
+    user: User = Depends(require_unlock),
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
@@ -313,121 +396,6 @@ def cancel_job(
     return {"job_id": str(job.id), "status": job.status}
 
 
-# --------------------------------------------------------------------------- queue
-
-
-def _job_card(job: SupportCompareJob, processed: int, names: dict[uuid.UUID, str]) -> dict[str, Any]:
-    return {
-        "id": str(job.id),
-        "status": job.status,
-        "requested_count": job.requested_count,
-        "processed_count": processed,
-        "duplicate_count": job.duplicate_count,
-        "error_count": job.error_count,
-        "requested_by": names.get(job.requested_by_id) if job.requested_by_id else None,
-        "worker_name": job.worker_id,
-        "created_at": _iso(job.created_at),
-        "started_at": _iso(job.started_at),
-        "heartbeat_at": _iso(job.heartbeat_at),
-        "finished_at": _iso(job.finished_at),
-        "last_error": job.last_error,
-    }
-
-
-@router.get("/queue")
-def queue(
-    _u: User = Depends(_user),
-    platform_id: uuid.UUID = Depends(get_current_platform_id),
-    db: Session = Depends(get_db),
-) -> dict[str, Any]:
-    now = datetime.now(UTC)
-    jobs = (
-        db.query(SupportCompareJob)
-        .filter(SupportCompareJob.platform_id == platform_id)
-        .order_by(SupportCompareJob.created_at.desc())
-        .limit(30)
-        .all()
-    )
-    searches = (
-        db.query(SupportSearchJob)
-        .filter(SupportSearchJob.platform_id == platform_id)
-        .order_by(SupportSearchJob.created_at.desc())
-        .limit(10)
-        .all()
-    )
-    devices = (
-        db.query(SupportWorkerDevice)
-        .filter(
-            SupportWorkerDevice.platform_id == platform_id,
-            SupportWorkerDevice.status == "approved",
-            SupportWorkerDevice.expires_at > now,
-        )
-        .order_by(SupportWorkerDevice.approved_at.desc())
-        .all()
-    )
-    user_ids = {j.requested_by_id for j in jobs if j.requested_by_id}
-    user_ids |= {s.requested_by_id for s in searches if s.requested_by_id}
-    user_ids |= {d.user_id for d in devices if d.user_id}
-    names = {
-        u.id: (u.full_name or u.username)
-        for u in db.query(User).filter(User.id.in_(user_ids)).all()
-    } if user_ids else {}
-
-    run_ids = [j.run_id for j in jobs if j.run_id and j.status == "running"]
-    processed: dict[uuid.UUID, int] = {}
-    if run_ids:
-        for run_id, count in db.execute(
-            text(
-                f"""SELECT run_id, count(*) FROM {S}.comparison_items
-                    WHERE run_id = ANY(:ids) AND processing_status = 'completed' GROUP BY run_id"""
-            ),
-            {"ids": run_ids},
-        ).fetchall():
-            processed[run_id] = count
-
-    running = [j for j in jobs if j.status == "running"]
-    queued = sorted((j for j in jobs if j.status == "queued"), key=lambda j: j.created_at)
-    finished = [j for j in jobs if j.status in ("completed", "failed")][:8]
-    states = [sw.device_state(d, now) for d in devices]
-    return {
-        "workers": {
-            "ready": sum(1 for s in states if s in ("idle", "busy")),
-            "paused": sum(1 for s in states if s == "paused"),
-            "offline": sum(1 for s in states if s == "offline"),
-            "devices": [
-                {
-                    "id": str(d.id),
-                    "machine_name": d.machine_name,
-                    "state": st,
-                    "user_name": names.get(d.user_id),
-                    "busy_with": d.busy_with,
-                    "last_seen_at": _iso(d.last_seen_at),
-                    "presence_at": _iso(d.presence_at),
-                }
-                for d, st in zip(devices, states)
-            ],
-        },
-        "running": [_job_card(j, processed.get(j.run_id, 0), names) for j in running],
-        "queued": [
-            {**_job_card(j, 0, names), "position": index}
-            for index, j in enumerate(queued, start=1)
-        ],
-        "searches": [
-            {
-                "id": str(s.id),
-                "filename": s.filename,
-                "status": s.status,
-                "requested_by": names.get(s.requested_by_id) if s.requested_by_id else None,
-                "created_at": _iso(s.created_at),
-                "finished_at": _iso(s.finished_at),
-                "last_error": s.last_error,
-            }
-            for s in searches
-        ],
-        "recent": [_job_card(j, j.processed_count, names) for j in finished],
-    }
-
-
 # --------------------------------------------------------------------------- image search
 
 
@@ -435,7 +403,7 @@ def queue(
 def create_search(
     file: UploadFile = File(...),
     top_k: int = 10,
-    user: User = Depends(_user),
+    user: User = Depends(require_unlock),
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
@@ -456,7 +424,7 @@ def create_search(
 @router.get("/search/{search_id}")
 def get_search(
     search_id: uuid.UUID,
-    _u: User = Depends(_user),
+    _u: User = Depends(require_unlock),
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:

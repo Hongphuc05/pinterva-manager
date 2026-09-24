@@ -1,10 +1,10 @@
 """Server side of the Support compute agent (device login + job/search queue).
 
-The VPS never runs DINO. A Support machine pairs with the web by *device login*
-(``gh auth login`` style): the agent shows a short code, a signed-in Support/Admin
-approves it on the web, and the agent then receives a token. The token works only
-while the approving user's web page keeps sending presence heartbeats, so closing the
-web or logging out stops the machine from taking (or continuing) work.
+The VPS never runs DINO. When a Support logs in on a machine that runs the agent, the web asks
+whether that machine may compute; on "Có" the web session *grants* the machine a token
+(``grant_device``) and hands it to the agent listening on localhost. The token works only while
+the granting user's web page keeps sending presence heartbeats, so closing the web or logging out
+stops the machine from taking (or continuing) work.
 
 Work items are handed out with a lease (``heartbeat_at``): a job whose lease expired is
 re-claimed by another machine and resumes with the orders that still have no completed
@@ -44,13 +44,10 @@ logger = logging.getLogger(__name__)
 SCHEMA = "support_compare_image"
 PRESENCE_TTL = timedelta(seconds=90)
 LEASE_TTL = timedelta(seconds=180)
-PENDING_TTL = timedelta(minutes=10)
 DEVICE_LIFETIME = timedelta(hours=12)
 AGENT_ONLINE_TTL = timedelta(seconds=60)
-MAX_PENDING_DEVICES = 50
 MAX_CANDIDATES = 30
 CLASSIFIER_VERSION = "rule-based-v1"
-CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 SEARCH_KEEP = timedelta(days=7)
 
 
@@ -76,91 +73,37 @@ def _sha256(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def _normalise_user_code(value: str) -> str:
-    return "".join(ch for ch in value.upper() if ch.isalnum())
-
-
-def _new_user_code() -> str:
-    raw = "".join(secrets.choice(CODE_ALPHABET) for _ in range(8))
-    return f"{raw[:4]}-{raw[4:]}"
-
-
-# --------------------------------------------------------------------------- device login
-
-
-def start_device_login(session: Session, *, machine_name: str) -> tuple[SupportWorkerDevice, str]:
+def grant_device(
+    session: Session, *, user: User, platform_id: uuid.UUID, machine_name: str
+) -> tuple[SupportWorkerDevice, str]:
+    """Allow the machine the user is on to compute during this login. Returns the one-time token."""
+    name = (machine_name.strip() or "Máy Support")[:128]
+    # A machine that asks again (agent restarted) replaces its previous grant.
+    for old in (
+        session.query(SupportWorkerDevice)
+        .filter(
+            SupportWorkerDevice.user_id == user.id,
+            SupportWorkerDevice.machine_name == name,
+            SupportWorkerDevice.status == "approved",
+        )
+        .all()
+    ):
+        revoke_device(session, old)
     now = _now()
-    session.query(SupportWorkerDevice).filter(
-        SupportWorkerDevice.status == "pending", SupportWorkerDevice.expires_at < now
-    ).delete(synchronize_session=False)
-    pending = session.query(SupportWorkerDevice).filter(SupportWorkerDevice.status == "pending").count()
-    if pending >= MAX_PENDING_DEVICES:
-        raise WorkerAuthError("too_many_pending", "Có quá nhiều yêu cầu kết nối đang chờ, thử lại sau.", 429)
-    device_code = secrets.token_urlsafe(32)
+    token = "sw_" + secrets.token_urlsafe(32)
     device = SupportWorkerDevice(
-        machine_name=(machine_name.strip() or "Máy Support")[:128],
-        user_code=_new_user_code(),
-        device_code_hash=_sha256(device_code),
-        status="pending",
-        expires_at=now + PENDING_TTL,
+        machine_name=name,
+        status="approved",
+        user_id=user.id,
+        platform_id=platform_id,
+        token_hash=_sha256(token),
+        approved_at=now,
+        presence_at=now,
+        expires_at=now + DEVICE_LIFETIME,
     )
     session.add(device)
     session.flush()
-    return device, device_code
-
-
-def find_pending_device(session: Session, user_code: str) -> SupportWorkerDevice | None:
-    wanted = _normalise_user_code(user_code)
-    if len(wanted) != 8:
-        return None
-    rows = (
-        session.query(SupportWorkerDevice)
-        .filter(SupportWorkerDevice.status == "pending", SupportWorkerDevice.expires_at > _now())
-        .all()
-    )
-    return next((row for row in rows if _normalise_user_code(row.user_code) == wanted), None)
-
-
-def approve_device(
-    session: Session, *, user: User, platform_id: uuid.UUID, user_code: str
-) -> SupportWorkerDevice:
-    device = find_pending_device(session, user_code)
-    if device is None:
-        raise WorkerStateError("Mã không đúng hoặc đã hết hạn. Hãy chạy lại agent để lấy mã mới.")
-    now = _now()
-    device.status = "approved"
-    device.user_id = user.id
-    device.platform_id = platform_id
-    device.approved_at = now
-    device.presence_at = now
-    device.expires_at = now + DEVICE_LIFETIME
-    token = "sw_" + secrets.token_urlsafe(32)
-    device.token_hash = _sha256(token)
-    device.token_delivery = token
-    session.flush()
-    return device
-
-
-def poll_device(session: Session, device_code: str) -> dict[str, Any]:
-    device = (
-        session.query(SupportWorkerDevice)
-        .filter(SupportWorkerDevice.device_code_hash == _sha256(device_code))
-        .with_for_update()
-        .first()
-    )
-    if device is None:
-        return {"status": "expired"}
-    if device.status == "pending":
-        return {"status": "pending" if device.expires_at > _now() else "expired"}
-    if device.status == "revoked":
-        return {"status": "denied"}
-    token = device.token_delivery
-    if token is None:
-        # Already collected once: the agent must start a new login.
-        return {"status": "expired"}
-    device.token_delivery = None
-    session.flush()
-    return {"status": "approved", "token": token, "device_id": str(device.id)}
+    return device, token
 
 
 def authenticate_device(session: Session, token: str | None) -> SupportWorkerDevice:
@@ -266,19 +209,20 @@ def first_image_url(thumbnail_url: Any, product_image_urls: Any) -> str | None:
     return None
 
 
-def pending_job_orders(session: Session, platform_id: uuid.UUID) -> list[dict[str, Any]]:
-    """Orders a job still has to compare: Support's unchecked scope without a completed item."""
+def pending_job_orders(
+    session: Session, platform_id: uuid.UUID, order_ids: list | None = None
+) -> list[dict[str, Any]]:
+    """Orders a job still has to compare: its frozen order list (all unchecked orders for a job
+    without one), minus the ones that already have a completed item."""
     from sqlalchemy import exists
 
     never_compared = ~exists().where(
         SupportCompareItem.order_id == Order.id, SupportCompareItem.processing_status == "completed"
     )
-    rows = (
-        session.query(Order)
-        .filter(*_unchecked_scope(platform_id), never_compared)
-        .order_by(Order.created_at.asc(), Order.id.asc())
-        .all()
-    )
+    query = session.query(Order).filter(*_unchecked_scope(platform_id), never_compared)
+    if order_ids is not None:
+        query = query.filter(Order.id.in_([uuid.UUID(str(i)) for i in order_ids]))
+    rows = query.order_by(Order.created_at.asc(), Order.id.asc()).all()
     orders: list[dict[str, Any]] = []
     for order in rows:
         url = first_image_url(order.thumbnail_url, order.product_image_urls)
@@ -334,7 +278,7 @@ def claim_work(
         device.busy_with = None
         return {"kind": "none"}
 
-    orders = pending_job_orders(session, job.platform_id)
+    orders = pending_job_orders(session, job.platform_id, job.order_ids)
     job.status = "running"
     job.worker_id = device.machine_name
     job.device_id = device.id
@@ -812,3 +756,81 @@ def fail_search(session: Session, device: SupportWorkerDevice, search_id: uuid.U
     job.heartbeat_at = now
     device.busy_with = None
     session.flush()
+
+
+# --------------------------------------------------------------------------- queue (web)
+
+
+def queue_overview(session: Session, platform_id: uuid.UUID) -> dict[str, Any]:
+    """Jobs waiting or running for the Support queue page: one job = one "Có" on Telegram."""
+    now = _now()
+    jobs = (
+        session.query(SupportCompareJob)
+        .filter(
+            SupportCompareJob.platform_id == platform_id,
+            SupportCompareJob.status.in_(("queued", "running")),
+        )
+        .order_by(SupportCompareJob.created_at.asc(), SupportCompareJob.id.asc())
+        .all()
+    )
+    names = {
+        u.id: (u.full_name or u.username)
+        for u in session.query(User).filter(User.id.in_([j.requested_by_id for j in jobs if j.requested_by_id])).all()
+    }
+    devices = (
+        session.query(SupportWorkerDevice)
+        .filter(
+            SupportWorkerDevice.platform_id == platform_id,
+            SupportWorkerDevice.status == "approved",
+            SupportWorkerDevice.expires_at > now,
+        )
+        .all()
+    )
+    states = [device_state(d, now) for d in devices]
+    return {
+        "waiting_jobs": len(jobs),
+        "jobs": [
+            {
+                "id": str(job.id),
+                "status": job.status,
+                "requested_count": job.requested_count,
+                "remaining_count": len(pending_job_orders(session, platform_id, job.order_ids)),
+                "requested_by": names.get(job.requested_by_id),
+                "created_at": job.created_at.isoformat() if job.created_at else None,
+                "started_at": job.started_at.isoformat() if job.started_at else None,
+                "worker_name": job.worker_id if job.status == "running" else None,
+            }
+            for job in jobs
+        ],
+        "machines": {
+            "ready": sum(1 for s in states if s in ("idle", "busy")),
+            "paused": sum(1 for s in states if s == "paused"),
+            "offline": sum(1 for s in states if s == "offline"),
+        },
+    }
+
+
+def queue_job_orders(session: Session, platform_id: uuid.UUID, job_id: uuid.UUID) -> dict[str, Any] | None:
+    """The orders of one waiting job that still have to be checked for duplicates."""
+    job = session.get(SupportCompareJob, job_id)
+    if job is None or job.platform_id != platform_id:
+        return None
+    pending = pending_job_orders(session, platform_id, job.order_ids)
+    thumbs = {
+        str(o.id): o.thumbnail_url
+        for o in session.query(Order.id, Order.thumbnail_url).filter(Order.id.in_([uuid.UUID(p["order_id"]) for p in pending]))
+    } if pending else {}
+    return {
+        "id": str(job.id),
+        "status": job.status,
+        "requested_count": job.requested_count,
+        "orders": [
+            {
+                "order_id": p["order_id"],
+                "external_order_id": p["external_order_id"],
+                "product_name": p["product_name"],
+                "thumbnail_url": thumbs.get(p["order_id"]) or p["image_url"],
+            }
+            for p in pending
+        ],
+    }

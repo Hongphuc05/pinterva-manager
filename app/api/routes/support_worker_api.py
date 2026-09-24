@@ -1,8 +1,8 @@
 """API for the Support compute agent and the web page that lets it run.
 
-Agent side (device token, no user session): device login, claiming work, downloading the
-image pool, reporting results. Web side (Support/Admin session): approve a machine, keep it
-allowed with presence heartbeats, revoke it.
+Agent side (device token, no user session): claiming work, downloading the image pool, reporting
+results. Web side (Support session): grant the machine the user is on, keep it allowed with
+presence heartbeats, revoke it, show the queue.
 """
 
 from __future__ import annotations
@@ -19,7 +19,6 @@ from sqlalchemy.orm import Session
 from app.adapters.db.models import SupportWorkerDevice, User
 from app.api.deps import get_current_platform_id, get_db, require_any_role
 from app.application import support_worker as sw
-from app.config import get_settings
 from app.domain.access import ROLE_SUPPORT
 
 router = APIRouter(prefix="/support-worker")
@@ -62,95 +61,49 @@ def _state_error(exc: sw.WorkerStateError) -> HTTPException:
     return HTTPException(status.HTTP_409_CONFLICT, {"code": "lease_lost", "message": str(exc)})
 
 
-# --------------------------------------------------------------------------- device login (agent)
-
-
-class DeviceStartIn(BaseModel):
-    machine_name: str = Field(default="", max_length=128)
-
-
-class DevicePollIn(BaseModel):
-    device_code: str = Field(min_length=10, max_length=200)
-
-
-@router.post("/device/start")
-def device_start(payload: DeviceStartIn, db: Session = Depends(get_db)):
-    try:
-        device, device_code = sw.start_device_login(db, machine_name=payload.machine_name)
-    except sw.WorkerAuthError as exc:
-        raise HTTPException(exc.status_code, {"code": exc.code, "message": exc.message}) from exc
-    db.commit()
-    base = (get_settings().public_web_url or "").rstrip("/")
-    return {
-        "device_code": device_code,
-        "user_code": device.user_code,
-        "verification_uri": f"{base}/support-queue" if base else None,
-        "interval": 3,
-        "expires_in": int(sw.PENDING_TTL.total_seconds()),
-    }
-
-
-@router.post("/device/poll")
-def device_poll(payload: DevicePollIn, db: Session = Depends(get_db)):
-    result = sw.poll_device(db, payload.device_code)
-    db.commit()
-    return result
-
-
 # --------------------------------------------------------------------------- web side
 
 
-class ApproveIn(BaseModel):
-    user_code: str = Field(min_length=8, max_length=16)
+class GrantIn(BaseModel):
+    machine_name: str = Field(default="", max_length=128)
 
 
-@router.post("/devices/lookup")
-def device_lookup(
-    payload: ApproveIn, user: User = Depends(_web_user), db: Session = Depends(get_db)
-):
-    """Show which machine a code belongs to before the user allows it."""
-    device = sw.find_pending_device(db, payload.user_code)
-    if device is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Mã không đúng hoặc đã hết hạn.")
-    return {"machine_name": device.machine_name, "user_code": device.user_code}
-
-
-@router.post("/devices/approve")
-def device_approve(
-    payload: ApproveIn,
+@router.post("/devices/grant")
+def device_grant(
+    payload: GrantIn,
     user: User = Depends(_web_user),
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
-    try:
-        device = sw.approve_device(db, user=user, platform_id=platform_id, user_code=payload.user_code)
-    except sw.WorkerStateError as exc:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    """The user said "Có": let the machine they are on compute for this login.
+
+    The token is returned once, to the web page, which hands it to the agent on localhost.
+    """
+    device, token = sw.grant_device(db, user=user, platform_id=platform_id, machine_name=payload.machine_name)
     db.commit()
-    return _device_out(device, {user.id: user.full_name or user.username})
+    return {**_device_out(device, {user.id: user.full_name or user.username}), "token": token}
 
 
-@router.get("/devices")
-def devices_list(
-    user: User = Depends(_web_user),
+@router.get("/queue")
+def queue(
+    _u: User = Depends(_web_user),
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
-    devices = (
-        db.query(SupportWorkerDevice)
-        .filter(
-            SupportWorkerDevice.platform_id == platform_id,
-            SupportWorkerDevice.status == "approved",
-            SupportWorkerDevice.expires_at > sw._now(),
-        )
-        .order_by(SupportWorkerDevice.approved_at.desc())
-        .all()
-    )
-    names = {
-        u.id: (u.full_name or u.username)
-        for u in db.query(User).filter(User.id.in_([d.user_id for d in devices if d.user_id])).all()
-    }
-    return {"devices": [_device_out(d, names) for d in devices]}
+    return sw.queue_overview(db, platform_id)
+
+
+@router.get("/queue/jobs/{job_id}/orders")
+def queue_job_orders(
+    job_id: uuid.UUID,
+    _u: User = Depends(_web_user),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    detail = sw.queue_job_orders(db, platform_id, job_id)
+    if detail is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy job")
+    return detail
 
 
 @router.post("/presence")

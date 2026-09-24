@@ -637,12 +637,22 @@ async def api_telegram_webhook(
                     platform_id=support_user.platform_id,
                     requested_by_id=support_user.id,
                     chat_id=user_chat_id,
-                    requested_count=int(payload.get("order_count") or 0),
                 )
             except Exception:
                 db.rollback()
                 logger.exception("failed to queue local Support /check comparison for %s", user_chat_id)
                 send_message(user_chat_id, "❌ Không thể bắt đầu kiểm tra trùng lúc này. Vui lòng thử lại.")
+                return {"ok": True}
+            if job is None:  # the orders were queued by another press or compared meanwhile
+                supersede_support_check_siblings(db, action_log)
+                action_log.status = "executed"
+                action_log.executed_at = datetime.now(UTC)
+                action_log.actor_id = support_user.id
+                db.commit()
+                message_id = payload.get("message_id")
+                if message_id is not None:
+                    clear_message_keyboard(user_chat_id, int(message_id))
+                send_message(user_chat_id, "📋 Không còn đơn mới nào để xếp vào hàng đợi.")
                 return {"ok": True}
 
             action_log.status = "executed"
@@ -657,14 +667,12 @@ async def api_telegram_webhook(
             message_id = payload.get("message_id")
             if message_id is not None:
                 clear_message_keyboard(user_chat_id, int(message_id))
-            order_count = payload.get("order_count", 0)
             send_message(
                 user_chat_id,
-                f"✅ Đã xếp <b>{order_count}</b> đơn trong tab <b>Chưa kiểm tra</b> "
+                f"✅ Đã xếp <b>{job.requested_count}</b> đơn trong tab <b>Chưa kiểm tra</b> "
                 "vào hàng đợi để embedding và kiểm tra trùng.\n"
-                "Job chạy khi có một Support mở web và cho phép máy của mình dùng CPU/GPU "
-                "(trang <b>Hàng đợi</b>). Bot sẽ báo cáo khi so sánh xong; sau đó bạn duyệt "
-                "các đơn nghi trùng ở trang <b>Duyệt trùng</b>.",
+                "Job chạy khi có một Support đăng nhập web và cho phép máy của mình dùng CPU/GPU "
+                "(xem trang <b>Hàng đợi</b>). Bot sẽ báo cáo khi so sánh xong.",
             )
             return {"ok": True}
 

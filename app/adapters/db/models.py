@@ -807,12 +807,6 @@ class SupportCompareJob(Base):
             "notification_sent_at",
             "finished_at",
         ),
-        Index(
-            "uq_support_compare_jobs_active_platform",
-            "platform_id",
-            unique=True,
-            postgresql_where=text("status IN ('queued', 'running')"),
-        ),
         CheckConstraint(
             "source_kind IN ('support_unchecked')",
             name="ck_support_compare_job_source_kind",
@@ -835,6 +829,8 @@ class SupportCompareJob(Base):
     )
     worker_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     device_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    # Orders this job compares, frozen when Support pressed "Có" (NULL on jobs created before this).
+    order_ids: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -966,8 +962,8 @@ class SupportWorkerDevice(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     machine_name: Mapped[str] = mapped_column(String(128), nullable=False)
-    user_code: Mapped[str] = mapped_column(String(16), nullable=False)
-    device_code_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    user_code: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    device_code_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
     user_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     platform_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
@@ -1008,5 +1004,22 @@ class SupportSearchJob(Base):
     result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class SupportReviewAccess(Base):
+    """Password of the hidden duplicate-review area (one per platform, shared by its Support users)."""
+
+    __tablename__ = "review_access"
+    __table_args__ = {"schema": SUPPORT_COMPARE_SCHEMA}
+
+    platform_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    failed_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_by_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
