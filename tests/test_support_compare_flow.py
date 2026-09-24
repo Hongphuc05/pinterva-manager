@@ -576,3 +576,58 @@ def test_review_image_proxy_serves_public_images_only(review_client, monkeypatch
     monkeypatch.setattr(review, "_fetch_image", lambda url: (b"RIFFwebp", "image/webp"))
     res = review_client.get("/review/img", params={"url": "https://cdn.example/x.jpg"})
     assert res.status_code == 200 and res.content == b"RIFFwebp" and res.headers["content-type"] == "image/webp"
+
+
+def _notify_selected_pair(db_session, setup, code: str):
+    order = _order(db_session, setup, code)
+    item = _item(db_session, setup, order, "pending_review", is_duplicate=True)
+    candidate = _candidate(db_session, item, 1)
+    item.review_status, item.selected_candidate_id, item.reviewed_at = "selected_duplicate", candidate.id, datetime.now(UTC)
+    db_session.commit()
+    with patch("app.application.support_compare.send_media_group", return_value=[{"message_id": 11}, {"message_id": 12}]), \
+            patch("app.application.support_compare.send_message", return_value={"message_id": 13}):
+        assert notify_pending_duplicate_candidates(db_session) == 1
+    return order, {
+        a.action_type: a.callback_token
+        for a in db_session.query(TelegramActionLog).filter(TelegramActionLog.order_id == order.id)
+    }
+
+
+def _press(client, data: str, *, delete_ok: bool):
+    with (
+        patch("app.api.routes.telegram_api.get_settings", return_value=SimpleNamespace(support_compare_enabled=True, telegram_webhook_secret=None)),
+        patch("app.api.routes.telegram_api.send_message", return_value={"message_id": 99}) as send,
+        patch("app.api.routes.telegram_api.clear_message_keyboard") as clear,
+        patch("app.api.routes.telegram_api.delete_messages", return_value=delete_ok) as delete,
+        patch("app.api.routes.telegram_api.answer_callback_query") as answer,
+    ):
+        client.post("/api/telegram/webhook", json={"callback_query": {"id": "cb1", "data": data, "from": {"id": int(CHAT_ID)}}})
+    return send, clear, delete, answer
+
+
+@pytest.mark.parametrize(("button", "status", "toast"), [
+    ("SUPPORT_COMPARE_CONFIRM_DUPLICATE", "duplicate", "Đã xác nhận trùng"),
+    ("SUPPORT_COMPARE_REJECT_DUPLICATE", "non_duplicate", "Đã đưa vào Không trùng lặp"),
+])
+def test_deciding_a_pair_deletes_its_messages_from_the_chat(client, db_session, setup, button, status, toast):
+    order, tokens = _notify_selected_pair(db_session, setup, f"DJ-DEL-{status}")
+    prefix = "scdup_yes" if "CONFIRM" in button else "scdup_no"
+
+    send, clear, delete, answer = _press(client, f"{prefix}:{tokens[button]}", delete_ok=True)
+
+    delete.assert_called_once_with(CHAT_ID, [11, 12, 13])  # album + prompt
+    assert toast in answer.call_args.args[1] and order.external_order_id in answer.call_args.args[1]
+    send.assert_not_called()  # nothing is left in the chat
+    clear.assert_not_called()
+    db_session.refresh(order)
+    assert order.duplicate_check_status == status
+
+
+def test_when_the_messages_cannot_be_deleted_the_prompt_is_closed_and_the_result_is_sent(client, db_session, setup):
+    order, tokens = _notify_selected_pair(db_session, setup, "DJ-DEL-FALLBACK")
+
+    send, clear, delete, answer = _press(client, f"scdup_yes:{tokens['SUPPORT_COMPARE_CONFIRM_DUPLICATE']}", delete_ok=False)
+
+    clear.assert_called_once_with(CHAT_ID, 13)
+    assert order.external_order_id in send.call_args.args[1]
+    answer.assert_not_called()

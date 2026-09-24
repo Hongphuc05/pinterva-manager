@@ -67,6 +67,7 @@ from app.application.support_compare import (
     support_handle_keyboard,
 )
 from app.application.telegram_service import (
+    answer_callback_query,
     clear_message_keyboard,
     delete_messages,
     generate_telegram_link_code,
@@ -678,7 +679,7 @@ async def api_telegram_webhook(
 
             decision = "duplicate" if prefix == SUPPORT_COMPARE_CALLBACK_CONFIRM else "non_duplicate"
             try:
-                execute_support_duplicate_decision(
+                _, decided_order = execute_support_duplicate_decision(
                     db,
                     actor=support_user,
                     action_log=action_log,
@@ -693,11 +694,24 @@ async def api_telegram_webhook(
             action_log.executed_at = datetime.now(UTC)
             action_log.actor_id = support_user.id
             db.commit()
-            message_id = (action_log.payload or {}).get("message_id")
-            if message_id is not None:
-                clear_message_keyboard(user_chat_id, int(message_id))
-            result_text = "✅ Đã xác nhận: đơn được đưa vào Trùng lặp." if decision == "duplicate" else "✅ Đã xác nhận: Không trùng, đơn không bị đưa vào Trùng lặp."
-            send_message(user_chat_id, result_text)
+            payload = action_log.payload or {}
+            message_ids = payload.get("message_ids") or (
+                [payload["message_id"]] if payload.get("message_id") is not None else []
+            )
+            # Keep the chat clean: remove the album and the prompt of the order Support just decided.
+            if message_ids and delete_messages(user_chat_id, [int(i) for i in message_ids]):
+                verdict = "Đã xác nhận trùng" if decision == "duplicate" else "Đã đưa vào Không trùng lặp"
+                if callback_query.get("id"):
+                    answer_callback_query(str(callback_query["id"]), f"{verdict}: {decided_order.external_order_id}")
+            else:  # too old to delete (or nothing stored): close the buttons and say what happened
+                if payload.get("message_id") is not None:
+                    clear_message_keyboard(user_chat_id, int(payload["message_id"]))
+                result_text = (
+                    f"✅ Đã xác nhận: đơn {decided_order.external_order_id} được đưa vào Trùng lặp."
+                    if decision == "duplicate"
+                    else f"✅ Đã xác nhận: đơn {decided_order.external_order_id} không trùng, không đưa vào Trùng lặp."
+                )
+                send_message(user_chat_id, result_text)
             return {"ok": True}
 
         # Verify admin user

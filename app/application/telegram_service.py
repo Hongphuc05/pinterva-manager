@@ -261,6 +261,13 @@ def clear_message_keyboard(chat_id: str, message_id: int) -> bool:
     }))
 
 
+def answer_callback_query(callback_query_id: str, text: str) -> bool:
+    """Show a short toast for a pressed inline button (leaves nothing in the chat)."""
+    return bool(send_telegram_request("answerCallbackQuery", {
+        "callback_query_id": callback_query_id, "text": text[:190], "show_alert": False,
+    }))
+
+
 def delete_messages(chat_id: str, message_ids: list[int]) -> bool:
     ids = list(dict.fromkeys(message_ids))
     return not ids or bool(send_telegram_request("deleteMessages", {"chat_id": chat_id, "message_ids": ids}))

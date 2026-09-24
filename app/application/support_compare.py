@@ -506,6 +506,7 @@ def notify_duplicate_candidate(session: Session, candidate_id: uuid.UUID) -> boo
         for confirm, reject, chat_id in action_rows:
             caption = _combined_caption(session, item, candidate)
             album = None
+            sent_ids: list[int] = []
             if (
                 item.image_url.startswith(("http://", "https://"))
                 and candidate.matched_image_url.startswith(("http://", "https://"))
@@ -530,6 +531,8 @@ def notify_duplicate_candidate(session: Session, candidate_id: uuid.UUID) -> boo
                 if new_message is None or old_message is None:
                     logger.warning("failed to deliver duplicate candidate %s to %s", candidate.id, chat_id)
                     continue
+                album = [new_message, old_message]
+            sent_ids = [m["message_id"] for m in album if isinstance(m, dict) and m.get("message_id") is not None]
 
             prompt = send_message(
                 chat_id,
@@ -548,6 +551,8 @@ def notify_duplicate_candidate(session: Session, candidate_id: uuid.UUID) -> boo
                 action.payload = {
                     **(action.payload or {}),
                     "message_id": message_id,
+                    # everything sent for this order, deleted once Support decides
+                    "message_ids": [*sent_ids, *([message_id] if message_id is not None else [])],
                 }
             delivered = True
         if delivered:
