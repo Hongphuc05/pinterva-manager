@@ -77,9 +77,9 @@ Luồng vận hành một lô (ví dụ 100 order admin vừa crawl về Waiting
    review đang mở), hỏi xác nhận rồi chuyển chúng sang Không trùng lặp. `/help` liệt kê lệnh.
 
 Mỗi order chỉ được so sánh một lần; order đã có kết quả không được đưa vào `/check` lần sau. Order
-lỗi được thử lại. Mọi ảnh, tin nhắn và màn hình đều kèm mã đơn. Trang Duyệt trùng chỉ dành cho
-Support/Admin, chỉ đọc theo platform của tài khoản và không bao giờ ghi vào `public.orders`. Admin
-hủy được job đang chờ ở trang Hàng đợi.
+lỗi được thử lại. Mọi ảnh, tin nhắn và màn hình đều kèm mã đơn. Các trang Duyệt trùng và Hàng đợi chỉ dành
+cho role Support (Admin không dùng), giới hạn theo platform của tài khoản và không bao giờ ghi vào
+`public.orders`. Support dừng máy và hủy job đang chờ ở trang Hàng đợi.
 
 Weight fine-tune ở phase 2 phải có `MODEL_VERSION` riêng. Nếu đổi dimension, preprocessing hoặc
 model space, re-embed toàn bộ baseline trước khi so sánh; không trộn vector DINOv2 gốc với vector

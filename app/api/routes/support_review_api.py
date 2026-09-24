@@ -30,7 +30,7 @@ from app.adapters.db.models import (
 )
 from app.api.deps import get_current_platform_id, get_db, require_any_role
 from app.application import support_worker as sw
-from app.domain.access import ROLE_ADMIN, ROLE_SUPPORT
+from app.domain.access import ROLE_SUPPORT
 
 S = "support_compare_image"
 # States in which the reviewer may still change the decision. Once the pair was sent to
@@ -39,7 +39,7 @@ REVIEWABLE = ("pending_review", "ai_wrong", "selected_duplicate")
 MAX_UPLOAD_BYTES = 10_000_000
 
 router = APIRouter(prefix="/support-review")
-_user = require_any_role(ROLE_ADMIN, ROLE_SUPPORT)
+_user = require_any_role(ROLE_SUPPORT)
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -294,11 +294,11 @@ def reject_item(
 @router.post("/jobs/{job_id}/cancel")
 def cancel_job(
     job_id: uuid.UUID,
-    user: User = Depends(require_any_role(ROLE_ADMIN)),
+    user: User = Depends(_user),
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    """Admin cancels a queued/running job. Items compared so far are kept; nothing is sent to Telegram."""
+    """Support cancels a queued/running job. Items compared so far are kept; nothing is sent to Telegram."""
     job = db.query(SupportCompareJob).filter(SupportCompareJob.id == job_id).with_for_update().first()
     if job is None or job.platform_id != platform_id:
         raise HTTPException(404, "Không tìm thấy job")

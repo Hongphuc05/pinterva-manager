@@ -77,7 +77,7 @@ phần mới thêm vào pool.
 ## Trên web
 
 - **Hàng đợi** (`/support-queue`): máy đang kết nối, job đang chạy (tiến độ, máy nào), job đang chờ,
-  yêu cầu tìm ảnh, job gần đây. Nhập mã của agent để cho phép máy; Admin hủy được job đang chờ.
+  yêu cầu tìm ảnh, job gần đây. Nhập mã của agent để cho phép máy; Support dừng máy hoặc hủy job đang chờ ở đây. Chỉ role Support dùng các trang này (Admin không).
 - **Duyệt trùng** (`/duplicate-review`): mỗi thẻ hiện ảnh gốc và top-10 candidate, đều kèm mã đơn.
   **Chọn trùng** ghi `selected_duplicate` (VPS gửi cặp ảnh lên Telegram trong ≤60 giây; **Xác nhận
   trùng** gắn tag Trùng lặp, **Từ chối** đưa đơn vào Không trùng lặp). **Model sai** ghi `ai_wrong`

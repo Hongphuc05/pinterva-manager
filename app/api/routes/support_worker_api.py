@@ -20,11 +20,11 @@ from app.adapters.db.models import SupportWorkerDevice, User
 from app.api.deps import get_current_platform_id, get_db, require_any_role
 from app.application import support_worker as sw
 from app.config import get_settings
-from app.domain.access import ROLE_ADMIN, ROLE_SUPPORT
+from app.domain.access import ROLE_SUPPORT
 
 router = APIRouter(prefix="/support-worker")
 
-_web_user = require_any_role(ROLE_ADMIN, ROLE_SUPPORT)
+_web_user = require_any_role(ROLE_SUPPORT)
 
 
 # --------------------------------------------------------------------------- helpers
@@ -171,8 +171,6 @@ def device_revoke(
     device = db.get(SupportWorkerDevice, device_id)
     if device is None or device.platform_id != platform_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy máy")
-    if device.user_id != user.id and user.role != ROLE_ADMIN:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Chỉ người đã cho phép hoặc Admin mới dừng được máy này")
     sw.revoke_device(db, device)
     db.commit()
     return {"ok": True}

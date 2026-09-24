@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Cpu, Loader2, Power, X } from 'lucide-react'
 import { DashboardLayout } from '../components/DashboardLayout'
-import { useAuth } from '../auth/AuthContext'
 import { approveDevice, cancelJob, fetchQueue, lookupDevice, revokeDevice } from '../features/dupReview/api'
 import type { DeviceState, QueueJob, QueueState, WorkerDevice } from '../features/dupReview/types'
 import { useToast } from '../features/dupReview/toast'
@@ -160,7 +159,7 @@ function ConnectMachine({ onDone }: { onDone: () => void }) {
   )
 }
 
-function DeviceRow({ device, canStop, onStop }: { device: WorkerDevice; canStop: boolean; onStop: () => void }) {
+function DeviceRow({ device, onStop }: { device: WorkerDevice; onStop: () => void }) {
   const label = DEVICE_LABEL[device.state]
   return (
     <li className="flex flex-wrap items-center gap-3 rounded-lg border border-dup-line bg-dup-surface px-3 py-2">
@@ -170,15 +169,13 @@ function DeviceRow({ device, canStop, onStop }: { device: WorkerDevice; canStop:
       <span className="text-xs text-dup-dim">
         cho phép bởi {device.user_name ?? '—'} · agent {ago(device.last_seen_at)} · web {ago(device.presence_at)}
       </span>
-      {canStop && (
-        <button
-          type="button"
-          onClick={onStop}
-          className="ml-auto inline-flex h-7 cursor-pointer items-center gap-1 rounded border border-dup-line bg-dup-raised px-2 text-xs transition hover:text-dup-bad"
-        >
-          <Power className="size-3" />Dừng máy
-        </button>
-      )}
+      <button
+        type="button"
+        onClick={onStop}
+        className="ml-auto inline-flex h-7 cursor-pointer items-center gap-1 rounded border border-dup-line bg-dup-raised px-2 text-xs transition hover:text-dup-bad"
+      >
+        <Power className="size-3" />Dừng máy
+      </button>
     </li>
   )
 }
@@ -219,11 +216,9 @@ function JobCard({ job, children }: { job: QueueJob; children?: ReactNode }) {
 }
 
 export function SupportQueuePage() {
-  const { user } = useAuth()
   const toast = useToast()
   const [queue, setQueue] = useState<QueueState | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const isAdmin = user?.role === 'admin'
 
   const load = useCallback(async () => {
     try {
@@ -290,7 +285,7 @@ export function SupportQueuePage() {
               {queue.workers.devices.length ? (
                 <ul className="space-y-2">
                   {queue.workers.devices.map((d) => (
-                    <DeviceRow key={d.id} device={d} canStop={isAdmin || d.user_name === (user?.full_name || user?.username)} onStop={() => void stop(d)} />
+                    <DeviceRow key={d.id} device={d} onStop={() => void stop(d)} />
                   ))}
                 </ul>
               ) : (
@@ -312,15 +307,13 @@ export function SupportQueuePage() {
                   {queue.queued.map((j) => (
                     <JobCard key={j.id} job={j}>
                       <span className="font-mono text-dup-warn">#{j.position}</span>
-                      {isAdmin && (
-                        <button
-                          type="button"
-                          onClick={() => void cancel(j)}
-                          className="ml-auto inline-flex h-6 cursor-pointer items-center gap-1 rounded border border-dup-line bg-dup-raised px-2 text-[11px] transition hover:text-dup-bad"
-                        >
-                          <X className="size-3" />Hủy
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => void cancel(j)}
+                        className="ml-auto inline-flex h-6 cursor-pointer items-center gap-1 rounded border border-dup-line bg-dup-raised px-2 text-[11px] transition hover:text-dup-bad"
+                      >
+                        <X className="size-3" />Hủy
+                      </button>
                     </JobCard>
                   ))}
                 </ul>

@@ -106,7 +106,7 @@ function App() {
           <Route
             path="/duplicate-review"
             element={
-              <ProtectedRoute allowedRoles={['admin', 'support']}>
+              <ProtectedRoute allowedRoles={['support']}>
                 <DuplicateReviewPage />
               </ProtectedRoute>
             }
@@ -114,7 +114,7 @@ function App() {
           <Route
             path="/support-queue"
             element={
-              <ProtectedRoute allowedRoles={['admin', 'support']}>
+              <ProtectedRoute allowedRoles={['support']}>
                 <SupportQueuePage />
               </ProtectedRoute>
             }

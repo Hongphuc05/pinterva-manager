@@ -26,8 +26,8 @@ describe('useWorkerPresence', () => {
     expect(api.apiFetch).toHaveBeenCalledTimes(4)
   })
 
-  it('does nothing for a designer or a signed-out visitor', () => {
-    for (const role of ['designer', null]) {
+  it('does nothing for an admin, a designer or a signed-out visitor', () => {
+    for (const role of ['admin', 'designer', null]) {
       state.role = role
       renderHook(() => useWorkerPresence())
     }
@@ -36,7 +36,7 @@ describe('useWorkerPresence', () => {
   })
 
   it('a failing beat does not break the page', async () => {
-    state.role = 'admin'
+    state.role = 'support'
     api.apiFetch.mockRejectedValue(new Error('offline'))
     expect(() => renderHook(() => useWorkerPresence())).not.toThrow()
     await vi.advanceTimersByTimeAsync(20_000)

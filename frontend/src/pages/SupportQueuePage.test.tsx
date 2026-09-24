@@ -8,11 +8,6 @@ import { SupportQueuePage } from './SupportQueuePage'
 
 vi.mock('../components/DashboardLayout', () => ({ DashboardLayout: ({ children }: { children: React.ReactNode }) => <>{children}</> }))
 
-const auth = vi.hoisted(() => ({ role: 'support' }))
-vi.mock('../auth/AuthContext', () => ({
-  useAuth: () => ({ user: { id: 'u1', username: 'sup', full_name: 'Support A', role: auth.role } }),
-}))
-
 const api = vi.hoisted(() => ({ apiFetch: vi.fn() }))
 vi.mock('../api/client', async (importOriginal) => ({ ...(await importOriginal<typeof import('../api/client')>()), apiFetch: api.apiFetch }))
 
@@ -31,7 +26,6 @@ const renderPage = (entry = '/support-queue') =>
   render(<MemoryRouter initialEntries={[entry]}><ToastProvider><SupportQueuePage /></ToastProvider></MemoryRouter>)
 
 beforeEach(() => {
-  auth.role = 'support'
   queue = emptyQueue
   calls = []
   vi.spyOn(window, 'confirm').mockReturnValue(true)
@@ -86,17 +80,18 @@ describe('support queue page', () => {
     expect(calls.find((c) => c.path === '/support-worker/devices/lookup')?.init?.body).toBe(JSON.stringify({ user_code: 'ABCD2345' }))
   })
 
-  it('only an admin can cancel a queued job', async () => {
+  it('lets Support cancel a queued job after confirming', async () => {
     queue = { ...emptyQueue, queued: [job({ position: 1 })] }
-    const support = renderPage()
-    await screen.findByText('Job abcdef12')
-    expect(screen.queryByRole('button', { name: /Hủy/ })).not.toBeInTheDocument()
-    support.unmount()
-
-    auth.role = 'admin'
     renderPage()
     await userEvent.click(await screen.findByRole('button', { name: /Hủy/ }))
     await waitFor(() => expect(calls.some((c) => c.path === '/support-review/jobs/abcdef123456/cancel' && c.init?.method === 'POST')).toBe(true))
+  })
+
+  it('lets Support stop a machine', async () => {
+    queue = { ...emptyQueue, workers: { ready: 1, paused: 0, offline: 0, devices: [{ id: 'd1', machine_name: 'MacBook Phúc', state: 'idle', user_name: 'Support B', busy_with: null, last_seen_at: now, presence_at: now }] } }
+    renderPage()
+    await userEvent.click(await screen.findByRole('button', { name: /Dừng máy/ }))
+    await waitFor(() => expect(calls.some((c) => c.path === '/support-worker/devices/d1/revoke' && c.init?.method === 'POST')).toBe(true))
   })
 
   it('lists image searches with their state and recent jobs with a link to review them', async () => {

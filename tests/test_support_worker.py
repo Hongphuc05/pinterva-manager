@@ -354,10 +354,12 @@ def test_queue_lists_running_queued_workers_and_recent(client, ctx, db_session):
     assert resp["workers"]["ready"] == 1 and resp["workers"]["devices"][0]["state"] == "busy"
 
 
-def test_only_admin_cancels_a_job(client, ctx, db_session):
+def test_support_cancels_a_job_and_admin_has_no_access(client, db_session, ctx):
     job = _queue_job(db_session, ctx)
-    assert client.post(f"/api/support-review/jobs/{job.id}/cancel", headers=_auth(ctx.support)).status_code == 403
-    assert client.post(f"/api/support-review/jobs/{job.id}/cancel", headers=_auth(ctx.admin)).status_code == 200
+    assert client.get("/api/support-review/queue", headers=_auth(ctx.admin)).status_code == 403
+    assert client.post(f"/api/support-review/jobs/{job.id}/cancel", headers=_auth(ctx.admin)).status_code == 403
+    assert client.post("/api/support-worker/presence", headers=_auth(ctx.admin)).status_code == 403
+    assert client.post(f"/api/support-review/jobs/{job.id}/cancel", headers=_auth(ctx.support)).status_code == 200
     db_session.expire_all()
     cancelled = db_session.get(SupportCompareJob, job.id)
     assert cancelled.status == "failed" and cancelled.notification_sent_at is not None
