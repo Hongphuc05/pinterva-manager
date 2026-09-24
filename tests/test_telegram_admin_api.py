@@ -4,8 +4,16 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from app.adapters.db.models import Order, Platform, TelegramConfigurationAudit, User
+from app.adapters.db.models import (
+    Order,
+    Platform,
+    SupportCompareCandidate,
+    SupportCompareItem,
+    TelegramConfigurationAudit,
+    User,
+)
 from app.application.auth import create_session_token, hash_password
+from app.application.support_compare import _caption_for_new, _caption_for_old
 from app.application.telegram_service import (
     TelegramGroupInspection,
     notify_designer_new_order,
@@ -86,7 +94,11 @@ def test_telegram_admin_overview_is_platform_scoped_and_admin_only(client: TestC
     assert {row["username"] for row in data["designers"]} == {
         "telegram-own-designer",
         "telegram-own-trello",
+        "telegram-own-support",
     }
+    assert data["recipient_count"] == 3
+    assert data["designer_count"] == 2
+    assert data["support_count"] == 1
     assert data["private_connected_count"] == 1
 
     non_admin = User(
@@ -224,9 +236,70 @@ def test_duplicate_group_is_rejected_and_group_mode_has_no_private_fallback(
     send_request.assert_not_called()
 
 
+def test_admin_can_manage_support_private_telegram_but_not_group(
+    client: TestClient, db_session
+):
+    platform, admin = _admin_and_platform(db_session, suffix="support")
+    support = User(
+        username="telegram-support",
+        full_name="Support Telegram",
+        role="support",
+        password_hash=hash_password("pass"),
+        platform_id=platform.id,
+        telegram_chat_id="private-support",
+    )
+    db_session.add(support)
+    db_session.commit()
+    headers = _auth(admin)
+
+    group_response = client.put(
+        f"/api/telegram/admin/designers/{support.id}/group",
+        headers=headers,
+        json={"group_chat_id": "-1004004004"},
+    )
+    assert group_response.status_code == 409
+
+    group_mode_response = client.patch(
+        f"/api/telegram/admin/designers/{support.id}/delivery-mode",
+        headers=headers,
+        json={"mode": "group"},
+    )
+    assert group_mode_response.status_code == 409
+
+    private_mode_response = client.patch(
+        f"/api/telegram/admin/designers/{support.id}/delivery-mode",
+        headers=headers,
+        json={"mode": "private"},
+    )
+    assert private_mode_response.status_code == 200
+    assert private_mode_response.json()["delivery_mode"] == "private"
+
+    with patch("app.api.routes.telegram_admin_api.is_telegram_configured", return_value=True), patch(
+        "app.api.routes.telegram_admin_api.send_message",
+        return_value={"message_id": 43},
+    ) as send_message:
+        test_response = client.post(
+            f"/api/telegram/admin/designers/{support.id}/test",
+            headers=headers,
+            json={"message": "<b>support</b>"},
+        )
+    assert test_response.status_code == 200
+    assert test_response.json()["chat_id"] == "private-support"
+    assert send_message.call_args.args[0] == "private-support"
+    assert send_message.call_args.args[1] == "&lt;b&gt;support&lt;/b&gt;"
+
+
 def test_template_update_preview_and_reset(client: TestClient, db_session):
     _, admin = _admin_and_platform(db_session, suffix="templates")
     headers = _auth(admin)
+
+    listed = client.get("/api/telegram/admin/templates", headers=headers)
+    assert listed.status_code == 200
+    assert any(
+        item["template_key"] == "support_duplicate_match_candidate"
+        and item["audience"] == "support"
+        for item in listed.json()
+    )
 
     invalid = client.put(
         "/api/telegram/admin/templates/designer_new_order",
@@ -254,6 +327,23 @@ def test_template_update_preview_and_reset(client: TestClient, db_session):
     assert preview.status_code == 200
     assert preview.json()["rendered"] == "Sản phẩm: Áo &lt;test&gt;"
 
+    support_preview = client.post(
+        "/api/telegram/admin/templates/support_duplicate_match_candidate/preview",
+        headers=headers,
+        json={
+            "context": {
+                "matched_order_code": "DJ <old>",
+                "matched_product_name": "Áo <old>",
+                "similarity": "0.9234",
+                "classifier": "TRUNG & nghi vấn",
+            }
+        },
+    )
+    assert support_preview.status_code == 200
+    assert "DJ &lt;old&gt;" in support_preview.json()["rendered"]
+    assert "Áo &lt;old&gt;" in support_preview.json()["rendered"]
+    assert "TRUNG &amp; nghi vấn" in support_preview.json()["rendered"]
+
     reset = client.post(
         "/api/telegram/admin/templates/designer_new_order/reset",
         headers=headers,
@@ -261,3 +351,25 @@ def test_template_update_preview_and_reset(client: TestClient, db_session):
     assert reset.status_code == 200
     assert "{{product_name}}" in reset.json()["body"]
     assert reset.json()["version"] == 1
+
+
+def test_support_compare_captions_use_the_editable_templates(db_session):
+    item = SupportCompareItem(
+        external_order_id="DJ <new>",
+        product_name="Áo <new>",
+    )
+    candidate = SupportCompareCandidate(
+        matched_external_order_id="DJ <old>",
+        matched_product_name="Áo <old>",
+        visual_similarity=0.9234,
+        classification="TRUNG & nghi vấn",
+    )
+
+    new_caption = _caption_for_new(db_session, item)
+    old_caption = _caption_for_old(db_session, candidate)
+
+    assert "DJ &lt;new&gt;" in new_caption
+    assert "Áo &lt;new&gt;" in new_caption
+    assert "DJ &lt;old&gt;" in old_caption
+    assert "TRUNG &amp; nghi vấn" in old_caption
+    assert "0.9234" in old_caption

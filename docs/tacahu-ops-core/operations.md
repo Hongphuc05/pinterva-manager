@@ -14,7 +14,10 @@ SPA/API local thường ở `http://localhost:8000`. Xem cấu hình compose th�
 
 - `compose.production.yaml` là runtime production tách biệt.
 - Chạy migration service trước API/worker, sau đó xác minh health, migration head, worker
-  queue và Cloudflare Tunnel.
+  queue (`celery-general`, `celery-assignment`, `celery-compare`) và Cloudflare Tunnel.
+- Migration service chạy cả Alembic root và migration riêng của
+  `support_compare_image`. Kiểm tra `support_compare_image.comparison_runs` tồn tại trước
+  khi bật runner.
 - Backup PostgreSQL và private assets trước deploy/rollback. Không dùng `down -v` lên data
   production.
 - Sau mỗi thay đổi compose, kiểm tra tất cả thư mục có file ghi runtime đều được bind-mount.
@@ -39,6 +42,39 @@ Không gán một group cho hai Designer. Khi group bị xóa, mode group tự c
 không tự tạo kết nối chat riêng; mọi thay đổi mapping/mode/template được lưu audit trong
 PostgreSQL. Kiểm tra `group_last_error`, log API và Bot API trước khi kết luận worker bị lỗi.
 
+### Chạy thử image comparison bằng order Review
+
+Phase 1 dùng model Hugging Face `facebook/dinov2-base`; chạy runner trên máy có đủ
+`torch/transformers` và kết nối PostgreSQL qua private network/SSH tunnel:
+
+```bash
+cd support_compare_image/dup-compare
+python compare_orders.py --source review --limit 10 --confirm
+```
+
+Kiểm tra `comparison_runs` và `comparison_candidates` trước khi bật
+`SUPPORT_COMPARE_ENABLED=true`. Source `review` không promote embedding vào pool và không cho
+Support mutate order qua callback. Sau khi model/threshold được kiểm chứng, scheduler dùng source
+`support_unchecked`, quét toàn bộ Waiting + Doing chưa phân loại mỗi 30 phút. Không cấu hình
+`SUPPORT_COMPARE_SCAN_LIMIT` thì không giới hạn số order; `SUPPORT_COMPARE_BATCH_LIMIT` chỉ giới
+hạn số candidate Telegram được gửi trong một lần notification task.
+
+Candidate top-1 bị model xác định `TRUNG` mới được gửi Telegram. Candidate `KHONG_TRUNG` không
+đổi `duplicate_check_status`, vì vậy order vẫn ở tab **Chưa kiểm tra** và sẽ được so sánh lại ở
+vòng sau. Khi Support chọn kết quả, callback mới chuyển order sang tab **Trùng lặp** hoặc
+**Không trùng lặp**.
+
+Support cũng có thể chủ động gửi `/check` cho bot Telegram. Bot đếm đúng các order Waiting và
+Doing chưa phân loại của platform Support, hỏi xác nhận bằng hai nút **Có, bắt đầu**/**Không**;
+chỉ nút **Có** mới enqueue một batch `support_unchecked` không giới hạn. Sau khi task kết thúc,
+bot gửi số order đã xử lý, số candidate duplicate và số lỗi; các candidate top-1 dương tính vẫn
+được gửi qua luồng notification Telegram hiện có. `/check` yêu cầu tài khoản Support active đã
+link Telegram, có platform và `SUPPORT_COMPARE_ENABLED=true`.
+
+Weight fine-tune ở phase 2 phải có `MODEL_VERSION` riêng. Nếu đổi dimension, preprocessing hoặc
+model space, re-embed toàn bộ baseline trước khi so sánh; không trộn vector DINOv2 gốc với vector
+fine-tune.
+
 ## Kiểm tra tối thiểu trước bàn giao
 
 ```bash
@@ -49,8 +85,9 @@ cd frontend && npm test && npm run build
 ```
 
 Sau khi thêm Telegram management, chạy thêm các test API/service Telegram liên quan và xác nhận
-`telegram_message_templates`, `telegram_configuration_audits` đã có sau migration. DB-backed pytest
-phải chạy tuần tự trên database test riêng.
+`telegram_message_templates`, `telegram_configuration_audits` đã có sau migration; kiểm tra thêm
+hai template audience `support` dùng cho candidate duplicate và preview trong Admin. DB-backed
+pytest phải chạy tuần tự trên database test riêng.
 
 Chạy DB-backed pytest tuần tự. Không chạy parallel trên cùng `pinterval_test` vì có thể
 deadlock/che lỗi concurrency.

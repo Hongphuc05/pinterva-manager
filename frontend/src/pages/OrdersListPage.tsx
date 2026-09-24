@@ -119,12 +119,16 @@ const SUPPORT_CLASSIFICATION_STATES = new Set([
 const SUPPORT_READ_ONLY_DOING_STATES = new Set(['IN_PROGRESS', 'ASSIGNED'])
 const ORDERS_CACHE_PREFIX = 'tacahu-orders-cache'
 
-function isSupportClassificationEditable(order: Pick<OrderSummary, 'state'>) {
-  return SUPPORT_CLASSIFICATION_STATES.has((order.state || '').toUpperCase())
+function isSupportClassificationEditable(order: Pick<OrderSummary, 'state' | 'platform_status'>) {
+  const state = (order.state || '').toUpperCase()
+  const externalStatus = (order.platform_status || '').toUpperCase()
+  if (SUPPORT_READ_ONLY_DOING_STATES.has(state) || externalStatus === 'DOING') return false
+  return SUPPORT_CLASSIFICATION_STATES.has(state) || externalStatus === 'WAITING'
 }
 
-function isSupportDoingOrder(order: Pick<OrderSummary, 'state'>) {
-  return SUPPORT_READ_ONLY_DOING_STATES.has((order.state || '').toUpperCase())
+function isSupportDoingOrder(order: Pick<OrderSummary, 'state' | 'platform_status'>) {
+  return SUPPORT_READ_ONLY_DOING_STATES.has((order.state || '').toUpperCase()) ||
+    (order.platform_status || '').toUpperCase() === 'DOING'
 }
 
 function parseUtcDate(dateInput: string | null | undefined): Date | null {
@@ -1057,13 +1061,14 @@ export function OrdersListPage() {
     }
   }, [syncStatus?.is_running, syncStatus?.last_finished_at])
 
-  // Support chỉ được phân loại queue Waiting. Các order đã phân loại vẫn
-  // xuất hiện ở tab tương ứng sau khi sang Doing/Review/Done, nhưng chỉ xem.
+  // Support's unverified tab is the input queue for the automated comparison:
+  // it includes both Waiting and Doing. Doing rows are intentionally read-only
+  // in the web UI and can only be decided through the Telegram comparison card.
   const supportUncheckedOrders = useMemo(() => {
     return orders.filter((o) => {
       if (o.work_domain === 'duplicate') return false
       const isUncheck = !o.duplicate_check_status || o.duplicate_check_status === 'uncheck'
-      return isUncheck && isSupportClassificationEditable(o)
+      return isUncheck && (isSupportClassificationEditable(o) || isSupportDoingOrder(o))
     })
   }, [orders])
 
@@ -2859,34 +2864,40 @@ export function OrdersListPage() {
                             </div>
                           </td>
 
-                          {/* 4. Support Actions: classification controls in Waiting; read-only tags/status elsewhere */}
+                          {/* 4. Support Actions: Waiting is web-editable; unverified Doing is Telegram-only */}
                           <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center justify-end gap-2">
                               {supportTab === 'all' && (
-                                <>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleSetDuplicateStatus([o.id], 'duplicate')}
-                                    disabled={updatingDuplicateStatus}
-                                    className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-900 bg-amber-100 hover:bg-amber-200 border border-amber-300 px-3 py-1.5 rounded-lg transition-all cursor-pointer shadow-2xs hover:scale-105 active:scale-95 disabled:opacity-50"
-                                    title="Đánh dấu đơn này là Trùng lặp"
-                                  >
-                                    <Layers className="h-3.5 w-3.5 text-amber-700" />
-                                    <span>Trùng lặp</span>
-                                  </button>
+                                isSupportClassificationEditable(o) ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSetDuplicateStatus([o.id], 'duplicate')}
+                                      disabled={updatingDuplicateStatus}
+                                      className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-900 bg-amber-100 hover:bg-amber-200 border border-amber-300 px-3 py-1.5 rounded-lg transition-all cursor-pointer shadow-2xs hover:scale-105 active:scale-95 disabled:opacity-50"
+                                      title="Đánh dấu đơn này là Trùng lặp"
+                                    >
+                                      <Layers className="h-3.5 w-3.5 text-amber-700" />
+                                      <span>Trùng lặp</span>
+                                    </button>
 
-                                  <button
-                                    type="button"
-                                    onClick={() => handleSetDuplicateStatus([o.id], 'non_duplicate')}
-                                    disabled={updatingDuplicateStatus}
-                                    className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-900 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 px-3 py-1.5 rounded-lg transition-all cursor-pointer shadow-2xs hover:scale-105 active:scale-95 disabled:opacity-50"
-                                    title="Đánh dấu đơn này là Không trùng lặp"
-                                  >
-                                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700" />
-                                    <span>Không trùng lặp</span>
-                                  </button>
-                                </>
-                              )}
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSetDuplicateStatus([o.id], 'non_duplicate')}
+                                      disabled={updatingDuplicateStatus}
+                                      className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-900 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 px-3 py-1.5 rounded-lg transition-all cursor-pointer shadow-2xs hover:scale-105 active:scale-95 disabled:opacity-50"
+                                      title="Đánh dấu đơn này là Không trùng lặp"
+                                    >
+                                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700" />
+                                      <span>Không trùng lặp</span>
+                                    </button>
+                                  </>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1.5 rounded-lg bg-blue-100 border border-blue-300 px-3 py-1.5 text-xs font-bold text-blue-900">
+                                    <Zap className="h-3.5 w-3.5 text-blue-700" />
+                                    <span>Chờ kiểm tra qua Telegram</span>
+                                  </span>
+                                ))}
 
                               {supportTab === 'duplicate' && (
                                 <div className="inline-flex items-center gap-1.5 rounded-lg bg-purple-100 border border-purple-300 px-3 py-1.5 text-xs font-bold text-purple-900 shadow-2xs group">

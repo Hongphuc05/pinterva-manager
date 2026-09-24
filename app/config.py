@@ -57,6 +57,17 @@ class Settings(BaseSettings):
     telegram_bot_username: str | None = None
     telegram_webhook_secret: str | None = None
     telegram_notifications_enabled: bool = True
+    # Support duplicate-image comparison is opt-in until the historical pool,
+    # thresholds and Telegram recipient have been verified in production.
+    support_compare_enabled: bool = False
+    support_compare_model_name: str = "facebook/dinov2-base"
+    support_compare_model_version: str | None = None
+    # Notification batch size.  The recurring scan itself is unbounded by
+    # default; use SUPPORT_COMPARE_SCAN_LIMIT only as an operational safety cap.
+    support_compare_batch_limit: int = 100
+    support_compare_scan_limit: int | None = None
+    support_compare_embedding_batch_size: int = 16
+    support_compare_interval_seconds: int = 1800
 
     @field_validator("order_sheet_backup_hour")
     @classmethod
@@ -86,6 +97,24 @@ class Settings(BaseSettings):
     def _validate_status_sync_heartbeat_window(cls, value: int) -> int:
         if value <= 0:
             raise ValueError("STATUS_SYNC heartbeat settings must be positive")
+        return value
+
+    @field_validator(
+        "support_compare_batch_limit",
+        "support_compare_embedding_batch_size",
+        "support_compare_interval_seconds",
+    )
+    @classmethod
+    def _validate_support_compare_settings(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("SUPPORT_COMPARE batch/interval settings must be positive")
+        return value
+
+    @field_validator("support_compare_scan_limit")
+    @classmethod
+    def _validate_support_compare_scan_limit(cls, value: int | None) -> int | None:
+        if value is not None and value <= 0:
+            raise ValueError("SUPPORT_COMPARE_SCAN_LIMIT must be positive when configured")
         return value
 
     @model_validator(mode="after")

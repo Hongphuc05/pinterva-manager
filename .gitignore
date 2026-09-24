@@ -43,6 +43,7 @@ chrome-profile-*/
 crawled_assets/
 crawled_orders.csv
 platform_data/
+huggingface_cache/
 cookies.txt
 200
 COOKIE_SECURE=false

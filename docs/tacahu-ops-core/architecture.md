@@ -26,9 +26,10 @@ React SPA ── /api ── FastAPI command/query layer ── PostgreSQL
   optimistic concurrency và audit event.
 - `app/adapters/db/`: SQLAlchemy model và Alembic migration.
 - `app/workers/`: Celery cho crawl, status sync, external assignment/review writes,
-  Google Sheet backup và Telegram notification.
+  Google Sheet backup, Telegram notification và duplicate-image comparison.
 - `compose.yaml` / `compose.production.yaml`: API, migration, Redis, PostgreSQL,
-  general worker, serialized assignment worker, Celery Beat và Cloudflare Tunnel.
+  general worker, serialized assignment worker, dedicated `celery-compare` worker,
+  Celery Beat và Cloudflare Tunnel.
 
 ### Telegram management boundary
 
@@ -41,6 +42,26 @@ trong template.
 
 Các thay đổi mapping/mode/template được ghi vào `telegram_configuration_audits`. Callback Fix của
 Admin vẫn dùng chat riêng hiện hành và các state/approval vẫn do API/PostgreSQL quyết định.
+
+### Support duplicate-image comparison
+
+Runner trong `support_compare_image/dup-compare` dùng Hugging Face DINOv2 ở phase 1. Nó đọc
+order mẫu/live từ `public.orders`, đọc baseline vector từ `support_compare_image.image_embeddings`
+và ghi run/item/candidate vào cùng schema. Với source `review`, candidate cùng
+`external_order_id` bị loại để tránh self-match vì historical crawl đã chứa các order Review.
+
+Source runtime `support_unchecked` quét cả order đang `Waiting` và `Doing` có
+`duplicate_check_status=uncheck` mỗi 30 phút. Top-1 theo cosine similarity là cặp được gửi
+Telegram; nếu Support chọn **Trùng** hoặc **Không trùng**, callback gọi
+`set_orders_duplicate_status` và ghi audit/version như command hiện có. Doing chỉ được phân loại
+qua callback scoped này; command web vẫn Waiting-only. Nếu top-1 là `KHONG_TRUNG`, item không gửi
+Telegram và order vẫn `uncheck` trong tab **Chưa kiểm tra**. Ảnh đã compare thành công được
+promote vào historical pool để các vòng sau có thêm baseline; order uncheck không duplicate sẽ
+được quét lại khi pool tiếp tục tăng.
+
+Runner fail-closed với model: không dùng HOG fallback để so với baseline DINOv2. Celery Beat chỉ
+enqueue khi `SUPPORT_COMPARE_ENABLED=true`; task chạy trên queue `support-compare` và worker solo
+riêng để không chặn các tác vụ status sync/assignment.
 
 ## Dữ liệu và side effect
 

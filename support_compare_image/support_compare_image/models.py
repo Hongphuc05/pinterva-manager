@@ -10,6 +10,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -224,3 +225,117 @@ class JobImage(Base):
     is_primary: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=text("true")
     )
+
+
+class ComparisonRun(Base):
+    __tablename__ = "comparison_runs"
+    __table_args__ = (
+        Index("ix_support_compare_comparison_runs_status", "run_status", "source_kind"),
+        {"schema": SCHEMA_NAME},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    source_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    platform_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    model_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    embedding_dim: Mapped[int] = mapped_column(Integer, nullable=False)
+    classifier_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    run_status: Mapped[str] = mapped_column(String(16), nullable=False, default="running")
+    baseline_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    requested_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    processed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    duplicate_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    promote_new_images: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ComparisonItem(Base):
+    __tablename__ = "comparison_items"
+    __table_args__ = (
+        Index(
+            "ix_support_compare_comparison_items_order",
+            "platform_id",
+            "order_id",
+            "processing_status",
+        ),
+        Index("ix_support_compare_comparison_items_run_status", "run_id", "processing_status"),
+        UniqueConstraint(
+            "run_id",
+            "order_id",
+            "image_url_sha256",
+            "model_version",
+            name="uq_support_compare_comparison_item_source",
+        ),
+        {"schema": SCHEMA_NAME},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    run_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    platform_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    order_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    external_order_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    product_name: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    source_state: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    source_printerval_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    source_order_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    image_url: Mapped[str] = mapped_column(Text, nullable=False)
+    image_url_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    embedding: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    embedding_dim: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    model_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    phash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    color_l: Mapped[float | None] = mapped_column(nullable=True)
+    color_a: Mapped[float | None] = mapped_column(nullable=True)
+    color_b: Mapped[float | None] = mapped_column(nullable=True)
+    classification: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    is_duplicate: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    processing_status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pool_promoted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    pool_promotion_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.now)
+
+
+class ComparisonCandidate(Base):
+    __tablename__ = "comparison_candidates"
+    __table_args__ = (
+        Index(
+            "ix_support_compare_candidates_review_queue",
+            "classification",
+            "decision_status",
+            "telegram_notified_at",
+        ),
+        UniqueConstraint(
+            "comparison_item_id",
+            "historical_asset_id",
+            "classifier_version",
+            name="uq_support_compare_candidate_asset_classifier",
+        ),
+        {"schema": SCHEMA_NAME},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    comparison_item_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    historical_job_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    historical_asset_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    matched_external_order_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    matched_product_name: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    matched_image_url: Mapped[str] = mapped_column(Text, nullable=False)
+    rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    visual_similarity: Mapped[float] = mapped_column(nullable=False)
+    phash_distance: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ssim: Mapped[float | None] = mapped_column(nullable=True)
+    color_delta_e: Mapped[float | None] = mapped_column(nullable=True)
+    classification: Mapped[str] = mapped_column(String(32), nullable=False)
+    confidence: Mapped[float] = mapped_column(nullable=False)
+    reasons: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    classifier_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    decision_status: Mapped[str] = mapped_column(String(24), nullable=False, default="pending")
+    decided_by_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    telegram_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.now)

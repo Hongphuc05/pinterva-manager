@@ -686,7 +686,7 @@ describe('OrdersListPage', () => {
     expect(screen.queryByText(/Quét Đơn Mới/i)).not.toBeInTheDocument()
   })
 
-  it('keeps unchecked classification in Waiting and exposes Doing as read-only', async () => {
+  it('shows unchecked Waiting and Doing in the comparison queue, with Doing read-only', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn((url: string) => {
@@ -766,10 +766,10 @@ describe('OrdersListPage', () => {
       </BrowserRouter>
     )
 
-    // Only unchecked Waiting is in Tab 1 ("Chưa kiểm tra"). Doing orders are
-    // intentionally separated into the read-only "Đang làm" tab.
+    // Both unchecked Waiting and Doing feed the automated comparison queue.
     await waitFor(() => expect(screen.getByText('DJ-WAITING')).toBeInTheDocument())
-    expect(screen.queryByText('DJ-DOING')).not.toBeInTheDocument()
+    expect(screen.getByText('DJ-DOING')).toBeInTheDocument()
+    expect(screen.getByText('Chờ kiểm tra qua Telegram')).toBeInTheDocument()
     // Classified non_duplicate order is NOT in Tab 1 ("Chưa kiểm tra")
     expect(screen.queryByText('DJ-REVIEW')).not.toBeInTheDocument()
 

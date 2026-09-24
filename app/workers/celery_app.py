@@ -19,6 +19,7 @@ celery_app = Celery(
         "app.workers.assignment_sync_tasks",
         "app.workers.order_sheet_backup_tasks",
         "app.workers.telegram_tasks",
+        "app.workers.support_compare_tasks",
     ],
 )
 
@@ -27,7 +28,12 @@ celery_app = Celery(
 # assignment: a Designer has already submitted work and Printerval must receive its
 # link/status promptly. Redis priorities plus a prefetch of one prevent a solo
 # assignment worker from reserving several bulk jobs ahead of that submission.
-celery_app.conf.task_queues = (Queue("celery"), Queue("assignment", max_priority=10))
+celery_app.conf.task_queues = (
+    Queue("celery"),
+    Queue("assignment", max_priority=10),
+    # DINOv2 is CPU/GPU-heavy and must not block status sync or Telegram jobs.
+    Queue("support-compare"),
+)
 celery_app.conf.task_routes = {
     "app.workers.assignment_sync_tasks.sync_printerval_assignment_request": {
         "queue": "assignment"
@@ -41,6 +47,12 @@ celery_app.conf.task_routes = {
     },
     "app.workers.sync_job_tasks.run_status_sync_job": {"queue": "celery"},
     "app.workers.order_sheet_backup_tasks.export_order_sheet_backup": {"queue": "celery"},
+    "app.workers.support_compare_tasks.run_support_compare_batch": {
+        "queue": "support-compare"
+    },
+    "app.workers.support_compare_tasks.notify_support_duplicate_candidates": {
+        "queue": "support-compare"
+    },
 }
 celery_app.conf.worker_prefetch_multiplier = 1
 celery_app.conf.task_track_started = True
@@ -78,6 +90,16 @@ def build_beat_schedule(settings):
                 hour=settings.order_sheet_backup_hour,
                 minute=settings.order_sheet_backup_minute,
             ),
+        }
+    if settings.support_compare_enabled:
+        schedule["support-compare-unchecked"] = {
+            "task": "app.workers.support_compare_tasks.run_support_compare_batch",
+            "schedule": settings.support_compare_interval_seconds,
+            "kwargs": {"source_kind": "support_unchecked"},
+        }
+        schedule["support-compare-telegram"] = {
+            "task": "app.workers.support_compare_tasks.notify_support_duplicate_candidates",
+            "schedule": 60.0,
         }
     return schedule
 

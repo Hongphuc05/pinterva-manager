@@ -19,7 +19,10 @@ COPY --chown=app:app alembic.ini /app/alembic.ini
 COPY --chown=app:app migrations /app/migrations
 COPY --chown=app:app app /app/app
 COPY --chown=app:app CopyImage /app/CopyImage
+COPY --chown=app:app support_compare_image /app/support_compare_image
 COPY --chown=app:app --from=frontend-build /frontend/dist /app/frontend/dist
+COPY support_compare_image/requirements.compare-runtime.txt /tmp/support-compare-requirements.txt
+RUN pip install -r /tmp/support-compare-requirements.txt && rm /tmp/support-compare-requirements.txt
 RUN pip install --no-deps -e /app
 
 USER app

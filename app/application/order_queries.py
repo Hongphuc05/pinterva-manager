@@ -24,16 +24,18 @@ def is_support_visible_order(order: Order) -> bool:
     """Return whether Support may read an order in its classification workspace.
 
     Unclassified orders are visible for classification only while they are
-    waiting.  Support also keeps read access to every order in Doing, while
+    waiting or externally marked Doing.  Support also keeps read access to every order in Doing, while
     completed duplicate classifications remain visible in their own tabs after
     workflow state advances.
     A duplicate domain is included as a defensive compatibility check for old
     rows whose duplicate-check status was not backfilled consistently.
     """
     state = (order.state or "").upper()
+    printerval_status = (order.printerval_status or "").lower()
     return (
         state in SUPPORT_CLASSIFICATION_STATES
         or state in SUPPORT_READ_ONLY_DOING_STATES
+        or printerval_status in {"waiting", "doing"}
         or order.work_domain == WORK_DOMAIN_DUPLICATE
         or (order.duplicate_check_status or "") in SUPPORT_CLASSIFIED_STATUSES
     )
@@ -56,9 +58,10 @@ def list_orders_for_user(
 ) -> list[Order]:
     """Return the orders visible to the current role.
 
-    Support may classify only the pre-classification queue, keeps read access
-    to every order in Doing, and keeps completed classifications visible after
-    they move to Review or Done.
+    Support may classify only the pre-classification queue through the web,
+    keeps read access to every order in Doing, and keeps completed
+    classifications visible after they move to Review or Done. The comparison
+    callback has a separate scoped path for unclassified Doing orders.
     """
     if user.role in (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO):
         designer_id = str(user.id)
@@ -73,6 +76,8 @@ def list_orders_for_user(
             or_(
                 Order.state.in_(SUPPORT_CLASSIFICATION_STATES),
                 Order.state.in_(SUPPORT_READ_ONLY_DOING_STATES),
+                Order.printerval_status.ilike("waiting"),
+                Order.printerval_status.ilike("doing"),
                 Order.work_domain == WORK_DOMAIN_DUPLICATE,
                 Order.duplicate_check_status.in_(SUPPORT_CLASSIFIED_STATUSES),
             )

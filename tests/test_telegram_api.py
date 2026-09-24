@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -182,6 +183,98 @@ def test_telegram_admin_fix_callbacks(client: TestClient, db_session):
         TelegramActionLog.action_type == "APPROVE_FIX_WRITE_NOTE"
     ).one()
     assert sibling_write_choice.status == "superseded"
+
+
+def test_support_check_command_counts_scope_and_enqueues_full_scan(client: TestClient, db_session):
+    platform = Platform(name="Plat support check", account_username="support-check@print.com", is_active=True)
+    db_session.add(platform)
+    db_session.flush()
+    support = User(
+        username="support-check",
+        full_name="Support Check",
+        role="support",
+        password_hash=hash_password("pass"),
+        telegram_chat_id="998877",
+        active=True,
+        platform_id=platform.id,
+    )
+    waiting_order = Order(
+        external_order_id="DJ-CHECK-WAITING",
+        platform_id=platform.id,
+        state=OrderState.WAITING.value,
+        duplicate_check_status="uncheck",
+        work_domain="standard",
+    )
+    doing_order = Order(
+        external_order_id="DJ-CHECK-DOING",
+        platform_id=platform.id,
+        state=OrderState.IN_PROGRESS.value,
+        duplicate_check_status="uncheck",
+        work_domain="standard",
+    )
+    completed_order = Order(
+        external_order_id="DJ-CHECK-DONE",
+        platform_id=platform.id,
+        state=OrderState.DONE.value,
+        duplicate_check_status="uncheck",
+        work_domain="standard",
+    )
+    duplicate_domain_order = Order(
+        external_order_id="DJ-CHECK-DUPLICATE-DOMAIN",
+        platform_id=platform.id,
+        state=OrderState.WAITING.value,
+        duplicate_check_status="uncheck",
+        work_domain="duplicate",
+    )
+    db_session.add_all([support, waiting_order, doing_order, completed_order, duplicate_domain_order])
+    db_session.commit()
+
+    with (
+        patch(
+            "app.api.routes.telegram_api.get_settings",
+            return_value=SimpleNamespace(support_compare_enabled=True),
+        ),
+        patch("app.api.routes.telegram_api.send_message", return_value={"message_id": 700}) as send_message,
+        patch("app.api.routes.telegram_api.clear_message_keyboard") as clear_keyboard,
+    ):
+        response = client.post(
+            "/api/telegram/webhook",
+            json={"message": {"chat": {"id": 998877}, "from": {"id": 998877}, "text": "/check"}},
+        )
+        assert response.status_code == 200
+
+        prompt = next(call for call in send_message.call_args_list if "reply_markup" in call.kwargs)
+        keyboard = prompt.kwargs["reply_markup"]["inline_keyboard"][0]
+        yes_callback = keyboard[0]["callback_data"]
+        assert "<b>2</b>" in prompt.args[1]
+
+        task_result = SimpleNamespace(id="support-check-task-1")
+        with patch("app.workers.support_compare_tasks.run_support_compare_batch.delay", return_value=task_result) as enqueue:
+            response = client.post(
+                "/api/telegram/webhook",
+                json={
+                    "callback_query": {
+                        "id": "support-check-callback",
+                        "data": yes_callback,
+                        "from": {"id": 998877},
+                    }
+                },
+            )
+        assert response.status_code == 200
+        enqueue.assert_called_once_with(
+            source_kind="support_unchecked",
+            limit=None,
+            platform_id=str(platform.id),
+            notify_chat_id="998877",
+        )
+        clear_keyboard.assert_called_once_with("998877", 700)
+
+    actions = db_session.query(TelegramActionLog).filter(
+        TelegramActionLog.action_type.in_(("SUPPORT_COMPARE_CHECK_YES", "SUPPORT_COMPARE_CHECK_NO"))
+    ).all()
+    assert {action.status for action in actions} == {"executed", "superseded"}
+    executed = next(action for action in actions if action.status == "executed")
+    assert executed.payload["task_id"] == "support-check-task-1"
 
 
 def test_telegram_admin_fix_notification_uses_tacahu_designer_name(db_session):

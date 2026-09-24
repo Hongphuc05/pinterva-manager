@@ -23,6 +23,7 @@ from app.adapters.db.models import (
     User,
 )
 from app.config import get_settings
+from app.domain.access import ROLE_SUPPORT
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,28 @@ DEFAULT_TELEGRAM_TEMPLATES: dict[str, dict[str, Any]] = {
             "<i>Cảm ơn bạn đã nỗ lực! Chúc bạn làm việc hiệu quả và nhiều năng lượng!</i>"
         ),
         "placeholders": {"order_count", "total_amount", "time"},
+    },
+    "support_duplicate_new_candidate": {
+        "audience": "support",
+        "body": (
+            "🆕 <b>ĐƠN MỚI CẦN KIỂM TRA TRÙNG</b>\n"
+            "📦 Mã đơn: <code>{{order_code}}</code>\n"
+            "👕 Sản phẩm: {{product_name}}\n"
+            "Ảnh mới"
+        ),
+        "placeholders": {"order_code", "product_name"},
+    },
+    "support_duplicate_match_candidate": {
+        "audience": "support",
+        "body": (
+            "🗂 <b>ẢNH ĐÃ CÓ TRONG KHO LỊCH SỬ</b>\n"
+            "📦 Mã đơn cũ: <code>{{matched_order_code}}</code>\n"
+            "👕 Sản phẩm cũ: {{matched_product_name}}\n"
+            "📊 Similarity: <code>{{similarity}}</code>\n"
+            "🏷 Classifier: <code>{{classifier}}</code>\n\n"
+            "Đây có phải là đơn trùng không?"
+        ),
+        "placeholders": {"matched_order_code", "matched_product_name", "similarity", "classifier"},
     },
     "admin_new_fix": {
         "audience": "admin",
@@ -185,7 +208,7 @@ def send_telegram_request(
     payload: dict[str, Any],
     *,
     timeout: float = 10.0,
-) -> dict[str, Any] | None:
+) -> dict[str, Any] | list[Any] | None:
     """Synchronous HTTP call to Telegram Bot API with graceful error handling."""
     settings = get_settings()
     token = settings.telegram_bot_token
@@ -273,6 +296,32 @@ def send_photo(
     if not res and caption:
         return send_message(chat_id, caption, parse_mode=parse_mode, reply_markup=reply_markup)
     return res
+
+
+def send_media_group(
+    chat_id: str,
+    photos: list[dict[str, Any]],
+    *,
+    parse_mode: str = "HTML",
+) -> list[dict[str, Any]] | None:
+    """Send a small Telegram photo album, used for side-by-side previews."""
+    if not 2 <= len(photos) <= 10:
+        raise ValueError("Telegram media group must contain between 2 and 10 photos")
+    media: list[dict[str, Any]] = []
+    for photo in photos:
+        media_url = str(photo.get("media") or "").strip()
+        if not media_url.startswith(("http://", "https://")):
+            return None
+        item: dict[str, Any] = {"type": "photo", "media": media_url}
+        if photo.get("caption"):
+            item["caption"] = photo["caption"]
+            item["parse_mode"] = parse_mode
+        media.append(item)
+    result = send_telegram_request(
+        "sendMediaGroup",
+        {"chat_id": chat_id, "media": media},
+    )
+    return result if isinstance(result, list) else None
 
 
 def validate_telegram_template_body(template_key: str, body: str) -> set[str]:
@@ -375,8 +424,19 @@ def inspect_telegram_group(chat_id: str) -> TelegramGroupInspection:
 
 
 def resolve_designer_chat_target(session: Session, designer: User) -> TelegramChatTarget | None:
-    """Resolve the explicitly selected designer destination without silent fallback."""
+    """Resolve the explicitly selected Telegram destination without silent fallback."""
     if not designer.telegram_notifications_enabled:
+        return None
+    # Support duplicate candidates are authenticated against the user's private
+    # Telegram chat in the callback webhook.  Keep this role private-only even
+    # if an old/stale group configuration exists on the user row.
+    if designer.role == ROLE_SUPPORT:
+        if designer.telegram_chat_id:
+            return TelegramChatTarget(
+                chat_id=designer.telegram_chat_id,
+                mode=TELEGRAM_DELIVERY_PRIVATE,
+                label=designer.telegram_username or designer.telegram_chat_id,
+            )
         return None
     if designer.telegram_delivery_mode == TELEGRAM_DELIVERY_GROUP:
         if designer.telegram_group_chat_id and designer.telegram_group_verified:

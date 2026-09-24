@@ -23,12 +23,16 @@ Module có 3 phần:
 3. **Backfill embedding** (`embed_backfill.py`): tính embedding cho ảnh Printerval đã
    crawl và ghi vào Postgres trên VPS (schema `support_compare_image`). Chạy trên máy
    có GPU.
+4. **So sánh với PostgreSQL** (`compare_orders.py`): lấy ảnh preview của order từ
+   `public.orders`, đọc pool DINOv2 cũ từ `support_compare_image.image_embeddings`,
+   tính candidate và ghi kết quả vào các bảng `comparison_*`. Có thể chạy thử với
+   order `review`; các order này không được promote ngược vào pool.
 
 ## Cài đặt
 
 ```bash
 cd dup-compare
-pip install -r requirements.txt
+pip install -r ../requirements.txt -r ../requirements.compare-runtime.txt
 ```
 
 Lần đầu chạy, model `facebook/dinov2-base` (khoảng 300–400MB) được tải từ Hugging Face,
@@ -182,7 +186,120 @@ Face. Metric là cosine, bằng dot product vì vector đã chuẩn hóa. Tiền
 > Hiện tại luồng quét pool (`scan.html`) vẫn đọc từ SQLite, chưa đọc từ bảng
 > `image_embeddings` trên Postgres.
 
-## 3. Test và calibrate
+## 3. So sánh order mẫu từ `public.orders`
+
+Migration `support_compare_image/migrations/versions/0003_comparison_runs.py` tạo
+`comparison_runs`, `comparison_items` và `comparison_candidates`. Chạy migration
+trước khi compare:
+
+```bash
+cd support_compare_image
+alembic upgrade head
+cd dup-compare
+```
+
+`compare_orders.py` dùng model Hugging Face thật, mặc định là
+`facebook/dinov2-base`. Nó không dùng HOG fallback, vì vector fallback không cùng
+không gian với 85k embedding DINOv2 đang có.
+
+Mở SSH tunnel tới PostgreSQL nếu chạy ngoài VPS:
+
+```bash
+ssh -N -L 15432:127.0.0.1:5432 USER@VPS_HOST
+export DATABASE_URL='postgresql://USER:PASSWORD@127.0.0.1:15432/DB_NAME'
+```
+
+Chạy thử tối đa 10 order có `printerval_status='review'` hoặc `state='QC_PENDING'`:
+
+```bash
+python compare_orders.py \
+  --source review \
+  --limit 10 \
+  --model facebook/dinov2-base \
+  --confirm
+```
+
+Ảnh mới được chọn theo thứ tự `thumbnail_url`, rồi tới ảnh đầu tiên của
+`product_image_urls`. Khi source là `review`, comparator loại candidate có cùng
+`external_order_id` với order mới để tránh tự match, vì pool historical trước đó
+đã chứa cả status `review`.
+
+Kiểm tra kết quả:
+
+```sql
+SELECT id, source_kind, run_status, baseline_count, requested_count,
+       processed_count, duplicate_count, error_count, started_at, finished_at
+FROM support_compare_image.comparison_runs
+ORDER BY started_at DESC
+LIMIT 10;
+
+SELECT i.external_order_id AS new_order,
+       i.product_name AS new_product,
+       c.matched_external_order_id AS old_order,
+       c.matched_product_name AS old_product,
+       c.visual_similarity, c.phash_distance, c.ssim,
+       c.classification, c.decision_status
+FROM support_compare_image.comparison_candidates c
+JOIN support_compare_image.comparison_items i
+  ON i.id = c.comparison_item_id
+ORDER BY c.created_at DESC
+LIMIT 50;
+```
+
+Không dùng `--include-self` trong test thông thường. Không bật `SUPPORT_COMPARE_ENABLED`
+cho production trước khi kiểm tra kết quả thực tế và Telegram recipient.
+
+Migration `0004_support_unchecked_source.py` mở source runtime `support_unchecked`. Source này
+quét order `uncheck` ở cả Waiting và Doing; ảnh preview được embedding, so sánh với pool rồi
+promote vào pool sau khi xử lý thành công. Top-1 theo similarity mới được dùng làm cặp Telegram.
+Nếu top-1 là `KHONG_TRUNG`, order không bị đổi status và vẫn nằm trong tab Chưa kiểm tra để
+được quét lại khi pool tăng.
+
+Có thể chạy pilot thủ công toàn bộ queue (nên dùng `--limit` nhỏ khi test):
+
+```bash
+python compare_orders.py \
+  --source support_unchecked \
+  --limit 10 \
+  --model facebook/dinov2-base \
+  --confirm
+```
+
+Source `waiting` cũ vẫn giữ cơ chế terminal sau khi promote ở model/version hiện tại và chỉ
+dành cho compatibility. Có thể chạy pilot Waiting cũ:
+
+```bash
+python compare_orders.py \
+  --source waiting \
+  --limit 10 \
+  --model facebook/dinov2-base \
+  --confirm
+```
+
+Trong production, bật `SUPPORT_COMPARE_ENABLED=true` sẽ để Celery Beat enqueue vào queue
+`support-compare`; worker `celery-compare` xử lý tuần tự, tách khỏi queue general/assignment.
+Review chỉ là nguồn test: candidate được lưu để kiểm tra, nhưng callback Telegram bị chặn không
+cho đổi trạng thái order. Candidate live `support_unchecked` mới được phép đi qua command Support;
+Doing chỉ được phân loại qua callback Telegram, còn command web vẫn Waiting-only.
+
+## 4. Chuyển sang weight fine-tune ở phase 2
+
+Có thể trỏ runner tới một thư mục Hugging Face local:
+
+```bash
+python compare_orders.py \
+  --source review \
+  --limit 10 \
+  --model /path/to/finetuned-dinov2 \
+  --model-version dinov2-finetuned-v1 \
+  --confirm
+```
+
+Nếu dimension, preprocessing hoặc model space thay đổi, phải re-embed pool cũ bằng
+đúng weight mới trước khi so sánh. Không trộn vector `facebook/dinov2-base` với
+vector fine-tune trong cùng một pool.
+
+## 5. Test và calibrate
 
 ```bash
 # Smoke test bằng ảnh vẽ tay tổng hợp, không cần ảnh thật

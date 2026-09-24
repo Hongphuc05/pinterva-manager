@@ -31,6 +31,7 @@ x-backend: &backend
     - tacahu_local_platform_data:/app/platform_data
     - tacahu_local_playwright_evidence:/app/playwright-evidence
     - tacahu_local_chrome_profiles:/app/chrome-profiles
+    - tacahu_local_huggingface_cache:/home/app/.cache/huggingface
   logging:
     driver: local
     options:
@@ -72,7 +73,7 @@ services:
   migrate:
     <<: *backend
     restart: "no"
-    command: ["alembic", "upgrade", "head"]
+    command: ["sh", "-lc", "alembic upgrade head && cd /app/support_compare_image && alembic upgrade head"]
     depends_on:
       db:
         condition: service_healthy
@@ -111,6 +112,15 @@ services:
       redis:
         condition: service_healthy
 
+  celery-compare:
+    <<: *backend
+    command: ["celery", "-A", "app.workers.celery_app", "worker", "--pool=solo", "--loglevel=info", "-Q", "support-compare", "-n", "compare@%h"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
   celery-beat:
     <<: *backend
     command: ["celery", "-A", "app.workers.celery_app", "beat", "--loglevel=info"]
@@ -128,3 +138,4 @@ volumes:
   tacahu_local_platform_data:
   tacahu_local_playwright_evidence:
   tacahu_local_chrome_profiles:
+  tacahu_local_huggingface_cache:

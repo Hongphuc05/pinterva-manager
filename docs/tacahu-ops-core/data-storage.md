@@ -24,17 +24,22 @@ workflow Tacahu.
 | Browser/platform runtime | session/profile, Playwright evidence | VPS filesystem | Dưới `DATA_DIR/platform_data`, `chrome_profiles`, `playwright_evidence`; cần bảo vệ như credential/evidence. |
 | Queue/cache | Celery message, schedule runtime, Redis AOF | Redis tại `DATA_DIR/redis` | Không dùng để khôi phục business state. |
 | Hệ thống ngoài | dữ liệu gốc Printerval, Drive links, Google Sheet export | Dịch vụ ngoài | Printerval là integration; Google Sheet chỉ là export/backup tùy cấu hình. |
+| So sánh ảnh Support | run, order image embedding, historical candidate, similarity và quyết định Telegram | PostgreSQL schema `support_compare_image` | Vector phase 1 dùng `facebook/dinov2-base`; không trộn với weight fine-tune khác model space. |
 
 ## Dữ liệu quản trị Telegram
 
 - Các cột `telegram_group_*` và `telegram_delivery_mode` nằm trên `users`; group ID, title,
   loại group, trạng thái verify và lỗi gửi gần nhất phải được backup cùng PostgreSQL.
 - `telegram_message_templates` lưu text template, audience, version và người sửa. Migration seed
-  các template mặc định; Admin có thể sửa/preview/reset, còn placeholder được backend allowlist.
+  các template mặc định cho Designer, Admin và Support; Admin có thể sửa/preview/reset, còn
+  placeholder được backend allowlist.
 - `telegram_configuration_audits` lưu actor, target/template, action và before/after JSON để đối
   soát thay đổi cấu hình. Không lưu bot token hoặc raw callback token trong bảng này.
 - Telegram không phải source of truth: mất message/Telegram outage không làm mất assignment,
   order state, approval hoặc payment state.
+- `comparison_runs`, `comparison_items` và `comparison_candidates` là audit/queue của image
+  comparison. Chúng không thay thế `orders`; quyết định `duplicate`/`non_duplicate` vẫn phải
+  đi qua application service và tạo workflow event.
 
 ## Layout production theo compose
 
@@ -49,6 +54,7 @@ private_work_note_assets/ screenshot/ảnh private của Note làm việc; QR ng
 platform_data/        dữ liệu runtime platform
 playwright_evidence/  evidence browser automation
 chrome_profiles/      Chrome profile/session
+huggingface_cache/    Hugging Face checkpoint cache; có thể tải lại, không phải business source of truth
 ```
 
 Port PostgreSQL chỉ bind `127.0.0.1` của VPS, không public Internet theo compose hiện hành.

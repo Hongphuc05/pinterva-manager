@@ -5,6 +5,7 @@ FROM python:3.12-slim-bookworm
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
+    HF_HOME=/home/app/.cache/huggingface \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 WORKDIR /app
@@ -22,13 +23,20 @@ RUN python -c "import tomllib; f = open('pyproject.toml', 'rb'); data = tomllib.
     && useradd --uid 10001 --gid app --create-home --shell /usr/sbin/nologin app \
     && mkdir -p /app/crawled_assets /app/order_assets /app/private_work_note_assets /app/platform_data \
         /app/playwright-evidence /app/chrome-profiles /app/credentials \
-    && chown -R app:app /app /ms-playwright
+        /home/app/.cache/huggingface \
+    && chown -R app:app /app /home/app/.cache /ms-playwright
 
 # 3. Copy application source and migrations AFTER dependencies are installed
 COPY alembic.ini ./
 COPY migrations ./migrations
 COPY app ./app
 COPY CopyImage ./CopyImage
+COPY support_compare_image ./support_compare_image
+
+# Optional database-backed duplicate comparison worker. The Hugging Face model
+# itself is downloaded lazily into the configured HF cache when a task runs.
+COPY support_compare_image/requirements.compare-runtime.txt /tmp/support-compare-requirements.txt
+RUN pip install -r /tmp/support-compare-requirements.txt && rm /tmp/support-compare-requirements.txt
 
 # 4. Install the package itself without re-resolving dependencies
 RUN pip install --no-deps -e . && chown -R app:app /app

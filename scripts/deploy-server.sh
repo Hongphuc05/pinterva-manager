@@ -88,7 +88,7 @@ if ! "${SSH_CMD[@]}" "echo 'SSH connected successfully'" >/dev/null 2>&1; then
 fi
 
 # Ensure server directories exist with proper write permissions for container user
-"${SSH_CMD[@]}" "mkdir -p '${SERVER_PATH}/app' '${SERVER_PATH}/data/'{crawled_assets,order_assets,private_work_note_assets,platform_data,playwright_evidence,chrome_profiles,redis} '${SERVER_PATH}/backups' && chmod -R 777 '${SERVER_PATH}/data/'{crawled_assets,order_assets,private_work_note_assets,platform_data,playwright_evidence,chrome_profiles} 2>/dev/null || true"
+"${SSH_CMD[@]}" "mkdir -p '${SERVER_PATH}/app' '${SERVER_PATH}/data/'{crawled_assets,order_assets,private_work_note_assets,platform_data,playwright_evidence,chrome_profiles,huggingface_cache,redis} '${SERVER_PATH}/backups' && chmod -R 777 '${SERVER_PATH}/data/'{crawled_assets,order_assets,private_work_note_assets,platform_data,playwright_evidence,chrome_profiles,huggingface_cache} 2>/dev/null || true"
 
 # 4. Sync source code to staging directory using rsync
 echo "📦 Syncing source files via rsync to ${SERVER_PATH}/app/..."
@@ -155,8 +155,8 @@ export APP_VERSION="$APP_VERSION"
 export APP_SOURCE_DIR="./app"
 export DATA_DIR="./data"
 
-mkdir -p "$DATA_DIR/crawled_assets" "$DATA_DIR/order_assets" "$DATA_DIR/private_work_note_assets" "$DATA_DIR/platform_data" "$DATA_DIR/playwright-evidence" "$DATA_DIR/credentials"
-chmod -R 777 "$DATA_DIR/crawled_assets" "$DATA_DIR/order_assets" "$DATA_DIR/private_work_note_assets" "$DATA_DIR/platform_data" "$DATA_DIR/playwright-evidence" "$DATA_DIR/credentials" 2>/dev/null || true
+mkdir -p "$DATA_DIR/crawled_assets" "$DATA_DIR/order_assets" "$DATA_DIR/private_work_note_assets" "$DATA_DIR/platform_data" "$DATA_DIR/playwright-evidence" "$DATA_DIR/credentials" "$DATA_DIR/huggingface_cache"
+chmod -R 777 "$DATA_DIR/crawled_assets" "$DATA_DIR/order_assets" "$DATA_DIR/private_work_note_assets" "$DATA_DIR/platform_data" "$DATA_DIR/playwright-evidence" "$DATA_DIR/credentials" "$DATA_DIR/huggingface_cache" 2>/dev/null || true
 
 COMPOSE_ARGS=(docker compose -f compose.yaml --env-file .env)
 if [[ "$DEPLOY_WITH_TUNNEL" == "true" ]]; then

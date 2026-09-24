@@ -26,10 +26,11 @@ from app.application.telegram_service import (
     template_metadata,
     validate_telegram_template_body,
 )
-from app.domain.access import ROLE_ADMIN, ROLE_DESIGNER, ROLE_DESIGNER_TRELLO
+from app.domain.access import ROLE_ADMIN, ROLE_DESIGNER, ROLE_DESIGNER_TRELLO, ROLE_SUPPORT
 
 router = APIRouter(prefix="/telegram/admin", tags=["telegram-admin"])
 DESIGNER_ROLES = (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO)
+TELEGRAM_RECIPIENT_ROLES = (*DESIGNER_ROLES, ROLE_SUPPORT)
 CHAT_ID_PATTERN = re.compile(r"-?\d{1,64}")
 
 
@@ -58,7 +59,9 @@ class TelegramOverviewOut(BaseModel):
     is_configured: bool
     bot_username: str | None
     platform_id: str
+    recipient_count: int
     designer_count: int
+    support_count: int
     private_connected_count: int
     group_configured_count: int
     group_verified_count: int
@@ -86,7 +89,7 @@ class TelegramTestOut(BaseModel):
 
 class TelegramTemplateOut(BaseModel):
     template_key: str
-    audience: Literal["designer", "admin"]
+    audience: Literal["designer", "admin", "support"]
     body: str
     active: bool
     version: int
@@ -113,18 +116,18 @@ def _designer(db: Session, user_id: str, platform_id: uuid.UUID) -> User:
     try:
         target_id = uuid.UUID(user_id)
     except ValueError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mã designer không hợp lệ.") from exc
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mã người nhận không hợp lệ.") from exc
     target = (
         db.query(User)
         .filter(
             User.id == target_id,
             User.platform_id == platform_id,
-            User.role.in_(DESIGNER_ROLES),
+            User.role.in_(TELEGRAM_RECIPIENT_ROLES),
         )
         .one_or_none()
     )
     if target is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy designer trong Acc Mẹ đang chọn.")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy người nhận trong Acc Mẹ đang chọn.")
     return target
 
 
@@ -200,18 +203,20 @@ def get_telegram_admin_overview(
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
-    designers = (
+    recipients = (
         db.query(User)
-        .filter(User.platform_id == platform_id, User.role.in_(DESIGNER_ROLES))
+        .filter(User.platform_id == platform_id, User.role.in_(TELEGRAM_RECIPIENT_ROLES))
         .order_by(User.active.desc(), User.full_name.asc(), User.username.asc())
         .all()
     )
-    rows = [_designer_out(designer) for designer in designers]
+    rows = [_designer_out(recipient) for recipient in recipients]
     return TelegramOverviewOut(
         is_configured=is_telegram_configured(),
         bot_username=get_bot_username() or None,
         platform_id=str(platform_id),
-        designer_count=len(rows),
+        recipient_count=len(rows),
+        designer_count=sum(row.role in DESIGNER_ROLES for row in rows),
+        support_count=sum(row.role == ROLE_SUPPORT for row in rows),
         private_connected_count=sum(row.private_connected for row in rows),
         group_configured_count=sum(row.group_configured for row in rows),
         group_verified_count=sum(row.group_verified for row in rows),
@@ -231,6 +236,8 @@ def save_designer_group_chat(
     if not CHAT_ID_PATTERN.fullmatch(group_chat_id):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Group chat ID phải là một số hợp lệ.")
     target = _designer(db, user_id, platform_id)
+    if target.role == ROLE_SUPPORT:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Support hiện chỉ nhận candidate qua chat riêng Telegram.")
     duplicate = (
         db.query(User)
         .filter(User.telegram_group_chat_id == group_chat_id, User.id != target.id)
@@ -271,6 +278,8 @@ def clear_designer_group_chat(
     db: Session = Depends(get_db),
 ):
     target = _designer(db, user_id, platform_id)
+    if target.role == ROLE_SUPPORT:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Support hiện chỉ nhận candidate qua chat riêng Telegram.")
     before = _designer_snapshot(target)
     target.telegram_group_chat_id = None
     target.telegram_group_title = None
@@ -301,6 +310,8 @@ def verify_designer_group_chat(
     db: Session = Depends(get_db),
 ):
     target = _designer(db, user_id, platform_id)
+    if target.role == ROLE_SUPPORT:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Support hiện chỉ nhận candidate qua chat riêng Telegram.")
     if not target.telegram_group_chat_id:
         raise HTTPException(status.HTTP_409_CONFLICT, "Designer này chưa có group chat ID.")
     before = _designer_snapshot(target)
@@ -334,6 +345,8 @@ def update_designer_delivery_mode(
     db: Session = Depends(get_db),
 ):
     target = _designer(db, user_id, platform_id)
+    if target.role == ROLE_SUPPORT and payload.mode != TELEGRAM_DELIVERY_PRIVATE:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Support hiện chỉ nhận candidate qua chat riêng Telegram.")
     if payload.mode == TELEGRAM_DELIVERY_GROUP and not (
         target.telegram_group_chat_id and target.telegram_group_verified
     ):
@@ -496,6 +509,10 @@ def preview_telegram_template(
         "title": "Cảnh báo mẫu",
         "platform_name": "Acc Mẹ mẫu",
         "message": "Nội dung cảnh báo mẫu",
+        "matched_order_code": "DJ0000001",
+        "matched_product_name": "Sản phẩm lịch sử mẫu",
+        "similarity": "0.9234",
+        "classifier": "TRUNG",
     }
     context.update(payload.context)
     try:

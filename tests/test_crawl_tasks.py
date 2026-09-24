@@ -1,7 +1,7 @@
 from app.adapters.db.models import Order
 from app.adapters.printerval.fake_adapter import FakePrintervalAdapter
 from app.domain.models import OrderState
-from app.workers.celery_app import celery_app
+from app.workers.celery_app import build_beat_schedule, celery_app
 from app.workers.crawl_tasks import run_crawl_cycle
 
 
@@ -37,6 +37,29 @@ def test_celery_app_has_status_sync_beat_schedule_and_no_crawl():
 
 def test_celery_app_includes_telegram_tasks():
     assert "app.workers.telegram_tasks" in celery_app.conf.include
+
+
+def test_celery_app_includes_support_compare_tasks_on_dedicated_queue():
+    assert "app.workers.support_compare_tasks" in celery_app.conf.include
+    assert celery_app.conf.task_routes[
+        "app.workers.support_compare_tasks.run_support_compare_batch"
+    ] == {"queue": "support-compare"}
+
+
+def test_support_compare_beat_scans_waiting_and_doing_every_30_minutes():
+    from app.config import Settings
+
+    schedule = build_beat_schedule(
+        Settings(secret_key="test", cookie_secure=False, support_compare_enabled=True)
+    )
+
+    entry = schedule["support-compare-unchecked"]
+    assert entry["task"] == "app.workers.support_compare_tasks.run_support_compare_batch"
+    assert entry["schedule"] == 1800
+    assert entry["kwargs"] == {"source_kind": "support_unchecked"}
+    assert celery_app.conf.task_routes[
+        "app.workers.support_compare_tasks.notify_support_duplicate_candidates"
+    ] == {"queue": "support-compare"}
 
 
 def test_celery_app_includes_the_scheduled_status_sync_task():

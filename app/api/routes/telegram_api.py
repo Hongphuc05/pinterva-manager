@@ -18,6 +18,37 @@ from app.adapters.db.models import (
     WorkflowEvent,
 )
 from app.api.deps import get_current_user, get_db
+from app.application.support_compare import (
+    ACTION_CHECK_NO as SUPPORT_COMPARE_ACTION_CHECK_NO,
+)
+from app.application.support_compare import (
+    ACTION_CHECK_YES as SUPPORT_COMPARE_ACTION_CHECK_YES,
+)
+from app.application.support_compare import (
+    ACTION_CONFIRM as SUPPORT_COMPARE_ACTION_CONFIRM,
+)
+from app.application.support_compare import (
+    ACTION_REJECT as SUPPORT_COMPARE_ACTION_REJECT,
+)
+from app.application.support_compare import (
+    CALLBACK_CHECK_NO_PREFIX as SUPPORT_COMPARE_CALLBACK_CHECK_NO,
+)
+from app.application.support_compare import (
+    CALLBACK_CHECK_YES_PREFIX as SUPPORT_COMPARE_CALLBACK_CHECK_YES,
+)
+from app.application.support_compare import (
+    CALLBACK_CONFIRM_PREFIX as SUPPORT_COMPARE_CALLBACK_CONFIRM,
+)
+from app.application.support_compare import (
+    CALLBACK_REJECT_PREFIX as SUPPORT_COMPARE_CALLBACK_REJECT,
+)
+from app.application.support_compare import (
+    count_support_unchecked_orders,
+    execute_support_duplicate_decision,
+    new_support_check_actions,
+    supersede_support_check_siblings,
+    support_check_keyboard,
+)
 from app.application.telegram_service import (
     clear_message_keyboard,
     delete_messages,
@@ -29,6 +60,7 @@ from app.application.telegram_service import (
     unlink_telegram_account,
 )
 from app.config import get_settings
+from app.domain.access import ROLE_SUPPORT
 from app.domain.models import OrderState
 
 logger = logging.getLogger(__name__)
@@ -261,6 +293,93 @@ async def api_telegram_webhook(
                 )
             return {"ok": True}
 
+        command = text.split(maxsplit=1)[0].lower() if text else ""
+        if command.split("@", 1)[0] == "/check":
+            support_user = (
+                db.query(User)
+                .filter(
+                    User.telegram_chat_id == chat_id,
+                    User.role == ROLE_SUPPORT,
+                    User.active.is_(True),
+                )
+                .first()
+            )
+            if not support_user:
+                send_message(chat_id, "⚠️ Lệnh này chỉ dành cho tài khoản Support đã liên kết với Telegram.")
+                return {"ok": True}
+            if support_user.platform_id is None:
+                send_message(chat_id, "⚠️ Tài khoản Support chưa được gắn platform.")
+                return {"ok": True}
+            if not settings.support_compare_enabled:
+                send_message(chat_id, "⚠️ Chức năng kiểm tra trùng đang tắt trên hệ thống.")
+                return {"ok": True}
+
+            order_count = count_support_unchecked_orders(db, platform_id=support_user.platform_id)
+            if order_count == 0:
+                send_message(
+                    chat_id,
+                    "📋 Hiện tại có <b>0</b> đơn trong tab <b>Chưa kiểm tra</b>. Không có gì để kiểm tra.",
+                )
+                return {"ok": True}
+
+            pending_check_actions = (
+                db.query(TelegramActionLog)
+                .filter(
+                    TelegramActionLog.status == "pending",
+                    TelegramActionLog.action_type.in_(
+                        (SUPPORT_COMPARE_ACTION_CHECK_YES, SUPPORT_COMPARE_ACTION_CHECK_NO)
+                    ),
+                )
+                .all()
+            )
+            has_pending_prompt = any(
+                str((action.payload or {}).get("chat_id") or "") == chat_id
+                and _action_is_pending_and_valid(action, action.action_type)
+                for action in pending_check_actions
+            )
+            if has_pending_prompt:
+                send_message(chat_id, "⚠️ Bạn đã có một yêu cầu kiểm tra đang chờ xác nhận.")
+                return {"ok": True}
+
+            yes_action, no_action = new_support_check_actions(
+                platform_id=support_user.platform_id,
+                chat_id=chat_id,
+                order_count=order_count,
+            )
+            db.add_all([yes_action, no_action])
+            db.commit()
+            try:
+                prompt = send_message(
+                    chat_id,
+                    (
+                        f"📋 Hiện tại có <b>{order_count}</b> đơn trong tab "
+                        "<b>Chưa kiểm tra</b>.\nBạn có muốn kiểm tra trùng không?"
+                    ),
+                    reply_markup=support_check_keyboard(
+                        yes_action.callback_token,
+                        no_action.callback_token,
+                    ),
+                )
+            except Exception:
+                logger.exception("failed to send Support /check confirmation to %s", chat_id)
+                yes_action.status = no_action.status = "failed"
+                db.commit()
+                return {"ok": True}
+
+            if prompt is None:
+                yes_action.status = no_action.status = "failed"
+                db.commit()
+                return {"ok": True}
+
+            message_id = prompt.get("message_id") if isinstance(prompt, dict) else None
+            for action in (yes_action, no_action):
+                action.payload = {
+                    **(action.payload or {}),
+                    "message_id": message_id,
+                }
+            db.commit()
+            return {"ok": True}
+
         # A note typed by an Admin after choosing “soạn ghi chú” is the final
         # confirmation step for a Telegram Fix approval. Prefer a reply to the
         # bot prompt; accepting a non-reply is safe only when that Admin has
@@ -334,6 +453,161 @@ async def api_telegram_webhook(
         cb_data = str(callback_query.get("data") or "")
         from_user = callback_query.get("from", {})
         user_chat_id = str(from_user.get("id"))
+
+        # Support duplicate-image review callbacks are intentionally handled
+        # before the legacy Admin-only Fix callback branch.  The callback still
+        # delegates the actual order mutation to the scoped comparison service.
+        # The normal Support web command remains Waiting-only; this callback
+        # additionally permits an unclassified Doing order from this source.
+        check_prefixes = {
+            SUPPORT_COMPARE_CALLBACK_CHECK_YES,
+            SUPPORT_COMPARE_CALLBACK_CHECK_NO,
+        }
+        if ":" in cb_data and cb_data.split(":", 1)[0] in check_prefixes:
+            prefix, token = cb_data.split(":", 1)
+            support_user = (
+                db.query(User)
+                .filter(
+                    User.telegram_chat_id == user_chat_id,
+                    User.role == ROLE_SUPPORT,
+                    User.active.is_(True),
+                )
+                .first()
+            )
+            if not support_user:
+                logger.warning("Unauthorized Support /check callback from chat_id %s", user_chat_id)
+                return {"ok": True}
+
+            expected_action_type = (
+                SUPPORT_COMPARE_ACTION_CHECK_YES
+                if prefix == SUPPORT_COMPARE_CALLBACK_CHECK_YES
+                else SUPPORT_COMPARE_ACTION_CHECK_NO
+            )
+            action_log = (
+                db.query(TelegramActionLog)
+                .filter(TelegramActionLog.callback_token == token)
+                .with_for_update()
+                .first()
+            )
+            if not action_log or not _action_is_pending_and_valid(action_log, expected_action_type):
+                send_message(user_chat_id, "⚠️ Nút bấm này đã được xử lý trước đó hoặc đã hết hạn.")
+                return {"ok": True}
+
+            payload = action_log.payload or {}
+            if str(payload.get("chat_id") or "") != user_chat_id:
+                logger.warning("Support /check callback chat mismatch for action %s", action_log.id)
+                return {"ok": True}
+            if str(payload.get("platform_id") or "") != str(support_user.platform_id):
+                send_message(user_chat_id, "⚠️ Platform của tài khoản Support đã thay đổi. Hãy gửi lại /check.")
+                return {"ok": True}
+
+            if prefix == SUPPORT_COMPARE_CALLBACK_CHECK_NO:
+                action_log.status = "executed"
+                action_log.executed_at = datetime.now(UTC)
+                action_log.actor_id = support_user.id
+                supersede_support_check_siblings(db, action_log)
+                db.commit()
+                message_id = payload.get("message_id")
+                if message_id is not None:
+                    clear_message_keyboard(user_chat_id, int(message_id))
+                send_message(user_chat_id, "✅ Đã hủy kiểm tra trùng.")
+                return {"ok": True}
+
+            try:
+                from app.workers.support_compare_tasks import run_support_compare_batch
+
+                task = run_support_compare_batch.delay(
+                    source_kind="support_unchecked",
+                    limit=None,
+                    platform_id=str(support_user.platform_id),
+                    notify_chat_id=user_chat_id,
+                )
+            except Exception:
+                db.rollback()
+                logger.exception("failed to enqueue Support /check comparison for %s", user_chat_id)
+                send_message(user_chat_id, "❌ Không thể bắt đầu kiểm tra trùng lúc này. Vui lòng thử lại.")
+                return {"ok": True}
+
+            action_log.status = "executed"
+            action_log.executed_at = datetime.now(UTC)
+            action_log.actor_id = support_user.id
+            action_log.payload = {
+                **payload,
+                "task_id": getattr(task, "id", None),
+            }
+            supersede_support_check_siblings(db, action_log)
+            db.commit()
+            message_id = payload.get("message_id")
+            if message_id is not None:
+                clear_message_keyboard(user_chat_id, int(message_id))
+            order_count = payload.get("order_count", 0)
+            send_message(
+                user_chat_id,
+                f"✅ Đã bắt đầu kiểm tra trùng cho <b>{order_count}</b> đơn trong tab <b>Chưa kiểm tra</b>.\n"
+                "Bot sẽ gửi kết quả và các cặp nghi trùng khi xử lý xong.",
+            )
+            return {"ok": True}
+
+        support_prefixes = {
+            SUPPORT_COMPARE_CALLBACK_CONFIRM,
+            SUPPORT_COMPARE_CALLBACK_REJECT,
+        }
+        if ":" in cb_data and cb_data.split(":", 1)[0] in support_prefixes:
+            prefix, token = cb_data.split(":", 1)
+            support_user = (
+                db.query(User)
+                .filter(
+                    User.telegram_chat_id == user_chat_id,
+                    User.role == ROLE_SUPPORT,
+                    User.active.is_(True),
+                )
+                .first()
+            )
+            if not support_user:
+                logger.warning("Unauthorized Support comparison callback from chat_id %s", user_chat_id)
+                return {"ok": True}
+
+            expected_action_type = (
+                SUPPORT_COMPARE_ACTION_CONFIRM
+                if prefix == SUPPORT_COMPARE_CALLBACK_CONFIRM
+                else SUPPORT_COMPARE_ACTION_REJECT
+            )
+            action_log = (
+                db.query(TelegramActionLog)
+                .filter(TelegramActionLog.callback_token == token)
+                .with_for_update()
+                .first()
+            )
+            if not action_log or not _action_is_pending_and_valid(action_log, expected_action_type):
+                send_message(user_chat_id, "⚠️ Nút bấm này đã được xử lý trước đó hoặc đã hết hạn.")
+                return {"ok": True}
+            if str((action_log.payload or {}).get("chat_id") or "") != user_chat_id:
+                logger.warning("Support comparison callback chat mismatch for action %s", action_log.id)
+                return {"ok": True}
+
+            decision = "duplicate" if prefix == SUPPORT_COMPARE_CALLBACK_CONFIRM else "non_duplicate"
+            try:
+                execute_support_duplicate_decision(
+                    db,
+                    actor=support_user,
+                    action_log=action_log,
+                    decision_status=decision,
+                )
+            except ValueError as exc:
+                db.rollback()
+                send_message(user_chat_id, f"⚠️ {exc}")
+                return {"ok": True}
+
+            action_log.status = "executed"
+            action_log.executed_at = datetime.now(UTC)
+            action_log.actor_id = support_user.id
+            db.commit()
+            message_id = (action_log.payload or {}).get("message_id")
+            if message_id is not None:
+                clear_message_keyboard(user_chat_id, int(message_id))
+            result_text = "✅ Đã xác nhận: đơn được đưa vào Trùng lặp." if decision == "duplicate" else "✅ Đã xác nhận: Không trùng, đơn không bị đưa vào Trùng lặp."
+            send_message(user_chat_id, result_text)
+            return {"ok": True}
 
         # Verify admin user
         admin_user = (

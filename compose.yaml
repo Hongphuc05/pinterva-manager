@@ -23,6 +23,7 @@ x-backend: &backend
     - ${DATA_DIR:-./data}/platform_data:/app/platform_data
     - ${DATA_DIR:-./data}/playwright_evidence:/app/playwright-evidence
     - ${DATA_DIR:-./data}/chrome_profiles:/app/chrome-profiles
+    - ${DATA_DIR:-./data}/huggingface_cache:/home/app/.cache/huggingface
   logging:
     driver: local
     options:
@@ -58,6 +59,13 @@ services:
       redis:
         condition: service_healthy
 
+  celery-compare:
+    <<: *backend
+    command: ["celery", "-A", "app.workers.celery_app", "worker", "--pool=solo", "--loglevel=info", "-Q", "support-compare", "-n", "compare@%h"]
+    depends_on:
+      redis:
+        condition: service_healthy
+
   celery-beat:
     <<: *backend
     command: ["celery", "-A", "app.workers.celery_app", "beat", "--loglevel=info"]
@@ -68,7 +76,7 @@ services:
   migrate:
     <<: *backend
     restart: "no"
-    command: ["alembic", "upgrade", "head"]
+    command: ["sh", "-lc", "alembic upgrade head && cd /app/support_compare_image && alembic upgrade head"]
     profiles: ["migration"]
 
   redis:
