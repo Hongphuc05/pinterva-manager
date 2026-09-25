@@ -115,3 +115,26 @@ def test_overdue_fix_order_gets_own_message_with_send_to_designer_button(db_sess
     assert "ĐƠN FIX QUÁ 1 GIỜ" in payload["text"] and "DJ-FIXOVER" in payload["text"]
     button = payload["reply_markup"]["inline_keyboard"][0][0]
     assert button["callback_data"].startswith("remdes:")
+
+
+def test_scan_ignores_fix_waiting_for_admin_but_flags_approved_fix(db_session):
+    past = datetime(2026, 9, 20, 6, 0, tzinfo=UTC)
+    waiting = Order(external_order_id="DJ-FIXWAIT", state=OrderState.REVISION.value, deadline_tacahu=past)
+    approved = Order(external_order_id="DJ-FIXAPPR", state=OrderState.REVISION.value, deadline_tacahu=past,
+                     fix_approved_by_admin=True, fix_deadline_at=past)
+    db_session.add_all([waiting, approved])
+    db_session.commit()
+
+    from unittest.mock import MagicMock
+
+    from app.workers import telegram_tasks
+
+    session = MagicMock(wraps=db_session)
+    with (
+        patch.object(telegram_tasks, "is_telegram_configured", return_value=True),
+        patch.object(telegram_tasks, "SessionLocal", return_value=session),
+        patch.object(telegram_tasks, "notify_admin_deadline_overdue_by_designer") as notify,
+    ):
+        telegram_tasks.check_designer_deadlines()
+
+    assert [o.external_order_id for o in notify.call_args.args[1]] == ["DJ-FIXAPPR"]

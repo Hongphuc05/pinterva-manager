@@ -249,6 +249,7 @@ def _transition_to_fix_from_observation(
         order.note_outsource = note
     order.fix_approved_by_admin = False
     order.fix_rejected_by_admin = False
+    order.fix_deadline_at = None
     order.designer_note = ""
     order.designer_note_released_for_fix = False
     order.suppress_note_outsource_for_designer = True

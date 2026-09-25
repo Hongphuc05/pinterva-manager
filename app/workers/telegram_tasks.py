@@ -147,6 +147,11 @@ def check_designer_deadlines() -> None:
         for order in orders:
             # Starting a Fix changes state to IN_PROGRESS, but its one-hour
             # deadline remains authoritative until the designer resubmits.
+            if order.state == "REVISION" and not order.fix_approved_by_admin:
+                # A Fix Printerval just returned, still waiting for Admin: no
+                # timer runs yet (the 1h starts on approval); the old Tacahu
+                # deadline is not an overdue signal.
+                continue
             deadline = order.fix_deadline_at or order.deadline_tacahu
             if deadline and deadline <= now:
                 order.deadline_overdue_notified_at = now
