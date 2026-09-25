@@ -101,7 +101,7 @@ DEFAULT_TELEGRAM_TEMPLATES: dict[str, dict[str, Any]] = {
             "⚠️ <b>CÓ ĐƠN FIX MỚI TỪ PLATFORM!</b>\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             "📦 <b>Mã đơn:</b> <code>{{order_code}}</code>\n"
-            "👕 <b>Sản phẩm:</b> {{product_name}}\n"
+            "👕 <b>Sản phẩm:</b> <code>{{product_name}}</code>\n"
             "👤 <b>Designer:</b> {{designer_name}}\n"
             "🔄 <b>Lần fix:</b> #{{fix_count}}\n"
             "📝 <b>Ghi chú từ QC:</b> {{qc_note}}\n\n"
@@ -153,6 +153,28 @@ DEFAULT_TELEGRAM_TEMPLATES: dict[str, dict[str, Any]] = {
             "👉 Admin kiểm tra và xử lý các đơn trên Tacahu."
         ),
         "placeholders": {"designer_name", "order_count"},
+    },
+    "admin_fix_overdue": {
+        "audience": "admin",
+        "body": (
+            "⏰ <b>ĐƠN FIX QUÁ 1 GIỜ!</b>\n"
+            "📦 <b>Mã đơn:</b> <code>{{order_code}}</code>\n"
+            "👕 <b>Sản phẩm:</b> <code>{{product_name}}</code>\n"
+            "👤 <b>Designer:</b> {{designer_name}}\n"
+            "👉 Designer chưa nộp lại sau 1 giờ kể từ lúc Admin duyệt Fix."
+        ),
+        "placeholders": {"order_code", "product_name", "designer_name"},
+    },
+    "designer_deadline_reminder": {
+        "audience": "designer",
+        "body": (
+            "⏰ <b>NHẮC: ĐƠN ĐÃ QUÁ HẠN!</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "📦 <b>Số đơn quá hạn:</b> {{order_count}}\n"
+            "👕 <b>Đơn:</b> {{product_name}}\n"
+            "⚡ <i>Vui lòng vào web xử lý và nộp ngay!</i>"
+        ),
+        "placeholders": {"order_count", "product_name"},
     },
     "admin_system_alert": {
         "audience": "admin",
@@ -621,6 +643,25 @@ def notify_designer_urgent_fix(
     return send_designer_notification(session, designer, text, photo_url=thumb)
 
 
+def notify_designer_deadline_reminder(session: Session, designer_id: uuid.UUID, order_ids: list[uuid.UUID]) -> bool:
+    """Admin pressed "Gửi cho des" on an overdue warning."""
+    designer = session.get(User, designer_id)
+    if not designer:
+        return False
+    orders = session.query(Order).filter(Order.id.in_(order_ids)).all()
+    if not orders:
+        return False
+    text = render_telegram_template(
+        session,
+        "designer_deadline_reminder",
+        {
+            "order_count": len(orders),
+            "product_name": ", ".join(o.product_name or o.external_order_id for o in orders[:5]),
+        },
+    )
+    return send_designer_notification(session, designer, text)
+
+
 def notify_designer_payment(
     session: Session,
     designer_id: uuid.UUID,
@@ -843,10 +884,11 @@ def notify_admin_review_submitted(
 
 
 def notify_admin_deadline_overdue_by_designer(session: Session, orders: list[Order]) -> None:
-    """Send one overdue summary per Designer instead of one message per order.
+    """Warn Admins about overdue orders, each message carrying a "send to Designer" button.
 
-    Orders must already have been selected by the periodic deadline scanner.  A
-    platform is part of the grouping key so an Admin only receives summaries for
+    Normal orders: one summary per Designer. Fix orders (an Admin-approved Fix has
+    ``fix_deadline_at``, one hour after approval): one message per order.
+    A platform is part of the grouping key so an Admin only receives summaries for
     the platform they are allowed to manage.
     """
     if not orders:
@@ -865,7 +907,8 @@ def notify_admin_deadline_overdue_by_designer(session: Session, orders: list[Ord
         for designer in session.query(User).filter(User.id.in_(designer_ids)).all()
     } if designer_ids else {}
 
-    grouped_orders: dict[tuple[uuid.UUID | None, str], list[Order]] = {}
+    # (platform, designer_id, designer_name, fix order id or None) -> orders
+    grouped_orders: dict[tuple[uuid.UUID | None, uuid.UUID | None, str, uuid.UUID | None], list[Order]] = {}
     for order in orders:
         assignment = assignment_by_order.get(order.id)
         designer = designers_by_id.get(assignment.designer_id) if assignment else None
@@ -874,22 +917,56 @@ def notify_admin_deadline_overdue_by_designer(session: Session, orders: list[Ord
             if designer
             else (order.printerval_designer or "Chưa rõ")
         )
-        grouped_orders.setdefault((order.platform_id, designer_name), []).append(order)
+        key = (order.platform_id, designer.id if designer else None, designer_name, order.id if order.fix_deadline_at else None)
+        grouped_orders.setdefault(key, []).append(order)
 
-    for (platform_id, designer_name), designer_orders in grouped_orders.items():
+    for (platform_id, designer_id, designer_name, fix_order_id), designer_orders in grouped_orders.items():
         chat_ids = _get_admin_chat_ids(session, platform_id)
         if not chat_ids:
             continue
-        text = render_telegram_template(
-            session,
-            "admin_deadline_overdue",
-            {
-                "designer_name": designer_name,
-                "order_count": len(designer_orders),
-            },
-        )
+        first = designer_orders[0]
+        if fix_order_id:
+            text = render_telegram_template(
+                session,
+                "admin_fix_overdue",
+                {
+                    "order_code": first.external_order_id,
+                    "product_name": first.product_name or "Sản phẩm",
+                    "designer_name": designer_name,
+                },
+            )
+        else:
+            text = render_telegram_template(
+                session,
+                "admin_deadline_overdue",
+                {"designer_name": designer_name, "order_count": len(designer_orders)},
+            )
+        markup = None
+        action = None
+        if designer_id:
+            token = secrets.token_urlsafe(16)
+            action = TelegramActionLog(
+                order_id=first.id,
+                action_type="REMIND_DESIGNER",
+                callback_token=token,
+                payload={
+                    "designer_id": str(designer_id),
+                    "order_ids": [str(o.id) for o in designer_orders],
+                    "messages": [],
+                },
+                expires_at=datetime.now(UTC) + timedelta(hours=48),
+            )
+            session.add(action)
+            session.commit()
+            markup = {"inline_keyboard": [[{"text": "📨 Gửi cho des", "callback_data": f"remdes:{token}"}]]}
+        sent = []
         for cid in chat_ids:
-            send_message(cid, text)
+            result = send_message(cid, text, reply_markup=markup)
+            if isinstance(result, dict) and result.get("message_id") is not None:
+                sent.append([cid, int(result["message_id"])])
+        if action is not None and sent:
+            action.payload = {**action.payload, "messages": sent}
+            session.commit()
 
 
 def notify_admin_deadline_overdue(session: Session, order_id: uuid.UUID) -> bool:

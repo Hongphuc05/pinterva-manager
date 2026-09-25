@@ -94,3 +94,24 @@ def test_overdue_notification_is_grouped_by_designer(db_session):
     assert any("Designer:</b> Dân" in message and "3" in message for message in messages)
     assert any("Designer:</b> Chiến" in message and "2" in message for message in messages)
     assert all("DJ-OVERDUE" not in message for message in messages)
+
+
+def test_overdue_fix_order_gets_own_message_with_send_to_designer_button(db_session):
+    admin = User(username="fixover_admin", full_name="A", role="admin", password_hash=hash_password("pass"),
+                 telegram_chat_id="999333", telegram_notifications_enabled=True, active=True)
+    des = User(username="fixover_des", full_name="Dân", role="designer", password_hash=hash_password("pass"))
+    order = Order(external_order_id="DJ-FIXOVER", state=OrderState.REVISION.value,
+                  fix_deadline_at=datetime(2026, 9, 20, 6, 0, tzinfo=UTC))
+    db_session.add_all([admin, des, order])
+    db_session.flush()
+    db_session.add(Assignment(order_id=order.id, designer_id=des.id, status="approved"))
+    db_session.commit()
+
+    with patch("app.application.telegram_service.send_telegram_request") as send:
+        send.return_value = {"message_id": 5}
+        notify_admin_deadline_overdue_by_designer(db_session, [order])
+
+    payload = send.call_args.args[1]
+    assert "ĐƠN FIX QUÁ 1 GIỜ" in payload["text"] and "DJ-FIXOVER" in payload["text"]
+    button = payload["reply_markup"]["inline_keyboard"][0][0]
+    assert button["callback_data"].startswith("remdes:")

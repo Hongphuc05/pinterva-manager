@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import secrets
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -104,15 +105,13 @@ def _track_fix_transient_message(db: Session, order_id, chat_id: str, message_id
 
 
 def _clean_completed_fix_conversations(db: Session, order_id, extra_message: tuple[str, int] | None = None) -> None:
-    """Keep the original Fix card but remove its buttons and all flow chatter."""
+    """Delete the whole Fix card (root + buttons) and all flow chatter once Admin has decided."""
     conversations = db.query(TelegramFixConversation).filter_by(order_id=order_id, status="active").all()
     for conversation in conversations:
-        keyboard_cleared = clear_message_keyboard(conversation.chat_id, conversation.root_message_id)
-        transient = [int(message_id) for message_id in (conversation.transient_message_ids or [])]
+        doomed = [conversation.root_message_id, *(int(m) for m in (conversation.transient_message_ids or []))]
         if extra_message and extra_message[0] == conversation.chat_id:
-            transient.append(extra_message[1])
-        messages_deleted = delete_messages(conversation.chat_id, transient)
-        if keyboard_cleared and messages_deleted:
+            doomed.append(extra_message[1])
+        if delete_messages(conversation.chat_id, doomed):
             conversation.status = "cleaned"
             conversation.cleaned_at = datetime.now(UTC)
         else:
@@ -767,7 +766,7 @@ async def api_telegram_webhook(
 
         # Parse callback: first choose approve/reject, then (for approval)
         # choose whether to write an Admin note or release the QC text verbatim.
-        valid_prefixes = {"appfix", "rejfix", "appfixnote", "appfixsource"}
+        valid_prefixes = {"appfix", "rejfix", "appfixnote", "appfixsource", "remdes"}
         if ":" in cb_data and cb_data.split(":", 1)[0] in valid_prefixes:
             prefix, token = cb_data.split(":", 1)
             action_log = (
@@ -780,6 +779,7 @@ async def api_telegram_webhook(
                 "rejfix": "REJECT_FIX",
                 "appfixnote": "APPROVE_FIX_WRITE_NOTE",
                 "appfixsource": "APPROVE_FIX_USE_OUTSOURCE",
+                "remdes": "REMIND_DESIGNER",
             }
             if not action_log or not _action_is_pending_and_valid(action_log, expected_action_types[prefix]):
                 send_message(user_chat_id, "⚠️ Nút bấm này đã được xử lý trước đó hoặc đã hết hạn.")
@@ -790,7 +790,25 @@ async def api_telegram_webhook(
                 send_message(user_chat_id, "❌ Không tìm thấy đơn hàng tương ứng.")
                 return {"ok": True}
 
-            if prefix == "appfix":
+            if prefix == "remdes":
+                payload = action_log.payload or {}
+                action_log.status = "executed"
+                action_log.executed_at = datetime.now(UTC)
+                action_log.actor_id = admin_user.id
+                db.commit()
+                from app.application.telegram_service import notify_designer_deadline_reminder
+
+                sent = notify_designer_deadline_reminder(
+                    db,
+                    uuid.UUID(payload["designer_id"]),
+                    [uuid.UUID(i) for i in payload.get("order_ids", [])],
+                )
+                if callback_query.get("id"):
+                    answer_callback_query(str(callback_query["id"]), "Đã gửi cho des." if sent else "Không gửi được cho des.")
+                for chat_id, message_id in payload.get("messages", []):
+                    delete_messages(str(chat_id), [int(message_id)])
+
+            elif prefix == "appfix":
                 # Do not release the Fix yet. Admin must first decide the only
                 # Designer-facing note that will be copied into Tacahu.
                 action_log.status = "executed"

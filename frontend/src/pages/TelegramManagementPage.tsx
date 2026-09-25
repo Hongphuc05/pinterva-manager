@@ -80,6 +80,8 @@ const templateLabels: Record<string, string> = {
   admin_missing_template: 'Admin — Báo thiếu temp',
   admin_excessive_fix: 'Admin — QC Alert nhiều Fix',
   admin_deadline_overdue: 'Admin — Des quá hạn',
+  admin_fix_overdue: 'Admin — Đơn Fix quá 1 giờ',
+  designer_deadline_reminder: 'Des — Nhắc quá hạn',
   admin_system_alert: 'Admin — Cảnh báo hệ thống',
 }
 

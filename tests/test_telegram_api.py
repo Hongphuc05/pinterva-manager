@@ -487,7 +487,7 @@ def test_urgent_fix_telegram_never_includes_printerval_outsource_note(db_session
     assert "PRIVATE PRINT QC NOTE" not in payload["text"]
 
 
-def test_rejected_fix_cleans_transient_chat_but_keeps_root_card(client, db_session):
+def test_rejected_fix_deletes_root_card_and_transient_chat(client, db_session):
     platform = Platform(name="Telegram cleanup", account_username="cleanup@example.com")
     admin = User(username="cleanup-admin", full_name="Cleanup Admin", role="admin", password_hash=hash_password("pass"), telegram_chat_id="777", active=True)
     order = Order(external_order_id="DJ-CLEANUP", platform_id=platform.id, state=OrderState.REVISION.value)
@@ -499,13 +499,11 @@ def test_rejected_fix_cleans_transient_chat_but_keeps_root_card(client, db_sessi
     ])
     db_session.commit()
 
-    with patch("app.api.routes.telegram_api.clear_message_keyboard") as clear, patch("app.api.routes.telegram_api.delete_messages") as delete:
-        clear.return_value = True
+    with patch("app.api.routes.telegram_api.delete_messages") as delete:
         delete.return_value = True
         response = client.post("/api/telegram/webhook", json={"callback_query": {"data": "rejfix:reject-cleanup", "from": {"id": 777}}})
     assert response.status_code == 200
-    clear.assert_called_once_with("777", 100)
-    delete.assert_called_once_with("777", [101, 102])
+    delete.assert_called_once_with("777", [100, 101, 102])
     conversation = db_session.query(TelegramFixConversation).one()
     assert conversation.status == "cleaned"
 
@@ -568,3 +566,28 @@ def test_resolve_tacahu_designer_name_and_excessive_fix_notification(db_session)
     payload = mock_send.call_args.args[1]
     assert "Nguyễn Thị Thuý Hường" in payload["text"]
     assert "- 2D Prin" not in payload["text"]
+
+
+def test_remind_designer_button_notifies_designer_and_deletes_warning(client, db_session):
+    admin = User(username="rem-admin", full_name="Rem Admin", role="admin", password_hash=hash_password("pass"), telegram_chat_id="888", active=True)
+    des = User(username="rem-des", full_name="Rem Des", role="designer", password_hash=hash_password("pass"), telegram_chat_id="999", telegram_notifications_enabled=True, active=True)
+    order = Order(external_order_id="DJ-REM", product_name="Áo", state=OrderState.REVISION.value)
+    db_session.add_all([admin, des, order])
+    db_session.flush()
+    db_session.add(TelegramActionLog(
+        order_id=order.id, action_type="REMIND_DESIGNER", callback_token="rem-tok", expires_at=None,
+        payload={"designer_id": str(des.id), "order_ids": [str(order.id)], "messages": [["888", 55]]},
+    ))
+    db_session.commit()
+
+    with (
+        patch("app.application.telegram_service.send_telegram_request", return_value={"message_id": 1}) as send,
+        patch("app.api.routes.telegram_api.delete_messages") as delete,
+        patch("app.api.routes.telegram_api.answer_callback_query"),
+    ):
+        response = client.post("/api/telegram/webhook", json={"callback_query": {"id": "c", "data": "remdes:rem-tok", "from": {"id": 888}}})
+    assert response.status_code == 200
+    assert send.call_args.args[1]["chat_id"] == "999"
+    delete.assert_called_once_with("888", [55])
+    db_session.expire_all()
+    assert db_session.query(TelegramActionLog).filter_by(callback_token="rem-tok").one().status == "executed"
