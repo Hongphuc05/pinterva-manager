@@ -2590,6 +2590,15 @@ def api_approve_fix(
     db.commit()
     db.refresh(order)
 
+
+    # The Fix card in the Admins' Telegram chats is settled: remove it.
+    try:
+        from app.api.routes.telegram_api import _clean_completed_fix_conversations
+
+        _clean_completed_fix_conversations(db, order.id)
+    except Exception:
+        logger.warning("Telegram Fix card cleanup failed for order %s", order.id, exc_info=True)
+
     # Telegram notification for designer
     if target_des_id:
         try:
@@ -2659,6 +2668,15 @@ def api_reject_fix_to_review(
     db.add(event)
     db.commit()
     db.refresh(order)
+
+
+    # The Fix card in the Admins' Telegram chats is settled: remove it.
+    try:
+        from app.api.routes.telegram_api import _clean_completed_fix_conversations
+
+        _clean_completed_fix_conversations(db, order.id)
+    except Exception:
+        logger.warning("Telegram Fix card cleanup failed for order %s", order.id, exc_info=True)
 
     # Sync to Printerval in background
     try:
