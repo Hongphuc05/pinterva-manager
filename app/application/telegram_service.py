@@ -41,7 +41,7 @@ DEFAULT_TELEGRAM_TEMPLATES: dict[str, dict[str, Any]] = {
         "body": (
             "🎨 <b>BẠN CÓ ĐƠN HÀNG MỚI (ĐANG LÀM)!</b>\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            "👕 <b>Sản phẩm:</b> {{product_name}}\n"
+            "👕 <b>Sản phẩm:</b> <code>{{product_name}}</code>\n"
             "⏰ <b>Hạn chót:</b> {{deadline}}\n"
             "📝 <b>Note Admin:</b> {{admin_note}}"
         ),
@@ -52,7 +52,7 @@ DEFAULT_TELEGRAM_TEMPLATES: dict[str, dict[str, Any]] = {
         "body": (
             "🚨 <b>CẢNH BÁO: ĐƠN CẦN SỬA GẤP (FIX)!</b>\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            "👕 <b>Sản phẩm:</b> {{product_name}}\n"
+            "👕 <b>Sản phẩm:</b> <code>{{product_name}}</code>\n"
             "🔄 <b>Lần fix thứ:</b> #{{fix_count}}\n"
             "⏰ <b>Hạn sửa:</b> {{deadline}}\n"
             "📌 <b>Hướng dẫn từ Admin:</b> {{admin_note}}\n"
@@ -115,7 +115,7 @@ DEFAULT_TELEGRAM_TEMPLATES: dict[str, dict[str, Any]] = {
             "📤 <b>DESIGNER VỪA NỘP BÀI (REVIEW)</b>\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             "📦 <b>Mã đơn:</b> <code>{{order_code}}</code>\n"
-            "👕 <b>Sản phẩm:</b> {{product_name}}\n"
+            "👕 <b>Sản phẩm:</b> <code>{{product_name}}</code>\n"
             "👤 <b>Designer:</b> {{designer_name}}\n"
             "🔗 <b>Link nộp:</b> {{submission_link}}\n"
             "⏱ <i>Hệ thống đang tự động đồng bộ Review lên Platform.</i>"
