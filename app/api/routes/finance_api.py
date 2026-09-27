@@ -220,6 +220,20 @@ class FinanceNoteListResponse(BaseModel):
     total_pages: int
 
 
+MAX_ORDER_RATE = 10_000_000
+
+
+class OrderRateUpdate(BaseModel):
+    rate: int = Field(ge=0, le=MAX_ORDER_RATE)
+
+
+class OrderRateOut(BaseModel):
+    order_id: str
+    rate: int
+    custom_rate: int | None
+    version: int
+
+
 class MarkPaidPayload(BaseModel):
     order_ids: list[str] = []
     designer_id: str | None = None
@@ -888,6 +902,62 @@ def get_finance_stats(
         total_pages=total_pages,
         support_classified_count=sum(item.classified_tasks for item in support_summary),
         support_summary=support_summary,
+    )
+
+
+@router.put("/finance/orders/{order_id}/rate", response_model=OrderRateOut)
+def set_order_rate(
+    order_id: uuid.UUID,
+    payload: OrderRateUpdate,
+    user: User = Depends(get_current_user),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    """Admin sets the pay rate of ONE order. Equal to the platform default → back to the default (NULL)."""
+    if user.role != ROLE_ADMIN:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Chỉ Admin mới có quyền sửa giá đơn.")
+    order = (
+        db.query(Order)
+        .filter(Order.id == order_id, Order.platform_id == platform_id)
+        .with_for_update()
+        .one_or_none()
+    )
+    if order is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng.")
+    if order.is_paid:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Đơn đã thanh toán, không thể sửa giá. Hãy hủy thanh toán trước.")
+
+    platform = db.get(Platform, platform_id)
+    default = 0
+    if platform is not None:
+        default = (
+            platform.duplicate_order_rate
+            if order.work_domain == WORK_DOMAIN_DUPLICATE
+            else platform.standard_order_rate
+        )
+    new_custom = None if payload.rate == default else payload.rate
+    if new_custom != order.custom_rate:
+        old_rate = order.custom_rate if order.custom_rate is not None else default
+        order.custom_rate = new_custom
+        db.add(
+            WorkflowEvent(
+                order_id=order.id,
+                from_state=order.state,
+                to_state=order.state,
+                actor_id=user.id,
+                evidence={
+                    "source": "finance",
+                    "action": "set_order_rate",
+                    "actor_name": user.full_name or user.username,
+                    "old_rate": old_rate,
+                    "new_rate": payload.rate,
+                },
+            )
+        )
+        db.commit()
+        db.refresh(order)
+    return OrderRateOut(
+        order_id=str(order.id), rate=payload.rate, custom_rate=order.custom_rate, version=order.version
     )
 
 

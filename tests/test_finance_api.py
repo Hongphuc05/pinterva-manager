@@ -148,3 +148,55 @@ def test_support_finance_is_scoped_to_own_classification_count(client, db_sessio
         (item["support_name"], item["classified_tasks"])
         for item in admin_payload["support_summary"]
     } == {("Support Owner", 1), ("Other Support", 1)}
+
+
+def _rate_setup(db_session, suffix):
+    platform = Platform(name=f"Rate plat {suffix}", account_username=f"rate-{suffix}@example.com",
+                        standard_order_rate=40000, duplicate_order_rate=30000)
+    other = Platform(name=f"Rate other {suffix}", account_username=f"rate-other-{suffix}@example.com")
+    db_session.add_all([platform, other])
+    db_session.flush()
+    admin = User(username=f"rate_admin_{suffix}", full_name="Rate Admin", role="admin", password_hash=hash_password("pass"))
+    des = User(username=f"rate_des_{suffix}", full_name="Rate Des", role="designer", password_hash=hash_password("pass"),
+               platform_id=platform.id)
+    order = Order(external_order_id=f"RATE-{suffix}", platform_id=platform.id, state=OrderState.QC_PENDING.value)
+    foreign = Order(external_order_id=f"RATE-F-{suffix}", platform_id=other.id, state=OrderState.QC_PENDING.value)
+    db_session.add_all([admin, des, order, foreign])
+    db_session.commit()
+    hdr = {"Authorization": f"Bearer {create_session_token(str(admin.id), admin.role)}", "X-Platform-Id": str(platform.id)}
+    return platform, admin, des, order, foreign, hdr
+
+
+def test_admin_sets_single_order_rate_and_it_persists(client, db_session):
+    platform, admin, des, order, foreign, hdr = _rate_setup(db_session, "ok")
+    url = f"/api/finance/orders/{order.id}/rate"
+
+    res = client.put(url, json={"rate": 55000}, headers=hdr)
+    assert res.status_code == 200
+    assert res.json()["rate"] == 55000 and res.json()["custom_rate"] == 55000
+    db_session.expire_all()
+    assert db_session.get(Order, order.id).custom_rate == 55000
+    # A second, independent request (what a re-opened tab does) still sees it in the stats.
+    stats = client.get("/api/finance/stats", headers=hdr).json()
+    assert next(t for t in stats["tasks"] if t["order_id"] == str(order.id))["rate"] == 55000
+
+    # Back to the platform default: stored as NULL so it follows the default again.
+    res = client.put(url, json={"rate": 40000}, headers=hdr)
+    assert res.json()["custom_rate"] is None and res.json()["rate"] == 40000
+    db_session.expire_all()
+    assert db_session.get(Order, order.id).custom_rate is None
+
+
+def test_order_rate_is_admin_only_platform_scoped_validated_and_locked_when_paid(client, db_session):
+    platform, admin, des, order, foreign, hdr = _rate_setup(db_session, "rules")
+    des_hdr = {"Authorization": f"Bearer {create_session_token(str(des.id), des.role)}"}
+    assert client.put(f"/api/finance/orders/{order.id}/rate", json={"rate": 1}, headers=des_hdr).status_code == 403
+    assert client.put(f"/api/finance/orders/{foreign.id}/rate", json={"rate": 1}, headers=hdr).status_code == 404
+    assert client.put(f"/api/finance/orders/{order.id}/rate", json={"rate": -5}, headers=hdr).status_code == 422
+    assert client.put(f"/api/finance/orders/{order.id}/rate", json={"rate": 10_000_001}, headers=hdr).status_code == 422
+
+    order.is_paid = True
+    db_session.commit()
+    assert client.put(f"/api/finance/orders/{order.id}/rate", json={"rate": 50000}, headers=hdr).status_code == 409
+    db_session.expire_all()
+    assert db_session.get(Order, order.id).custom_rate is None

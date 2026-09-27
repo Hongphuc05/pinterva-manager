@@ -16,7 +16,7 @@ describe('FinancePage', () => {
     // The modal defaults to the current week. Keep the fixture inside that
     // range so the assertion does not depend on the calendar date in CI.
     const submittedAt = new Date().toISOString()
-    const fetchMock = vi.fn((url: string) => {
+    const fetchMock = vi.fn((url: string, _init?: RequestInit) => {
         if (url.includes('/api/me')) {
           return Promise.resolve({
             ok: true,
@@ -105,6 +105,12 @@ describe('FinancePage', () => {
             }),
           })
         }
+        if (url.includes('/api/finance/orders/ord1/rate')) {
+          return Promise.resolve({
+            ok: true, status: 200,
+            json: async () => ({ order_id: 'ord1', rate: 45000, custom_rate: 45000, version: 2 }),
+          })
+        }
         return Promise.resolve({ ok: true, status: 200, json: async () => ({}) })
       })
     vi.stubGlobal('fetch', fetchMock)
@@ -149,6 +155,13 @@ describe('FinancePage', () => {
     const plusBtn = screen.getByTitle('Tăng 5,000 đ')
     fireEvent.click(plusBtn)
     expect(screen.getAllByText('45.000 đ').length).toBeGreaterThanOrEqual(2)
+    // The edit is saved on the server (not just kept in this page), so it survives leaving the tab.
+    await waitFor(() => {
+      const put = fetchMock.mock.calls.find(([url]) => String(url).includes('/api/finance/orders/ord1/rate'))
+      expect(put).toBeTruthy()
+      expect(JSON.parse((put![1] as RequestInit).body as string)).toEqual({ rate: 45000 })
+      expect((put![1] as RequestInit).method).toBe('PUT')
+    })
 
     // Close modal
     const closeBtn = screen.getByTitle('Đóng popup')
@@ -302,5 +315,93 @@ describe('FinancePage', () => {
     fireEvent.click(modal.getByTitle('Tuần trước'))
     fireEvent.click(modal.getByText('Đã Thanh Toán'))
     await waitFor(() => expect(screen.getByText('DJ-b')).toBeInTheDocument())
+  })
+
+  // A tiny fake server that really remembers the price, to prove an edit survives leaving the popup / page.
+  function setupRateServer() {
+    const at = new Date().toISOString()
+    const server = { custom: null as number | null, puts: [] as { rate: number; at: number; keepalive: boolean }[] }
+    const task = () => ({
+      order_id: 'ord1', order_version: 1, external_order_id: 'DJ-RATE', product_name: 'Rate product',
+      thumbnail_url: null, designer_id: 'des1', designer_name: 'Trâm', current_state: 'QC_PENDING',
+      placeholder_filled: true, status_changed_at: at, first_submitted_at: at, latest_submitted_at: at,
+      submission_count: 1, order_created_at: at, notes_count: 0, is_paid: false,
+      rate: server.custom ?? 40000, custom_rate: server.custom,
+    })
+    const summary = {
+      designer_id: 'des1', designer_name: 'Trâm', username: 'tram', total_tasks: 1, unpaid_tasks: 1, paid_tasks: 0,
+      in_review_tasks: 1, in_fix_tasks: 0, done_tasks: 0, first_submission_at: at, latest_submission_at: at, notes_count: 0,
+    }
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const ok = (body: unknown) => Promise.resolve({ ok: true, status: 200, json: async () => body })
+      if (url.includes('/api/me')) return ok({ id: 'admin1', role: 'admin', full_name: 'Admin' })
+      if (url.includes('/api/platforms')) return ok({ platforms: [] })
+      if (url.includes('/rate')) {
+        const rate = JSON.parse(init!.body as string).rate as number
+        server.custom = rate === 40000 ? null : rate
+        server.puts.push({ rate, at: Date.now(), keepalive: Boolean(init!.keepalive) })
+        return ok({ order_id: 'ord1', rate, custom_rate: server.custom, version: 2 })
+      }
+      if (url.includes('/api/finance/stats')) {
+        return ok({ designers_summary: [summary], tasks: [task()], total_tasks_count: 1, page: 1, page_size: 500, total_pages: 1 })
+      }
+      return ok({})
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const view = render(
+      <BrowserRouter><AuthProvider><PlatformProvider><ToastProvider><GallerySyncProvider>
+        <FinancePage />
+      </GallerySyncProvider></ToastProvider></PlatformProvider></AuthProvider></BrowserRouter>,
+    )
+    return { server, view }
+  }
+
+  it('keeps an edited order price: close the popup right away, reopen, the saved price is shown', async () => {
+    const { server } = setupRateServer()
+    await waitFor(() => expect(screen.getByText('Xem đơn')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('Xem đơn'))
+    await waitFor(() => expect(screen.getByText('DJ-RATE')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByTitle('Tăng 5,000 đ'))
+    const closedAt = Date.now()
+    fireEvent.click(screen.getByTitle('Đóng popup')) // well before the 500ms debounce
+
+    // Saved at once on close (not after the debounce), and with keepalive so it survives leaving the page.
+    await waitFor(() => expect(server.puts).toHaveLength(1))
+    expect(server.puts[0]).toMatchObject({ rate: 45000, keepalive: true })
+    expect(server.puts[0].at - closedAt).toBeLessThan(400)
+    expect(server.custom).toBe(45000)
+
+    // Reopen: the popup reads the price from the server again and still shows the edit.
+    fireEvent.click(screen.getByText('Xem đơn'))
+    const modal = () => within(screen.getByText('Chi tiết các đơn hàng & tính công cho Designer').closest('div.fixed') as HTMLElement)
+    await waitFor(() => expect(modal().getByText('DJ-RATE')).toBeInTheDocument())
+    await waitFor(() => expect(modal().getAllByText('45.000 đ').length).toBeGreaterThanOrEqual(1))
+    expect(modal().queryAllByText('40.000 đ')).toHaveLength(0)
+  })
+
+  it('saves a pending price edit when the page is left (unmount / pagehide) inside the debounce window', async () => {
+    const { server, view } = setupRateServer()
+    await waitFor(() => expect(screen.getByText('Xem đơn')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('Xem đơn'))
+    await waitFor(() => expect(screen.getByText('DJ-RATE')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByTitle('Giảm 5,000 đ'))
+    view.unmount() // switching to another tab of the app
+    await waitFor(() => expect(server.puts).toHaveLength(1))
+    expect(server.puts[0]).toMatchObject({ rate: 35000, keepalive: true })
+
+    // Closing / reloading the browser tab fires pagehide instead of unmounting.
+    const second = setupRateServer()
+    await waitFor(() => expect(screen.getByText('Xem đơn')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('Xem đơn'))
+    await waitFor(() => expect(screen.getByText('DJ-RATE')).toBeInTheDocument())
+    fireEvent.click(screen.getByTitle('Tăng 5,000 đ'))
+    window.dispatchEvent(new Event('pagehide'))
+    await waitFor(() => expect(second.server.puts).toHaveLength(1))
+    expect(second.server.puts[0]).toMatchObject({ rate: 45000, keepalive: true })
+    // The debounce timer was cancelled: no second, duplicate save follows.
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    expect(second.server.puts).toHaveLength(1)
   })
 })

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { apiFetch, ApiError, resolveAssetUrl } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
@@ -400,7 +400,9 @@ export function FinancePage() {
   const [modalStateFilter, setModalStateFilter] = useState('')
   const [modalSelectedOrderIds, setModalSelectedOrderIds] = useState<string[]>([])
   const [modalLastSelectedIndex, setModalLastSelectedIndex] = useState<number | null>(null)
-  const [orderRates, setOrderRates] = useState<Record<string, number>>({})
+  // Rate edits of single orders wait briefly (Admin taps +/- several times) and are then saved to the server.
+  const inflightRateSaves = useRef<Set<Promise<unknown>>>(new Set())
+  const pendingRates = useRef<Record<string, { timer: ReturnType<typeof setTimeout>; rate: number }>>({})
 
   // Rate configuration state (Admin)
   const [standardRate, setStandardRate] = useState<number>(40000)
@@ -676,8 +678,13 @@ export function FinancePage() {
   }
 
   // --- Modal Specific Data Loading & Actions (Admin) ---
-  async function loadModalTasks() {
+  async function loadModalTasks(waitForSaves = true) {
     if (!selectedDesignerForModal) return
+    if (waitForSaves) {
+      // Reopening right after an edit must read the saved price, not race the save.
+      sendPendingRatesNow()
+      await Promise.all([...inflightRateSaves.current])
+    }
     const designerKey = selectedDesignerForModal.designer_id || selectedDesignerForModal.username || selectedDesignerForModal.designer_name
     setModalTasksLoading(true)
     try {
@@ -759,15 +766,86 @@ export function FinancePage() {
       return tB - tA // initial submission time descending
     })
 
-  function handleRateChange(orderId: string, delta: number) {
-    setOrderRates((prev) => {
-      const task = modalTasks.find((item) => item.order_id === orderId)
-      const baseRate = task?.rate ?? (task?.work_domain === 'duplicate' ? duplicateRate : standardRate)
-      const current = prev[orderId] ?? baseRate
-      const next = Math.max(0, current + delta)
-      return { ...prev, [orderId]: next }
-    })
+  function defaultRateOf(task: CreditedTask) {
+    return task.work_domain === 'duplicate' ? duplicateRate : standardRate
   }
+  function rateOf(task: CreditedTask) {
+    return task.rate ?? defaultRateOf(task)
+  }
+
+  async function saveOrderRate(orderId: string, rate: number): Promise<{ rate: number; version: number } | null> {
+    delete pendingRates.current[orderId]
+    const run = async () => {
+      try {
+        // keepalive: the request still completes when the page is being left or closed.
+        const res = await apiFetch<{ rate: number; custom_rate: number | null; version: number }>(
+          `/finance/orders/${orderId}/rate`,
+          { method: 'PUT', body: JSON.stringify({ rate }), keepalive: true },
+        )
+        // Keep the version in step: paying right after would otherwise fail its version check.
+        setModalTasks((prev) => prev.map((t) => (
+          t.order_id === orderId ? { ...t, rate: res.rate, custom_rate: res.custom_rate, order_version: res.version } : t
+        )))
+        void loadData()
+        return { rate: res.rate, version: res.version }
+      } catch (err) {
+        showToast(err instanceof ApiError ? err.message : 'Không lưu được giá đơn.', 'error')
+        await loadModalTasks(false) // show what the server really has
+        return null
+      }
+    }
+    const promise = run()
+    inflightRateSaves.current.add(promise)
+    void promise.finally(() => inflightRateSaves.current.delete(promise))
+    return promise
+  }
+
+  function handleRateChange(orderId: string, delta: number) {
+    const task = modalTasks.find((item) => item.order_id === orderId)
+    if (!task || task.is_paid) return
+    const pending = pendingRates.current[orderId]
+    const next = Math.max(0, (pending?.rate ?? rateOf(task)) + delta)
+    if (pending) clearTimeout(pending.timer)
+    pendingRates.current[orderId] = { rate: next, timer: setTimeout(() => void saveOrderRate(orderId, next), 500) }
+    setModalTasks((prev) => prev.map((t) => (t.order_id === orderId ? { ...t, rate: next } : t)))
+  }
+
+  // Save every waiting rate edit now (before paying, so the payment uses the rates on screen).
+  // Returns the saved rate and new version per order for the caller, whose render is already stale.
+  async function flushPendingRates() {
+    const waiting = Object.entries(pendingRates.current)
+    for (const [, pending] of waiting) clearTimeout(pending.timer)
+    const saved: Record<string, { rate: number; version: number }> = {}
+    await Promise.all(waiting.map(async ([orderId, pending]) => {
+      const result = await saveOrderRate(orderId, pending.rate)
+      if (result) saved[orderId] = result
+    }))
+    return { saved, failed: waiting.length - Object.keys(saved).length }
+  }
+
+  // Send every waiting rate edit right now without waiting for the result (popup closed, page left).
+  function sendPendingRatesNow() {
+    for (const [orderId, pending] of Object.entries(pendingRates.current)) {
+      clearTimeout(pending.timer)
+      void saveOrderRate(orderId, pending.rate)
+    }
+  }
+  const sendPendingRatesRef = useRef(sendPendingRatesNow)
+  sendPendingRatesRef.current = sendPendingRatesNow
+
+  function closeDesignerModal() {
+    sendPendingRatesNow()
+    setSelectedDesignerForModal(null)
+  }
+
+  useEffect(() => {
+    const onHide = () => sendPendingRatesRef.current()
+    window.addEventListener('pagehide', onHide)
+    return () => {
+      window.removeEventListener('pagehide', onHide)
+      onHide() // leaving the tab unmounts this page
+    }
+  }, [])
 
   function handleModalSelectOrder(orderId: string, index: number, event?: React.MouseEvent) {
     if (event?.shiftKey && modalLastSelectedIndex !== null && displayedModalTasks.length > 0) {
@@ -795,6 +873,8 @@ export function FinancePage() {
   }
 
   async function handleModalMarkPaid(orderIdsToMark?: string[]) {
+    const { saved, failed } = await flushPendingRates()
+    if (failed > 0) return // a price failed to save: do not pay with a rate the server does not have
     const targetUnpaidTasks = modalWeekUnpaidTasks
     const ids = orderIdsToMark && orderIdsToMark.length > 0
       ? orderIdsToMark
@@ -808,7 +888,7 @@ export function FinancePage() {
 
     const totalAmount = targetUnpaidTasks
       .filter((t) => ids.includes(t.order_id))
-      .reduce((sum, t) => sum + (orderRates[t.order_id] ?? t.rate ?? (t.work_domain === 'duplicate' ? duplicateRate : standardRate)), 0)
+      .reduce((sum, t) => sum + (saved[t.order_id]?.rate ?? rateOf(t)), 0)
 
     const weekLabel = formatWeekRangeLabel(selectedWeekStart)
     const isPayAllWeek = modalSelectedOrderIds.length === 0 && (!orderIdsToMark || orderIdsToMark.length === 0)
@@ -827,7 +907,10 @@ export function FinancePage() {
         body: JSON.stringify({
           order_ids: ids,
           designer_id: modalSelectedOrderIds.length === 0 ? desId : undefined,
-          expected_versions: expectedVersionsFor(ids),
+          expected_versions: {
+            ...expectedVersionsFor(ids),
+            ...Object.fromEntries(Object.entries(saved).map(([id, v]) => [id, v.version])),
+          },
         }),
       })
       showToast(`Đã xác nhận thanh toán thành công cho ${res.updated_count} đơn hàng!`, 'success')
@@ -1009,7 +1092,7 @@ export function FinancePage() {
         if (exportModalOpen) setExportModalOpen(false)
         else if (noteModalOpen) setNoteModalOpen(false)
         else if (qrDesigner) setQrDesigner(null)
-        else if (selectedDesignerForModal) setSelectedDesignerForModal(null)
+        else if (selectedDesignerForModal) closeDesignerModal()
       }
     }
     window.addEventListener('keydown', handleKeyDown)
@@ -2741,7 +2824,7 @@ export function FinancePage() {
                 <button
                   type="button"
                   title="Đóng popup"
-                  onClick={() => setSelectedDesignerForModal(null)}
+                  onClick={closeDesignerModal}
                   className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-200 hover:text-slate-600 transition-colors cursor-pointer"
                 >
                   <X className="h-5 w-5" />
@@ -2961,7 +3044,7 @@ export function FinancePage() {
                       <span className="font-mono text-sm font-extrabold text-[#0052CC] bg-white px-2.5 py-1 rounded-lg border border-blue-200 shadow-2xs">
                         {currentTabWeekTasks
                           .filter((t) => modalSelectedOrderIds.includes(t.order_id))
-                          .reduce((sum, t) => sum + (orderRates[t.order_id] ?? t.rate ?? (t.work_domain === 'duplicate' ? duplicateRate : standardRate)), 0)
+                          .reduce((sum, t) => sum + (rateOf(t)), 0)
                           .toLocaleString('vi-VN')} đ
                       </span>
                     </div>
@@ -2972,7 +3055,7 @@ export function FinancePage() {
                     </span>
                     <span className="font-mono text-base font-extrabold text-emerald-700 bg-white px-3 py-1 rounded-lg border border-emerald-300 shadow-2xs">
                       {currentTabWeekTasks
-                        .reduce((sum, t) => sum + (orderRates[t.order_id] ?? t.rate ?? (t.work_domain === 'duplicate' ? duplicateRate : standardRate)), 0)
+                        .reduce((sum, t) => sum + (rateOf(t)), 0)
                         .toLocaleString('vi-VN')} đ
                     </span>
                   </div>
@@ -3063,7 +3146,7 @@ export function FinancePage() {
                           const statusInfo = getStatusInfo(task.current_state)
                           const submitTimeSplit = formatUtc7Split(task.first_submitted_at || task.review_submitted_at || task.status_changed_at)
                           const paidTimeSplit = formatUtc7Split(task.paid_at)
-                          const currentRate = orderRates[task.order_id] ?? task.rate ?? (task.work_domain === 'duplicate' ? duplicateRate : standardRate)
+                          const currentRate = rateOf(task)
 
                           return (
                             <tr
@@ -3105,7 +3188,7 @@ export function FinancePage() {
                                   {task.notes_count && task.notes_count > 0 ? (
                                     <span
                                       onClick={() => {
-                                        setSelectedDesignerForModal(null)
+                                        closeDesignerModal()
                                         setNotesTargetFilter('order')
                                         setNotesSearch(task.external_order_id)
                                         setActiveMainTab('notes')
@@ -3189,7 +3272,8 @@ export function FinancePage() {
                                   <button
                                     type="button"
                                     onClick={() => handleRateChange(task.order_id, -5000)}
-                                    className="w-5 h-5 rounded bg-white hover:bg-slate-200 text-slate-700 font-bold flex items-center justify-center text-xs shadow-2xs border border-slate-200 cursor-pointer active:scale-95 transition-all"
+                                    disabled={Boolean(task.is_paid)}
+                                    className="w-5 h-5 rounded bg-white hover:bg-slate-200 text-slate-700 font-bold flex items-center justify-center text-xs shadow-2xs border border-slate-200 cursor-pointer active:scale-95 transition-all disabled:cursor-not-allowed disabled:opacity-40"
                                     title="Giảm 5,000 đ"
                                   >
                                     -
@@ -3200,7 +3284,8 @@ export function FinancePage() {
                                   <button
                                     type="button"
                                     onClick={() => handleRateChange(task.order_id, 5000)}
-                                    className="w-5 h-5 rounded bg-white hover:bg-slate-200 text-slate-700 font-bold flex items-center justify-center text-xs shadow-2xs border border-slate-200 cursor-pointer active:scale-95 transition-all"
+                                    disabled={Boolean(task.is_paid)}
+                                    className="w-5 h-5 rounded bg-white hover:bg-slate-200 text-slate-700 font-bold flex items-center justify-center text-xs shadow-2xs border border-slate-200 cursor-pointer active:scale-95 transition-all disabled:cursor-not-allowed disabled:opacity-40"
                                     title="Tăng 5,000 đ"
                                   >
                                     +
