@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { BrowserRouter } from 'react-router-dom'
 import { FinancePage } from './FinancePage'
@@ -139,9 +139,8 @@ describe('FinancePage', () => {
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => (
       String(url).includes('/api/finance/stats')
       && String(url).includes('designer_id=des1')
-      && String(url).includes('page_size=50')
+      && String(url).includes('page_size=500')
     ))).toBe(true))
-    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('page_size=1000'))).toBe(false)
     expect(screen.getAllByText('Vintage T-Shirt Design').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('40.000 đ').length).toBeGreaterThanOrEqual(2)
     expect(screen.getByText('Tổng số tiền trong tuần (Chưa thanh toán):')).toBeInTheDocument()
@@ -243,5 +242,65 @@ describe('FinancePage', () => {
     expect(screen.getByText('Không có đơn nào khớp.')).toBeInTheDocument()
     expect(screen.queryByText('Tổng Đơn Tính Công')).not.toBeInTheDocument()
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/finance/stats') && String(url).includes('is_paid='))).toBe(false)
+  })
+
+  it('loads every page of the designer orders so older weeks and paid orders show in the modal', async () => {
+    const now = Date.now()
+    const thisWeek = new Date(now).toISOString()
+    const lastWeek = new Date(now - 7 * 86400_000).toISOString()
+    const task = (id: string, at: string, paid: boolean) => ({
+      order_id: id, order_version: 1, external_order_id: `DJ-${id}`, product_name: `Prod ${id}`,
+      thumbnail_url: null, designer_id: 'des1', designer_name: 'Trâm', current_state: 'QC_PENDING',
+      placeholder_filled: true, status_changed_at: at, first_submitted_at: at, latest_submitted_at: at,
+      submission_count: 1, order_created_at: at, notes_count: 0, is_paid: paid, rate: 40000,
+    })
+    const summary = {
+      designer_id: 'des1', designer_name: 'Trâm', username: 'tram', total_tasks: 2, unpaid_tasks: 1,
+      paid_tasks: 1, in_review_tasks: 2, in_fix_tasks: 0, done_tasks: 0, first_submission_at: lastWeek,
+      latest_submission_at: thisWeek, notes_count: 0, total_amount: 80000, unpaid_amount: 40000, paid_amount: 40000,
+    }
+    const modalPages: string[] = []
+    const fetchMock = vi.fn((url: string) => {
+      const ok = (body: unknown) => Promise.resolve({ ok: true, status: 200, json: async () => body })
+      if (url.includes('/api/me')) return ok({ id: 'admin1', role: 'admin', full_name: 'Admin' })
+      if (url.includes('/api/platforms')) return ok({ platforms: [] })
+      if (url.includes('/api/finance/stats')) {
+        const params = new URL(url, 'http://x').searchParams
+        const page = Number(params.get('page'))
+        if (params.get('designer_id')) {
+          // The modal: 2 orders split over two pages of one order each.
+          modalPages.push(`${page}/${params.get('page_size')}`)
+          return ok({
+            designers_summary: [summary], tasks: [page === 1 ? task('a', thisWeek, false) : task('b', lastWeek, true)],
+            total_tasks_count: 2, page, page_size: 1, total_pages: 2,
+          })
+        }
+        return ok({
+          designers_summary: [summary], tasks: [task('a', thisWeek, false)], total_tasks_count: 2,
+          total_credited_tasks: 2, total_unpaid_tasks: 1, total_paid_tasks: 1, page: 1, page_size: 50, total_pages: 1,
+        })
+      }
+      return ok({})
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <BrowserRouter><AuthProvider><PlatformProvider><ToastProvider><GallerySyncProvider>
+        <FinancePage />
+      </GallerySyncProvider></ToastProvider></PlatformProvider></AuthProvider></BrowserRouter>,
+    )
+    await waitFor(() => expect(screen.getByText('Xem đơn')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('Xem đơn'))
+
+    // Both pages were requested, so the unpaid order of this week is shown ...
+    await waitFor(() => expect(screen.getByText('DJ-a')).toBeInTheDocument())
+    expect(modalPages).toEqual(['1/500', '2/500'])
+    expect(screen.queryByText('DJ-b')).not.toBeInTheDocument()
+
+    // ... and the paid order of the previous week (page 2) shows after going back one week.
+    const modal = within(screen.getByText('Chi tiết các đơn hàng & tính công cho Designer').closest('div.fixed') as HTMLElement)
+    fireEvent.click(modal.getByTitle('Tuần trước'))
+    fireEvent.click(modal.getByText('Đã Thanh Toán'))
+    await waitFor(() => expect(screen.getByText('DJ-b')).toBeInTheDocument())
   })
 })

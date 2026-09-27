@@ -40,6 +40,8 @@ import {
   QrCode,
 } from 'lucide-react'
 
+const MODAL_PAGE_SIZE = 500
+
 function parseUtcDate(dateInput: string | null | undefined): Date | null {
   if (!dateInput) return null
   let normalized = dateInput.trim()
@@ -676,16 +678,32 @@ export function FinancePage() {
   // --- Modal Specific Data Loading & Actions (Admin) ---
   async function loadModalTasks() {
     if (!selectedDesignerForModal) return
+    const designerKey = selectedDesignerForModal.designer_id || selectedDesignerForModal.username || selectedDesignerForModal.designer_name
     setModalTasksLoading(true)
     try {
-      const params = new URLSearchParams()
-      params.set('page', '1')
-      params.set('page_size', '50')
-      params.set('designer_id', selectedDesignerForModal.designer_id || selectedDesignerForModal.username || selectedDesignerForModal.designer_name)
-
-      const res = await apiFetch<FinanceStatsResponse>(`/finance/stats?${params.toString()}`)
-      setModalTasks(res.tasks || [])
+      // The week filter, the paid/unpaid tabs and "pay the whole week" all work on this list, so it
+      // must hold EVERY credited order of the designer: read every page, never just the first one.
+      const byId = new Map<string, CreditedTask>()
+      let page = 1
+      let total = 0
+      let pages = 1
+      do {
+        const params = new URLSearchParams()
+        params.set('page', String(page))
+        params.set('page_size', String(MODAL_PAGE_SIZE))
+        params.set('designer_id', designerKey)
+        const res = await apiFetch<FinanceStatsResponse>(`/finance/stats?${params.toString()}`)
+        for (const task of res.tasks || []) byId.set(task.order_id, task)
+        total = res.total_tasks_count
+        pages = res.total_pages
+        page += 1
+      } while (page <= pages)
+      if (byId.size !== total) {
+        throw new ApiError(0, `Chỉ tải được ${byId.size}/${total} đơn. Hãy đóng và mở lại.`)
+      }
+      setModalTasks([...byId.values()])
     } catch (err) {
+      setModalTasks([])
       showToast(err instanceof ApiError ? err.message : 'Không tải được danh sách đơn của Designer.', 'error')
     } finally {
       setModalTasksLoading(false)
