@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
+from unittest.mock import patch
 
-from app.adapters.db.models import Order, Platform, User
+from app.adapters.db.models import Assignment, Order, Platform, User, WorkflowEvent
 from app.api.routes.finance_api import (
     get_task_submission_timestamp,
     parse_date_to_utc_timestamp,
@@ -200,3 +201,41 @@ def test_order_rate_is_admin_only_platform_scoped_validated_and_locked_when_paid
     assert client.put(f"/api/finance/orders/{order.id}/rate", json={"rate": 50000}, headers=hdr).status_code == 409
     db_session.expire_all()
     assert db_session.get(Order, order.id).custom_rate is None
+
+
+def test_payment_telegram_notification_credits_latest_submitter_not_current_assignee(client, db_session):
+    """An order that changed hands: A was assigned, but B is the one who actually
+    submitted it (the finance page credits B). Paying it must notify B, not A."""
+    platform = Platform(name="Payment handoff plat", account_username="pay-handoff@example.com",
+                        standard_order_rate=40000, duplicate_order_rate=30000)
+    db_session.add(platform)
+    db_session.flush()
+    admin = User(username="pay_handoff_admin", full_name="Pay Admin", role="admin", password_hash=hash_password("pass"))
+    designer_a = User(username="pay_handoff_a", full_name="Designer A", role="designer",
+                       password_hash=hash_password("pass"), platform_id=platform.id,
+                       telegram_chat_id="111", telegram_notifications_enabled=True)
+    designer_b = User(username="pay_handoff_b", full_name="Designer B", role="designer",
+                       password_hash=hash_password("pass"), platform_id=platform.id,
+                       telegram_chat_id="222", telegram_notifications_enabled=True)
+    order = Order(external_order_id="PAY-HANDOFF", platform_id=platform.id, state=OrderState.QC_PENDING.value)
+    db_session.add_all([admin, designer_a, designer_b, order])
+    db_session.flush()
+    # Current Assignment still points at A (never updated after the handoff).
+    db_session.add(Assignment(order_id=order.id, designer_id=designer_a.id, status="approved"))
+    # But B is the one who actually submitted the order — the finance page credits B for it.
+    db_session.add(WorkflowEvent(
+        order_id=order.id, from_state=OrderState.IN_PROGRESS.value, to_state=OrderState.QC_PENDING.value,
+        actor_id=designer_b.id, evidence={"actor_role": "designer"},
+    ))
+    db_session.commit()
+
+    hdr = {"Authorization": f"Bearer {create_session_token(str(admin.id), admin.role)}", "X-Platform-Id": str(platform.id)}
+    with patch("app.workers.telegram_tasks.safe_dispatch_telegram_task") as dispatch:
+        res = client.post("/api/finance/mark-paid", json={"order_ids": [str(order.id)]}, headers=hdr)
+    assert res.status_code == 200 and res.json()["updated_count"] == 1
+
+    assert dispatch.call_count == 1
+    args = dispatch.call_args.args
+    assert args[1] == str(designer_b.id)  # notified: the credited submitter B
+    assert args[1] != str(designer_a.id)  # not: the stale current assignee A
+    assert args[2] == 1 and args[3] == 40000

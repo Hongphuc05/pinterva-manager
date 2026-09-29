@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 import unicodedata
 import uuid
@@ -34,6 +35,7 @@ from app.domain.access import (
 from app.domain.models import OrderState
 
 router = APIRouter(tags=["finance"])
+logger = logging.getLogger(__name__)
 
 VN_TZ = timezone(timedelta(hours=7))
 
@@ -982,7 +984,7 @@ def mark_orders_paid(
     if not parsed_ids and payload.designer_id:
         try:
             stats = get_finance_stats(
-                request=Request({"type": "http"}),
+                request=Request({"type": "http", "headers": []}),
                 designer_id=payload.designer_id,
                 is_paid=False,
                 page=1,
@@ -1035,29 +1037,34 @@ def mark_orders_paid(
     try:
         from collections import defaultdict
 
-        from app.adapters.db.models import Assignment, Platform
         from app.workers.telegram_tasks import (
             async_notify_designer_payment,
             safe_dispatch_telegram_task,
         )
 
-        plat = db.get(Platform, platform_id)
-        std_rate = plat.standard_order_rate if plat else 40000
-        dup_rate = plat.duplicate_order_rate if plat else 40000
+        # Credit the same Designer the finance stats page shows for each order (the
+        # latest submitter), not whoever the order's current Assignment happens to be —
+        # they can differ once an order changed hands, and paying it never rewrites
+        # its Assignment. Reusing get_finance_stats is exactly what the designer_id
+        # fallback branch above already does, so both agree on "who gets credited".
+        paid_order_ids = {o.id for o in orders}
+        stats = get_finance_stats(request=Request({"type": "http", "headers": []}), page=1, page_size=10000, user=user, db=db)
+        rate_and_designer_by_order = {
+            uuid.UUID(t.order_id): (t.designer_id, t.rate) for t in stats.tasks if uuid.UUID(t.order_id) in paid_order_ids
+        }
 
         des_summary = defaultdict(lambda: {"count": 0, "amount": 0})
         for o in orders:
-            rate = o.custom_rate if o.custom_rate is not None else (dup_rate if o.work_domain == "duplicate" else std_rate)
-            asgn = db.query(Assignment).filter(Assignment.order_id == o.id, Assignment.status != "cancelled").first()
-            if asgn and asgn.designer_id:
-                des_summary[asgn.designer_id]["count"] += 1
-                des_summary[asgn.designer_id]["amount"] += rate
+            designer_id, rate = rate_and_designer_by_order.get(o.id, (None, None))
+            if designer_id:
+                des_summary[uuid.UUID(designer_id)]["count"] += 1
+                des_summary[uuid.UUID(designer_id)]["amount"] += rate
 
-        for des_id, stats in des_summary.items():
-            if stats["count"] > 0:
-                safe_dispatch_telegram_task(async_notify_designer_payment, str(des_id), stats["count"], stats["amount"])
+        for des_id, stats_row in des_summary.items():
+            if stats_row["count"] > 0:
+                safe_dispatch_telegram_task(async_notify_designer_payment, str(des_id), stats_row["count"], stats_row["amount"])
     except Exception:
-        pass
+        logger.exception("Failed to notify designers about payment for orders %s", [str(o.id) for o in orders])
 
     return {"ok": True, "updated_count": len(orders)}
 
