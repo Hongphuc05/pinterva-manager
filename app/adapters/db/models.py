@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -63,7 +64,9 @@ class Platform(Base):
 class User(Base):
     __tablename__ = "users"
     __table_args__ = (
-        CheckConstraint("role IN ('admin', 'designer', 'designer-trello', 'support')", name="ck_users_role"),
+        CheckConstraint(
+            "role IN ('admin', 'designer', 'designer-trello', 'support', 'accountant')", name="ck_users_role"
+        ),
         CheckConstraint(
             "telegram_delivery_mode IN ('private', 'group')",
             name="ck_users_telegram_delivery_mode",
@@ -144,6 +147,41 @@ class UserBankQr(Base):
     content_type: Mapped[str] = mapped_column(String(64), nullable=False)
     byte_size: Mapped[int] = mapped_column(Integer, nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class PaymentBatch(Base):
+    """One payment to one Designer: who paid, how many orders, how much, when.
+
+    ``items`` snapshots each order and the amount paid for it, so the record stays true
+    even if a rate is edited later. ``source`` is ``payment`` for a real payment and
+    ``backfill`` for rows rebuilt from orders paid before this table existed.
+    """
+
+    __tablename__ = "payment_batches"
+    __table_args__ = (
+        CheckConstraint("source IN ('payment', 'backfill')", name="ck_payment_batches_source"),
+        Index("ix_payment_batches_platform_paid_at", "platform_id", "paid_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    platform_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("platforms.id"), nullable=True)
+    paid_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    paid_by_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    paid_by_role: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    designer_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    designer_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    order_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    total_amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    items: Mapped[list] = mapped_column(JSONB, nullable=False)
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="payment")
+    paid_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

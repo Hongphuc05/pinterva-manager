@@ -8,6 +8,8 @@ ROLE_ADMIN = "admin"
 ROLE_DESIGNER = "designer"
 ROLE_DESIGNER_TRELLO = "designer-trello"
 ROLE_SUPPORT = "support"
+# Pays designers (the same payment Admin makes); sees nothing else. See app/api/deps.py.
+ROLE_ACCOUNTANT = "accountant"
 
 WORK_DOMAIN_STANDARD = "standard"
 WORK_DOMAIN_DUPLICATE = "duplicate"

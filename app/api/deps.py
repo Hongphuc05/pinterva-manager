@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import uuid
 
 from fastapi import Depends, HTTPException, Request, status
@@ -8,8 +9,28 @@ from sqlalchemy.orm import Session
 from app.adapters.db.models import User
 from app.adapters.db.session import SessionLocal
 from app.application.auth import read_session_token
+from app.domain.access import ROLE_ACCOUNTANT
 
 SESSION_COOKIE_NAME = "session"
+
+# The Accountant only pays Designers. Every route builds on get_current_user and many only
+# fence off designers/support, treating any other role like Admin, so the Accountant is
+# denied everything except this list (deny by default: a new route stays closed to it).
+ACCOUNTANT_ALLOWED = (
+    ("GET", re.compile(r"/api/me")),
+    ("GET", re.compile(r"/api/platforms/current")),
+    ("GET", re.compile(r"/api/finance/payment-history")),
+    ("GET", re.compile(r"/api/users/[^/]+/bank-qr(/[^/]+)?")),
+    (None, re.compile(r"/api/accountant/.*")),
+)
+
+
+def _accountant_may_call(request: Request) -> bool:
+    path = request.scope.get("path", "")
+    return any(
+        (method is None or request.method == method) and pattern.fullmatch(path)
+        for method, pattern in ACCOUNTANT_ALLOWED
+    )
 
 
 def get_db():
@@ -35,6 +56,8 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     user = db.get(User, uuid.UUID(data["user_id"]))
     if user is None or not user.active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User not found or inactive")
+    if user.role == ROLE_ACCOUNTANT and not _accountant_may_call(request):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Tài khoản Kế toán không có quyền dùng chức năng này.")
     return user
 
 

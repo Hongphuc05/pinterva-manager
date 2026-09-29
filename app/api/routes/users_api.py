@@ -23,7 +23,13 @@ from app.api.deps import (
 from app.application.auth import hash_password
 from app.application.order_work_notes import PRIVATE_WORK_NOTE_ASSETS_DIR
 from app.application.password_vault import decrypt_password, encrypt_password
-from app.domain.access import ROLE_ADMIN, ROLE_DESIGNER, ROLE_DESIGNER_TRELLO, ROLE_SUPPORT
+from app.domain.access import (
+    ROLE_ACCOUNTANT,
+    ROLE_ADMIN,
+    ROLE_DESIGNER,
+    ROLE_DESIGNER_TRELLO,
+    ROLE_SUPPORT,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -198,7 +204,7 @@ def delete_my_bank_qr_image(
 @router.get("/users/{user_id}/bank-qr", response_model=BankQrImageListOut)
 def list_user_bank_qr_images(
     user_id: str,
-    current_admin: User = Depends(require_role(ROLE_ADMIN)),
+    current_admin: User = Depends(require_any_role(ROLE_ADMIN, ROLE_ACCOUNTANT)),
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
@@ -214,12 +220,14 @@ def download_user_bank_qr_image(
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
+    # Admin and the Accountant (who pays by these QR codes) see any user of their platform.
+    may_see_others = current_user.role in (ROLE_ADMIN, ROLE_ACCOUNTANT)
     target_user = (
         _current_platform_user(db, user_id, platform_id)
-        if current_user.role == ROLE_ADMIN
+        if may_see_others
         else _target_user(db, user_id)
     )
-    if current_user.role != ROLE_ADMIN and target_user.id != current_user.id:
+    if not may_see_others and target_user.id != current_user.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Chỉ được xem ảnh QR của chính mình.")
     image = (
         db.query(UserBankQr)
@@ -327,10 +335,10 @@ def create_user(
     role = payload.role.strip().lower()
     if role == "user":
         role = ROLE_DESIGNER
-    if role not in (ROLE_ADMIN, ROLE_DESIGNER, ROLE_DESIGNER_TRELLO, ROLE_SUPPORT):
+    if role not in (ROLE_ADMIN, ROLE_DESIGNER, ROLE_DESIGNER_TRELLO, ROLE_SUPPORT, ROLE_ACCOUNTANT):
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            "Vai trò không hợp lệ (admin, designer, designer-trello hoặc support).",
+            "Vai trò không hợp lệ (admin, designer, designer-trello, support hoặc accountant).",
         )
 
     existing = db.query(User).filter_by(username=clean_username).one_or_none()

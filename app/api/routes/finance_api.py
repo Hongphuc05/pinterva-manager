@@ -16,23 +16,31 @@ from app.adapters.db.models import (
     Assignment,
     FinanceNote,
     Order,
+    PaymentBatch,
     Platform,
     ResultVersion,
     User,
     WorkflowEvent,
 )
-from app.api.deps import DEFAULT_PLATFORM_ID, get_current_platform_id, get_current_user, get_db
+from app.api.deps import (
+    DEFAULT_PLATFORM_ID,
+    get_current_platform_id,
+    get_current_user,
+    get_db,
+    require_any_role,
+)
 from app.application.concurrency import require_expected_order_version
+from app.application.payments import pay_orders
 from app.application.sanitization import encode_proxy_url
 from app.domain.access import (
     DUPLICATE_CHECK_DUPLICATE,
+    ROLE_ACCOUNTANT,
     ROLE_ADMIN,
     ROLE_DESIGNER,
     ROLE_DESIGNER_TRELLO,
     ROLE_SUPPORT,
     WORK_DOMAIN_DUPLICATE,
 )
-from app.domain.models import OrderState
 
 router = APIRouter(tags=["finance"])
 logger = logging.getLogger(__name__)
@@ -234,6 +242,34 @@ class OrderRateOut(BaseModel):
     rate: int
     custom_rate: int | None
     version: int
+
+
+class PaymentHistoryItemOut(BaseModel):
+    order_id: str
+    external_order_id: str | None = None
+    product_name: str | None = None
+    amount: int | None = None  # hidden from the Accountant, who sees totals only
+
+
+class PaymentBatchOut(BaseModel):
+    id: str
+    paid_at: datetime
+    paid_by_name: str
+    paid_by_role: str | None
+    designer_id: str | None
+    designer_name: str
+    order_count: int
+    total_amount: int
+    source: str
+    items: list[PaymentHistoryItemOut]
+
+
+class PaymentHistoryOut(BaseModel):
+    batches: list[PaymentBatchOut]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
 
 
 class MarkPaidPayload(BaseModel):
@@ -1003,70 +1039,63 @@ def mark_orders_paid(
     if not parsed_ids:
         return {"ok": True, "updated_count": 0}
 
+    # One payment path for Admin and Accountant: marks paid, closes the order in Tacahu
+    # (DONE), records the payment history and notifies the credited Designers.
+    result = pay_orders(
+        db,
+        actor=user,
+        platform_id=platform_id,
+        order_ids=parsed_ids,
+        expected_versions=payload.expected_versions,
+    )
+    return {"ok": True, "updated_count": result.updated_count}
 
-    now_utc = datetime.now(UTC)
-    orders = (
-        db.query(Order)
-        .filter(Order.id.in_(parsed_ids), Order.platform_id == platform_id)
-        .order_by(Order.id)
-        .with_for_update()
+
+@router.get("/finance/payment-history", response_model=PaymentHistoryOut)
+def get_payment_history(
+    designer_id: uuid.UUID | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    user: User = Depends(require_any_role(ROLE_ADMIN, ROLE_ACCOUNTANT)),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    """Who paid which Designer, how many orders, how much, when (newest first)."""
+    query = db.query(PaymentBatch).filter(PaymentBatch.platform_id == platform_id)
+    if designer_id:
+        query = query.filter(PaymentBatch.designer_id == designer_id)
+    total = query.count()
+    rows = (
+        query.order_by(PaymentBatch.paid_at.desc(), PaymentBatch.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
         .all()
     )
-    for o in orders:
-        require_expected_order_version(o, (payload.expected_versions or {}).get(o.id))
-        o.is_paid = True
-        o.paid_at = now_utc
-        o.paid_by_id = user.id
-        norm_st = (o.state or "").upper()
-        if norm_st not in ("DONE", "CLAIMED_IMPORTED", "COMPLETED"):
-            previous_state = o.state
-            o.state = OrderState.DONE.value
-            o.status_changed_at = now_utc
-            db.add(
-                WorkflowEvent(
-                    order_id=o.id,
-                    from_state=previous_state,
-                    to_state=OrderState.DONE.value,
-                    actor_id=user.id,
-                    evidence={"source": "finance", "action": "mark_paid"},
-                )
+    show_amounts = user.role == ROLE_ADMIN
+    return PaymentHistoryOut(
+        batches=[
+            PaymentBatchOut(
+                id=str(b.id),
+                paid_at=b.paid_at,
+                paid_by_name=b.paid_by_name,
+                paid_by_role=b.paid_by_role,
+                designer_id=str(b.designer_id) if b.designer_id else None,
+                designer_name=b.designer_name,
+                order_count=b.order_count,
+                total_amount=b.total_amount,
+                source=b.source,
+                items=[
+                    PaymentHistoryItemOut(**{**item, "amount": item.get("amount") if show_amounts else None})
+                    for item in b.items
+                ],
             )
-    db.commit()
-
-    # Telegram notification for each paid designer
-    try:
-        from collections import defaultdict
-
-        from app.workers.telegram_tasks import (
-            async_notify_designer_payment,
-            safe_dispatch_telegram_task,
-        )
-
-        # Credit the same Designer the finance stats page shows for each order (the
-        # latest submitter), not whoever the order's current Assignment happens to be —
-        # they can differ once an order changed hands, and paying it never rewrites
-        # its Assignment. Reusing get_finance_stats is exactly what the designer_id
-        # fallback branch above already does, so both agree on "who gets credited".
-        paid_order_ids = {o.id for o in orders}
-        stats = get_finance_stats(request=Request({"type": "http", "headers": []}), page=1, page_size=10000, user=user, db=db)
-        rate_and_designer_by_order = {
-            uuid.UUID(t.order_id): (t.designer_id, t.rate) for t in stats.tasks if uuid.UUID(t.order_id) in paid_order_ids
-        }
-
-        des_summary = defaultdict(lambda: {"count": 0, "amount": 0})
-        for o in orders:
-            designer_id, rate = rate_and_designer_by_order.get(o.id, (None, None))
-            if designer_id:
-                des_summary[uuid.UUID(designer_id)]["count"] += 1
-                des_summary[uuid.UUID(designer_id)]["amount"] += rate
-
-        for des_id, stats_row in des_summary.items():
-            if stats_row["count"] > 0:
-                safe_dispatch_telegram_task(async_notify_designer_payment, str(des_id), stats_row["count"], stats_row["amount"])
-    except Exception:
-        logger.exception("Failed to notify designers about payment for orders %s", [str(o.id) for o in orders])
-
-    return {"ok": True, "updated_count": len(orders)}
+            for b in rows
+        ],
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=max(1, math.ceil(total / page_size)),
+    )
 
 
 @router.post("/finance/unmark-paid")

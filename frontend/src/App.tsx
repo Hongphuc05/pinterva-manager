@@ -17,6 +17,8 @@ import { PlatformHubPage } from './pages/PlatformHubPage'
 import { TelegramManagementPage } from './pages/TelegramManagementPage'
 import { DuplicateReviewPage } from './pages/DuplicateReviewPage'
 import { SupportQueuePage } from './pages/SupportQueuePage'
+import { AccountantPaymentsPage } from './pages/AccountantPaymentsPage'
+import { RootRedirect } from './auth/RootRedirect'
 import { WorkerProvider } from './features/worker/WorkerProvider'
 import { ConsentDialog } from './features/worker/ConsentDialog'
 
@@ -33,7 +35,7 @@ function App() {
           <Route
             path="/orders"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute allowedRoles={['admin', 'designer', 'designer-trello', 'support']}>
                 <OrdersListPage />
               </ProtectedRoute>
             }
@@ -41,7 +43,7 @@ function App() {
           <Route
             path="/orders/:id"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute allowedRoles={['admin', 'designer', 'designer-trello', 'support']}>
                 <OrderDetailPage />
               </ProtectedRoute>
             }
@@ -49,8 +51,16 @@ function App() {
           <Route
             path="/finance"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute allowedRoles={['admin', 'designer', 'designer-trello', 'support']}>
                 <FinancePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/payments"
+            element={
+              <ProtectedRoute allowedRoles={['accountant']}>
+                <AccountantPaymentsPage />
               </ProtectedRoute>
             }
           />
@@ -138,7 +148,7 @@ function App() {
               </ProtectedRoute>
             }
           />
-          <Route path="/" element={<Navigate to="/orders" replace />} />
+          <Route path="/" element={<RootRedirect />} />
         </Routes>
               </WorkerProvider>
             </GallerySyncProvider>

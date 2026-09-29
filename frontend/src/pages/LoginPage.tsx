@@ -18,7 +18,7 @@ export function LoginPage() {
     setLoading(true)
     try {
       const signedInUser = await login(username, password)
-      navigate(signedInUser.role === 'designer-trello' ? '/kanban' : '/orders')
+      navigate(signedInUser.role === 'designer-trello' ? '/kanban' : signedInUser.role === 'accountant' ? '/payments' : '/orders')
     } catch (err) {
       setError(err instanceof ApiError ? 'Sai tên đăng nhập hoặc mật khẩu' : 'Lỗi hệ thống hoặc kết nối máy chủ')
     } finally {

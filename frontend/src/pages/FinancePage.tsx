@@ -10,6 +10,7 @@ import { CopyableOrderCode } from '../components/CopyableOrderCode'
 import { OrderHistoryTimelineModal } from '../components/OrderHistoryTimelineModal'
 import { BankQrManager } from '../components/BankQrManager'
 import { BankQrViewerModal } from '../components/BankQrViewerModal'
+import { PaymentHistoryModal } from '../components/PaymentHistoryModal'
 import { getStatusInfo, resolveExternalUrl } from '../utils/statusTranslation'
 import { readViewState, writeViewState } from '../utils/viewState'
 import {
@@ -408,6 +409,7 @@ export function FinancePage() {
   const [standardRate, setStandardRate] = useState<number>(40000)
   const [duplicateRate, setDuplicateRate] = useState<number>(40000)
   const [rateSettingsOpen, setRateSettingsOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const [savingRates, setSavingRates] = useState(false)
 
   useEffect(() => {
@@ -1154,6 +1156,15 @@ export function FinancePage() {
                 <span className="text-[10px] font-mono bg-white text-amber-900 px-1.5 py-0.5 rounded border border-amber-300 font-bold">
                   {standardRate.toLocaleString('vi-VN')} đ / {duplicateRate.toLocaleString('vi-VN')} đ
                 </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setHistoryOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl transition-all cursor-pointer shadow-2xs"
+              >
+                <History className="h-4 w-4 text-slate-500" />
+                <span>Lịch Sử Thanh Toán</span>
               </button>
 
               <button
@@ -3368,6 +3379,7 @@ export function FinancePage() {
           designerName={qrDesigner.designer_name}
         />
       )}
+      {historyOpen && <PaymentHistoryModal onClose={() => setHistoryOpen(false)} />}
     </DashboardLayout>
   )
 }

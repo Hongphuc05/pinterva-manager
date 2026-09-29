@@ -404,4 +404,40 @@ describe('FinancePage', () => {
     await new Promise((resolve) => setTimeout(resolve, 700))
     expect(second.server.puts).toHaveLength(1)
   })
+
+  it('Admin can open the shared payment history modal from the finance page', async () => {
+    const submittedAt = new Date().toISOString()
+    const fetchMock = vi.fn((url: string) => {
+      const ok = (body: unknown) => Promise.resolve({ ok: true, status: 200, json: async () => body })
+      if (url.includes('/api/me')) return ok({ id: 'admin1', role: 'admin', full_name: 'Admin' })
+      if (url.includes('/api/platforms')) return ok({ platforms: [] })
+      if (url.includes('/api/finance/payment-history')) {
+        return ok({
+          batches: [{
+            id: 'b1', paid_at: submittedAt, paid_by_name: 'Admin', paid_by_role: 'admin', designer_id: 'd1',
+            designer_name: 'Trâm', order_count: 2, total_amount: 80000, source: 'payment',
+            items: [{ order_id: 'o1', external_order_id: 'DJ-1', product_name: 'Áo', amount: 40000 }],
+          }],
+          total: 1, page: 1, page_size: 50, total_pages: 1,
+        })
+      }
+      if (url.includes('/api/finance/stats')) {
+        return ok({ designers_summary: [], tasks: [], total_tasks_count: 0, page: 1, page_size: 50, total_pages: 1 })
+      }
+      return ok({})
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <BrowserRouter><AuthProvider><PlatformProvider><ToastProvider><GallerySyncProvider>
+        <FinancePage />
+      </GallerySyncProvider></ToastProvider></PlatformProvider></AuthProvider></BrowserRouter>,
+    )
+    await waitFor(() => expect(screen.getByText('Lịch Sử Thanh Toán')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('Lịch Sử Thanh Toán'))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/finance/payment-history'))).toBe(true))
+    const modal = within(screen.getByTestId('payment-history-modal'))
+    await waitFor(() => expect(modal.getByText('Trâm')).toBeInTheDocument())
+    expect(modal.getByText('80.000 đ')).toBeInTheDocument()
+  })
 })
