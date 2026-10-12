@@ -1421,7 +1421,9 @@ export function OrdersListPage() {
           (o.product_name && o.product_name.toLowerCase().includes(q)) ||
           (o.assigned_designer_name && o.assigned_designer_name.toLowerCase().includes(q)) ||
           (o.platform_designer && o.platform_designer.toLowerCase().includes(q))
-          : (o.product_name && o.product_name.toLowerCase().includes(q))
+          : (o.product_name && o.product_name.toLowerCase().includes(q)) ||
+          // Support sees the order code, so it can search by it; a designer does not.
+          (isSupport && o.external_order_id.toLowerCase().includes(q))
         if (!matches) return false
       }
 
@@ -2228,7 +2230,7 @@ export function OrdersListPage() {
             <Search className="h-4 w-4 absolute left-3.5 top-3 text-slate-400" />
             <input
               type="text"
-              placeholder={isAdmin ? "Tìm theo Mã Đơn, Tên SP, DES..." : "Tìm theo Tên Sản Phẩm..."}
+              placeholder={isAdmin ? "Tìm theo Mã Đơn, Tên SP, DES..." : isSupport ? "Tìm theo Mã Đơn, Tên SP..." : "Tìm theo Tên Sản Phẩm..."}
               className="w-full pl-10 pr-4 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:border-[#0052CC] bg-slate-50"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}

@@ -814,6 +814,13 @@ describe('OrdersListPage', () => {
     expect(dimmed.length).toBeGreaterThanOrEqual(1)
     dimmed.forEach((button) => expect(button).toBeDisabled())
 
+    // Support can search by order code (it sees the code), not only by product name.
+    fireEvent.click(screen.getByRole('button', { name: /^Trùng lặp1$/i }))
+    const search = screen.getByPlaceholderText('Tìm theo Mã Đơn, Tên SP...')
+    fireEvent.change(search, { target: { value: 'dj-dup-doing' } })
+    expect(await screen.findByText('DJ-DUP-DOING')).toBeInTheDocument()
+    fireEvent.change(search, { target: { value: '' } })
+
     fireEvent.click(screen.getByRole('button', { name: /^Đang làm1$/i }))
     expect(await screen.findByText('DJ-DOING')).toBeInTheDocument()
     expect(screen.queryByText('DJ-DUP-DOING')).not.toBeInTheDocument()  // a tag wins: it stays in Trùng lặp
