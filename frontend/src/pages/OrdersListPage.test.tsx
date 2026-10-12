@@ -704,8 +704,11 @@ describe('OrdersListPage', () => {
           return Promise.resolve({
             ok: true,
             status: 200,
-            json: async () => ({ enabled: true, new_orders: 2, handleable_orders: 0 }),
+            json: async () => ({ enabled: true, new_orders: 2, handleable_orders: 3 }),
           })
+        }
+        if (url.includes('/api/support-compare/handle')) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ handled_count: 3 }) })
         }
         if (url.includes('/api/orders')) {
           return Promise.resolve({
@@ -783,6 +786,16 @@ describe('OrdersListPage', () => {
     expect(screen.getByTestId('support-totals')).toHaveTextContent('Tổng 4 tab: 4 · Đã nộp bài (đã ẩn): 7 · Tổng cộng: 11')
     // Web entry for the same job as Telegram /check.
     expect(await screen.findByRole('button', { name: /Kiểm tra trùng \(2\)/ })).toBeInTheDocument()
+    // ...and for Telegram /handle: compared orders with no duplicate move to Không trùng lặp.
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    fireEvent.click(await screen.findByRole('button', { name: /Chuyển không trùng \(3\)/ }))
+    await waitFor(() =>
+      expect(
+        (fetch as unknown as { mock: { calls: [string, RequestInit?][] } }).mock.calls.some(
+          ([url, init]) => url.includes('/api/support-compare/handle') && init?.method === 'POST',
+        ),
+      ).toBe(true),
+    )
     // Classified non_duplicate order is NOT in Tab 1 ("Chưa kiểm tra")
     expect(screen.queryByText('DJ-REVIEW')).not.toBeInTheDocument()
 

@@ -992,8 +992,9 @@ class SupportCompareCandidate(Base):
 
 
 class SupportWorkerDevice(Base):
-    """A Support machine paired with the web by device login; it may run jobs only while
-    the approving user's web page keeps ``presence_at`` fresh."""
+    """A Support machine granted by one Support login. It serves the whole platform while its agent
+    stays online (``last_seen_at``) until it is revoked, expires or its owner is deactivated.
+    ``presence_at`` is no longer used (the web page does not need to stay open)."""
 
     __tablename__ = "worker_devices"
     __table_args__ = (
@@ -1016,6 +1017,8 @@ class SupportWorkerDevice(Base):
     presence_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     busy_with: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Self-reported by the agent (device kind, pool/job progress); shown to every Support account.
+    agent_info: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

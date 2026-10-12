@@ -12,9 +12,30 @@ export interface QueueJob {
   worker_name: string | null
 }
 
+/** A machine running the compute agent for the whole team, as every Support account sees it. */
+export interface QueueHost {
+  id: string
+  machine_name: string
+  /** The Support account whose login allows this machine. */
+  owner: string | null
+  state: 'idle' | 'busy' | 'paused' | 'offline' | string
+  device: string | null
+  progress: {
+    phase?: 'idle' | 'syncing_pool' | 'comparing'
+    pool_loaded?: number
+    pool_total?: number
+    job_total?: number
+    job_embedded?: number
+    job_compared?: number
+  }
+  last_seen_at: string | null
+  expires_at: string
+}
+
 export interface QueueOverview {
   waiting_jobs: number
   jobs: QueueJob[]
+  hosts?: QueueHost[]
   machines: { ready: number; paused: number; offline: number }
 }
 

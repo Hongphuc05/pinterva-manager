@@ -128,18 +128,12 @@ describe('worker consent', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
-  it('never asks or beats for anyone but Support', async () => {
+  it('never asks anything for anyone but Support', async () => {
     auth.user = { id: 'a1', role: 'admin' }
     renderProvider()
     await new Promise((r) => setTimeout(r, 50))
     expect(agentApi.probeAgent).not.toHaveBeenCalled()
     expect(api.apiFetch).not.toHaveBeenCalled()
-  })
-
-  it('tells the API the web is open (presence) while a Support is logged in', async () => {
-    current = null
-    renderProvider()
-    await waitFor(() => expect(calls.some((c) => c.path === '/support-worker/presence' && c.init?.method === 'POST')).toBe(true))
   })
 
   it('Stop revokes the grant and disconnects the agent, and it stays off for this login', async () => {

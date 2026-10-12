@@ -65,7 +65,7 @@ def test_list_orders_for_user_designer_with_designer_id_filter(db_session):
     assert [o.external_order_id for o in orders] == ["DJ1"]
 
 
-def test_support_sees_waiting_and_classified_orders_in_own_platform(db_session):
+def test_support_sees_only_waiting_and_doing_orders_in_own_platform(db_session):
     platform = Platform(name="Support queue platform", account_username="support-queue@example.com")
     other_platform = Platform(name="Other platform", account_username="other@example.com")
     db_session.add_all([platform, other_platform])
@@ -112,18 +112,17 @@ def test_support_sees_waiting_and_classified_orders_in_own_platform(db_session):
 
     visible = list_orders_for_user(db_session, support)
 
+    # A tag does not keep an order in Support's workspace once its designer has handed in a result.
     assert {item.external_order_id for item in visible} == {
         "SUPPORT-WAITING",
         "SUPPORT-DOING",
         "SUPPORT-DUPLICATE",
-        "SUPPORT-REVIEW",
-        "SUPPORT-DONE",
     }
     assert get_order_detail_for_user(db_session, support, str(waiting.id)) is waiting
     assert get_order_detail_for_user(db_session, support, str(doing.id)) is doing
     assert get_order_detail_for_user(db_session, support, str(classified_duplicate.id)) is classified_duplicate
-    assert get_order_detail_for_user(db_session, support, str(classified_review.id)) is classified_review
-    assert get_order_detail_for_user(db_session, support, str(classified_done.id)) is classified_done
+    assert get_order_detail_for_user(db_session, support, str(classified_review.id)) is None
+    assert get_order_detail_for_user(db_session, support, str(classified_done.id)) is None
     assert get_order_detail_for_user(db_session, support, str(other_waiting.id)) is None
 
 

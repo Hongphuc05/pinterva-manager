@@ -699,7 +699,7 @@ export function OrdersListPage() {
     if (!supportCompare || supportCompare.new_orders === 0 || startingSupportCompare) return
     if (!window.confirm(
       `Xếp ${supportCompare.new_orders} đơn mới vào hàng đợi kiểm tra trùng?\n` +
-      'Job chạy khi có một Support cho phép máy của mình. Kết quả được báo qua Telegram.',
+      'Job chạy trên máy đang chạy agent của nhóm. Kết quả được báo qua Telegram.',
     )) return
     setStartingSupportCompare(true)
     try {
@@ -710,6 +710,25 @@ export function OrdersListPage() {
       showToast(err instanceof ApiError ? err.message : 'Không thể bắt đầu kiểm tra trùng.', 'error')
     } finally {
       setStartingSupportCompare(false)
+    }
+  }
+
+  const [handlingSupportCompare, setHandlingSupportCompare] = useState(false)
+
+  // Same as Telegram /handle → Có: compared orders with no duplicate go to Không trùng lặp.
+  async function handleMoveNonDuplicates() {
+    if (!supportCompare || supportCompare.handleable_orders === 0 || handlingSupportCompare) return
+    if (!window.confirm(`Chuyển ${supportCompare.handleable_orders} đơn đã so sánh mà không thấy trùng sang Không trùng lặp?`)) return
+    setHandlingSupportCompare(true)
+    try {
+      const res = await apiFetch<{ handled_count: number }>('/support-compare/handle', { method: 'POST' })
+      showToast(`Đã chuyển ${res.handled_count} đơn sang Không trùng lặp.`, 'success')
+      loadSupportCompareStatus()
+      await loadOrders()
+    } catch (err) {
+      showToast(err instanceof ApiError ? err.message : 'Không thể chuyển các đơn này.', 'error')
+    } finally {
+      setHandlingSupportCompare(false)
     }
   }
 
@@ -2662,6 +2681,18 @@ export function OrdersListPage() {
             >
               {startingSupportCompare ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
               <span>Kiểm tra trùng ({supportCompare.new_orders})</span>
+            </button>
+          )}
+          {isSupport && supportTab === 'all' && supportCompare?.enabled && supportCompare.handleable_orders > 0 && (
+            <button
+              type="button"
+              onClick={handleMoveNonDuplicates}
+              disabled={handlingSupportCompare}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-all disabled:opacity-50 cursor-pointer"
+              title="Chuyển các đơn đã so sánh mà không thấy trùng sang Không trùng lặp (giống lệnh /handle trên Telegram)"
+            >
+              {handlingSupportCompare ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+              <span>Chuyển không trùng ({supportCompare.handleable_orders})</span>
             </button>
           )}
 

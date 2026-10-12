@@ -47,13 +47,23 @@ Admin vẫn dùng chat riêng hiện hành và các state/approval vẫn do API/
 
 `support_compare_image/dup-compare/agent.py` là process duy nhất sở hữu runtime Hugging Face
 DINOv2. Nó chạy trên máy của Support và chỉ nói chuyện với API (`/api/support-worker/*`) bằng HTTPS:
-không có quyền vào PostgreSQL. Máy được cấp quyền từ chính phiên đăng nhập: khi Support đăng nhập trên máy có agent, web hỏi
-"Cho phép dùng GPU/CPU của máy này?"; **Có** thì web gọi `POST /support-worker/devices/grant`, nhận
+không có quyền vào PostgreSQL. Máy được cấp quyền một lần: khi Support đăng nhập trên máy có agent, web
+hỏi "Cho phép dùng GPU/CPU của máy này?"; **Có** thì web gọi `POST /support-worker/devices/grant`, nhận
 token của máy và giao cho agent qua `http://127.0.0.1:8765/connect` (agent chỉ nhận từ `Origin` của
-web Tacahu và `Host` loopback). Token chỉ dùng được khi trang web của người đó còn gửi tín hiệu có
-mặt (`POST /support-worker/presence` mỗi 20 giây, hết hiệu lực sau 90 giây); đăng xuất thu hồi mọi
-máy của người đó và token hết hạn sau 12 giờ. Model được cache
+web Tacahu và `Host` loopback). Agent lưu token vào volume cache nên khởi động lại vẫn online mà không cần
+trang web. Token hết hạn sau 30 ngày, hoặc khi tài khoản chủ máy bị khóa/xóa; máy dừng khi bấm **Dừng
+máy này** trên chính máy đó (agent tự gọi `POST /support-worker/self/revoke`). Model được cache
 trong process giữa các job; production VPS không cài `torch`, `transformers` hay tải checkpoint.
+
+**Một máy chạy cho cả nhóm:** chỉ cần một máy bật Docker và một tài khoản Support đăng nhập trên máy đó
+bấm **Cho phép**. Agent claim job của **cả platform**, nên các tài khoản Support khác không cần chạy
+Docker hay cấp quyền gì thêm: họ tạo job (`/check`), xem hàng đợi và thao tác bình thường. Mỗi request
+của agent kèm header `X-Agent-Info` (loại máy cpu/mps/cuda, pha tải pool/so sánh, tiến độ), server lưu
+vào `worker_devices.agent_info` sau khi lọc theo danh sách field cho phép, và `GET
+/support-worker/queue` trả `hosts` (tên máy, tài khoản chủ máy, trạng thái, tiến độ) cho mọi Support
+cùng platform. Máy chạy miễn là agent còn online: không cần chủ máy mở web hay còn đăng nhập. Chỉ chủ
+máy (hoặc chính máy đó) dừng được; API `devices/{id}/revoke` từ chối tài khoản khác. Khi dừng, hết hạn
+hoặc agent im quá 60 giây thì máy rời trạng thái chạy trong danh sách `hosts`.
 
 Job chỉ được tạo khi Support xác nhận: lệnh `/check` trên Telegram (hoặc nút **Kiểm tra trùng** trên
 tab **Chưa kiểm tra**) đếm các order chưa từng được so sánh, hỏi **Có**/**Không**, rồi tạo một job

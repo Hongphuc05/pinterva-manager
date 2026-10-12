@@ -24,6 +24,7 @@ from app.adapters.db.models import (
 )
 from app.application.duplicate_board import set_orders_duplicate_status
 from app.application.telegram_service import (
+    delete_messages,
     render_telegram_template,
     send_media_group,
     send_message,
@@ -614,6 +615,44 @@ def notify_pending_duplicate_candidates(session: Session, *, limit: int = 20) ->
         if notify_duplicate_candidate(session, candidate.id):
             notified += 1
     return notified
+
+
+def withdraw_decided_pair_from_other_supports(session: Session, action_log: TelegramActionLog) -> int:
+    """One Support decided a pair: the same pair sent to the other Support accounts is withdrawn.
+
+    Their buttons are closed (they would only answer "already handled") and the album/prompt is
+    deleted from their chats. Returns how many other chats were cleaned.
+    """
+    payload = action_log.payload or {}
+    candidate_id = str(payload.get("candidate_id") or "")
+    own_chat = str(payload.get("chat_id") or "")
+    if not candidate_id:
+        return 0
+    others = (
+        session.query(TelegramActionLog)
+        .filter(
+            TelegramActionLog.order_id == action_log.order_id,
+            TelegramActionLog.status == "pending",
+            TelegramActionLog.action_type.in_((ACTION_CONFIRM, ACTION_REJECT)),
+            TelegramActionLog.id != action_log.id,
+        )
+        .all()
+    )
+    to_delete: dict[str, set[int]] = {}
+    for other in others:
+        other_payload = other.payload or {}
+        if str(other_payload.get("candidate_id") or "") != candidate_id:
+            continue
+        other.status = "superseded"
+        chat = str(other_payload.get("chat_id") or "")
+        if chat and chat != own_chat:
+            ids = other_payload.get("message_ids") or [other_payload.get("message_id")]
+            to_delete.setdefault(chat, set()).update(int(i) for i in ids if i is not None)
+    session.commit()
+    for chat, ids in to_delete.items():
+        if ids:
+            delete_messages(chat, sorted(ids))
+    return len(to_delete)
 
 
 def execute_support_duplicate_decision(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import time
 import uuid
 from pathlib import Path
@@ -365,3 +366,58 @@ def test_the_cached_pool_is_loaded_at_start_before_any_token_or_job(tmp_path):
     cfg = _cfg(tmp_path, cache_dir=str(tmp_path / "c"))
     assert agent.run_agent(cfg, once=True, api=api, embedder=FakeEmbedder(), state=state) == 1
     assert state.snapshot()["progress"]["pool_loaded"] == 3 and api.pool_calls == []
+
+
+def test_api_requests_carry_what_the_machine_reports_about_itself():
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    seen: dict[str, str | None] = {}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            seen["info"] = self.headers.get("X-Agent-Info")
+            body = b'{"kind":"none"}'
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        state = agent.AgentState(_cfg(Path(".")), "sw_x")
+        state.device = "cpu"
+        state.set_progress(phase="syncing_pool", pool_loaded=10, pool_total=20)
+        api = agent.Api(f"http://127.0.0.1:{server.server_address[1]}", "sw_x")
+        api.info_provider = state.agent_info
+        api.claim("m", DIM)
+    finally:
+        server.shutdown()
+    assert json.loads(seen["info"]) == {"device": "cpu", "phase": "syncing_pool", "pool_loaded": 10, "pool_total": 20}
+
+
+def test_the_device_token_survives_a_restart_and_is_removed_when_dropped(tmp_path):
+    cfg = _cfg(tmp_path, cache_dir=str(tmp_path / "cache"))
+    first = agent.AgentState(cfg)
+    assert first.token is None and first.snapshot()["state"] == "waiting"
+    first.set_token("sw_saved")
+
+    restarted = agent.AgentState(cfg)  # a new container: online again without any web page
+    assert restarted.token == "sw_saved" and restarted.snapshot()["state"] == "ready"
+
+    restarted.set_token(None)
+    assert agent.AgentState(cfg).token is None
+
+
+def test_disconnect_revokes_the_token_on_the_api_before_dropping_it(local_agent):
+    state, base = local_agent
+    state.set_token("sw_live")
+    revoked: list[str | None] = []
+    state.on_disconnect = lambda: revoked.append(state.token)
+
+    code, _, _ = _call(f"{base}/disconnect", method="POST", body={})
+    assert code == 200 and revoked == ["sw_live"] and state.token is None

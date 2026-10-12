@@ -175,7 +175,7 @@ def test_support_review_password_and_queue_are_per_platform(client, two_platform
 
     queue_a = client.get("/api/support-worker/queue", headers=hdr_a).json()
     queue_b = client.get("/api/support-worker/queue", headers=hdr_b).json()
-    assert queue_a == {"waiting_jobs": 0, "jobs": [], "machines": {"ready": 0, "paused": 0, "offline": 0}}
+    assert queue_a == {"waiting_jobs": 0, "jobs": [], "hosts": [], "machines": {"ready": 0, "paused": 0, "offline": 0}}
     assert queue_b == queue_a  # both empty and independent, not shared state
 
 
@@ -259,5 +259,4 @@ def _agent_token_for(client, support_user: User) -> dict[str, str]:
     grant = client.post(
         "/api/support-worker/devices/grant", json={"machine_name": "isolation-test-machine"}, headers=_auth(support_user),
     ).json()
-    client.post("/api/support-worker/presence", headers=_auth(support_user))
     return {"Authorization": f"Bearer {grant['token']}"}

@@ -253,6 +253,28 @@ def test_web_check_queues_a_job_for_the_never_compared_orders(client, db_session
         assert res.json()["requested_count"] == 2
 
 
+def test_web_handle_moves_the_compared_orders_without_a_duplicate(client, db_session, setup):
+    no_match = _order(db_session, setup, "DJ-WH-NOMATCH")
+    _item(db_session, setup, no_match, "no_match")
+    pending = _order(db_session, setup, "DJ-WH-PENDING")
+    _item(db_session, setup, pending, "pending_review", is_duplicate=True)
+    headers = _login_headers(client, setup.support)
+    with patch(
+        "app.api.routes.support_compare_api.get_settings",
+        return_value=SimpleNamespace(support_compare_enabled=True),
+    ):
+        assert client.get("/api/support-compare/status", headers=headers).json()["handleable_orders"] == 1
+        res = client.post("/api/support-compare/handle", headers=headers)
+        assert res.status_code == 200 and res.json() == {"handled_count": 1}
+        # Nothing is left to move: a clear refusal instead of a silent zero.
+        assert client.post("/api/support-compare/handle", headers=headers).status_code == 409
+
+    for order in (no_match, pending):
+        db_session.refresh(order)
+    assert no_match.duplicate_check_status == "non_duplicate"
+    assert pending.duplicate_check_status == "uncheck"
+
+
 def _bearer(user: User) -> dict[str, str]:
     """Session of a Support who also opened the hidden review area (password set directly in the DB)."""
     from app.application import support_review_access as access
@@ -613,3 +635,58 @@ def test_search_rejects_empty_and_out_of_range_requests(client, setup):
     assert client.post("/api/support-review/search?top_k=0", files={"file": png}, headers=headers).status_code == 400
     assert client.post("/api/support-review/search", files={"file": ("e.png", b"", "image/png")}, headers=headers).status_code == 400
     assert client.post("/api/support-review/search", files={"file": png}).status_code == 401
+
+
+def test_when_one_support_decides_the_pair_is_withdrawn_from_the_other_supports(client, db_session, setup):
+    other_chat = "777002"
+    db_session.add(
+        User(
+            username="support-flow-2", full_name="Support Two", role="support",
+            password_hash=hash_password("pass"), telegram_chat_id=other_chat,
+            active=True, platform_id=setup.platform.id,
+        )
+    )
+    db_session.commit()
+    order = _order(db_session, setup, "DJ-TWO-SUPPORTS")
+    item = _item(db_session, setup, order, "pending_review", is_duplicate=True)
+    candidate = _candidate(db_session, item, 1)
+    item.review_status, item.selected_candidate_id, item.reviewed_at = "selected_duplicate", candidate.id, datetime.now(UTC)
+    db_session.commit()
+    with patch("app.application.support_compare.send_media_group", return_value=[{"message_id": 11}, {"message_id": 12}]), \
+            patch("app.application.support_compare.send_message", return_value={"message_id": 13}):
+        assert notify_pending_duplicate_candidates(db_session) == 1
+
+    actions = db_session.query(TelegramActionLog).filter(TelegramActionLog.order_id == order.id).all()
+    assert {a.payload["chat_id"] for a in actions} == {CHAT_ID, other_chat}  # both accounts got the pair
+    mine = {a.action_type: a.callback_token for a in actions if a.payload["chat_id"] == CHAT_ID}
+    theirs = {a.action_type: a.callback_token for a in actions if a.payload["chat_id"] == other_chat}
+
+    with patch("app.application.support_compare.delete_messages") as withdrawn:
+        _press(client, f"scdup_yes:{mine['SUPPORT_COMPARE_CONFIRM_DUPLICATE']}", delete_ok=True)
+    withdrawn.assert_called_once_with(other_chat, [11, 12, 13])
+
+    db_session.expire_all()
+    assert db_session.query(Order).get(order.id).duplicate_check_status == "duplicate"
+    statuses = {
+        a.payload["chat_id"]: a.status for a in db_session.query(TelegramActionLog).filter(TelegramActionLog.order_id == order.id)
+    }
+    assert statuses[other_chat] == "superseded"
+
+    # A late press on the other account's copy is a harmless "already handled", never a second decision.
+    send, _clear, _delete, answer = _press_as(client, other_chat, f"scdup_no:{theirs['SUPPORT_COMPARE_REJECT_DUPLICATE']}")
+    send.assert_not_called()
+    assert "đã được xử lý" in answer.call_args.args[1]
+    db_session.expire_all()
+    assert db_session.query(Order).get(order.id).duplicate_check_status == "duplicate"
+
+
+def _press_as(client, chat_id: str, data: str):
+    with (
+        patch("app.api.routes.telegram_api.get_settings", return_value=SimpleNamespace(support_compare_enabled=True, telegram_webhook_secret=None)),
+        patch("app.api.routes.telegram_api.send_message", return_value={"message_id": 902}) as send,
+        patch("app.api.routes.telegram_api.clear_message_keyboard") as clear,
+        patch("app.api.routes.telegram_api.delete_messages") as delete,
+        patch("app.api.routes.telegram_api.answer_callback_query") as answer,
+    ):
+        client.post("/api/telegram/webhook", json={"callback_query": {"id": "cb2", "data": data, "from": {"id": int(chat_id)}}})
+    return send, clear, delete, answer

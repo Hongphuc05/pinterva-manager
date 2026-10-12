@@ -195,6 +195,58 @@ describe('duplicate review page', () => {
     expect(calls.some((c) => c.path === '/support-review/search?top_k=10' && c.init?.body instanceof FormData)).toBe(true)
   })
 
+  it('runs /check and /handle from the control tab and shows pool loading and comparison progress', async () => {
+    let status = { enabled: true, new_orders: 235, handleable_orders: 12 }
+    const base = mocks.apiFetch.getMockImplementation()!
+    mocks.apiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/support-compare/status') return Promise.resolve(status)
+      if (path === '/support-worker/queue') {
+        return Promise.resolve({
+          waiting_jobs: 1,
+          machines: { ready: 1, paused: 0, offline: 0 },
+          jobs: [{
+            id: 'job1', status: 'running', requested_count: 100, remaining_count: 40, requested_by: 'Support A',
+            created_at: null, started_at: null, worker_name: 'MacBook-Phuc',
+          }],
+          hosts: [{
+            id: 'h1', machine_name: 'MacBook-Phuc', owner: 'Support A', state: 'busy', device: 'cpu',
+            progress: { phase: 'comparing', pool_loaded: 88000, pool_total: 88000, job_total: 100, job_embedded: 70, job_compared: 60 },
+            last_seen_at: null, expires_at: '2026-11-01T00:00:00Z',
+          }],
+        })
+      }
+      if (path === '/support-compare/check' && init?.method === 'POST') {
+        calls.push({ path, init })
+        return Promise.resolve({ job_id: 'j2', requested_count: 235 })
+      }
+      if (path === '/support-compare/handle' && init?.method === 'POST') {
+        calls.push({ path, init })
+        status = { ...status, handleable_orders: 0 }
+        return Promise.resolve({ handled_count: 12 })
+      }
+      return base(path, init)
+    })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    renderPage('/duplicate-review?tab=control')
+
+    await waitFor(() => expect(screen.getByTestId('new-orders')).toHaveTextContent('235'))
+    expect(screen.getByTestId('handleable-orders')).toHaveTextContent('12')
+
+    // What the machine is doing: the pool is loaded, 70 of 100 embedded, 60 compared with it.
+    const hosts = screen.getByTestId('control-hosts')
+    expect(within(hosts).getByText('MacBook-Phuc')).toBeInTheDocument()
+    expect(within(hosts).getByText(/88\.000 \/ 88\.000 \(100%\)/)).toBeInTheDocument()
+    expect(within(hosts).getByText(/70 \/ 100 \(70%\)/)).toBeInTheDocument()
+    expect(within(hosts).getByText(/60 \/ 100 \(60%\)/)).toBeInTheDocument()
+    expect(within(screen.getByTestId('control-jobs')).getByText(/60 \/ 100 \(60%\)/)).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: /Kiểm tra trùng/ }))
+    await waitFor(() => expect(posted('/support-compare/check')).toBe(true))
+    await userEvent.click(screen.getByRole('button', { name: /Chuyển sang Không trùng lặp/ }))
+    await waitFor(() => expect(posted('/support-compare/handle')).toBe(true))
+    await waitFor(() => expect(screen.getByTestId('handleable-orders')).toHaveTextContent('0'))
+  })
+
   it('says so while no machine has picked the search up yet', async () => {
     mocks.apiFetch.mockImplementation((path: string) => {
       if (path === '/support-review/access') return Promise.resolve(access)

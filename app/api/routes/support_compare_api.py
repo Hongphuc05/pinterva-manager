@@ -1,4 +1,4 @@
-"""Web entry for Support's duplicate check (same job as the Telegram /check command)."""
+"""Web entry for Support's duplicate check: the same jobs as Telegram /check and /handle."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from app.application.support_compare import (
     count_handleable_orders,
     count_support_unchecked_orders,
     create_support_compare_job,
+    handle_unchecked_orders,
 )
 from app.config import get_settings
 from app.domain.access import ROLE_SUPPORT
@@ -28,6 +29,10 @@ class SupportCompareStatusOut(BaseModel):
 class SupportCompareCheckOut(BaseModel):
     job_id: str
     requested_count: int
+
+
+class SupportCompareHandleOut(BaseModel):
+    handled_count: int
 
 
 @router.get("/support-compare/status", response_model=SupportCompareStatusOut)
@@ -69,3 +74,19 @@ def api_support_compare_check(
         raise HTTPException(status.HTTP_409_CONFLICT, "Không có đơn mới nào cần kiểm tra.")
     db.commit()
     return SupportCompareCheckOut(job_id=str(job.id), requested_count=job.requested_count)
+
+
+@router.post("/support-compare/handle", response_model=SupportCompareHandleOut)
+def api_support_compare_handle(
+    user: User = Depends(require_role(ROLE_SUPPORT)),
+    db: Session = Depends(get_db),
+):
+    """Move compared orders with no duplicate found to Không trùng lặp (Telegram /handle → Có)."""
+    if not get_settings().support_compare_enabled:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Chức năng kiểm tra trùng đang tắt trên hệ thống.")
+    if user.platform_id is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Tài khoản Support chưa được gắn platform.")
+    handled = handle_unchecked_orders(db, actor=user, platform_id=user.platform_id)
+    if handled == 0:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Không có đơn nào để chuyển.")
+    return SupportCompareHandleOut(handled_count=handled)

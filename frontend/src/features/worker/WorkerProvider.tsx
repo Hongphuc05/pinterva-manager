@@ -4,7 +4,6 @@ import { useAuth } from '../../auth/AuthContext'
 import { useToast } from '../../context/ToastContext'
 import { connectAgent, disconnectAgent, probeAgent, type AgentStatus } from './agentClient'
 
-const PRESENCE_MS = 20_000
 const PROBE_MS = 3_000
 const MAX_AUTO_FAILURES = 3
 
@@ -48,8 +47,8 @@ function readConsent(): Consent {
 }
 
 /**
- * For Support only: keeps this login's machines allowed (presence heartbeat), finds the agent on
- * this machine, asks "Có/Không" once per login and hands the agent its token.
+ * For Support only: finds the agent on this machine, asks "Có/Không" once per login and hands the
+ * agent its token. Once granted, the agent keeps the token and serves the whole team on its own.
  */
 export function WorkerProvider({ children, ConsentDialog }: { children: ReactNode; ConsentDialog?: React.ComponentType }) {
   const { user } = useAuth()
@@ -72,20 +71,6 @@ export function WorkerProvider({ children, ConsentDialog }: { children: ReactNod
     setProbed(true)
     return status
   }, [])
-
-  // Presence: tells the API the web is open, so this login's machines may compute.
-  useEffect(() => {
-    if (!isSupport) return
-    const beat = () => void apiFetch('/support-worker/presence', { method: 'POST' }).catch(() => undefined)
-    beat()
-    const timer = setInterval(beat, PRESENCE_MS)
-    const onVisible = () => document.visibilityState === 'visible' && beat()
-    document.addEventListener('visibilitychange', onVisible)
-    return () => {
-      clearInterval(timer)
-      document.removeEventListener('visibilitychange', onVisible)
-    }
-  }, [isSupport])
 
   // Look for the agent on this machine.
   useEffect(() => {

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ChevronDown, ChevronRight, Cpu, ListChecks, Loader2, RefreshCw } from 'lucide-react'
 import { DashboardLayout } from '../components/DashboardLayout'
-import { fetchJobOrders, fetchQueue, type JobOrders, type QueueJob, type QueueOverview } from '../features/worker/queueApi'
-import type { AgentProgress } from '../features/worker/agentClient'
+import { fetchJobOrders, fetchQueue, type JobOrders, type QueueHost, type QueueJob, type QueueOverview } from '../features/worker/queueApi'
+import { AgentProgressPanel } from '../features/worker/AgentProgressPanel'
 import { useWorker } from '../features/worker/WorkerProvider'
 
 const REFRESH_MS = 5000
@@ -16,52 +16,20 @@ function ago(iso: string | null): string {
   return `${Math.floor(seconds / 86400)} ngày trước`
 }
 
-function Bar({ label, value, total }: { label: string; value: number; total: number | null | undefined }) {
-  const pct = total ? Math.min(100, Math.round((value / total) * 100)) : null
-  return (
-    <div>
-      <div className="flex justify-between text-[11px] font-semibold text-slate-600">
-        <span>{label}</span>
-        <span className="tabular-nums">
-          {value.toLocaleString('vi-VN')}
-          {total ? ` / ${total.toLocaleString('vi-VN')} (${pct}%)` : ''}
-        </span>
-      </div>
-      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100">
-        <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${pct ?? 0}%` }} />
-      </div>
-    </div>
-  )
-}
-
-function AgentProgressPanel({ progress }: { progress: AgentProgress | undefined }) {
-  if (!progress || progress.phase === undefined || progress.phase === 'idle') return null
-  const syncing = progress.phase === 'syncing_pool'
-  return (
-    <div className="mt-4 space-y-2.5 border-t border-slate-100 pt-3" data-testid="agent-progress">
-      <p className="text-xs font-bold text-slate-800">
-        {syncing ? 'Đang tải pool ảnh cũ về máy (chưa so sánh được)…' : 'Đang embedding và so sánh với pool'}
-      </p>
-      <Bar label="Pool trên máy" value={progress.pool_loaded ?? 0} total={progress.pool_total} />
-      {progress.job_total ? (
-        <>
-          <Bar label="Embedding đơn mới" value={progress.job_embedded ?? 0} total={progress.job_total} />
-          <Bar label="Đã so sánh và gửi kết quả" value={progress.job_compared ?? 0} total={progress.job_total} />
-        </>
-      ) : null}
-    </div>
-  )
-}
-
-function MachineCard() {
+function MachineCard({ hosts }: { hosts: QueueHost[] }) {
   const { agent, probed, consent, busy, allow, stop } = useWorker()
   let title = 'Đang kiểm tra máy này…'
   let note = ''
   let action: { label: string; run: () => void; tone: 'primary' | 'plain' } | null = null
 
   if (probed && !agent) {
-    title = 'Máy này chưa chạy agent'
-    note = 'Bật agent trên máy này (docker compose up -d trong support_compare_image) để dùng GPU/CPU của máy chạy hàng đợi.'
+    if (hosts.length > 0) {
+      title = 'Không cần chạy agent trên máy này'
+      note = 'Hàng đợi đang chạy trên máy của một Support khác (xem bên dưới). Bạn vẫn xem và thao tác job bình thường.'
+    } else {
+      title = 'Máy này chưa chạy agent'
+      note = 'Bật agent trên máy này (docker compose up -d trong support_compare_image) để dùng GPU/CPU của máy chạy hàng đợi.'
+    }
   } else if (agent?.state === 'waiting') {
     title = consent === 'no' ? 'Bạn đã từ chối cho máy này chạy hàng đợi' : 'Máy này chưa được cho phép'
     note = 'Cho phép để hệ thống dùng GPU/CPU của máy này trong phiên đăng nhập hiện tại.'
@@ -70,7 +38,8 @@ function MachineCard() {
     const running = agent.state === 'busy' || (agent.progress?.phase !== undefined && agent.progress.phase !== 'idle')
     title = running ? 'Máy này đang chạy hàng đợi' : agent.state === 'paused' ? 'Máy này tạm dừng' : 'Máy này sẵn sàng chạy hàng đợi'
     note =
-      `${agent.name}${agent.device ? ` · ${agent.device.toUpperCase()}` : ''} · chỉ chạy trong phiên đăng nhập này.` +
+      `${agent.name}${agent.device ? ` · ${agent.device.toUpperCase()}` : ''} · chạy cho cả nhóm, ` +
+      'kể cả khi đóng web; chỉ máy này dừng được.' +
       (agent.state === 'paused' ? ' Đang chờ kết nối lại với hệ thống.' : '')
     action = { label: 'Dừng máy này', run: () => void stop(), tone: 'plain' }
   }
@@ -101,6 +70,53 @@ function MachineCard() {
         </button>
       )}
     </div>
+  )
+}
+
+const HOST_STATE: Record<string, { label: string; tone: string }> = {
+  busy: { label: 'Đang chạy job', tone: 'bg-emerald-50 text-emerald-700 ring-emerald-200' },
+  idle: { label: 'Sẵn sàng', tone: 'bg-emerald-50 text-emerald-700 ring-emerald-200' },
+  offline: { label: 'Mất kết nối', tone: 'bg-red-50 text-red-700 ring-red-200' },
+}
+
+function hostHint(host: QueueHost): string {
+  if (host.state === 'offline') return 'Agent không phản hồi. Kiểm tra Docker trên máy đó còn chạy không.'
+  return ''
+}
+
+function HostsCard({ hosts }: { hosts: QueueHost[] }) {
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm" data-testid="agent-hosts">
+      <h2 className="text-sm font-bold text-slate-800">Máy đang chạy agent của nhóm</h2>
+      {hosts.length === 0 ? (
+        <p className="mt-2 text-xs leading-relaxed text-slate-500">
+          Chưa có máy nào chạy agent. Một Support cần đăng nhập trên máy đang bật Docker và bấm “Cho phép máy này”; các
+          tài khoản còn lại không phải làm gì thêm.
+        </p>
+      ) : (
+        <ul className="mt-3 space-y-3">
+          {hosts.map((host) => {
+            const state = HOST_STATE[host.state] ?? HOST_STATE.offline
+            const hint = hostHint(host)
+            return (
+              <li key={host.id} className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span className="text-sm font-semibold text-slate-900">{host.machine_name}</span>
+                  <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ring-1 ${state.tone}`}>{state.label}</span>
+                  <span className="text-xs text-slate-500">
+                    Tài khoản {host.owner ?? '—'}
+                    {host.device ? ` · ${host.device.toUpperCase()}` : ''}
+                    {host.last_seen_at ? ` · phản hồi ${ago(host.last_seen_at)}` : ''}
+                  </span>
+                </div>
+                {hint && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
+                <AgentProgressPanel progress={host.progress} />
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </section>
   )
 }
 
@@ -238,8 +254,10 @@ export function SupportQueuePage() {
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Job đang đợi</p>
             <p className="mt-2 text-5xl font-bold tabular-nums text-slate-900" data-testid="waiting-jobs">{queue?.waiting_jobs ?? '–'}</p>
           </div>
-          <MachineCard />
+          <MachineCard hosts={queue?.hosts ?? []} />
         </div>
+
+        <HostsCard hosts={queue?.hosts ?? []} />
 
         {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-xs font-medium text-red-700">Không tải được hàng đợi. Sẽ thử lại tự động.</div>}
 

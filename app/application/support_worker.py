@@ -2,9 +2,11 @@
 
 The VPS never runs DINO. When a Support logs in on a machine that runs the agent, the web asks
 whether that machine may compute; on "Có" the web session *grants* the machine a token
-(``grant_device``) and hands it to the agent listening on localhost. The token works only while
-the granting user's web page keeps sending presence heartbeats, so closing the web or logging out
-stops the machine from taking (or continuing) work.
+(``grant_device``) and hands it to the agent listening on localhost, which keeps it across restarts.
+From then on the machine is the team's host: it claims the jobs of every Support account of the
+platform and works as long as the agent is online, whether or not any web page is open. It stops
+when its owner stops it (the agent revokes itself), when the token expires or when the owner's
+account is deactivated.
 
 Work items are handed out with a lease (``heartbeat_at``): a job whose lease expired is
 re-claimed by another machine and resumes with the orders that still have no completed
@@ -42,9 +44,8 @@ from app.application.support_compare import _unchecked_scope
 logger = logging.getLogger(__name__)
 
 SCHEMA = "support_compare_image"
-PRESENCE_TTL = timedelta(seconds=90)
 LEASE_TTL = timedelta(seconds=180)
-DEVICE_LIFETIME = timedelta(hours=12)
+DEVICE_LIFETIME = timedelta(days=30)
 AGENT_ONLINE_TTL = timedelta(seconds=60)
 MAX_CANDIDATES = 30
 CLASSIFIER_VERSION = "rule-based-v1"
@@ -98,12 +99,38 @@ def grant_device(
         platform_id=platform_id,
         token_hash=_sha256(token),
         approved_at=now,
-        presence_at=now,
         expires_at=now + DEVICE_LIFETIME,
     )
     session.add(device)
     session.flush()
     return device, token
+
+
+_INFO_PHASES = frozenset({"idle", "syncing_pool", "comparing"})
+_INFO_COUNTERS = ("pool_loaded", "pool_total", "job_total", "job_embedded", "job_compared")
+
+
+def parse_agent_info(raw: str | None) -> dict[str, Any] | None:
+    """Keep only the fields the agent is expected to report; anything else is dropped."""
+    if not raw or len(raw) > 1024:
+        return None
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    info: dict[str, Any] = {}
+    device = data.get("device")
+    if isinstance(device, str) and device.isalnum() and len(device) <= 16:
+        info["device"] = device.lower()
+    if data.get("phase") in _INFO_PHASES:
+        info["phase"] = data["phase"]
+    for key in _INFO_COUNTERS:
+        value = data.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 10_000_000:
+            info[key] = value
+    return info or None
 
 
 def authenticate_device(session: Session, token: str | None) -> SupportWorkerDevice:
@@ -125,29 +152,8 @@ def authenticate_device(session: Session, token: str | None) -> SupportWorkerDev
     user = session.get(User, device.user_id) if device.user_id else None
     if user is None or not user.active:
         raise WorkerAuthError("user_inactive", "Tài khoản đã cho phép máy này không còn hoạt động.", 401)
-    if device.presence_at is None or device.presence_at < now - PRESENCE_TTL:
-        raise WorkerAuthError(
-            "presence_lost", "Chưa có Support nào đăng nhập và mở web để cho phép máy này chạy.", 403
-        )
     device.last_seen_at = now
     return device
-
-
-def touch_presence(session: Session, user_id: uuid.UUID) -> list[SupportWorkerDevice]:
-    now = _now()
-    devices = (
-        session.query(SupportWorkerDevice)
-        .filter(
-            SupportWorkerDevice.user_id == user_id,
-            SupportWorkerDevice.status == "approved",
-            SupportWorkerDevice.expires_at > now,
-        )
-        .all()
-    )
-    for device in devices:
-        device.presence_at = now
-    session.flush()
-    return devices
 
 
 def revoke_device(session: Session, device: SupportWorkerDevice) -> None:
@@ -169,12 +175,10 @@ def revoke_user_devices(session: Session, user_id: uuid.UUID) -> int:
 
 
 def device_state(device: SupportWorkerDevice, now: datetime | None = None) -> str:
-    """paused (no user on the web) / busy / idle / offline (agent stopped polling)."""
+    """busy / idle / offline (the agent stopped calling the API) / revoked."""
     now = now or _now()
     if device.status != "approved" or device.expires_at <= now:
         return "revoked"
-    if device.presence_at is None or device.presence_at < now - PRESENCE_TTL:
-        return "paused"
     if device.last_seen_at is None or device.last_seen_at < now - AGENT_ONLINE_TTL:
         return "offline"
     return "busy" if device.busy_with else "idle"
@@ -792,8 +796,28 @@ def queue_overview(session: Session, platform_id: uuid.UUID) -> dict[str, Any]:
         )
         .all()
     )
+    owners = {
+        u.id: (u.full_name or u.username)
+        for u in session.query(User).filter(User.id.in_([d.user_id for d in devices if d.user_id])).all()
+    }
     states = [device_state(d, now) for d in devices]
+    hosts = [
+        {
+            "id": str(d.id),
+            "machine_name": d.machine_name,
+            "owner": owners.get(d.user_id),
+            "state": device_state(d, now),
+            "device": (d.agent_info or {}).get("device"),
+            "progress": {k: v for k, v in (d.agent_info or {}).items() if k != "device"},
+            "busy_with": d.busy_with,
+            "approved_at": d.approved_at.isoformat() if d.approved_at else None,
+            "last_seen_at": d.last_seen_at.isoformat() if d.last_seen_at else None,
+            "expires_at": d.expires_at.isoformat(),
+        }
+        for d in devices
+    ]
     return {
+        "hosts": hosts,
         "waiting_jobs": len(jobs),
         "jobs": [
             {

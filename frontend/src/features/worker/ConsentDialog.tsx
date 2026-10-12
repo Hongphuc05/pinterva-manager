@@ -16,7 +16,7 @@ export function ConsentDialog() {
         </div>
         <p className="text-sm leading-relaxed text-slate-600">
           Hệ thống muốn dùng <b>GPU/CPU</b> của máy <b>{agent.name}</b> để so sánh ảnh các job đang chờ kiểm tra trùng.
-          Máy chỉ chạy trong phiên đăng nhập này: đăng xuất hoặc đóng web thì máy tự dừng.
+          Máy sẽ chạy hàng đợi cho cả nhóm, kể cả khi bạn đóng web hoặc đăng xuất; chỉ máy này dừng được nó.
         </p>
         <div className="mt-6 flex justify-end gap-2">
           <button

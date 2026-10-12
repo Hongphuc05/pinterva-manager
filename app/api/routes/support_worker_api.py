@@ -1,8 +1,8 @@
 """API for the Support compute agent and the web page that lets it run.
 
 Agent side (device token, no user session): claiming work, downloading the image pool, reporting
-results. Web side (Support session): grant the machine the user is on, keep it allowed with
-presence heartbeats, revoke it, show the queue.
+results, stopping itself. Web side (Support session): grant the machine the user is on, revoke it
+(owner only), show the queue and the hosting machines.
 """
 
 from __future__ import annotations
@@ -39,7 +39,6 @@ def _device_out(device: SupportWorkerDevice, users: dict[uuid.UUID, str] | None 
         "busy_with": device.busy_with,
         "approved_at": device.approved_at.isoformat() if device.approved_at else None,
         "last_seen_at": device.last_seen_at.isoformat() if device.last_seen_at else None,
-        "presence_at": device.presence_at.isoformat() if device.presence_at else None,
         "expires_at": device.expires_at.isoformat(),
     }
 
@@ -48,7 +47,11 @@ def get_worker_device(request: Request, db: Session = Depends(get_db)) -> Suppor
     authorization = request.headers.get("authorization", "")
     token = authorization[7:].strip() if authorization.lower().startswith("bearer ") else None
     try:
-        return sw.authenticate_device(db, token)
+        device = sw.authenticate_device(db, token)
+        info = sw.parse_agent_info(request.headers.get("x-agent-info"))
+        if info is not None:
+            device.agent_info = info
+        return device
     except sw.WorkerAuthError as exc:
         db.commit()  # keep a revoke/expiry decided while authenticating
         raise HTTPException(exc.status_code, {"code": exc.code, "message": exc.message}) from exc
@@ -106,14 +109,6 @@ def queue_job_orders(
     return detail
 
 
-@router.post("/presence")
-def presence(user: User = Depends(_web_user), db: Session = Depends(get_db)):
-    """Heartbeat of an open web page: keeps this user's machines allowed to compute."""
-    devices = sw.touch_presence(db, user.id)
-    db.commit()
-    return {"devices": [_device_out(d, {user.id: user.full_name or user.username}) for d in devices]}
-
-
 @router.post("/devices/{device_id}/revoke")
 def device_revoke(
     device_id: uuid.UUID,
@@ -124,6 +119,8 @@ def device_revoke(
     device = db.get(SupportWorkerDevice, device_id)
     if device is None or device.platform_id != platform_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy máy")
+    if device.user_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Chỉ tài khoản đã cho phép máy này mới dừng được nó")
     sw.revoke_device(db, device)
     db.commit()
     return {"ok": True}
@@ -199,6 +196,14 @@ class ItemIn(BaseModel):
 
 class ItemsIn(BaseModel):
     items: list[ItemIn] = Field(min_length=1, max_length=50)
+
+
+@router.post("/self/revoke")
+def device_self_revoke(device: WorkerDevice, db: Session = Depends(get_db)):
+    """The hosting machine stops itself: only whoever holds its token can."""
+    sw.revoke_device(db, device)
+    db.commit()
+    return {"ok": True}
 
 
 @router.post("/jobs/{job_id}/heartbeat")

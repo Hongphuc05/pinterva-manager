@@ -152,35 +152,64 @@ def test_only_a_support_session_can_grant_and_an_unauthenticated_agent_is_reject
     assert client.post("/api/support-worker/devices/grant", json={}).status_code == 401
     assert client.post("/api/support-worker/devices/grant", json={}, headers=_auth(ctx.admin)).status_code == 403
     assert client.post("/api/support-worker/claim", json={"model_version": MODEL, "embedding_dim": DIM}).status_code == 401
-    assert client.post("/api/support-worker/presence").status_code == 401
-    assert client.post("/api/support-worker/presence", headers=_auth(ctx.admin)).status_code == 403
+    assert client.post("/api/support-worker/self/revoke").status_code == 401
 
 
-def test_agent_works_only_while_the_web_shows_presence(client, ctx, db_session):
+def test_the_hosting_machine_keeps_working_without_any_web_page_or_login(client, ctx, db_session):
     token = _pair(client, ctx.support)
+    # Hours later, with the owner's web closed and the owner logged out: no presence is needed.
+    assert client.post("/api/logout", headers=_auth(ctx.support)).status_code == 200
+    device = db_session.query(SupportWorkerDevice).one()
+    device.last_seen_at = datetime.now(UTC) - timedelta(hours=20)
+    db_session.commit()
     assert _claim(client, token)["kind"] == "none"
 
+
+def test_a_machine_stops_when_its_owner_account_is_deactivated_or_the_grant_expires(client, ctx, db_session):
+    token = _pair(client, ctx.support)
     device = db_session.query(SupportWorkerDevice).one()
-    device.presence_at = datetime.now(UTC) - timedelta(minutes=5)
+    device.expires_at = datetime.now(UTC) - timedelta(minutes=1)
     db_session.commit()
-    paused = client.post(
+    resp = client.post(
         "/api/support-worker/claim", json={"model_version": MODEL, "embedding_dim": DIM}, headers=_agent(token)
     )
-    assert paused.status_code == 403
-    assert paused.json()["detail"]["code"] == "presence_lost"
+    assert resp.status_code == 401 and resp.json()["detail"]["code"] == "expired"
 
-    assert client.post("/api/support-worker/presence", headers=_auth(ctx.support)).status_code == 200
-    assert _claim(client, token)["kind"] == "none"
+    token = _pair(client, ctx.support, "Mac B")
+    ctx.support.active = False
+    db_session.commit()
+    resp = client.post(
+        "/api/support-worker/claim", json={"model_version": MODEL, "embedding_dim": DIM}, headers=_agent(token)
+    )
+    assert resp.status_code == 401 and resp.json()["detail"]["code"] == "user_inactive"
 
 
-def test_logout_revokes_the_users_machines(client, ctx):
-    token = _pair(client, ctx.support)
-    assert client.post("/api/logout", headers=_auth(ctx.support)).status_code == 200
+def test_only_the_owner_or_the_machine_itself_can_stop_the_hosting_machine(client, ctx, db_session):
+    other = User(
+        username="sup-other2", full_name="Support Other", role="support",
+        password_hash=hash_password("pass"), active=True, platform_id=ctx.platform.id,
+    )
+    db_session.add(other)
+    db_session.commit()
+    token = _pair(client, ctx.support, "MacBook-Phuc")
+    device = db_session.query(SupportWorkerDevice).one()
+
+    refused = client.post(f"/api/support-worker/devices/{device.id}/revoke", headers=_auth(other))
+    assert refused.status_code == 403
+    assert _claim(client, token)["kind"] == "none"  # still working
+
+    assert client.post("/api/support-worker/self/revoke", headers=_agent(token)).status_code == 200
     resp = client.post(
         "/api/support-worker/claim", json={"model_version": MODEL, "embedding_dim": DIM}, headers=_agent(token)
     )
     assert resp.status_code == 401
-    assert resp.json()["detail"]["code"] == "revoked"
+    assert client.get("/api/support-worker/queue", headers=_auth(other)).json()["hosts"] == []
+
+
+def test_logout_keeps_the_hosting_machine_running(client, ctx):
+    token = _pair(client, ctx.support)
+    assert client.post("/api/logout", headers=_auth(ctx.support)).status_code == 200
+    assert _claim(client, token)["kind"] == "none"
 
 
 def test_job_round_trip_stores_items_and_promotes_the_batch_to_the_pool(client, ctx, db_session):
@@ -520,3 +549,74 @@ def test_the_password_is_shared_by_the_platform_but_a_token_is_per_user(client, 
     stolen = {**_auth(mate), "X-Review-Token": review["X-Review-Token"]}
     assert client.get("/api/support-review/jobs", headers=stolen).status_code == 403  # another user's token
     assert client.post("/api/support-review/access/unlock", json={"password": "secret1"}, headers=_auth(mate)).status_code == 200
+
+
+def test_other_support_accounts_see_the_hosting_machine_and_its_progress(client, ctx, db_session):
+    other = User(
+        username="sup-other", full_name="Support Other", role="support",
+        password_hash=hash_password("pass"), active=True, platform_id=ctx.platform.id,
+    )
+    db_session.add(other)
+    db_session.commit()
+    token = _pair(client, ctx.support, "MacBook-Phuc")
+
+    info = '{"device":"cpu","phase":"syncing_pool","pool_loaded":44000,"pool_total":88000,"evil":"x","job_total":-5}'
+    assert client.get(
+        "/api/support-worker/pool",
+        params={"model_version": MODEL, "embedding_dim": DIM, "limit": 5},
+        headers={**_agent(token), "X-Agent-Info": info},
+    ).status_code == 200
+
+    # A second account that runs no Docker sees who hosts the agent, on which machine and how far it is.
+    queue = client.get("/api/support-worker/queue", headers=_auth(other)).json()
+    assert len(queue["hosts"]) == 1
+    host = queue["hosts"][0]
+    assert host["machine_name"] == "MacBook-Phuc" and host["owner"] == "Support W"
+    assert host["state"] == "idle" and host["device"] == "cpu"
+    # Only the expected, valid fields are kept.
+    assert host["progress"] == {"phase": "syncing_pool", "pool_loaded": 44000, "pool_total": 88000}
+
+    # The machine keeps serving the team after its owner logs out, and leaves the list once stopped.
+    assert client.post("/api/logout", headers=_auth(ctx.support)).status_code == 200
+    assert len(client.get("/api/support-worker/queue", headers=_auth(other)).json()["hosts"]) == 1
+    assert client.post("/api/support-worker/self/revoke", headers=_agent(token)).status_code == 200
+    assert client.get("/api/support-worker/queue", headers=_auth(other)).json()["hosts"] == []
+
+
+def test_agent_info_header_is_ignored_when_malformed():
+    from app.application.support_worker import parse_agent_info
+
+    assert parse_agent_info(None) is None and parse_agent_info("not json") is None
+    assert parse_agent_info('["x"]') is None and parse_agent_info("{" + '"a":1,' * 400 + "}") is None
+    assert parse_agent_info('{"device":"mps; drop","phase":"hack"}') is None
+
+
+def test_another_support_can_take_over_when_the_hosting_machine_is_gone(client, ctx, db_session):
+    other = User(
+        username="sup-takeover", full_name="Support B", role="support",
+        password_hash=hash_password("pass"), active=True, platform_id=ctx.platform.id,
+    )
+    db_session.add(other)
+    db_session.commit()
+    _order(db_session, ctx, "DJ-TAKE-1")
+    job = create_support_compare_job(db_session, platform_id=ctx.platform.id, requested_by_id=ctx.support.id, chat_id="1")
+    db_session.commit()
+
+    # Support A's machine claims the job, then dies without being stopped (power cut, Docker down).
+    token_a = _pair(client, ctx.support, "Machine-A")
+    assert _claim(client, token_a)["kind"] == "job"
+    dead = db_session.query(SupportWorkerDevice).one()
+    dead.last_seen_at = datetime.now(UTC) - timedelta(hours=2)
+    db_session.query(SupportCompareJob).filter_by(id=job.id).update(
+        {"heartbeat_at": datetime.now(UTC) - timedelta(minutes=10)}
+    )
+    db_session.commit()
+
+    # Support B, on another machine with the agent running, allows it. Nothing of A is needed.
+    token_b = _pair(client, other, "Machine-B")
+    taken = _claim(client, token_b)
+    assert taken["kind"] == "job" and taken["job"]["id"] == str(job.id)
+
+    hosts = {h["machine_name"]: h for h in client.get("/api/support-worker/queue", headers=_auth(other)).json()["hosts"]}
+    assert hosts["Machine-B"]["state"] == "busy" and hosts["Machine-B"]["owner"] == "Support B"
+    assert hosts["Machine-A"]["state"] == "offline"  # still listed until it expires or is stopped

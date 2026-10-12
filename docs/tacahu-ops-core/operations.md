@@ -63,11 +63,12 @@ Luồng vận hành một lô (ví dụ 100 order admin vừa crawl về Waiting
 2. Bấm **Có**: tạo **một job** với danh sách đơn được chốt lúc đó (mỗi lần bấm Có là một job; nhiều
    job có thể cùng chờ, mỗi đơn chỉ thuộc một job). Xem ở trang **Hàng đợi** trên web: số job đang
    đợi, bấm vào job để xem các đơn còn chờ kiểm tra.
-3. Khi một Support đăng nhập web trên máy đang chạy agent, web hỏi "Cho phép dùng GPU/CPU của máy
-   này để chạy hàng đợi?". **Có** thì web xin token cho phiên đăng nhập và giao cho agent (chạy ở
-   `127.0.0.1:8765`, chỉ nhận lệnh từ web của Tacahu). Máy chạy miễn là phiên còn sống: đăng xuất thu
-   hồi máy, đóng web thì máy tạm dừng sau ≤90 giây và việc dở được máy khác nhận tiếp (lease 3 phút).
-   Token của máy hết hạn sau 12 giờ; Support dừng máy bất cứ lúc nào ở trang Hàng đợi.
+3. Chỉ cần **một máy** chạy Docker và một Support đăng nhập trên máy đó bấm **Có** ở câu hỏi "Cho phép
+   dùng GPU/CPU của máy này để chạy hàng đợi?" (một lần). Agent giữ token (volume cache) nên sau khi
+   khởi động lại vẫn tự online, kể cả khi không ai mở web. Máy chạy job của **mọi** tài khoản Support
+   trong platform; các tài khoản khác không cần Docker, chỉ xem trang **Hàng đợi** để biết máy nào đang
+   chạy, của tài khoản nào và tiến độ. Việc dở được máy khác nhận tiếp khi hết lease 3 phút. Chỉ máy
+   chủ bấm **Dừng máy này** được; token hết hạn sau 30 ngày thì bấm **Có** lại.
 4. Agent so sánh cả lô rồi VPS thêm cả lô vào pool. Bot báo số order đã so, số nghi trùng, số không
    thấy trùng và số lỗi.
 5. Support mở khu vực ẩn **Quản lý trùng lặp** (`/duplicate-review`, không có trong menu; vào bằng Alt+Shift+D hoặc bấm nhanh 5 lần vào logo; mật khẩu riêng,

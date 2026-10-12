@@ -88,6 +88,9 @@ playwright_evidence/  evidence browser automation
 chrome_profiles/      Chrome profile/session
 ```
 
+`support_compare_image.worker_devices.agent_info` (JSONB) lưu thông tin máy agent tự báo (loại máy, tiến độ
+tải pool/so sánh) để các tài khoản Support khác xem; đây là dữ liệu hiển thị, không ảnh hưởng quyền.
+
 `support_compare_image.comparison_jobs` là hàng đợi durable để máy Support local claim job; model
 checkpoint Hugging Face và cache của nó nằm trên máy Support, không nằm trong `DATA_DIR` production.
 Máy local nên dùng SSH tunnel/private VPN; không mở port PostgreSQL ra Internet.

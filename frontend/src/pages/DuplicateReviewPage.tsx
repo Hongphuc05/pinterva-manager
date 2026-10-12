@@ -1,19 +1,21 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, ClipboardCheck, History, Loader2, Lock, ScanSearch, Search, Settings, type LucideIcon } from 'lucide-react'
+import { ArrowLeft, ClipboardCheck, History, Loader2, Lock, ScanSearch, Search, Settings, Workflow, type LucideIcon } from 'lucide-react'
 import { fetchAccess, LOCKED_EVENT, setReviewToken } from '../features/dupReview/access'
 import { LockScreen } from '../features/dupReview/components/LockScreen'
 import { Lightbox } from '../features/dupReview/components/Lightbox'
 import { SearchPage } from '../features/dupReview/components/SearchPage'
 import { useSearchHistory } from '../features/dupReview/hooks'
+import { ControlView } from '../features/dupReview/views/ControlView'
 import { JobsView } from '../features/dupReview/views/JobsView'
 import { ReviewView } from '../features/dupReview/views/ReviewView'
 import { SettingsView } from '../features/dupReview/views/SettingsView'
 
-type TabId = 'review' | 'search' | 'jobs' | 'settings'
+type TabId = 'review' | 'control' | 'search' | 'jobs' | 'settings'
 
 const NAV: { id: TabId; label: string; icon: LucideIcon }[] = [
   { id: 'review', label: 'Duyệt kết quả', icon: ClipboardCheck },
+  { id: 'control', label: 'Điều khiển', icon: Workflow },
   { id: 'search', label: 'Tìm ảnh', icon: Search },
   { id: 'jobs', label: 'Lịch sử job', icon: History },
   { id: 'settings', label: 'Cài đặt', icon: Settings },
@@ -132,6 +134,7 @@ function Console({ onLock }: { onLock: () => void }) {
           {tab === 'review' && (
             <ReviewView jobId={jobId} onJobChange={(id) => go('review', id)} onZoom={setZoom} zoomOpen={zoom !== null} />
           )}
+          {tab === 'control' && <ControlView />}
           {tab === 'search' && <SearchPage history={searchHistory} onZoom={setZoom} />}
           {tab === 'jobs' && <JobsView onOpen={(id) => go('review', id)} />}
           {tab === 'settings' && <SettingsView onLock={onLock} />}

@@ -32,13 +32,18 @@ Agent: nhận job (có lease), tải pool (lần đầu, sau đó chỉ phần m
 Support: khu vực ẩn "Quản lý trùng lặp" (nhập mật khẩu) ──► chọn ảnh trùng / "Model sai" ──► Telegram
 ```
 
+- **Điều khiển trên web:** khu vực ẩn **Quản lý trùng lặp** có tab **Điều khiển** với hai nút tương ứng
+  lệnh Telegram `/check` (Kiểm tra trùng) và `/handle` (Chuyển sang Không trùng lặp), kèm tiến độ
+  từng máy (nạp pool, embedding, so sánh) và từng job. Hai nút này cũng nằm ở tab Chưa kiểm tra của trang
+  Đơn hàng.
 - **Nhiều job:** mỗi lần bấm **Có** là một job riêng với danh sách đơn cố định; các job chờ theo thứ
   tự, mỗi đơn chỉ thuộc một job. Máy nào rảnh nhận job cũ nhất.
-- **Máy chỉ chạy trong phiên đăng nhập.** Web gửi tín hiệu "có mặt" mỗi 20 giây; quá 90 giây không
-  thấy thì API từ chối agent. **Đăng xuất** thu hồi mọi máy của người đó, token hết hạn sau 12 giờ.
-  Việc dở quay lại hàng đợi (hết lease 3 phút) và máy khác làm tiếp các đơn còn lại.
-- Agent không có quyền vào database, chỉ giữ token của máy (thu hồi được: nút **Dừng máy** ở trang
-  Hàng đợi). Chỉ trang web thuộc `SUPPORT_WEB_URL` được điều khiển agent (kiểm tra `Origin` và `Host`).
+- **Một máy chạy cho cả nhóm.** Sau khi một Support bấm **Có** (một lần), agent giữ token trên volume
+  `pool-cache` và tự online sau mỗi lần khởi động Docker, không cần ai mở web hay đăng nhập. Nó chạy job
+  của mọi tài khoản Support cùng platform; các tài khoản khác xem máy chủ và tiến độ ở trang Hàng đợi.
+  Token hết hạn sau 30 ngày. Việc dở quay lại hàng đợi (hết lease 3 phút) nếu máy dừng giữa chừng.
+- Agent không có quyền vào database, chỉ giữ token của máy (thu hồi được: nút **Dừng máy này** ở trang
+  Hàng đợi, chỉ hiện và dùng được trên chính máy chủ; agent tự thu hồi token của nó). Chỉ trang web thuộc `SUPPORT_WEB_URL` được điều khiển agent (kiểm tra `Origin` và `Host`).
 - Các order trong cùng lô **không so chéo nhau**; cả lô được thêm vào pool sau khi so xong.
   Mỗi order ghi `review_status`: `pending_review` (model nghi trùng) hoặc `no_match`.
 

@@ -52,6 +52,17 @@ Các path vẫn giữ tên `designers` để tương thích client cũ, nhưng `
 tra trong tập recipient gồm `designer`, `designer-trello` và `support`. Support group bị từ chối
 vì callback duplicate chỉ xác thực chat riêng.
 
+### Hàng đợi so sánh ảnh
+
+- `GET /support-worker/queue` (Support): `waiting_jobs`, `jobs`, `machines` (đếm) và `hosts` — các máy đang
+  được cho phép của platform kèm tài khoản chủ máy, trạng thái (`idle`/`busy`/`paused`/`offline`), loại
+  máy và tiến độ tự báo của agent. Mọi tài khoản Support cùng platform thấy như nhau.
+- Agent gửi `X-Agent-Info` trên mọi request; server bỏ qua field lạ hoặc sai kiểu.
+- `GET /support-compare/status`, `POST /support-compare/check`, `POST /support-compare/handle` (Support):
+  cùng thao tác với lệnh Telegram `/check` và `/handle` → **Có**. `/check` xếp các đơn chưa từng so sánh vào một
+  job (cần tài khoản đã liên kết Telegram để nhận báo cáo); `/handle` chuyển các đơn đã so sánh mà không thấy
+  trùng sang Không trùng lặp. Cả hai trả 409 khi không còn đơn nào để xử lý.
+
 ### Phân loại order và công Support
 
 - `POST /orders/duplicate-check-status` và `POST /orders/duplicate-domain` cho phép Admin/Support,

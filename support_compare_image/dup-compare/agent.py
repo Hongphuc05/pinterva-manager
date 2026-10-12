@@ -7,11 +7,13 @@ controlled by the Tacahu web page open on the same machine:
    from this machine, the web asks "let this machine's GPU/CPU run the queue?".
 2. On "Có" the web gets a token for this login from the API and hands it to the agent
    (``POST /connect``). Only the allowed web origin may talk to the agent.
-3. The token works only while that user keeps the web open (presence heartbeat) and is revoked on
-   logout, so the machine stops as soon as the session ends. While allowed, the agent claims a
-   queued job (or image search) with a lease, downloads the image pool (once, then only the
+3. The agent keeps the token on its cache volume, so after a restart it is online again without any
+   web page. It then serves the whole team: it claims the queued jobs (or image searches) of every
+   Support account of the platform with a lease, downloads the image pool (once, then only the
    delta), embeds and compares on this machine's GPU/CPU and posts the results. If the lease is
    lost the work is dropped and another machine resumes it.
+4. It stops when ``POST /disconnect`` is called from this machine (the agent revokes its own token)
+   or when the API no longer accepts the token (expired, owner deactivated).
 """
 
 from __future__ import annotations
@@ -91,6 +93,8 @@ class Api:
         self.base = base_url.rstrip("/")
         self.token = token
         self.timeout = timeout
+        # What this machine tells the API about itself with every request (device kind, progress).
+        self.info_provider: Callable[[], dict[str, Any]] | None = None
 
     def _call(
         self,
@@ -109,6 +113,8 @@ class Api:
         headers = {"Content-Type": "application/json", "User-Agent": "support-compare-agent/1"}
         if auth and self.token:
             headers["Authorization"] = f"Bearer {self.token}"
+            if self.info_provider is not None:
+                headers["X-Agent-Info"] = json.dumps(self.info_provider(), separators=(",", ":"))
         request = urllib.request.Request(url, data=data, method=method, headers=headers)
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
@@ -144,6 +150,9 @@ class Api:
 
     def complete_job(self, job_id: str, baseline_count: int) -> dict:
         return self._call("POST", f"/jobs/{job_id}/complete", body={"baseline_count": baseline_count})
+
+    def revoke_self(self) -> None:
+        self._call("POST", "/self/revoke", body={})
 
     def fail_job(self, job_id: str, error: str) -> None:
         self._call("POST", f"/jobs/{job_id}/fail", body={"error": error[:4000]})
@@ -590,10 +599,21 @@ class AgentState:
         self.device: str | None = None
         self.model_loaded = False
         self.progress: dict[str, Any] = {"phase": "idle"}
+        self._token_file = Path(cfg.cache_dir) / "device-token" if cfg.cache_dir else None
+        if token is None and self._token_file is not None and self._token_file.is_file():
+            saved = self._token_file.read_text().strip()
+            if saved:
+                self._token, self.status = saved, "ready"
+        # Called by /disconnect with the token before it is dropped (the agent revokes itself).
+        self.on_disconnect: Callable[[], None] | None = None
 
     def set_progress(self, **fields: Any) -> None:
         with self._lock:
             self.progress.update(fields)
+
+    def agent_info(self) -> dict[str, Any]:
+        with self._lock:
+            return {"device": self.device, **self.progress}
 
     def clear_job_progress(self) -> None:
         with self._lock:
@@ -610,6 +630,20 @@ class AgentState:
         with self._lock:
             self._token = token
             self.status = "waiting" if token is None else "ready"
+            self._persist_token(token)
+
+    def _persist_token(self, token: str | None) -> None:
+        if self._token_file is None:
+            return
+        try:
+            if token is None:
+                self._token_file.unlink(missing_ok=True)
+            else:
+                self._token_file.parent.mkdir(parents=True, exist_ok=True)
+                self._token_file.write_text(token)
+                self._token_file.chmod(0o600)
+        except OSError as exc:  # keep working with the in-memory token
+            logger.warning("không lưu được token của máy: %s", exc)
 
     def set_status(self, status: str) -> None:
         with self._lock:
@@ -694,6 +728,8 @@ def make_handler(state: AgentState):
             if not (origin and self._host_ok()):
                 return self._send(403, {"error": "forbidden"})
             if self.path == "/disconnect":
+                if state.on_disconnect is not None:
+                    state.on_disconnect()
                 state.set_token(None)
                 return self._send(200, state.snapshot(), origin)
             if self.path != "/connect":
@@ -735,6 +771,17 @@ def run_agent(
 ) -> int:
     api = api or Api(cfg.api_url)
     state = state or AgentState(cfg, api.token)
+    if isinstance(api, Api):
+        api.info_provider = state.agent_info
+
+        def stop_machine() -> None:
+            try:
+                api.token = state.token
+                api.revoke_self()
+            except (ApiError, OSError) as exc:  # already revoked or offline: the token is dropped anyway
+                logger.info("không thu hồi được token trên API (%s)", exc)
+
+        state.on_disconnect = stop_machine
     pool = Pool(cfg.model_version, cfg.embedding_dim, cfg.pool_page_size, cache_dir=cfg.cache_dir)
     pool.load_cache()
     state.set_progress(pool_loaded=len(pool), pool_total=pool.total)

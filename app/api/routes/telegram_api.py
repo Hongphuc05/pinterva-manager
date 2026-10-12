@@ -66,6 +66,7 @@ from app.application.support_compare import (
     supersede_support_check_siblings,
     support_check_keyboard,
     support_handle_keyboard,
+    withdraw_decided_pair_from_other_supports,
 )
 from app.application.telegram_service import (
     answer_callback_query,
@@ -670,8 +671,8 @@ async def api_telegram_webhook(
                 user_chat_id,
                 f"✅ Đã xếp <b>{job.requested_count}</b> đơn trong tab <b>Chưa kiểm tra</b> "
                 "vào hàng đợi để embedding và kiểm tra trùng.\n"
-                "Job chạy khi có một Support đăng nhập web và cho phép máy của mình dùng CPU/GPU "
-                "(xem trang <b>Hàng đợi</b>). Bot sẽ báo cáo khi so sánh xong.",
+                "Job chạy trên máy đang chạy agent của nhóm (xem trang <b>Hàng đợi</b> trên web). "
+                "Bot sẽ báo cáo khi so sánh xong.",
             )
             return {"ok": True}
 
@@ -734,6 +735,11 @@ async def api_telegram_webhook(
             action_log.executed_at = datetime.now(UTC)
             action_log.actor_id = support_user.id
             db.commit()
+            try:
+                withdraw_decided_pair_from_other_supports(db, action_log)
+            except Exception:  # the decision is already saved; a leftover message is only clutter
+                db.rollback()
+                logger.exception("failed to withdraw pair of action %s from other Support chats", action_log.id)
             payload = action_log.payload or {}
             message_ids = payload.get("message_ids") or _legacy_pair_message_ids(
                 db, user_chat_id, payload.get("message_id")

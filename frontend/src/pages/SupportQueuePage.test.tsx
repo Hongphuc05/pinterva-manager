@@ -63,6 +63,40 @@ describe('support queue page', () => {
     expect(within(rows[1]).getByText(/máy MacBook Phúc/)).toBeInTheDocument()
   })
 
+  it("shows the team's hosting machine to an account that runs no agent itself", async () => {
+    setWorker({ agent: null, probed: true })
+    queue = {
+      waiting_jobs: 0,
+      jobs: [],
+      machines: { ready: 1, paused: 0, offline: 0 },
+      hosts: [
+        {
+          id: 'h1', machine_name: 'MacBook-Phuc', owner: 'Support W', state: 'busy', device: 'cpu',
+          progress: { phase: 'syncing_pool', pool_loaded: 44000, pool_total: 88000 },
+          last_seen_at: now, expires_at: now,
+        },
+      ],
+    }
+    render(<SupportQueuePage />)
+    const hosts = await screen.findByTestId('agent-hosts')
+    expect(within(hosts).getByText('MacBook-Phuc')).toBeInTheDocument()
+    expect(within(hosts).getByText('Đang chạy job')).toBeInTheDocument()
+    expect(within(hosts).getByText(/Tài khoản Support W · CPU/)).toBeInTheDocument()
+    expect(within(hosts).getByText(/44\.000 \/ 88\.000 \(50%\)/)).toBeInTheDocument()
+    expect(screen.getByText('Không cần chạy agent trên máy này')).toBeInTheDocument()
+    expect(screen.queryByText('Máy này chưa chạy agent')).not.toBeInTheDocument()
+  })
+
+  it('says when a hosting machine stopped answering', async () => {
+    queue = {
+      waiting_jobs: 0, jobs: [], machines: { ready: 0, paused: 0, offline: 1 },
+      hosts: [{ id: 'h1', machine_name: 'MacBook-Phuc', owner: 'Support W', state: 'offline', device: null, progress: {}, last_seen_at: now, expires_at: now }],
+    }
+    render(<SupportQueuePage />)
+    expect(await screen.findByText(/Agent không phản hồi/)).toBeInTheDocument()
+    expect(screen.getByText('Mất kết nối')).toBeInTheDocument()
+  })
+
   it('says so when nothing is waiting', async () => {
     render(<SupportQueuePage />)
     expect(await screen.findByText('Không có job nào đang đợi.')).toBeInTheDocument()
