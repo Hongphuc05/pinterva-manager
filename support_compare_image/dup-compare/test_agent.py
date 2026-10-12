@@ -92,9 +92,13 @@ class FakeApi:
 
 class FakeEmbedder:
     name = "m"
+    device = "cpu"
 
     def encode_batch(self, images):
         return np.tile(np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32), (len(images), 1))
+
+    def to(self, device):
+        self.device = device
 
 
 @pytest.fixture(autouse=True)
@@ -295,7 +299,10 @@ def test_status_is_readable_by_the_allowed_web_origin_with_cors_and_private_netw
     code, headers, body = _call(f"{base}/status")
     assert code == 200 and headers["Access-Control-Allow-Origin"] == "https://web.test"
     assert headers["Access-Control-Allow-Private-Network"] == "true"
-    assert json.loads(body) == {"agent": "support-compare", "version": 1, "name": "Mac Test", "state": "waiting", "device": "mps", "model_loaded": True, "progress": {"phase": "idle"}}
+    assert json.loads(body) == {
+        "agent": "support-compare", "version": 1, "name": "Mac Test", "state": "waiting",
+        "device": "mps", "available_devices": ["cpu"], "model_loaded": True, "progress": {"phase": "idle"},
+    }
     code, headers, _ = _call(f"{base}/status", method="OPTIONS")
     assert code == 204 and "POST" in headers["Access-Control-Allow-Methods"] and headers["Access-Control-Allow-Private-Network"] == "true"
 
@@ -421,3 +428,50 @@ def test_disconnect_revokes_the_token_on_the_api_before_dropping_it(local_agent)
 
     code, _, _ = _call(f"{base}/disconnect", method="POST", body={})
     assert code == 200 and revoked == ["sw_live"] and state.token is None
+
+
+def test_switching_device_calls_the_hook_and_reports_the_new_device(local_agent):
+    import json
+
+    state, base = local_agent
+    state.available_devices = ["cpu", "mps"]
+    state.device = "cpu"
+    switched: list[str] = []
+    state.on_switch_device = lambda device: (switched.append(device), setattr(state, "device", device))
+
+    code, _, body = _call(f"{base}/device", method="POST", body={"device": "mps"})
+    assert code == 200 and switched == ["mps"] and json.loads(body)["device"] == "mps"
+
+
+def test_switching_to_an_unavailable_device_is_refused_with_a_clear_reason(local_agent):
+    state, base = local_agent
+    state.available_devices = ["cpu"]
+    state.on_switch_device = lambda device: pytest.fail("must not be called")
+
+    code, _, body = _call(f"{base}/device", method="POST", body={"device": "mps"})
+    assert code == 400
+    message = json.loads(body)["message"]
+    assert "mps" in message and "Docker" in message
+
+
+def test_switching_device_is_refused_while_the_agent_is_busy(local_agent):
+    state, base = local_agent
+    state.available_devices = ["cpu", "mps"]
+    state.set_token("sw_live")  # set_status("busy") is a no-op for a machine with no token
+    state.set_status("busy")
+    state.on_switch_device = lambda device: pytest.fail("must not be called")
+
+    code, _, _ = _call(f"{base}/device", method="POST", body={"device": "mps"})
+    assert code == 409
+
+
+def test_a_failed_switch_reports_the_error_without_crashing_the_agent(local_agent):
+    state, base = local_agent
+    state.available_devices = ["cpu", "cuda"]
+
+    def boom(device):
+        raise RuntimeError("CUDA out of memory")
+
+    state.on_switch_device = boom
+    code, _, body = _call(f"{base}/device", method="POST", body={"device": "cuda"})
+    assert code == 500 and "CUDA out of memory" in json.loads(body)["message"]

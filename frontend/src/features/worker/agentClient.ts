@@ -19,6 +19,7 @@ export interface AgentStatus {
   name: string
   state: AgentState
   device: string | null
+  available_devices: string[]
   model_loaded: boolean
   progress?: AgentProgress
 }
@@ -63,4 +64,17 @@ export async function disconnectAgent(): Promise<void> {
   } catch {
     // the agent stops by itself when the token is revoked
   }
+}
+
+/** Ask the agent to move the model to another device (cpu/mps/cuda). Throws with the
+ * agent's own Vietnamese reason (busy, device not available on this machine...) on failure. */
+export async function switchAgentDevice(device: string): Promise<AgentStatus> {
+  const res = await call('/device', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ device }),
+  })
+  const body = await res.json().catch(() => null)
+  if (!res.ok) throw new Error(body?.message || 'Không đổi được device.')
+  return body as AgentStatus
 }

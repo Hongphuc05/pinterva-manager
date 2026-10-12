@@ -14,7 +14,7 @@ vi.mock('../../api/client', () => ({ apiFetch: api.apiFetch }))
 const agentApi = vi.hoisted(() => ({ probeAgent: vi.fn(), connectAgent: vi.fn(), disconnectAgent: vi.fn() }))
 vi.mock('./agentClient', () => agentApi)
 
-const status = (over: Partial<AgentStatus> = {}): AgentStatus => ({ agent: 'support-compare', version: 1, name: 'MacBook Phúc', state: 'waiting', device: 'mps', model_loaded: true, ...over })
+const status = (over: Partial<AgentStatus> = {}): AgentStatus => ({ agent: 'support-compare', version: 1, name: 'MacBook Phúc', state: 'waiting', device: 'mps', available_devices: ['cpu', 'mps'], model_loaded: true, ...over })
 
 let current: AgentStatus | null
 let calls: { path: string; init?: RequestInit }[]

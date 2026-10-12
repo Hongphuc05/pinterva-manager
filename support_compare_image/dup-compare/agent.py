@@ -45,6 +45,7 @@ from backend.compare_core import (
     fetch_image,
     get_cached_embedder,
 )
+from backend.embedding import detect_available_devices
 from PIL import Image
 
 logger = logging.getLogger("support_compare.agent")
@@ -597,6 +598,7 @@ class AgentState:
         self._token = token
         self.status = "waiting" if token is None else "ready"
         self.device: str | None = None
+        self.available_devices: list[str] = ["cpu"]
         self.model_loaded = False
         self.progress: dict[str, Any] = {"phase": "idle"}
         self._token_file = Path(cfg.cache_dir) / "device-token" if cfg.cache_dir else None
@@ -606,6 +608,12 @@ class AgentState:
                 self._token, self.status = saved, "ready"
         # Called by /disconnect with the token before it is dropped (the agent revokes itself).
         self.on_disconnect: Callable[[], None] | None = None
+        # Called by POST /device with the validated target device; raises on failure.
+        self.on_switch_device: Callable[[str], None] | None = None
+
+    def is_busy(self) -> bool:
+        with self._lock:
+            return self.status == "busy"
 
     def set_progress(self, **fields: Any) -> None:
         with self._lock:
@@ -658,6 +666,7 @@ class AgentState:
                 "name": self.cfg.machine_name,
                 "state": self.status,  # waiting (not allowed) | ready | busy | paused
                 "device": self.device,
+                "available_devices": list(self.available_devices),
                 "model_loaded": self.model_loaded,
                 "progress": dict(self.progress),
             }
@@ -732,6 +741,8 @@ def make_handler(state: AgentState):
                     state.on_disconnect()
                 state.set_token(None)
                 return self._send(200, state.snapshot(), origin)
+            if self.path == "/device":
+                return self._handle_device(origin)
             if self.path != "/connect":
                 return self._send(404, {"error": "not found"}, origin)
             try:
@@ -743,6 +754,36 @@ def make_handler(state: AgentState):
                 return self._send(400, {"error": "invalid token"}, origin)
             state.set_token(token)
             logger.info("web page connected this machine (token received)")
+            self._send(200, state.snapshot(), origin)
+
+        def _handle_device(self, origin: str) -> None:
+            try:
+                length = min(int(self.headers.get("Content-Length") or 0), 4096)
+                device = json.loads(self.rfile.read(length) or b"{}").get("device")
+            except (ValueError, AttributeError):
+                device = None
+            if not isinstance(device, str):
+                return self._send(400, {"error": "invalid device"}, origin)
+            if state.is_busy():
+                return self._send(409, {"error": "busy", "message": "Máy đang xử lý job, chờ xong rồi đổi."}, origin)
+            if device not in state.available_devices:
+                return self._send(
+                    400,
+                    {
+                        "error": "device_unavailable",
+                        "message": f"Máy này không dùng được '{device}' (chỉ có: {', '.join(state.available_devices)}). "
+                        "Nếu agent đang chạy bằng Docker trên macOS, GPU không khả dụng — chạy trực tiếp bằng Python để dùng GPU.",
+                    },
+                    origin,
+                )
+            if state.on_switch_device is None:
+                return self._send(409, {"error": "not_ready", "message": "Model chưa sẵn sàng để đổi device."}, origin)
+            try:
+                state.on_switch_device(device)
+            except Exception as exc:  # the model failed to move (e.g. OOM on the target device)
+                logger.exception("đổi device sang %s thất bại", device)
+                return self._send(500, {"error": "switch_failed", "message": str(exc)}, origin)
+            logger.info("đổi device sang %s theo yêu cầu từ web", device)
             self._send(200, state.snapshot(), origin)
 
     return Handler
@@ -793,6 +834,14 @@ def run_agent(
             embedder = get_cached_embedder(cfg.model_name)
         state.device = getattr(embedder, "device", None)
         state.model_loaded = True
+        state.available_devices = detect_available_devices()
+        if hasattr(embedder, "to"):
+
+            def switch_device(device: str) -> None:
+                embedder.to(device)
+                state.device = embedder.device
+
+            state.on_switch_device = switch_device
         while True:
             api.token = state.token
             if api.token is None:

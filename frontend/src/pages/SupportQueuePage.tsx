@@ -1,9 +1,65 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ChevronDown, ChevronRight, Cpu, ListChecks, Loader2, RefreshCw } from 'lucide-react'
+import { ChevronDown, ChevronRight, Cpu, ListChecks, Loader2, RefreshCw, Zap } from 'lucide-react'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { fetchJobOrders, fetchQueue, type JobOrders, type QueueHost, type QueueJob, type QueueOverview } from '../features/worker/queueApi'
 import { AgentProgressPanel } from '../features/worker/AgentProgressPanel'
 import { useWorker } from '../features/worker/WorkerProvider'
+import { useToast } from '../context/ToastContext'
+
+const DEVICE_LABEL: Record<string, string> = { cpu: 'CPU', mps: 'GPU (Apple)', cuda: 'GPU (NVIDIA)' }
+
+function DeviceSwitcher({ device, availableDevices }: { device: string | null; availableDevices: string[] }) {
+  const { switchDevice } = useWorker()
+  const { showToast } = useToast()
+  const [switching, setSwitching] = useState<string | null>(null)
+  if (!device) return null
+
+  async function pick(target: string) {
+    if (target === device || switching) return
+    setSwitching(target)
+    try {
+      await switchDevice(target)
+      showToast(`Đã đổi sang ${DEVICE_LABEL[target] || target}.`, 'success')
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Không đổi được device.', 'error')
+    } finally {
+      setSwitching(null)
+    }
+  }
+
+  // Always offer every known device so Support sees GPU exists even when this run can't use
+  // it (e.g. agent chạy trong Docker trên macOS — không có GPU) — hover/disabled explains why.
+  const allDevices = ['cpu', 'mps', 'cuda']
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-1.5">
+      <span className="flex items-center gap-1 text-[11px] font-semibold text-slate-400">
+        <Zap className="h-3 w-3" />Chạy bằng:
+      </span>
+      {allDevices.map((d) => {
+        const available = availableDevices.includes(d)
+        const active = d === device
+        return (
+          <button
+            key={d}
+            type="button"
+            disabled={!available || active || switching !== null}
+            onClick={() => void pick(d)}
+            title={available ? undefined : 'Không khả dụng trên máy này (nếu agent chạy bằng Docker trên macOS, GPU không dùng được — chạy trực tiếp bằng Python để dùng GPU)'}
+            className={`rounded-md px-2 py-1 text-[11px] font-bold transition disabled:cursor-not-allowed ${
+              active
+                ? 'bg-emerald-600 text-white'
+                : available
+                  ? 'border border-slate-300 bg-white text-slate-600 hover:bg-slate-50'
+                  : 'border border-slate-200 bg-slate-50 text-slate-300'
+            }`}
+          >
+            {switching === d ? <Loader2 className="h-3 w-3 animate-spin" /> : DEVICE_LABEL[d] || d.toUpperCase()}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
 
 const REFRESH_MS = 5000
 
@@ -53,6 +109,9 @@ function MachineCard({ hosts }: { hosts: QueueHost[] }) {
         <div className="min-w-0">
           <p className="text-sm font-bold text-slate-900">{title}</p>
           {note && <p className="mt-1 text-xs leading-relaxed text-slate-500">{note}</p>}
+          {agent && agent.state !== 'waiting' && (
+            <DeviceSwitcher device={agent.device} availableDevices={agent.available_devices} />
+          )}
         </div>
       </div>
       <AgentProgressPanel progress={agent?.progress} />

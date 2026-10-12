@@ -32,6 +32,22 @@ from .config import MODEL_CONFIG
 logger = logging.getLogger("dup_compare.embedding")
 
 
+def detect_available_devices() -> list[str]:
+    """Devices this process can actually run the model on right now — "cpu" always,
+    "mps"/"cuda" only when the hardware is real AND reachable from this process. Docker
+    Desktop on macOS never exposes Metal to a container, so inside Docker this correctly
+    reports only "cpu" even on an Apple Silicon host; running natively is what unlocks "mps"."""
+    import torch
+
+    devices = ["cpu"]
+    if torch.cuda.is_available():
+        devices.append("cuda")
+    mps = getattr(torch.backends, "mps", None)
+    if mps is not None and mps.is_available():
+        devices.append("mps")
+    return devices
+
+
 class VisualEmbedder(ABC):
     name: str = "abstract"
 
@@ -69,6 +85,15 @@ class DinoV2Embedder(VisualEmbedder):
         )
         self.model = AutoModel.from_pretrained(model_name).to(self.device)
         self.model.eval()
+
+    def to(self, device: str) -> None:
+        """Move the already-loaded model to another device (no re-download). Caller must
+        check the device is actually available (detect_available_devices()) and must not
+        call this while a batch is in flight — moving weights mid-forward-pass is undefined."""
+        if device == self.device:
+            return
+        self.model = self.model.to(device)
+        self.device = device
 
     def encode(self, image: Image.Image) -> np.ndarray:
         return self.encode_batch([image])[0]

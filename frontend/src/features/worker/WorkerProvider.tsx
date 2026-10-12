@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { apiFetch } from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'
 import { useToast } from '../../context/ToastContext'
-import { connectAgent, disconnectAgent, probeAgent, type AgentStatus } from './agentClient'
+import { connectAgent, disconnectAgent, probeAgent, switchAgentDevice, type AgentStatus } from './agentClient'
 
 const PROBE_MS = 3_000
 const MAX_AUTO_FAILURES = 3
@@ -22,6 +22,8 @@ interface WorkerContextValue {
   decline: () => void
   /** Stop this machine: revoke its grant and disconnect the agent. */
   stop: () => Promise<void>
+  /** Move this machine's model to another device (cpu/mps/cuda). Throws on failure. */
+  switchDevice: (device: string) => Promise<void>
 }
 
 const WorkerContext = createContext<WorkerContextValue | null>(null)
@@ -160,9 +162,17 @@ export function WorkerProvider({ children, ConsentDialog }: { children: ReactNod
     await refresh()
   }, [refresh])
 
+  const switchDevice = useCallback(
+    async (device: string) => {
+      await switchAgentDevice(device)
+      await refresh()
+    },
+    [refresh],
+  )
+
   const value = useMemo(
-    () => ({ agent, probed, consent, busy, allow, decline, stop }),
-    [agent, probed, consent, busy, allow, decline, stop],
+    () => ({ agent, probed, consent, busy, allow, decline, stop, switchDevice }),
+    [agent, probed, consent, busy, allow, decline, stop, switchDevice],
   )
   const promptOpen = isSupport && agent?.state === 'waiting' && consent === null
   return (

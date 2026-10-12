@@ -18,16 +18,17 @@ const job = (over: object) => ({
   id: 'abcdef123456', status: 'queued', requested_count: 12, remaining_count: 12, requested_by: 'Support A',
   created_at: now, started_at: null, worker_name: null, ...over,
 })
-const agent = (over: Partial<AgentStatus> = {}): AgentStatus => ({ agent: 'support-compare', version: 1, name: 'MacBook Phúc', state: 'ready', device: 'mps', model_loaded: true, ...over })
+const agent = (over: Partial<AgentStatus> = {}): AgentStatus => ({ agent: 'support-compare', version: 1, name: 'MacBook Phúc', state: 'ready', device: 'mps', available_devices: ['cpu', 'mps'], model_loaded: true, ...over })
 
 let queue: QueueOverview
 let orders: { orders: { order_id: string; external_order_id: string; product_name: string | null; thumbnail_url: string | null }[] }
 let calls: string[]
 const allow = vi.fn()
 const stop = vi.fn()
+const switchDevice = vi.fn()
 
 function setWorker(over: Record<string, unknown>) {
-  worker.value = { agent: null, probed: true, consent: null, busy: false, allow, decline: vi.fn(), stop, ...over }
+  worker.value = { agent: null, probed: true, consent: null, busy: false, allow, decline: vi.fn(), stop, switchDevice, ...over }
 }
 
 beforeEach(() => {
@@ -36,6 +37,7 @@ beforeEach(() => {
   calls = []
   allow.mockReset()
   stop.mockReset()
+  switchDevice.mockReset()
   setWorker({})
   api.apiFetch.mockReset().mockImplementation((path: string) => {
     calls.push(path)
@@ -141,6 +143,40 @@ describe('support queue page', () => {
     expect(screen.getByText(/MacBook Phúc · MPS/)).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Dừng máy này' }))
     expect(stop).toHaveBeenCalled()
+  })
+
+  it('lets Support switch device, greys out ones unavailable on this machine', async () => {
+    setWorker({ agent: agent({ state: 'ready', device: 'cpu', available_devices: ['cpu'] }), consent: 'yes' })
+    render(<SupportQueuePage />)
+    await screen.findByText('Máy này sẵn sàng chạy hàng đợi')
+
+    const cpuButton = screen.getByRole('button', { name: 'CPU' })
+    const gpuButton = screen.getByRole('button', { name: 'GPU (Apple)' })
+    expect(cpuButton).toBeDisabled() // already active
+    expect(gpuButton).toBeDisabled() // not in available_devices on this run
+
+    await userEvent.click(gpuButton)
+    expect(switchDevice).not.toHaveBeenCalled()
+  })
+
+  it('switching device calls switchDevice and reports success', async () => {
+    switchDevice.mockResolvedValue(undefined)
+    setWorker({ agent: agent({ state: 'ready', device: 'cpu', available_devices: ['cpu', 'mps'] }), consent: 'yes' })
+    render(<SupportQueuePage />)
+    await screen.findByText('Máy này sẵn sàng chạy hàng đợi')
+
+    await userEvent.click(screen.getByRole('button', { name: 'GPU (Apple)' }))
+    expect(switchDevice).toHaveBeenCalledWith('mps')
+  })
+
+  it('a failed switch shows the agent\'s own reason', async () => {
+    switchDevice.mockRejectedValue(new Error('Máy đang xử lý job, chờ xong rồi đổi.'))
+    setWorker({ agent: agent({ state: 'busy', device: 'cpu', available_devices: ['cpu', 'mps'] }), consent: 'yes' })
+    render(<SupportQueuePage />)
+    await screen.findByText('Máy này đang chạy hàng đợi')
+
+    await userEvent.click(screen.getByRole('button', { name: 'GPU (Apple)' }))
+    expect(switchDevice).toHaveBeenCalledWith('mps')
   })
 
   it('explains how to start the agent when none answers on this machine', async () => {

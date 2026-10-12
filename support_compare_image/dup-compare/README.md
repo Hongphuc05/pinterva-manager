@@ -83,7 +83,14 @@ cd dup-compare && python agent.py
 ```
 
 Thiết bị tự chọn `cuda` → `mps` → `cpu` (đặt `EMBEDDING_DEVICE` để ép). Docker trên macOS không
-truyền được GPU vào container.
+truyền được GPU vào container — chạy agent trong Docker thì luôn chỉ thấy `cpu`, kể cả trên máy
+Apple Silicon.
+
+**Đổi CPU/GPU ngay trên web:** trang Hàng đợi (`/support-queue`) hiện các device máy này thật sự
+dùng được (`GET /status` trả `available_devices`) và cho bấm đổi (`POST /device {"device": ...}`)
+mà không cần khởi động lại agent — model chỉ chuyển `.to(device)`, không tải lại. Bị từ chối (400)
+nếu device không khả dụng trên máy đó (ví dụ xin GPU trong khi agent chạy Docker), hoặc máy đang
+bận job (409, chờ xong rồi đổi).
 
 Lần đầu sau khi được cho phép, agent tải model (~350MB) và toàn bộ pool (~85k vector, vài trăm MB);
 các lần sau chỉ tải phần mới thêm vào pool.
