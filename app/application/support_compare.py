@@ -56,11 +56,10 @@ ACTION_EXPIRY = timedelta(hours=24)
 
 
 def _unchecked_scope(platform_id: uuid.UUID) -> list:
-    """Orders shown in Support's "Chưa kiểm tra" tab: unchecked and still Waiting."""
+    """Orders shown in Support's "Chưa kiểm tra" tab: untagged and still Waiting."""
     return [
         Order.platform_id == platform_id,
-        # Waiting only: an order that is already Doing is treated as non-duplicate and
-        # is not part of the check.
+        # An untagged order Admin has already assigned sits in "Đang làm" and is out of the check.
         Order.state.in_(SUPPORT_CLASSIFICATION_STATES),
         or_(
             Order.duplicate_check_status.is_(None),
@@ -147,7 +146,6 @@ def handle_unchecked_orders(session: Session, *, actor: User, platform_id: uuid.
         platform_id=platform_id,
         order_ids=order_ids,
         duplicate_status=DUPLICATE_CHECK_NON_DUPLICATE,
-        allow_support_unclassified_doing=True,
     )
 
 
@@ -652,9 +650,7 @@ def execute_support_duplicate_decision(
     if order.platform_id != item.platform_id:
         raise ValueError("Candidate không cùng platform với order")
 
-    # The normal web command remains Waiting-only.  This scoped callback is the
-    # only path allowed to classify an unverified Doing order after the model
-    # has produced a positive candidate and Support has clicked a button.
+    # Same rule as the web: an order Admin has already given to a designer cannot be tagged.
     # No expected order version here: the order legitimately changes between the notification and
     # Support's click (status sync bumps it), and the service re-checks scope under a row lock.
     # Idempotent: a previous click may have changed the order and then been interrupted (deploy
@@ -667,7 +663,6 @@ def execute_support_duplicate_decision(
             platform_id=item.platform_id,
             order_ids=[order.id],
             duplicate_status=decision_status,
-            allow_support_unclassified_doing=True,
         )
 
     candidate.decision_status = decision_status

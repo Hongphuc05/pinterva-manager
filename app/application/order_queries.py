@@ -11,7 +11,6 @@ from app.domain.access import (
     ROLE_DESIGNER_TRELLO,
     ROLE_SUPPORT,
     SUPPORT_CLASSIFICATION_STATES,
-    SUPPORT_CLASSIFIED_STATUSES,
     SUPPORT_READ_ONLY_DOING_STATES,
     WORK_DOMAIN_DUPLICATE,
     WORK_DOMAIN_STANDARD,
@@ -20,24 +19,29 @@ from app.domain.access import (
 FIX_STATES = frozenset({"REVISION", "REVISION_REQUESTED", "FIX"})
 
 
-def is_support_visible_order(order: Order) -> bool:
-    """Return whether Support may read an order in its classification workspace.
+SUPPORT_VISIBLE_STATES = SUPPORT_CLASSIFICATION_STATES | SUPPORT_READ_ONLY_DOING_STATES
+# Neither worked on nor handed in: left out of Support's workspace and of its "Đã nộp" count.
+_SUPPORT_UNCOUNTED_STATES = frozenset({"CANCELLED", "EXCEPTION"})
 
-    Unclassified orders are visible for classification only while they are
-    waiting or externally marked Doing.  Support also keeps read access to every order in Doing, while
-    completed duplicate classifications remain visible in their own tabs after
-    workflow state advances.
-    A duplicate domain is included as a defensive compatibility check for old
-    rows whose duplicate-check status was not backfilled consistently.
+
+def is_support_visible_order(order: Order) -> bool:
+    """Support sees an order only while it is Waiting or Doing.
+
+    Once the designer has handed in a result the order leaves Support's workspace, whatever
+    its tag; ``count_support_submitted_orders`` reports how many did.
     """
-    state = (order.state or "").upper()
-    printerval_status = (order.printerval_status or "").lower()
+    return (order.state or "").upper() in SUPPORT_VISIBLE_STATES
+
+
+def count_support_submitted_orders(session: Session, platform_id: uuid.UUID) -> int:
+    """Orders past Doing (handed in, in Fix or done): hidden from Support, shown as one number."""
     return (
-        state in SUPPORT_CLASSIFICATION_STATES
-        or state in SUPPORT_READ_ONLY_DOING_STATES
-        or printerval_status in {"waiting", "doing"}
-        or order.work_domain == WORK_DOMAIN_DUPLICATE
-        or (order.duplicate_check_status or "") in SUPPORT_CLASSIFIED_STATUSES
+        session.query(Order)
+        .filter(
+            Order.platform_id == platform_id,
+            Order.state.not_in(SUPPORT_VISIBLE_STATES | _SUPPORT_UNCOUNTED_STATES),
+        )
+        .count()
     )
 
 
@@ -58,10 +62,8 @@ def list_orders_for_user(
 ) -> list[Order]:
     """Return the orders visible to the current role.
 
-    Support may classify only the pre-classification queue through the web,
-    keeps read access to every order in Doing, and keeps completed
-    classifications visible after they move to Review or Done. The comparison
-    callback has a separate scoped path for unclassified Doing orders.
+    Support sees every Waiting and Doing order of its platform and nothing past Doing:
+    an order whose designer has handed in a result leaves the workspace.
     """
     if user.role in (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO):
         designer_id = str(user.id)
@@ -72,16 +74,7 @@ def list_orders_for_user(
         if user.platform_id is None:
             return []
         query = query.filter(Order.platform_id == user.platform_id)
-        query = query.filter(
-            or_(
-                Order.state.in_(SUPPORT_CLASSIFICATION_STATES),
-                Order.state.in_(SUPPORT_READ_ONLY_DOING_STATES),
-                Order.printerval_status.ilike("waiting"),
-                Order.printerval_status.ilike("doing"),
-                Order.work_domain == WORK_DOMAIN_DUPLICATE,
-                Order.duplicate_check_status.in_(SUPPORT_CLASSIFIED_STATUSES),
-            )
-        )
+        query = query.filter(Order.state.in_(SUPPORT_VISIBLE_STATES))
     elif platform_id:
         query = query.filter(Order.platform_id == platform_id)
 

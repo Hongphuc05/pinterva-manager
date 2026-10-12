@@ -24,14 +24,11 @@ phải enforce role + platform + assignment ở backend.
 ## Admin và Support
 
 - Admin có toàn quyền theo platform; một số endpoint quản lý platform/user là admin-only.
-- Support trên web chỉ được kiểm tra/phân loại order còn ở hàng chờ `Waiting` (bao gồm các state
-  legacy tương đương). Support vẫn xem được mọi order đang `Doing` trong tab `Đang làm`
-  để theo dõi, nhưng tab này chỉ read-only. Order Doing chưa kiểm tra cũng xuất hiện trong tab
-  **Chưa kiểm tra** để làm nguồn cho bộ so sánh, nhưng chỉ được quyết định qua nút Telegram
-  của candidate hợp lệ. Sau khi đã chốt `duplicate` hoặc
-  `non_duplicate`, order vẫn hiện trong tab phân loại tương ứng để Support đối soát, kể cả
-  khi đã sang `Doing`, `Review` hoặc `Done`; backend vẫn từ chối lệnh phân loại ngoài
-  `Waiting` từ web.
+- Support chỉ thấy đơn `Waiting` và `Doing` của platform mình, và chỉ gắn tag được cho đơn còn
+  `Waiting` (bao gồm các state legacy tương đương), trên web lẫn qua nút Telegram. Đơn chưa gắn tag
+  mà Admin đã chia cho designer nằm ở tab `Đang làm`, chỉ xem. Đơn designer đã nộp bài
+  (Review/Fix/Done) bị backend loại khỏi danh sách và trả 404 ở trang chi tiết; Support chỉ nhận
+  số lượng của chúng (`submitted_count`).
 - Khi Support chốt `duplicate`, order lưu `support_classified_by_id` và
   `support_classified_at`, đồng thời ghi timeline để Finance đếm công theo từng Support.
   Chốt `non_duplicate` chỉ đổi trạng thái kiểm tra, không ghi timeline và không được tính
@@ -43,8 +40,8 @@ phải enforce role + platform + assignment ở backend.
   notification. Candidate `review` chỉ phục vụ test embedding/compare; callback `review` bị
   chặn. Với source live `support_unchecked`, Telegram gửi album gồm ảnh mới và ảnh historical
   top-1, kèm mã/tên hai đơn và hai nút **Trùng**/**Không trùng**. Callback gọi cùng command
-  backend như web, ghi actor/version/audit; riêng order Doing chưa kiểm tra được phép đi qua
-  callback scoped này, không đặt quyền quyết định vào nội dung Telegram.
+  backend như web, ghi actor/version/audit, với cùng giới hạn: order đã được chia cho designer bị
+  từ chối kèm thông báo. Quyền quyết định không nằm trong nội dung Telegram.
 - Support có thể gửi `/check` trong chat riêng với bot để đếm các order **Chưa kiểm tra** của
   đúng platform mình được gắn. Bot chỉ tạo job sau khi Support bấm **Có, bắt đầu**; token nút
   có hạn dùng, khóa theo chat/platform và không mở quyền cho tài khoản khác. Bấm **Không** chỉ

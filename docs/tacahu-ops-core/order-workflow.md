@@ -3,11 +3,11 @@
 ## Role và domain
 
 - `admin`: quản trị platform, user, phân loại/phân công, state, Fix, tài chính và audit.
-- `support`: chỉ phân loại duplicate ở hàng chờ `Waiting`/state legacy tương đương và
-  xem/duyệt danh sách bài nộp; không có quyền Admin tổng quát. Support vẫn xem được mọi
-  order `Doing` trong tab `Đang làm` ở chế độ read-only. Order đã phân loại vẫn xuất hiện
-  ở tab `Trùng lặp`/`Không trùng lặp` để đối soát sau khi sang `Doing`, `Review` hoặc
-  `Done`, nhưng Support không được phân loại lại ngoài `Waiting`.
+- `support`: gắn tag trùng/không trùng cho đơn còn `Waiting` và xem/duyệt danh sách bài nộp;
+  không có quyền Admin tổng quát. Support thấy mọi đơn `Waiting` và `Doing` của platform, chia
+  thành bốn tab không chồng nhau (xem [architecture.md](architecture.md)); đơn Admin đã chia cho
+  designer mà chưa gắn tag nằm ở tab `Đang làm` và chỉ xem. Đơn designer đã nộp bài không còn hiện
+  với Support.
 - `designer`: chỉ làm assignment standard của chính mình.
 - `designer-trello`: làm duplicate domain trên board cộng tác; đây là ngoại lệ visibility có chủ đích.
 
@@ -54,9 +54,8 @@ transition nhưng application layer không được tự động recover.
    nhật duplicate check status. Support chỉ được thực hiện bước này khi order còn ở
    `Waiting`; chỉ quyết định `duplicate` mới ghi người + thời điểm, timeline và công
    Support. Quyết định `non_duplicate` không tạo timeline/công Support. Standard
-   được Admin phân công; duplicate vào Duplicate Board. Sau khi order vào `Doing`, Support
-   vẫn xem được mọi order trong tab `Đang làm`, còn order đã phân loại tiếp tục xuất hiện ở
-   tab phân loại tương ứng; tất cả đều read-only.
+   được Admin phân công; duplicate vào Duplicate Board. Đơn chưa gắn tag mà đã được chia
+   chuyển sang tab `Đang làm` của Support (chỉ xem).
 3. **Làm việc**: assignment approved hoặc Designer Trello nhận thẻ đưa order vào
    `IN_PROGRESS`. Assignment/status Printerval là write async, serialized trên queue
    `assignment`.

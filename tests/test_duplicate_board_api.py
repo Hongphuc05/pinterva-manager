@@ -779,7 +779,7 @@ def test_move_card_to_designer_enqueues_printerval_doing_sync(client, db_session
         del client.app.dependency_overrides[get_current_platform_id]
 
 
-def test_support_can_classify_unchecked_doing_order_on_web(client, db_session):
+def test_support_cannot_tag_an_untagged_order_admin_already_assigned(client, db_session):
     platform = _platform(db_session)
     _, headers = _login(client, db_session, "support", "support-doing-check-user", platform.id)
     doing = Order(
@@ -800,6 +800,32 @@ def test_support_can_classify_unchecked_doing_order_on_web(client, db_session):
         )
     finally:
         client.app.dependency_overrides.pop(get_current_platform_id, None)
-    assert res.status_code == 200
+    assert res.status_code == 400 and "ORD-WEB-DOING" in res.json()["detail"]
     db_session.refresh(doing)
-    assert doing.duplicate_check_status == "non_duplicate"
+    assert doing.duplicate_check_status == "uncheck"
+
+
+def test_support_list_hides_handed_in_orders_and_reports_them_as_one_number(client, db_session):
+    platform = _platform(db_session)
+    _, headers = _login(client, db_session, "support", "support-partition-user", platform.id)
+    rows = [
+        ("P-WAIT", "WAITING", "standard", "uncheck"),
+        ("P-ASSIGNED", "IN_PROGRESS", "standard", "uncheck"),
+        ("P-NONDUP-DOING", "IN_PROGRESS", "standard", "non_duplicate"),
+        ("P-DUP-BOARD", "IN_PROGRESS", "duplicate", "duplicate"),
+        ("P-DUP-REVIEW", "QC_PENDING", "duplicate", "duplicate"),  # handed in: hidden
+        ("P-NONDUP-DONE", "DONE", "standard", "non_duplicate"),  # handed in: hidden
+        ("P-FIX", "REVISION", "standard", "uncheck"),  # handed in: hidden
+        ("P-CANCELLED", "CANCELLED", "standard", "uncheck"),  # neither listed nor counted
+    ]
+    for code, state, domain, check in rows:
+        db_session.add(
+            Order(external_order_id=code, platform_id=platform.id, work_domain=domain, duplicate_check_status=check, state=state)
+        )
+    db_session.commit()
+
+    body = client.get("/api/orders", headers=headers).json()
+    assert {o["external_order_id"] for o in body["orders"]} == {"P-WAIT", "P-ASSIGNED", "P-NONDUP-DOING", "P-DUP-BOARD"}
+    assert body["submitted_count"] == 3
+    hidden = db_session.query(Order).filter(Order.external_order_id == "P-DUP-REVIEW").one()
+    assert client.get(f"/api/orders/{hidden.id}", headers=headers).status_code == 404

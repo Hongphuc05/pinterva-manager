@@ -199,7 +199,6 @@ def api_set_orders_duplicate_check_status(
             order_ids=payload.order_ids,
             duplicate_status=payload.status,
             expected_versions=payload.expected_versions,
-            allow_support_unclassified_doing=True,
         )
     except DuplicateBoardError as exc:
         db.rollback()

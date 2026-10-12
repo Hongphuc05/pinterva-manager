@@ -17,12 +17,10 @@ from app.domain.access import (
     DUPLICATE_CHECK_DUPLICATE,
     DUPLICATE_CHECK_NON_DUPLICATE,
     DUPLICATE_CHECK_STATUSES,
-    DUPLICATE_CHECK_UNCHECK,
     ROLE_ADMIN,
     ROLE_DESIGNER_TRELLO,
     ROLE_SUPPORT,
     SUPPORT_CLASSIFICATION_STATES,
-    SUPPORT_READ_ONLY_DOING_STATES,
     WORK_DOMAIN_DUPLICATE,
     WORK_DOMAIN_STANDARD,
     WORK_DOMAINS,
@@ -291,12 +289,11 @@ def set_orders_duplicate_status(
     order_ids: list[uuid.UUID],
     duplicate_status: str,
     expected_versions: dict[uuid.UUID, int] | None = None,
-    allow_support_unclassified_doing: bool = False,
 ) -> int:
     """Update duplicate verification status for orders (by Admin or Support).
 
-    The optional Doing scope is reserved for the Telegram comparison callback.
-    The normal Support web command remains Waiting-only by default.
+    Support may tag only an order that is still Waiting, on the web and on Telegram alike:
+    once Admin has given it to a designer it is out of Support's hands.
     """
     if actor.role not in (ROLE_ADMIN, ROLE_SUPPORT):
         raise DuplicateBoardError("Chỉ admin và support được thay đổi trạng thái trùng lặp của đơn hàng")
@@ -318,43 +315,16 @@ def set_orders_duplicate_status(
         raise DuplicateBoardError("Mỗi đơn phải thuộc platform đang chọn")
 
     if actor.role == ROLE_SUPPORT:
-        def _is_doing(order: Order) -> bool:
-            return (
-                (order.state or "").upper() in SUPPORT_READ_ONLY_DOING_STATES
-                or (order.printerval_status or "").lower() == "doing"
-            )
-
-        def _is_waiting(order: Order) -> bool:
-            return (
-                (order.state or "").upper() in SUPPORT_CLASSIFICATION_STATES
-                and not _is_doing(order)
-            )
-
         out_of_scope = [
             order.external_order_id
             for order in orders
-            if not (_is_waiting(order) or (allow_support_unclassified_doing and _is_doing(order)))
+            if (order.state or "").upper() not in SUPPORT_CLASSIFICATION_STATES
         ]
         if out_of_scope:
-            scope = "Waiting hoặc Doing qua luồng được cấp quyền" if allow_support_unclassified_doing else "Waiting"
             raise DuplicateBoardError(
-                f"Support chỉ được kiểm tra đơn đang ở {scope}; "
-                "đơn ngoài phạm vi không thể kiểm tra lại: "
-                + ", ".join(out_of_scope)
+                "Support chỉ được gắn tag cho đơn còn ở Waiting; đơn đã được chia cho designer "
+                "không gắn tag được nữa: " + ", ".join(out_of_scope)
             )
-        if allow_support_unclassified_doing:
-            classified_doing = [
-                order.external_order_id
-                for order in orders
-                if _is_doing(order)
-                and (order.duplicate_check_status or DUPLICATE_CHECK_UNCHECK)
-                != DUPLICATE_CHECK_UNCHECK
-            ]
-            if classified_doing:
-                raise DuplicateBoardError(
-                    "Đơn Doing đã được phân loại hoặc không còn ở trạng thái chưa kiểm tra: "
-                    + ", ".join(classified_doing)
-                )
 
     request_ids: list[uuid.UUID] = []
     for order in orders:

@@ -127,12 +127,18 @@ function isSupportClassificationEditable(order: Pick<OrderSummary, 'state' | 'pl
   return SUPPORT_CLASSIFICATION_STATES.has(state) || externalStatus === 'WAITING'
 }
 
-// Support may classify an unchecked order in Waiting or Doing on the web; a
-// classified Doing order stays read-only (the backend enforces the same rule).
-function canSupportClassify(order: Pick<OrderSummary, 'state' | 'platform_status' | 'duplicate_check_status'>) {
-  if (isSupportClassificationEditable(order)) return true
-  const unchecked = !order.duplicate_check_status || order.duplicate_check_status === 'uncheck'
-  return unchecked && isSupportDoingOrder(order)
+// Support may tag an order only while it is Waiting: once Admin has given it to a designer
+// it is read-only (the backend enforces the same rule).
+const canSupportClassify = isSupportClassificationEditable
+
+type SupportTab = 'all' | 'duplicate' | 'non_duplicate' | 'doing'
+
+// Every order Support sees belongs to exactly one tab, so the four counts add up to the list.
+// A tag wins over the state: "Đang làm" holds only the untagged orders that were already assigned.
+function supportTabOf(order: Pick<OrderSummary, 'state' | 'platform_status' | 'duplicate_check_status' | 'work_domain'>): SupportTab {
+  if (order.work_domain === 'duplicate' || order.duplicate_check_status === 'duplicate') return 'duplicate'
+  if (order.duplicate_check_status === 'non_duplicate') return 'non_duplicate'
+  return isSupportDoingOrder(order) ? 'doing' : 'all'
 }
 
 // Support may put a classified order back into "Chưa xử lý" until a designer has taken it.
@@ -246,6 +252,7 @@ export function OrdersListPage() {
     currentPage: 1,
   }))
 
+  const [supportSubmittedCount, setSupportSubmittedCount] = useState<number | null>(null)
   const [orders, setOrders] = useState<OrderSummary[]>(() => readOrdersCache(getOrdersCacheKey(undefined, '')) ?? [])
   const [ordersLoading, setOrdersLoading] = useState(() => readOrdersCache(getOrdersCacheKey(undefined, '')) === null)
 
@@ -963,7 +970,8 @@ export function OrdersListPage() {
     const qs = params.toString()
     setOrdersLoading(true)
     try {
-      const data = await apiFetch<{ orders: OrderSummary[] }>(`/orders${qs ? `?${qs}` : ''}`)
+      const data = await apiFetch<{ orders: OrderSummary[]; submitted_count?: number | null }>(`/orders${qs ? `?${qs}` : ''}`)
+      setSupportSubmittedCount(data.submitted_count ?? null)
       setOrders((prevOrders) => {
         if (prevOrders.length > 0) {
           const prevMap = new Map(prevOrders.map((o) => [o.id, o]))
@@ -1160,36 +1168,11 @@ export function OrdersListPage() {
     }
   }, [syncStatus?.is_running, syncStatus?.last_finished_at])
 
-  // Support's unverified tab is the input queue for the automated comparison:
-  // it includes both Waiting and Doing. Doing rows are intentionally read-only
-  // in the web UI and can only be decided through the Telegram comparison card.
-  const supportUncheckedOrders = useMemo(() => {
-    return orders.filter((o) => {
-      if (o.work_domain === 'duplicate') return false
-      const isUncheck = !o.duplicate_check_status || o.duplicate_check_status === 'uncheck'
-      // Waiting only: an order that is already Doing counts as non-duplicate (see the tab below).
-      return isUncheck && isSupportClassificationEditable(o)
-    })
-  }, [orders])
-
-  // 2. Trùng lặp (thuộc duplicate domain / trello hoặc đã gắn tag duplicate)
-  const supportDuplicateOrders = useMemo(() => {
-    return orders.filter((o) => o.work_domain === 'duplicate' || o.duplicate_check_status === 'duplicate')
-  }, [orders])
-
-  // 3. Không trùng lặp (đã kiểm tra và đánh dấu không trùng)
-  const supportNonDuplicateOrders = useMemo(() => {
-    return orders.filter((o) => {
-      if (o.work_domain === 'duplicate') return false
-      const isUncheck = !o.duplicate_check_status || o.duplicate_check_status === 'uncheck'
-      // An unchecked order that is already Doing is automatically non-duplicate.
-      return o.duplicate_check_status === 'non_duplicate' || (isUncheck && isSupportDoingOrder(o))
-    })
-  }, [orders])
-
-  const supportDoingOrders = useMemo(() => {
-    return orders.filter(isSupportDoingOrder)
-  }, [orders])
+  // Support's four tabs partition the list (see supportTabOf).
+  const supportUncheckedOrders = useMemo(() => orders.filter((o) => supportTabOf(o) === 'all'), [orders])
+  const supportDuplicateOrders = useMemo(() => orders.filter((o) => supportTabOf(o) === 'duplicate'), [orders])
+  const supportNonDuplicateOrders = useMemo(() => orders.filter((o) => supportTabOf(o) === 'non_duplicate'), [orders])
+  const supportDoingOrders = useMemo(() => orders.filter((o) => supportTabOf(o) === 'doing'), [orders])
 
   // Admin operational tabs stay scoped to standard work, except Fix: every
   // returned Fix needs the same central Admin decision before any designer can
@@ -2129,6 +2112,15 @@ export function OrdersListPage() {
               </button>
             </div>
           </div>
+          <p className="mt-2 px-1 text-xs text-slate-500" data-testid="support-totals">
+            Tổng 4 tab: <b className="font-mono text-slate-800">{orders.length}</b>
+            {supportSubmittedCount !== null && (
+              <>
+                {' '}· Đã nộp bài (đã ẩn): <b className="font-mono text-slate-800">{supportSubmittedCount}</b>
+                {' '}· Tổng cộng: <b className="font-mono text-slate-800">{orders.length + supportSubmittedCount}</b>
+              </>
+            )}
+          </p>
         </div>
       )}
 

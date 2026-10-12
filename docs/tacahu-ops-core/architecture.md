@@ -78,8 +78,13 @@ cặp (ảnh gốc, ảnh đã chọn, kèm mã đơn) qua Telegram; **Xác nh�
 để gắn Trùng lặp, **Từ chối** chuyển order sang Không trùng lặp. Các order `no_match`/`ai_wrong` vẫn
 nằm ở tab **Chưa kiểm tra** cho tới khi Support gõ `/handle` để chuyển chúng sang Không trùng lặp.
 
-Đơn đã sang `Doing` mà chưa phân loại được coi là **Không trùng lặp** trên giao diện Support (tab
-Không trùng lặp, không còn ở Chưa kiểm tra) và không nằm trong `/check`, `/handle` hay job so sánh.
+Bốn tab của Support chia danh sách thành các phần không chồng nhau, nên tổng bốn tab bằng số
+đơn Support đang thấy: **Trùng lặp** và **Không trùng lặp** theo tag (tag được ưu tiên, kể cả khi đơn
+đã được chia); **Chưa kiểm tra** là đơn chưa gắn tag còn `Waiting`; **Đang làm** là đơn chưa gắn tag
+nhưng Admin đã chia cho designer. Support chỉ gắn tag được cho đơn còn `Waiting` (web và Telegram
+như nhau); đơn ở tab Đang làm chỉ xem, và không nằm trong `/check`, `/handle` hay job so sánh. Đơn
+designer đã nộp bài (Review/Fix/Done) không còn được trả về cho Support; `GET /orders` chỉ trả số
+lượng của chúng ở `submitted_count` để đối chiếu tổng.
 
 **Lấy đơn trùng lặp:** ở tab Trùng lặp, Support có nút **Lấy** (`POST /api/orders/support-take`) cho các
 thẻ còn ở cột Đơn hàng của board (chưa có Designer nhận). Đơn được chia cho designer nội bộ

@@ -686,7 +686,7 @@ describe('OrdersListPage', () => {
     expect(screen.queryByText(/Quét Đơn Mới/i)).not.toBeInTheDocument()
   })
 
-  it('shows unchecked Waiting and Doing in the comparison queue, with Doing classifiable on the web', async () => {
+  it('puts every Support order in exactly one tab: an untagged assigned order is read-only in Đang làm', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn((url: string) => {
@@ -750,6 +750,7 @@ describe('OrdersListPage', () => {
                   created_at: '2026-09-18T00:00:00Z',
                 },
               ],
+              submitted_count: 7,
             }),
           })
         }
@@ -773,12 +774,13 @@ describe('OrdersListPage', () => {
       </BrowserRouter>
     )
 
-    // Only the unchecked Waiting order is in the check queue; an unchecked Doing order is treated as
-    // non-duplicate and moves to that tab automatically.
+    // Only the untagged Waiting order is in Chưa kiểm tra; the untagged order Admin already
+    // assigned is in Đang làm and cannot be tagged any more.
     await waitFor(() => expect(screen.getByText('DJ-WAITING')).toBeInTheDocument())
     expect(screen.queryByText('DJ-DOING')).not.toBeInTheDocument()
-    expect(screen.queryByText('Chờ kiểm tra qua Telegram')).not.toBeInTheDocument()
     expect(screen.getAllByTitle('Đánh dấu đơn này là Trùng lặp')).toHaveLength(1)
+    // The four tabs (1 + 1 + 1 + 1) add up to the list; handed-in orders are only a number.
+    expect(screen.getByTestId('support-totals')).toHaveTextContent('Tổng 4 tab: 4 · Đã nộp bài (đã ẩn): 7 · Tổng cộng: 11')
     // Web entry for the same job as Telegram /check.
     expect(await screen.findByRole('button', { name: /Kiểm tra trùng \(2\)/ })).toBeInTheDocument()
     // Classified non_duplicate order is NOT in Tab 1 ("Chưa kiểm tra")
@@ -802,19 +804,20 @@ describe('OrdersListPage', () => {
       ).toBe(true),
     )
 
-    fireEvent.click(screen.getByRole('button', { name: /^Không trùng lặp2$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^Không trùng lặp1$/i }))
     expect(await screen.findByText('DJ-REVIEW')).toBeInTheDocument()
-    expect(screen.getByText('DJ-DOING')).toBeInTheDocument()
-    // Orders that already moved on (QC / Doing) show the tag dimmed and disabled, without any text.
+    // An unchecked Doing order stays in Chưa kiểm tra: only explicitly classified orders are here.
+    expect(screen.queryByText('DJ-DOING')).not.toBeInTheDocument()
+    // Orders that already moved on (QC) show the tag dimmed and disabled, without any text.
     expect(screen.queryByText('Chỉ xem')).not.toBeInTheDocument()
     const dimmed = screen.getAllByTitle('Đơn đã sang bước xử lý khác nên không đưa về Chưa xử lý được')
-    expect(dimmed.length).toBeGreaterThanOrEqual(2)
+    expect(dimmed.length).toBeGreaterThanOrEqual(1)
     dimmed.forEach((button) => expect(button).toBeDisabled())
 
-    fireEvent.click(screen.getByRole('button', { name: /^Đang làm2$/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^Đang làm1$/i }))
     expect(await screen.findByText('DJ-DOING')).toBeInTheDocument()
-    expect(screen.getByText('DJ-DUP-DOING')).toBeInTheDocument()
-    expect(screen.getAllByText('Chỉ xem').length).toBeGreaterThanOrEqual(2)  // the Doing tab keeps its label
+    expect(screen.queryByText('DJ-DUP-DOING')).not.toBeInTheDocument()  // a tag wins: it stays in Trùng lặp
+    expect(screen.getAllByText('Chỉ xem').length).toBeGreaterThanOrEqual(1)  // the Doing tab keeps its label
     expect(screen.queryByTitle('Đánh dấu đơn này là Trùng lặp')).not.toBeInTheDocument()
   })
 

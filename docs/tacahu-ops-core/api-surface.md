@@ -54,14 +54,12 @@ vì callback duplicate chỉ xác thực chat riêng.
 
 ### Phân loại order và công Support
 
-- `POST /orders/duplicate-check-status` và `POST /orders/duplicate-domain` vẫn cho phép
-  Admin/Support, nhưng command web chỉ cho Support thao tác trên order ở `Waiting` hoặc state
-  legacy tương đương. Order đã được chia hoặc đã sang `Doing` trả HTTP 400 từ command web.
-- `GET /orders` và `GET /orders/{id}` trả mọi order `Doing` cho Support; order `Doing` chưa
-  kiểm tra cũng xuất hiện trong tab **Chưa kiểm tra** để scheduler so sánh. Support không có
-  nút web để phân loại các order này: chỉ callback Telegram của source `support_unchecked` mới
-  được phép quyết định. Order đã có phân loại `duplicate` hoặc `non_duplicate` vẫn được trả sau
-  khi state chuyển sang `Doing`/`Review`/`Done`.
+- `POST /orders/duplicate-check-status` và `POST /orders/duplicate-domain` cho phép Admin/Support,
+  nhưng Support chỉ thao tác được trên order ở `Waiting` hoặc state legacy tương đương. Order đã
+  được chia trả HTTP 400, kể cả khi chưa gắn tag; callback Telegram áp dụng cùng quy tắc.
+- `GET /orders` với role Support chỉ trả order `Waiting`/`Doing` và thêm `submitted_count`: số order
+  đã qua Doing (Review/Fix/Done) của platform, không trả nội dung. `GET /orders/{id}` trả 404 cho
+  các order đó.
 - Khi Support chốt `duplicate`, order lưu người và thời điểm tại
   `support_classified_by_id`/`support_classified_at` và có timeline Support. Chốt
   `non_duplicate` không lưu attribution/timeline và không được tính công.

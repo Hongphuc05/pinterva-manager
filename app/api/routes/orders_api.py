@@ -68,6 +68,7 @@ from app.application.concurrency import lock_order_for_command
 from app.application.crawl import DiscoverFailedError, refresh_order_detail, scan_orders_fast
 from app.application.order_queries import (
     FIX_STATES,
+    count_support_submitted_orders,
     get_order_detail_for_user,
     get_order_history,
     is_unreleased_fix,
@@ -160,6 +161,8 @@ class OrderSummaryOut(BaseModel):
 
 class OrdersListResponse(BaseModel):
     orders: list[Any]
+    # Support only: orders already handed in by a designer, hidden from the list.
+    submitted_count: int | None = None
 
 
 CRAWLED_ASSETS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "crawled_assets"
@@ -948,7 +951,12 @@ def api_orders_list(
             item = sanitize_order_summary_for_designer(item)
         out_list.append(item)
 
-    return OrdersListResponse(orders=out_list)
+    submitted_count = (
+        count_support_submitted_orders(db, user.platform_id)
+        if user.role == ROLE_SUPPORT and user.platform_id
+        else None
+    )
+    return OrdersListResponse(orders=out_list, submitted_count=submitted_count)
 
 
 # Declared before /orders/{order_id} — a literal path segment after a path-param
