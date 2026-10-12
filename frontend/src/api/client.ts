@@ -78,7 +78,9 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     return new Promise<T>(() => {})
   }
   if (!resp.ok) {
-    let message = resp.statusText
+    // resp.statusText is often empty over HTTP/2 (e.g. through Cloudflare Tunnel in
+    // production) — never let the fallback end up as a literally blank error message.
+    let message = resp.statusText || `Lỗi máy chủ (HTTP ${resp.status})`
     let detail: unknown = undefined
     try {
       const body = await resp.json()

@@ -77,10 +77,15 @@ class User(Base):
             unique=True,
             postgresql_where=text("telegram_group_chat_id IS NOT NULL"),
         ),
+        # Two different platforms (Acc Mẹ) may each have their own "admin"/"des1"/etc — the
+        # username only has to be unique within its own platform. Login still takes username
+        # alone (no platform picker), so it tries every candidate with that username and
+        # matches by password; see app/api/routes/auth.py.
+        UniqueConstraint("platform_id", "username", name="uq_users_platform_id_username"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    username: Mapped[str] = mapped_column(String(64), nullable=False)
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(16), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -237,7 +242,7 @@ class Order(Base):
     # Short-lived exclusive lease for active manual processing.  This supplements
     # optimistic versioning; it is never acquired merely by viewing or editing notes.
     processing_lock_owner_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("users.id"), nullable=True
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     processing_lock_acquired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     processing_lock_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -316,7 +321,7 @@ class Order(Base):
         DateTime(timezone=True), nullable=True
     )
     template_missing_reported_by_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("users.id"), nullable=True
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     template_missing_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Timestamp of the Admin's explicit release after a Designer reported a
@@ -429,7 +434,7 @@ class OrderWorkNote(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     order_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("orders.id", ondelete="CASCADE"), nullable=False, index=True)
-    author_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    author_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default=text("''"))
     idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -477,7 +482,7 @@ class Assignment(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     order_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("orders.id"), nullable=False)
-    designer_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    designer_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")
     sub_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     cancel_reason: Mapped[str | None] = mapped_column(String(512), nullable=True)
@@ -500,7 +505,7 @@ class PrintervalAssignmentRequest(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     order_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("orders.id"), nullable=False)
     platform_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("platforms.id"), nullable=False)
-    internal_designer_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    internal_designer_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     designer_option: Mapped[str] = mapped_column(String(255), nullable=False)
     target_status: Mapped[str] = mapped_column(String(32), nullable=False)
     lifecycle: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
@@ -557,7 +562,7 @@ class ApprovalDecision(Base):
     approval_request_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("approval_requests.id"), unique=True, nullable=False
     )
-    actor_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    actor_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     decision: Mapped[str] = mapped_column(String(32), nullable=False)
     comment: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     decided_at: Mapped[datetime] = mapped_column(
@@ -605,7 +610,7 @@ class WorkflowEvent(Base):
     order_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("orders.id"), nullable=False)
     from_state: Mapped[str | None] = mapped_column(String(32), nullable=True)
     to_state: Mapped[str] = mapped_column(String(32), nullable=False)
-    actor_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     operation_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("operations.id"), nullable=True
     )
@@ -668,7 +673,7 @@ class SyncJob(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     platform_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("platforms.id"), nullable=False)
-    created_by_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_by_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     job_type: Mapped[str] = mapped_column(String(64), nullable=False)
     scope_fingerprint: Mapped[str] = mapped_column(String(128), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
@@ -701,9 +706,9 @@ class FinanceNote(Base):
     target_type: Mapped[str] = mapped_column(String(32), nullable=False)  # 'order' or 'designer'
     order_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("orders.id"), nullable=True)
     order_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    designer_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    designer_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     designer_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    author_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    author_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     author_name: Mapped[str] = mapped_column(String(255), nullable=False, default="Admin")
     content: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -721,7 +726,7 @@ class TelegramActionLog(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     order_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("orders.id"), nullable=True)
-    actor_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     action_type: Mapped[str] = mapped_column(String(64), nullable=False)
     callback_token: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
     payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
@@ -764,7 +769,7 @@ class TelegramMessageTemplate(Base):
         Boolean, default=True, server_default=text("true"), nullable=False
     )
     version: Mapped[int] = mapped_column(Integer, default=1, server_default=text("1"), nullable=False)
-    updated_by_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    updated_by_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -779,8 +784,8 @@ class TelegramConfigurationAudit(Base):
     __tablename__ = "telegram_configuration_audits"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    actor_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
-    target_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    actor_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    target_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     template_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     action_type: Mapped[str] = mapped_column(String(64), nullable=False)
     before: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

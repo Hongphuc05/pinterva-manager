@@ -49,7 +49,12 @@ def take_duplicate_orders(
     username = get_settings().support_take_designer_username
     designer = (
         session.query(User)
-        .filter(User.username == username, User.role == ROLE_DESIGNER, User.active.is_(True))
+        .filter(
+            User.username == username,
+            User.platform_id == platform_id,
+            User.role == ROLE_DESIGNER,
+            User.active.is_(True),
+        )
         .first()
     )
     if designer is None:

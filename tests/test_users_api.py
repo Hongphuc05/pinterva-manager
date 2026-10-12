@@ -172,6 +172,87 @@ def test_admin_cannot_self_delete(client, db_session):
     assert resp.status_code == 400
 
 
+def test_deleting_a_user_with_history_is_refused_with_a_clear_reason_not_a_crash(client, db_session):
+    """Regression: used to hit an unhandled FK IntegrityError (500, blank error on the
+    frontend) because Assignment/WorkflowEvent etc. reference users.id without cascade —
+    on purpose, to never lose audit history. Deleting must be refused cleanly instead."""
+    from app.adapters.db.models import Assignment, Order, WorkflowEvent
+    from app.domain.models import OrderState
+
+    _, token = _login(client, db_session, "admin", "admin_delete_history")
+    platform = Platform(name="History scope", account_username="history-scope@printerval.com")
+    db_session.add(platform)
+    db_session.commit()
+    target = User(
+        username="has_history", full_name="Has History", role="designer",
+        password_hash=hash_password("pass"), platform_id=platform.id, active=True,
+    )
+    db_session.add(target)
+    db_session.commit()
+    order = Order(external_order_id="HIST-1", platform_id=platform.id, state=OrderState.IN_PROGRESS.value)
+    db_session.add(order)
+    db_session.flush()
+    db_session.add(Assignment(order_id=order.id, designer_id=target.id, status="approved"))
+    db_session.add(WorkflowEvent(order_id=order.id, to_state=OrderState.IN_PROGRESS.value, actor_id=target.id))
+    db_session.commit()
+
+    resp = client.delete(
+        f"/api/users/{target.id}",
+        headers={"Authorization": f"Bearer {token}", "X-Platform-Id": str(platform.id)},
+    )
+    assert resp.status_code == 409
+    assert resp.json()["detail"]  # never a blank reason
+    assert "khóa" in resp.json()["detail"].lower()
+
+    db_session.expire_all()
+    assert db_session.get(User, target.id) is not None  # nothing was deleted
+
+
+def test_admin_locks_and_unlocks_a_user_instead_of_deleting(client, db_session):
+    _, token = _login(client, db_session, "admin", "admin_lock")
+    platform = Platform(name="Lock scope", account_username="lock-scope@printerval.com")
+    db_session.add(platform)
+    db_session.commit()
+    target = User(
+        username="lockable", full_name="Lockable", role="designer",
+        password_hash=hash_password("pass123"), platform_id=platform.id, active=True,
+    )
+    db_session.add(target)
+    db_session.commit()
+    hdr = {"Authorization": f"Bearer {token}", "X-Platform-Id": str(platform.id)}
+
+    res = client.patch(f"/api/users/{target.id}/active", json={"active": False}, headers=hdr)
+    assert res.status_code == 200 and res.json()["active"] is False
+    db_session.expire_all()
+    assert db_session.get(User, target.id).active is False
+
+    # Locked out: cannot log in anymore.
+    login_res = client.post("/api/login", json={"username": "lockable", "password": "pass123"})
+    assert login_res.status_code == 401
+
+    # Unlock: login works again.
+    res = client.patch(f"/api/users/{target.id}/active", json={"active": True}, headers=hdr)
+    assert res.status_code == 200 and res.json()["active"] is True
+    login_res = client.post("/api/login", json={"username": "lockable", "password": "pass123"})
+    assert login_res.status_code == 200
+
+
+def test_admin_cannot_lock_self_but_lock_endpoint_is_admin_only(client, db_session):
+    admin_user, token = _login(client, db_session, "admin", "admin_lock_self")
+    res = client.patch(
+        f"/api/users/{admin_user.id}/active", json={"active": False},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert res.status_code == 400
+
+    _, designer_token = _login(client, db_session, "designer", "designer_no_lock_rights")
+    res = client.patch(
+        f"/api/users/{admin_user.id}/active", json={"active": False},
+        headers={"Authorization": f"Bearer {designer_token}"},
+    )
+    assert res.status_code == 403
+
+
 def test_admin_can_reset_another_users_password(client, db_session):
     _, token = _login(client, db_session, "admin", "admin_password_reset")
     platform = Platform(name="Password scope", account_username="password-scope@printerval.com")
@@ -344,3 +425,89 @@ def test_support_cannot_switch_workspace_with_a_browser_header(client, db_sessio
     assert current.status_code == 200
     assert current.json()["id"] == str(first.id)
     assert client.get("/api/platforms", headers=headers).status_code == 403
+
+
+def test_force_delete_cascades_everything_the_user_owns(client, db_session):
+    """The explicit "Xóa tất cả" path: Admin already saw the 409 and chose to nuke it anyway."""
+    from app.adapters.db.models import Assignment, Order, WorkflowEvent
+    from app.domain.models import OrderState
+
+    _, token = _login(client, db_session, "admin", "admin_force_delete")
+    platform = Platform(name="Force scope", account_username="force-scope@printerval.com")
+    db_session.add(platform)
+    db_session.commit()
+    target = User(
+        username="force_me", full_name="Force Me", role="designer",
+        password_hash=hash_password("pass"), platform_id=platform.id, active=True,
+    )
+    db_session.add(target)
+    db_session.commit()
+    order = Order(external_order_id="FORCE-1", platform_id=platform.id, state=OrderState.IN_PROGRESS.value)
+    db_session.add(order)
+    db_session.flush()
+    assignment = Assignment(order_id=order.id, designer_id=target.id, status="approved")
+    event = WorkflowEvent(order_id=order.id, to_state=OrderState.IN_PROGRESS.value, actor_id=target.id)
+    db_session.add_all([assignment, event])
+    db_session.commit()
+    assignment_id, event_id, order_id = assignment.id, event.id, order.id
+
+    hdr = {"Authorization": f"Bearer {token}", "X-Platform-Id": str(platform.id)}
+    resp = client.delete(f"/api/users/{target.id}?force=true", headers=hdr)
+    assert resp.status_code == 200
+
+    db_session.expire_all()
+    assert db_session.get(User, target.id) is None
+    assert db_session.get(Assignment, assignment_id) is None  # cascaded: it's the designer's own record
+    # The Order itself survives — it's not the deleted user's own record, and the event
+    # that references them keeps existing (SET NULL), so the order's audit trail is intact.
+    assert db_session.get(Order, order_id) is not None
+    kept_event = db_session.get(WorkflowEvent, event_id)
+    assert kept_event is not None and kept_event.actor_id is None
+
+
+def test_locked_accounts_are_hidden_from_the_list_by_default(client, db_session):
+    _, token = _login(client, db_session, "admin", "admin_hide_locked")
+    platform = Platform(name="Hide scope", account_username="hide-scope@printerval.com")
+    db_session.add(platform)
+    db_session.commit()
+    target = User(
+        username="to_be_hidden", full_name="To Be Hidden", role="designer",
+        password_hash=hash_password("pass"), platform_id=platform.id, active=True,
+    )
+    db_session.add(target)
+    db_session.commit()
+    hdr = {"Authorization": f"Bearer {token}", "X-Platform-Id": str(platform.id)}
+
+    assert client.patch(f"/api/users/{target.id}/active", json={"active": False}, headers=hdr).status_code == 200
+
+    names = [u["username"] for u in client.get("/api/users", headers=hdr).json()]
+    assert "to_be_hidden" not in names
+
+    names_with_locked = [u["username"] for u in client.get("/api/users?include_locked=true", headers=hdr).json()]
+    assert "to_be_hidden" in names_with_locked
+
+
+def test_two_platforms_may_reuse_the_same_username_and_login_still_resolves_correctly(client, db_session):
+    _, admin_token = _login(client, db_session, "admin", "admin_dup_username")
+    platform_a = Platform(name="Dup A", account_username="dup-a@printerval.com")
+    platform_b = Platform(name="Dup B", account_username="dup-b@printerval.com")
+    db_session.add_all([platform_a, platform_b])
+    db_session.commit()
+    hdr_a = {"Authorization": f"Bearer {admin_token}", "X-Platform-Id": str(platform_a.id)}
+    hdr_b = {"Authorization": f"Bearer {admin_token}", "X-Platform-Id": str(platform_b.id)}
+
+    body = {"username": "support1", "full_name": "Support One", "password": "passA123", "role": "support"}
+    res_a = client.post("/api/users", json=body, headers=hdr_a)
+    assert res_a.status_code == 201, res_a.text
+    # Same username, different platform, different password: not a conflict.
+    res_b = client.post("/api/users", json={**body, "password": "passB123"}, headers=hdr_b)
+    assert res_b.status_code == 201, res_b.text
+    # Same username, SAME platform: still refused.
+    assert client.post("/api/users", json={**body, "password": "whatever1"}, headers=hdr_a).status_code == 400
+
+    # Login (no platform selector) must resolve to the matching one by password.
+    login_a = client.post("/api/login", json={"username": "support1", "password": "passA123"})
+    login_b = client.post("/api/login", json={"username": "support1", "password": "passB123"})
+    assert login_a.status_code == 200 and login_a.json()["id"] == res_a.json()["id"]
+    assert login_b.status_code == 200 and login_b.json()["id"] == res_b.json()["id"]
+    assert client.post("/api/login", json={"username": "support1", "password": "wrong"}).status_code == 401

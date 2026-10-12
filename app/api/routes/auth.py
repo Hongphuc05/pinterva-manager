@@ -28,8 +28,13 @@ class LoginRequest(BaseModel):
 @router.post("/login")
 def login(payload: LoginRequest, response: Response, db: Session = Depends(get_db)):
     ensure_seed_users(db)
-    user = db.query(User).filter_by(username=payload.username).one_or_none()
-    if user is None or not verify_password(payload.password, user.password_hash):
+    # Login has no platform selector (one username+password form for every Acc Mẹ), but a
+    # username is now only unique PER platform (uq_users_platform_id_username) — two different
+    # platforms may each have their own "admin". Try every candidate with that username and
+    # match by password instead.
+    candidates = db.query(User).filter_by(username=payload.username).all()
+    user = next((u for u in candidates if verify_password(payload.password, u.password_hash)), None)
+    if user is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid credentials")
     if not user.active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Account is disabled")

@@ -26,6 +26,38 @@ workflow Tacahu.
 | Hệ thống ngoài | dữ liệu gốc Printerval, Drive links, Google Sheet export | Dịch vụ ngoài | Printerval là integration; Google Sheet chỉ là export/backup tùy cấu hình. |
 | So sánh ảnh Support | run, order image embedding, historical candidate, similarity và quyết định Telegram | PostgreSQL schema `support_compare_image` | Vector phase 1 dùng `facebook/dinov2-base`; không trộn với weight fine-tune khác model space. |
 
+## Xóa tài khoản (Admin)
+
+- **Khóa** (`PATCH /users/{id}/active`, `active=false`): không xóa gì — chặn đăng nhập/mất
+  hiệu lực phiên ngay, thu hồi mọi máy Support đang được cấp quyền, và ẩn khỏi danh sách
+  mặc định (`GET /users`, dùng `?include_locked=true` để xem lại/mở khóa). Đây là lựa chọn
+  mặc định nên dùng — giữ nguyên toàn bộ lịch sử.
+- **Xóa an toàn** (`DELETE /users/{id}`, không `force`): từ chối (409) nếu tài khoản còn
+  bất kỳ record nào thuộc về chính nó (assignment, note, quyết định duyệt, audit Telegram...
+  — danh sách đủ ở `_USER_OWNED_TABLES` trong `app/api/routes/users_api.py`).
+- **Xóa toàn bộ** (`DELETE /users/{id}?force=true`): admin xác nhận tường minh muốn mất
+  lịch sử. Hai nhóm FK khác chính sách (migration `f5d6e7f8a9b0`):
+  - record **thuộc về chính user đó** (Assignment, OrderWorkNote, ApprovalDecision,
+    PrintervalAssignmentRequest, FinanceNote, TelegramActionLog,
+    TelegramConfigurationAudit) → `ON DELETE CASCADE`, xóa theo.
+  - record **về thứ khác mà user chỉ là actor** (WorkflowEvent của một Order,
+    `Order.processing_lock_owner_id`/`template_missing_reported_by_id`,
+    `SyncJob.created_by_id`, `TelegramMessageTemplate.updated_by_id`) →
+    `ON DELETE SET NULL`, record gốc (đặc biệt là audit trail của Order) được giữ nguyên,
+    chỉ mất "ai đã làm". `PaymentBatch`/`Order.paid_by_id` đã `SET NULL` từ trước và còn
+    lưu tên dạng text (`paid_by_name`/`designer_name`), nên lịch sử thanh toán vẫn đọc
+    được dù user đã bị xóa hẳn.
+
+## Username không còn duy nhất toàn hệ thống
+
+`uq_users_platform_id_username` (migration `f5d6e7f8a9b0`) thay cho unique toàn cục cũ —
+hai platform khác nhau được phép có cùng username (ví dụ mỗi Acc Mẹ tự có "admin"/"des1"
+riêng). Đăng nhập không có bước chọn platform trước: `POST /login` thử từng tài khoản
+trùng username và so khớp bằng password (`app/api/routes/auth.py`). Nơi nào từng giả định
+username là khóa duy nhất toàn cục để tra cứu theo tên (không qua `user_id`) phải lọc thêm
+theo `platform_id` — đã sửa ở `get_finance_stats` (map tên designer) và
+`take_duplicate_orders` (tài khoản `des1` nội bộ).
+
 ## Dữ liệu quản trị Telegram
 
 - Các cột `telegram_group_*` và `telegram_delivery_mode` nằm trên `users`; group ID, title,

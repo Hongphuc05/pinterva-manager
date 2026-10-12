@@ -9,6 +9,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from sqlalchemy import text as sa_text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -23,6 +24,7 @@ from app.api.deps import (
 from app.application.auth import hash_password
 from app.application.order_work_notes import PRIVATE_WORK_NOTE_ASSETS_DIR
 from app.application.password_vault import decrypt_password, encrypt_password
+from app.application.support_worker import revoke_user_devices
 from app.domain.access import (
     ROLE_ACCOUNTANT,
     ROLE_ADMIN,
@@ -303,12 +305,16 @@ def _current_platform_user(db: Session, user_id: str, platform_id: uuid.UUID) ->
 
 @router.get("/users", response_model=list[UserOut])
 def list_users(
+    include_locked: bool = False,
     user: User = Depends(require_role("admin")),
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
-    # A manager sees every account created in the currently selected mother account.
+    # A manager sees every account created in the currently selected mother account. A locked
+    # (active=False) account is hidden by default — pass ?include_locked=true to unlock it again.
     query = db.query(User).filter(User.platform_id == platform_id)
+    if not include_locked:
+        query = query.filter(User.active.is_(True))
     users = query.order_by(User.created_at.desc()).all()
     return [_user_out(u) for u in users]
 
@@ -341,10 +347,12 @@ def create_user(
             "Vai trò không hợp lệ (admin, designer, designer-trello, support hoặc accountant).",
         )
 
-    existing = db.query(User).filter_by(username=clean_username).one_or_none()
+    # Scoped to this platform only (uq_users_platform_id_username): two different Acc Mẹ may
+    # each have their own "admin"/"des1" without colliding.
+    existing = db.query(User).filter_by(username=clean_username, platform_id=platform_id).one_or_none()
     if existing is not None:
         raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, f"Tài khoản '{clean_username}' đã tồn tại."
+            status.HTTP_400_BAD_REQUEST, f"Tài khoản '{clean_username}' đã tồn tại trong Acc Mẹ này."
         )
 
     new_user = User(
@@ -429,13 +437,47 @@ def update_user_password(
     return _user_out(target_user)
 
 
+# Tables where a row IS this user's own record (Assignment, a note they wrote, a Telegram
+# audit entry...). These now cascade-delete at the DB level (see migration
+# f5d6e7f8a9b0) — this list is also how a plain "Xóa" (no ?force) decides whether the
+# account still has real history and should be refused in favour of locking it instead.
+_USER_OWNED_TABLES = (
+    ("assignments", "designer_id"),
+    ("order_work_notes", "author_id"),
+    ("approval_decisions", "actor_id"),
+    ("printerval_assignment_requests", "internal_designer_id"),
+    ("finance_notes", "designer_id"),
+    ("finance_notes", "author_id"),
+    ("telegram_action_logs", "actor_id"),
+    ("telegram_configuration_audits", "actor_id"),
+    ("telegram_configuration_audits", "target_user_id"),
+    ("workflow_events", "actor_id"),
+    ("orders", "processing_lock_owner_id"),
+    ("orders", "template_missing_reported_by_id"),
+    ("sync_jobs", "created_by_id"),
+    ("telegram_message_templates", "updated_by_id"),
+)
+
+
+def _user_has_related_data(db: Session, user_id: uuid.UUID) -> bool:
+    exists_clauses = " OR ".join(
+        f'EXISTS (SELECT 1 FROM "{table}" WHERE "{column}" = :uid)' for table, column in _USER_OWNED_TABLES
+    )
+    return bool(db.execute(sa_text(f"SELECT ({exists_clauses})"), {"uid": user_id}).scalar())
+
+
 @router.delete("/users/{user_id}")
 def delete_user(
     user_id: str,
+    force: bool = False,
     current_admin: User = Depends(require_role("admin")),
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
+    """Delete an account. Plain delete refuses one with real history (suggests locking
+    instead); ``?force=true`` deletes it anyway, cascading everything it owns (see
+    _USER_OWNED_TABLES / migration f5d6e7f8a9b0) — irreversible, used when the Admin
+    explicitly picks "Xóa tất cả" on the confirm dialog."""
     try:
         target_uuid = uuid.UUID(user_id)
     except ValueError as exc:
@@ -448,6 +490,44 @@ def delete_user(
 
     target_user = _current_platform_user(db, user_id, platform_id)
 
+    if not force and _user_has_related_data(db, target_uuid):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"'{target_user.username}' đã có dữ liệu liên quan (đơn, lịch sử duyệt, ghi chú, "
+            "thanh toán...). Khóa tài khoản để giữ lịch sử, hoặc chọn \"Xóa tất cả\" để xóa "
+            "luôn toàn bộ dữ liệu liên quan — không thể hoàn tác.",
+        )
+
     db.delete(target_user)
     db.commit()
     return {"ok": True, "message": f"Đã xóa tài khoản '{target_user.username}'."}
+
+
+class SetUserActiveRequest(BaseModel):
+    active: bool
+
+
+@router.patch("/users/{user_id}/active", response_model=UserOut)
+def set_user_active(
+    user_id: str,
+    payload: SetUserActiveRequest,
+    current_admin: User = Depends(require_role("admin")),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    """Lock/unlock an account instead of deleting it — keeps history, blocks login."""
+    try:
+        target_uuid = uuid.UUID(user_id)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mã người dùng không hợp lệ.") from exc
+    if target_uuid == current_admin.id and not payload.active:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Không thể tự khóa tài khoản của chính mình.")
+
+    target_user = _current_platform_user(db, user_id, platform_id)
+    target_user.active = payload.active
+    if not payload.active:
+        # Mirror /logout: a locked account must not keep a Support machine authorized.
+        revoke_user_devices(db, target_user.id)
+    db.commit()
+    db.refresh(target_user)
+    return _user_out(target_user)

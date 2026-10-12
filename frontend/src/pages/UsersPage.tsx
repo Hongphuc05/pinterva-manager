@@ -12,7 +12,9 @@ import {
   AlertCircle,
   Loader2,
   Eye,
-  KeyRound
+  KeyRound,
+  Lock,
+  Unlock
 } from 'lucide-react'
 import { usePlatform } from '../auth/PlatformContext'
 import { sortUsersByRoleAndName } from '../utils/userSorting'
@@ -43,7 +45,10 @@ export function UsersPage() {
 
   // Delete User Confirmation state
   const [deletingUser, setDeletingUser] = useState<UserItem | null>(null)
+  const [deleteBlockedReason, setDeleteBlockedReason] = useState<string | null>(null)
+  const [togglingUserId, setTogglingUserId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [showLocked, setShowLocked] = useState(false)
 
   const [passwordUser, setPasswordUser] = useState<UserItem | null>(null)
   const [revealedPassword, setRevealedPassword] = useState<string | null>(null)
@@ -57,7 +62,8 @@ export function UsersPage() {
 
   useEffect(() => {
     loadUsers()
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showLocked])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -77,7 +83,7 @@ export function UsersPage() {
     setError('')
     try {
       const [data, unassigned] = await Promise.all([
-        apiFetch<UserItem[]>('/users'),
+        apiFetch<UserItem[]>(`/users${showLocked ? '?include_locked=true' : ''}`),
         apiFetch<UserItem[]>('/users/unassigned'),
       ])
       setUsers(sortUsersByRoleAndName(data))
@@ -175,19 +181,38 @@ export function UsersPage() {
     }
   }
 
-  async function handleDeleteUser() {
+  async function handleDeleteUser(force = false) {
     if (!deletingUser) return
+    if (force && !window.confirm(`Xóa TẤT CẢ dữ liệu liên quan tới ${deletingUser.username}? Không thể hoàn tác.`)) return
     setDeleting(true)
+    setDeleteBlockedReason(null)
     try {
-      await apiFetch(`/users/${deletingUser.id}`, { method: 'DELETE' })
+      await apiFetch(`/users/${deletingUser.id}${force ? '?force=true' : ''}`, { method: 'DELETE' })
       setDeletingUser(null)
       loadUsers()
     } catch (err) {
-      if (err instanceof ApiError) {
-        alert(`Không thể xóa: ${err.message}`)
+      if (err instanceof ApiError && err.status === 409) {
+        // Has real history: offer "Xóa tất cả" instead of a dead-end alert.
+        setDeleteBlockedReason(err.message)
+      } else {
+        alert(`Không thể xóa: ${err instanceof ApiError ? err.message : 'Lỗi không xác định.'}`)
       }
     } finally {
       setDeleting(false)
+    }
+  }
+
+  async function handleToggleActive(u: UserItem) {
+    const next = !u.active
+    if (!next && !window.confirm(`Khóa tài khoản ${u.username}? Tài khoản sẽ không đăng nhập được nữa, nhưng lịch sử vẫn giữ nguyên.`)) return
+    setTogglingUserId(u.id)
+    try {
+      await apiFetch(`/users/${u.id}/active`, { method: 'PATCH', body: JSON.stringify({ active: next }) })
+      loadUsers()
+    } catch (err) {
+      alert(err instanceof ApiError ? err.message : 'Không thể đổi trạng thái tài khoản.')
+    } finally {
+      setTogglingUserId(null)
     }
   }
 
@@ -244,6 +269,16 @@ export function UsersPage() {
             </div>
           </div>
         )}
+
+        <label className="flex w-fit items-center gap-2 text-xs font-semibold text-slate-600 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={showLocked}
+            onChange={(e) => setShowLocked(e.target.checked)}
+            className="h-3.5 w-3.5 rounded border-slate-300 text-[#0052CC] focus:ring-[#0052CC]/30"
+          />
+          Hiện cả tài khoản đã khóa
+        </label>
 
         {/* Users Table Card */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
@@ -345,7 +380,21 @@ export function UsersPage() {
                             <KeyRound className="h-4 w-4" />
                           </button>
                           <button
-                            onClick={() => setDeletingUser(u)}
+                            onClick={() => handleToggleActive(u)}
+                            disabled={togglingUserId === u.id}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition-colors cursor-pointer disabled:opacity-50"
+                            title={u.active ? 'Khóa tài khoản' : 'Mở khóa tài khoản'}
+                          >
+                            {togglingUserId === u.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : u.active ? (
+                              <Lock className="h-4 w-4" />
+                            ) : (
+                              <Unlock className="h-4 w-4" />
+                            )}
+                          </button>
+                          <button
+                            onClick={() => { setDeletingUser(u); setDeleteBlockedReason(null) }}
                             className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
                             title="Xóa tài khoản"
                           >
@@ -599,9 +648,12 @@ export function UsersPage() {
               <p className="text-xs text-slate-500">
                 Bạn có chắc chắn muốn xóa tài khoản <strong className="text-slate-800">{deletingUser.username}</strong> ({deletingUser.full_name})? Hành động này không thể hoàn tác.
               </p>
+              {deleteBlockedReason && (
+                <p className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-left text-xs text-amber-800">{deleteBlockedReason}</p>
+              )}
             </div>
 
-            <div className="flex justify-center gap-2 pt-2">
+            <div className="flex flex-wrap justify-center gap-2 pt-2">
               <button
                 onClick={() => setDeletingUser(null)}
                 className="px-4 py-2 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
@@ -609,13 +661,23 @@ export function UsersPage() {
                 Hủy
               </button>
               <button
-                onClick={handleDeleteUser}
+                onClick={() => handleDeleteUser(false)}
                 disabled={deleting}
                 className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-xl transition-colors shadow-2xs disabled:opacity-50 cursor-pointer"
               >
                 {deleting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                <span>{deleting ? 'Đang xóa...' : 'Xóa Ngay'}</span>
+                <span>{deleting ? 'Đang xóa...' : 'Xóa'}</span>
               </button>
+              {deleteBlockedReason && (
+                <button
+                  onClick={() => handleDeleteUser(true)}
+                  disabled={deleting}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-red-800 hover:bg-red-900 rounded-xl transition-colors shadow-2xs disabled:opacity-50 cursor-pointer"
+                >
+                  {deleting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  <span>Xóa tất cả</span>
+                </button>
+              )}
             </div>
           </div>
         </div>

@@ -369,20 +369,35 @@ def get_finance_stats(
     standard_rate = target_platform.standard_order_rate if target_platform else 40000
     duplicate_rate = target_platform.duplicate_order_rate if target_platform else 40000
 
-    # 1. Fetch all users for designer name mapping
+    # 1. Fetch all users for designer lookups. Unscoped: UUID lookups (user_map_by_id, used
+    # whenever an event/assignment carries an actor/designer id) are exact regardless of
+    # platform, and some legitimate accounts (legacy, admin) have platform_id IS NULL — scoping
+    # this query would silently drop them. See user_map_by_any below for the one place platform
+    # actually matters: matching a bare name string (no id on the event).
     all_users = db.query(User).all()
     user_map_by_id: dict[uuid.UUID, User] = {u.id: u for u in all_users}
+
+    def _index_by_name(target: dict[str, User], users: list[User]) -> None:
+        for u in users:
+            if u.username:
+                target[u.username.lower().strip()] = u
+                target[normalize_text(u.username)] = u
+            if u.full_name:
+                target[u.full_name.lower().strip()] = u
+                target[normalize_text(u.full_name)] = u
+            if u.printerval_designer_option:
+                target[u.printerval_designer_option.lower().strip()] = u
+                target[normalize_text(u.printerval_designer_option)] = u
+
+    # Usernames/full names are only unique PER platform now, so a bare name string (no actor_id
+    # on the event — legacy/Trello cases) could match either platform's user of that name. Index
+    # every user first, then re-index this platform's users last so they win any collision;
+    # p_uuid is None only for Admin's explicit "ALL platforms" view, where cross-platform matching
+    # is the intended behaviour.
     user_map_by_any: dict[str, User] = {}
-    for u in all_users:
-        if u.username:
-            user_map_by_any[u.username.lower().strip()] = u
-            user_map_by_any[normalize_text(u.username)] = u
-        if u.full_name:
-            user_map_by_any[u.full_name.lower().strip()] = u
-            user_map_by_any[normalize_text(u.full_name)] = u
-        if u.printerval_designer_option:
-            user_map_by_any[u.printerval_designer_option.lower().strip()] = u
-            user_map_by_any[normalize_text(u.printerval_designer_option)] = u
+    _index_by_name(user_map_by_any, all_users)
+    if p_uuid:
+        _index_by_name(user_map_by_any, [u for u in all_users if u.platform_id == p_uuid])
 
     def resolve_designer_user(candidate: str | None) -> User | None:
         if not candidate:
