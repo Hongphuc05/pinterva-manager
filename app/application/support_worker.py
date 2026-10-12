@@ -401,7 +401,13 @@ def pool_page(
     # ``cursor`` is where the last row ended (start of the next delta sync); ``next_cursor``
     # is set only while a full page came back and more may follow.
     cursor = f"{rows[-1][2].isoformat()}|{rows[-1][0]}" if rows else None
-    return {"items": items, "cursor": cursor, "next_cursor": cursor if len(rows) == limit else None}
+    page: dict[str, Any] = {"items": items, "cursor": cursor, "next_cursor": cursor if len(rows) == limit else None}
+    if after is None:
+        page["total"] = session.execute(
+            text(f"SELECT count(*) FROM {SCHEMA}.image_embeddings WHERE model_version = :mv AND embedding_dim = :dim"),
+            {"mv": model_version, "dim": embedding_dim},
+        ).scalar_one()
+    return page
 
 
 # --------------------------------------------------------------------------- results

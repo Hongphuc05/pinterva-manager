@@ -49,6 +49,11 @@ Cài một lần trên mỗi máy Support muốn góp CPU/GPU; agent chạy nề
 `SUPPORT_WEB_URL` (web của Tacahu), `AGENT_NAME`, và `MODEL_VERSION` khớp `model_version` của pool.
 Không cần mã hay thao tác gì thêm: chỉ cần đăng nhập web trên máy đó và bấm **Có** khi được hỏi.
 
+**Pool cache:** compose gắn volume `pool-cache` (`AGENT_CACHE_DIR=/pool-cache`). Lần đầu agent tải
+toàn bộ pool và ghi từng trang xuống volume; các lần khởi động sau chỉ tải phần ảnh mới. `docker
+compose down` giữ cache; `down -v` hoặc `docker volume rm dup-compare-local_pool-cache` xóa cache
+(lần chạy sau tải lại từ đầu). Cache gắn với `MODEL_VERSION` + `EMBEDDING_DIM`; đổi model là tự bỏ cache cũ.
+
 ### Docker (mọi hệ điều hành; trên macOS chỉ chạy CPU)
 
 ```bash

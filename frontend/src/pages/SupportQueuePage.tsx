@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { ChevronDown, ChevronRight, Cpu, ListChecks, Loader2, RefreshCw } from 'lucide-react'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { fetchJobOrders, fetchQueue, type JobOrders, type QueueJob, type QueueOverview } from '../features/worker/queueApi'
+import type { AgentProgress } from '../features/worker/agentClient'
 import { useWorker } from '../features/worker/WorkerProvider'
 
 const REFRESH_MS = 5000
@@ -13,6 +14,43 @@ function ago(iso: string | null): string {
   if (seconds < 3600) return `${Math.floor(seconds / 60)} phút trước`
   if (seconds < 86400) return `${Math.floor(seconds / 3600)} giờ trước`
   return `${Math.floor(seconds / 86400)} ngày trước`
+}
+
+function Bar({ label, value, total }: { label: string; value: number; total: number | null | undefined }) {
+  const pct = total ? Math.min(100, Math.round((value / total) * 100)) : null
+  return (
+    <div>
+      <div className="flex justify-between text-[11px] font-semibold text-slate-600">
+        <span>{label}</span>
+        <span className="tabular-nums">
+          {value.toLocaleString('vi-VN')}
+          {total ? ` / ${total.toLocaleString('vi-VN')} (${pct}%)` : ''}
+        </span>
+      </div>
+      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100">
+        <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${pct ?? 0}%` }} />
+      </div>
+    </div>
+  )
+}
+
+function AgentProgressPanel({ progress }: { progress: AgentProgress | undefined }) {
+  if (!progress || progress.phase === undefined || progress.phase === 'idle') return null
+  const syncing = progress.phase === 'syncing_pool'
+  return (
+    <div className="mt-4 space-y-2.5 border-t border-slate-100 pt-3" data-testid="agent-progress">
+      <p className="text-xs font-bold text-slate-800">
+        {syncing ? 'Đang tải pool ảnh cũ về máy (chưa so sánh được)…' : 'Đang embedding và so sánh với pool'}
+      </p>
+      <Bar label="Pool trên máy" value={progress.pool_loaded ?? 0} total={progress.pool_total} />
+      {progress.job_total ? (
+        <>
+          <Bar label="Embedding đơn mới" value={progress.job_embedded ?? 0} total={progress.job_total} />
+          <Bar label="Đã so sánh và gửi kết quả" value={progress.job_compared ?? 0} total={progress.job_total} />
+        </>
+      ) : null}
+    </div>
+  )
 }
 
 function MachineCard() {
@@ -29,7 +67,7 @@ function MachineCard() {
     note = 'Cho phép để hệ thống dùng GPU/CPU của máy này trong phiên đăng nhập hiện tại.'
     action = { label: 'Cho phép máy này', run: () => void allow(), tone: 'primary' }
   } else if (agent) {
-    const running = agent.state === 'busy'
+    const running = agent.state === 'busy' || (agent.progress?.phase !== undefined && agent.progress.phase !== 'idle')
     title = running ? 'Máy này đang chạy hàng đợi' : agent.state === 'paused' ? 'Máy này tạm dừng' : 'Máy này sẵn sàng chạy hàng đợi'
     note =
       `${agent.name}${agent.device ? ` · ${agent.device.toUpperCase()}` : ''} · chỉ chạy trong phiên đăng nhập này.` +
@@ -48,6 +86,7 @@ function MachineCard() {
           {note && <p className="mt-1 text-xs leading-relaxed text-slate-500">{note}</p>}
         </div>
       </div>
+      <AgentProgressPanel progress={agent?.progress} />
       {action && (
         <button
           type="button"

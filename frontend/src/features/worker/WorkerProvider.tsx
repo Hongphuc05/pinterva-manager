@@ -5,7 +5,7 @@ import { useToast } from '../../context/ToastContext'
 import { connectAgent, disconnectAgent, probeAgent, type AgentStatus } from './agentClient'
 
 const PRESENCE_MS = 20_000
-const PROBE_MS = 8_000
+const PROBE_MS = 3_000
 const MAX_AUTO_FAILURES = 3
 
 export type Consent = 'yes' | 'no' | null

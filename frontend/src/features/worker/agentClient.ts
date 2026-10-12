@@ -4,6 +4,15 @@ const TIMEOUT_MS = 2500
 
 export type AgentState = 'waiting' | 'ready' | 'busy' | 'paused'
 
+export interface AgentProgress {
+  phase?: 'idle' | 'syncing_pool' | 'comparing'
+  pool_loaded?: number
+  pool_total?: number | null
+  job_total?: number
+  job_embedded?: number
+  job_compared?: number
+}
+
 export interface AgentStatus {
   agent: string
   version: number
@@ -11,6 +20,7 @@ export interface AgentStatus {
   state: AgentState
   device: string | null
   model_loaded: boolean
+  progress?: AgentProgress
 }
 
 async function call(path: string, init: RequestInit = {}): Promise<Response> {

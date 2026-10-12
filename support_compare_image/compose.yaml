@@ -26,6 +26,11 @@ services:
     env_file: .env.agent
     environment:
       AGENT_BIND: 0.0.0.0   # inside the container; the port below is published on localhost only
+      AGENT_CACHE_DIR: /pool-cache   # the pool survives restarts: only new images are downloaded
+    volumes:
+      - ./dup-compare:/app/dup-compare:ro
+      - hf-cache:/models
+      - pool-cache:/pool-cache
     ports:
       - "127.0.0.1:8765:8765"
     command: python agent.py
@@ -40,3 +45,4 @@ services:
 
 volumes:
   hf-cache:
+  pool-cache:

@@ -32,6 +32,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -78,6 +79,8 @@ class AgentConfig:
     bind: str = "127.0.0.1"
     port: int = 8765  # 0 = do not listen (tests, --once)
     allowed_origins: tuple[str, ...] = ()
+    pool_refresh_seconds: float = 60.0  # idle machines pull new pool images this often
+    cache_dir: str | None = None  # persistent folder (a Docker volume) for the pool; None = memory only
 
 
 # --------------------------------------------------------------------------- HTTP
@@ -183,35 +186,129 @@ def _historical(item: dict, embedding_dim: int, model_version: str) -> Historica
 class Pool:
     """The historical pool in memory, synced incrementally (keyset cursor) from the API."""
 
-    def __init__(self, model_version: str, embedding_dim: int, page_size: int = 2000):
+    def __init__(self, model_version: str, embedding_dim: int, page_size: int = 2000, cache_dir: str | None = None):
         self.model_version = model_version
         self.embedding_dim = embedding_dim
         self.page_size = page_size
         self.rows: dict[uuid.UUID, HistoricalImage] = {}
         self.cursor: str | None = None
+        self.total: int | None = None
         self.synced_once = False
         self._matrix: np.ndarray | None = None
+        # ponytail: one chunk file per synced page, never compacted; compact if the chunk count gets large.
+        safe = "".join(c if c.isalnum() or c in "-._" else "_" for c in model_version)
+        self._dir = Path(cache_dir) / f"{safe}-{embedding_dim}" if cache_dir else None
+        self._chunks: list[str] = []
 
     def __len__(self) -> int:
         return len(self.rows)
 
-    def sync(self, api: Api, should_stop: Callable[[], bool] = lambda: False) -> int:
+    def load_cache(self) -> int:
+        """Restore rows and the sync cursor saved by earlier runs; any problem means start clean."""
+        if self._dir is None or not (self._dir / "meta.json").exists():
+            return 0
+        try:
+            meta = json.loads((self._dir / "meta.json").read_text())
+            if meta.get("model_version") != self.model_version or meta.get("embedding_dim") != self.embedding_dim:
+                raise ValueError("cache belongs to another model")
+            rows: dict[uuid.UUID, HistoricalImage] = {}
+            for name in meta["chunks"]:
+                with np.load(self._dir / name, allow_pickle=False) as data:
+                    items = json.loads(str(data["meta"]))
+                    vectors = data["embeddings"]
+                    if len(items) != len(vectors) or vectors.shape[1] != self.embedding_dim:
+                        raise ValueError(f"chunk {name} is inconsistent")
+                    for item, vector in zip(items, vectors):
+                        lab = item["lab"]
+                        row = HistoricalImage(
+                            asset_id=uuid.UUID(item["asset_id"]),
+                            job_id=uuid.UUID(item["job_id"]) if item.get("job_id") else None,
+                            external_order_id=item.get("external_order_id"),
+                            product_name=item.get("product_name"),
+                            image_url=item["image_url"],
+                            embedding=vector.astype(np.float32, copy=True),
+                            embedding_dim=self.embedding_dim,
+                            model_version=self.model_version,
+                            phash=item["phash"],
+                            color_lab=(float(lab[0]), float(lab[1]), float(lab[2])),
+                        )
+                        rows[row.asset_id] = row
+            self.rows, self.cursor, self.total = rows, meta.get("cursor"), meta.get("total")
+            self._chunks = list(meta["chunks"])
+            self._matrix = None
+            logger.info("pool cache: %s ảnh (cursor %s)", len(rows), self.cursor)
+            return len(rows)
+        except Exception as exc:
+            logger.warning("bỏ qua pool cache hỏng (%s); tải lại từ đầu", exc)
+            self.rows, self.cursor, self.total, self._chunks = {}, None, None, []
+            return 0
+
+    def _save_chunk(self, rows: list[HistoricalImage]) -> None:
+        """Persist one synced page; meta.json is replaced last so a crash never leaves a half chunk listed."""
+        if self._dir is None or not rows:
+            return
+        self._dir.mkdir(parents=True, exist_ok=True)
+        name = f"chunk-{len(self._chunks):06d}.npz"
+        items = [
+            {
+                "asset_id": str(r.asset_id),
+                "job_id": str(r.job_id) if r.job_id else None,
+                "external_order_id": r.external_order_id,
+                "product_name": r.product_name,
+                "image_url": r.image_url,
+                "phash": r.phash,
+                "lab": list(r.color_lab),
+            }
+            for r in rows
+        ]
+        tmp = self._dir / f"{name}.tmp.npz"
+        np.savez(tmp, embeddings=np.stack([r.embedding for r in rows]).astype(np.float32), meta=np.array(json.dumps(items)))
+        tmp.replace(self._dir / name)
+        self._chunks.append(name)
+        meta = {
+            "model_version": self.model_version,
+            "embedding_dim": self.embedding_dim,
+            "cursor": self.cursor,
+            "total": self.total,
+            "chunks": self._chunks,
+        }
+        tmp_meta = self._dir / "meta.json.tmp"
+        tmp_meta.write_text(json.dumps(meta))
+        tmp_meta.replace(self._dir / "meta.json")
+
+    def sync(
+        self,
+        api: Api,
+        should_stop: Callable[[], bool] = lambda: False,
+        on_progress: Callable[[int, int | None], None] | None = None,
+    ) -> int:
         received = 0
         while True:
             if should_stop():
                 raise LeaseLost("stopped while syncing the pool")
             page = api.pool(self.model_version, self.embedding_dim, self.cursor, self.page_size)
+            if page.get("total") is not None:
+                self.total = int(page["total"])
+            page_rows: list[HistoricalImage] = []
             for item in page["items"]:
                 row = _historical(item, self.embedding_dim, self.model_version)
                 self.rows[row.asset_id] = row  # a re-embedded asset replaces its old vector
+                page_rows.append(row)
                 received += 1
             if page.get("cursor"):
                 self.cursor = page["cursor"]
+            try:
+                self._save_chunk(page_rows)
+            except OSError as exc:  # a full or read-only cache disk must not stop the comparison
+                logger.warning("không ghi được pool cache: %s", exc)
+                self._dir = None
             if received:
                 self._matrix = None
+            if on_progress:
+                on_progress(len(self.rows), self.total)
             if not page.get("next_cursor"):
                 break
-            logger.info("pool sync: %s rows so far", len(self.rows))
+            logger.info("pool sync: %s/%s rows so far", len(self.rows), self.total or "?")
         self.synced_once = True
         return received
 
@@ -297,7 +394,14 @@ def _failed(order: dict, exc: Exception) -> dict:
 
 
 def process_orders(
-    api: Api, embedder, pool: Pool, cfg: AgentConfig, job: dict, lease: Lease, fetch=None
+    api: Api,
+    embedder,
+    pool: Pool,
+    cfg: AgentConfig,
+    job: dict,
+    lease: Lease,
+    fetch=None,
+    progress: Callable[..., None] | None = None,
 ) -> dict[str, int]:
     """Embed and compare the job's orders against the pool snapshot taken now, batch by batch."""
     fetch = fetch or fetch_image
@@ -306,6 +410,8 @@ def process_orders(
     counts = {"stored": 0, "failed": 0, "skipped": 0}
     orders = job["orders"]
     done = 0
+    embedded = 0
+    report = progress or (lambda **_: None)
     for batch in _chunks(orders, cfg.batch_size):
         lease.check()
         payloads: list[dict] = []
@@ -326,6 +432,8 @@ def process_orders(
                 payloads.extend(_failed(order, exc) for order, _ in prepared)
                 prepared = []
                 embeddings = []
+            embedded += len(embeddings)
+            report(job_embedded=embedded)
             for (order, image), embedding in zip(prepared, embeddings):
                 try:
                     embedding = np.asarray(embedding, dtype=np.float32)
@@ -362,17 +470,27 @@ def process_orders(
         for key in counts:
             counts[key] += int(result.get(key, 0))
         done += len(batch)
+        report(job_compared=done)
         logger.info("job %s: %s/%s orders submitted", job["id"], done, len(orders))
     return counts
 
 
-def run_job(api: Api, embedder, pool: Pool, cfg: AgentConfig, job: dict, fetch=None) -> None:
+def run_job(
+    api: Api, embedder, pool: Pool, cfg: AgentConfig, job: dict, fetch=None, progress: Callable[..., None] | None = None
+) -> None:
     job_id = job["id"]
+    report = progress or (lambda **_: None)
     logger.info("claimed job %s (%s orders)", job_id, len(job["orders"]))
+    report(phase="syncing_pool", job_total=len(job["orders"]), job_embedded=0, job_compared=0)
     try:
         with Lease(lambda: api.heartbeat_job(job_id), cfg.heartbeat_seconds) as lease:
-            pool.sync(api, should_stop=lease.lost.is_set)
-            counts = process_orders(api, embedder, pool, cfg, job, lease, fetch=fetch)
+            pool.sync(
+                api,
+                should_stop=lease.lost.is_set,
+                on_progress=lambda loaded, total: report(pool_loaded=loaded, pool_total=total),
+            )
+            report(phase="comparing", pool_loaded=len(pool), pool_total=max(len(pool), pool.total or 0))
+            counts = process_orders(api, embedder, pool, cfg, job, lease, fetch=fetch, progress=report)
             lease.check()
             summary = api.complete_job(job_id, baseline_count=len(pool))
         logger.info("job %s completed: %s %s", job_id, counts, summary)
@@ -471,6 +589,17 @@ class AgentState:
         self.status = "waiting" if token is None else "ready"
         self.device: str | None = None
         self.model_loaded = False
+        self.progress: dict[str, Any] = {"phase": "idle"}
+
+    def set_progress(self, **fields: Any) -> None:
+        with self._lock:
+            self.progress.update(fields)
+
+    def clear_job_progress(self) -> None:
+        with self._lock:
+            for key in ("job_total", "job_embedded", "job_compared"):
+                self.progress.pop(key, None)
+            self.progress["phase"] = "idle"
 
     @property
     def token(self) -> str | None:
@@ -496,6 +625,7 @@ class AgentState:
                 "state": self.status,  # waiting (not allowed) | ready | busy | paused
                 "device": self.device,
                 "model_loaded": self.model_loaded,
+                "progress": dict(self.progress),
             }
 
 
@@ -605,9 +735,12 @@ def run_agent(
 ) -> int:
     api = api or Api(cfg.api_url)
     state = state or AgentState(cfg, api.token)
-    pool = Pool(cfg.model_version, cfg.embedding_dim, cfg.pool_page_size)
+    pool = Pool(cfg.model_version, cfg.embedding_dim, cfg.pool_page_size, cache_dir=cfg.cache_dir)
+    pool.load_cache()
+    state.set_progress(pool_loaded=len(pool), pool_total=pool.total)
     server = start_local_server(state)
     note = ""
+    last_pool_sync = 0.0
     try:
         if embedder is None:
             embedder = get_cached_embedder(cfg.model_name)
@@ -621,10 +754,19 @@ def run_agent(
                 time.sleep(cfg.poll_seconds)
                 continue
             try:
-                if not pool.synced_once:
-                    logger.info("đồng bộ pool ảnh lần đầu...")
-                    pool.sync(api)
-                    logger.info("pool: %s ảnh", len(pool))
+                first = not pool.synced_once
+                if first or time.monotonic() - last_pool_sync >= cfg.pool_refresh_seconds:
+                    if first:
+                        logger.info("đồng bộ pool ảnh lần đầu (%s ảnh từ cache)...", len(pool))
+                        state.set_progress(phase="syncing_pool", pool_loaded=len(pool), pool_total=pool.total)
+                    pool.sync(
+                        api,
+                        on_progress=lambda loaded, total: state.set_progress(pool_loaded=loaded, pool_total=total),
+                    )
+                    last_pool_sync = time.monotonic()
+                    state.set_progress(phase="idle", pool_loaded=len(pool), pool_total=max(len(pool), pool.total or 0))
+                    if first:
+                        logger.info("pool: %s ảnh", len(pool))
                 work = api.claim(cfg.model_version, cfg.embedding_dim)
                 note = ""
                 state.set_status("ready")
@@ -653,7 +795,8 @@ def run_agent(
 
             if work["kind"] == "job":
                 state.set_status("busy")
-                run_job(api, embedder, pool, cfg, work["job"])
+                run_job(api, embedder, pool, cfg, work["job"], progress=state.set_progress)
+                state.clear_job_progress()
             elif work["kind"] == "search":
                 state.set_status("busy")
                 run_search(api, embedder, pool, cfg, work["search"])
@@ -695,6 +838,7 @@ def build_config(argv: list[str] | None = None) -> AgentConfig:
         default=os.environ.get("AGENT_ALLOWED_ORIGINS", ""),
         help="extra comma-separated web origins (the origin of SUPPORT_WEB_URL is always allowed)",
     )
+    parser.add_argument("--cache-dir", default=os.environ.get("AGENT_CACHE_DIR") or None, help="folder that keeps the pool between runs")
     args = parser.parse_args(argv)
     if not args.api_url:
         parser.error("SUPPORT_API_URL (hoặc --api-url) là bắt buộc")
@@ -713,6 +857,7 @@ def build_config(argv: list[str] | None = None) -> AgentConfig:
         bind=args.bind,
         port=args.port,
         allowed_origins=tuple(dict.fromkeys(o for o in origins if o)),
+        cache_dir=args.cache_dir,
     )
     return cfg
 

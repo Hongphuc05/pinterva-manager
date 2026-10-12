@@ -244,12 +244,14 @@ def test_job_round_trip_stores_items_and_promotes_the_batch_to_the_pool(client, 
         headers=_agent(token),
     ).json()
     assert len(pool["items"]) == 1 and pool["next_cursor"]
+    assert pool["total"] == 2  # the agent shows "loaded / total" while it downloads the pool
     rest = client.get(
         "/api/support-worker/pool",
         params={"model_version": MODEL, "embedding_dim": DIM, "limit": 5, "after": pool["next_cursor"]},
         headers=_agent(token),
     ).json()
     assert len(rest["items"]) == 1 and rest["next_cursor"] is None and rest["cursor"]
+    assert "total" not in rest  # only the first page pays for the count
     delta = client.get(
         "/api/support-worker/pool",
         params={"model_version": MODEL, "embedding_dim": DIM, "after": rest["cursor"]},

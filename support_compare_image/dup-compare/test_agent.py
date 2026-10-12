@@ -294,7 +294,7 @@ def test_status_is_readable_by_the_allowed_web_origin_with_cors_and_private_netw
     code, headers, body = _call(f"{base}/status")
     assert code == 200 and headers["Access-Control-Allow-Origin"] == "https://web.test"
     assert headers["Access-Control-Allow-Private-Network"] == "true"
-    assert json.loads(body) == {"agent": "support-compare", "version": 1, "name": "Mac Test", "state": "waiting", "device": "mps", "model_loaded": True}
+    assert json.loads(body) == {"agent": "support-compare", "version": 1, "name": "Mac Test", "state": "waiting", "device": "mps", "model_loaded": True, "progress": {"phase": "idle"}}
     code, headers, _ = _call(f"{base}/status", method="OPTIONS")
     assert code == 204 and "POST" in headers["Access-Control-Allow-Methods"] and headers["Access-Control-Allow-Private-Network"] == "true"
 
@@ -328,3 +328,40 @@ def test_config_allows_the_origin_of_the_web_url_and_extra_origins():
         ["--api-url", "https://tacahu.fun", "--web-url", "https://tacahu.fun/support-queue", "--allowed-origins", "http://localhost:5173/, https://tacahu.fun"]
     )
     assert cfg.allowed_origins == ("https://tacahu.fun", "http://localhost:5173") and cfg.port == 8765 and cfg.bind == "127.0.0.1"
+
+
+def test_pool_cache_survives_a_restart_and_only_the_delta_is_downloaded(tmp_path):
+    items = [_pool_item(0.1 * i, f"DJ-{i}") for i in range(1, 6)]
+    first = agent.Pool("m", DIM, page_size=2, cache_dir=str(tmp_path))
+    first.sync(FakeApi(items))
+
+    api = FakeApi(items + [_pool_item(0.9, "DJ-6")])
+    second = agent.Pool("m", DIM, page_size=2, cache_dir=str(tmp_path))
+    assert second.load_cache() == 5 and second.cursor == first.cursor
+    assert second.sync(api) == 1 and len(second) == 6
+    assert api.pool_calls == [first.cursor]  # one request from the saved cursor, not the whole pool
+    assert {r.external_order_id for r in second.rows.values()} == {f"DJ-{i}" for i in range(1, 7)}
+
+
+def test_a_corrupt_or_foreign_pool_cache_is_ignored(tmp_path):
+    items = [_pool_item(0.2, "DJ-1"), _pool_item(0.4, "DJ-2")]
+    agent.Pool("m", DIM, page_size=2, cache_dir=str(tmp_path)).sync(FakeApi(items))
+
+    other_model = agent.Pool("other", DIM, page_size=2, cache_dir=str(tmp_path))
+    assert other_model.load_cache() == 0  # different folder per model_version
+
+    for chunk in tmp_path.glob("*/chunk-*.npz"):
+        chunk.write_bytes(b"not an npz")
+    broken = agent.Pool("m", DIM, page_size=2, cache_dir=str(tmp_path))
+    assert broken.load_cache() == 0 and broken.cursor is None and len(broken) == 0
+
+
+def test_the_cached_pool_is_loaded_at_start_before_any_token_or_job(tmp_path):
+    items = [_pool_item(0.2, "DJ-1"), _pool_item(0.4, "DJ-2"), _pool_item(0.6, "DJ-3")]
+    agent.Pool("m", DIM, page_size=2, cache_dir=str(tmp_path / "c")).sync(FakeApi(items))
+
+    api = FakeApi(items)
+    state = agent.AgentState(_cfg(tmp_path), None)  # not allowed by the web yet
+    cfg = _cfg(tmp_path, cache_dir=str(tmp_path / "c"))
+    assert agent.run_agent(cfg, once=True, api=api, embedder=FakeEmbedder(), state=state) == 1
+    assert state.snapshot()["progress"]["pool_loaded"] == 3 and api.pool_calls == []
