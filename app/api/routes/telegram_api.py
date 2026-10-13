@@ -682,11 +682,12 @@ async def api_telegram_webhook(
         }
         if ":" in cb_data and cb_data.split(":", 1)[0] in support_prefixes:
             prefix, token = cb_data.split(":", 1)
+            # The pair goes to Support or to the Admin Support chose to ask: both may answer it.
             support_user = (
                 db.query(User)
                 .filter(
                     User.telegram_chat_id == user_chat_id,
-                    User.role == ROLE_SUPPORT,
+                    User.role.in_((ROLE_SUPPORT, "admin")),
                     User.active.is_(True),
                 )
                 .first()
@@ -746,16 +747,16 @@ async def api_telegram_webhook(
             )
             # Keep the chat clean: remove the album and the prompt of the order Support just decided.
             if message_ids and delete_messages(user_chat_id, [int(i) for i in message_ids]):
-                verdict = "Đã xác nhận trùng" if decision == "duplicate" else "Đã đưa vào Không trùng lặp"
+                verdict = "Đã verify trùng" if decision == "duplicate" else "Đã verify không trùng"
                 if callback_query.get("id"):
                     answer_callback_query(str(callback_query["id"]), f"{verdict}: {decided_order.external_order_id}")
             else:  # too old to delete (or nothing stored): close the buttons and say what happened
                 if payload.get("message_id") is not None:
                     clear_message_keyboard(user_chat_id, int(payload["message_id"]))
                 result_text = (
-                    f"✅ Đã xác nhận: đơn {decided_order.external_order_id} được đưa vào Trùng lặp."
+                    f"✅ Đã verify: đơn {decided_order.external_order_id} trùng. Support chuyển trạng thái trên web."
                     if decision == "duplicate"
-                    else f"✅ Đã xác nhận: đơn {decided_order.external_order_id} không trùng, không đưa vào Trùng lặp."
+                    else f"✅ Đã verify: đơn {decided_order.external_order_id} không trùng. Support chuyển trạng thái trên web."
                 )
                 send_message(user_chat_id, result_text)
             return {"ok": True}

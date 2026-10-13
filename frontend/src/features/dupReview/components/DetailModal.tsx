@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { ChevronLeft, ChevronRight, X } from 'lucide-react'
-import { isDone, isSent, isTodo, configEntries, type Item } from '../types'
+import { canReview, configEntries, type Item } from '../types'
 import { Badge } from './StatusBadge'
 import { ProxiedImg } from './ProxiedImg'
 
@@ -52,7 +52,7 @@ function ConfigList({ entries }: { entries: { key: string; value: string }[] }) 
 export function DetailModal({ item, index, busy, onIndex, onClose, onSelect }: Props) {
   const total = item.candidates.length
   const candidate = item.candidates[index]
-  const canAct = !isSent(item) && (isTodo(item) || isDone(item))
+  const canAct = canReview(item)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

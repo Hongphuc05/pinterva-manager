@@ -74,7 +74,7 @@ giây, hết hạn 3 phút): job có lease hết hạn được máy khác nhậ
 Agent tải pool (`GET /support-worker/pool`, phân trang keyset; lần sau chỉ phần mới), embedding và so
 sánh từng order trên máy, gửi từng lô kết quả. Các order trong cùng lô không so chéo với nhau; khi
 job xong VPS thêm cả lô vào pool từ chính embedding đã lưu. Celery Beat trên VPS chỉ chạy notifier mỗi
-phút để báo cáo job và gửi cặp ảnh Support đã chọn.
+phút để báo cáo job xong; cặp ảnh Support đã chọn chỉ gửi khi Support bấm gửi trên web (xem dưới).
 
 Kết quả từng order nằm ở `comparison_items.review_status`: `pending_review` (model nghi trùng),
 `no_match` (không thấy trùng), rồi `selected_duplicate` hoặc `ai_wrong` sau khi Support duyệt ở
@@ -83,10 +83,24 @@ khu vực ẩn **Quản lý trùng lặp** của dashboard (`/duplicate-review`,
 platform trong `review_access`, đổi được bên trong; mở khóa cấp token có chữ ký gửi qua header
 `X-Review-Token`, hết hạn sau 12 giờ hoặc khi đổi mật khẩu, khóa 10 phút sau 5 lần sai). Nó chỉ ghi vào
 schema `support_compare_image`, không đổi order. Mục **Tìm ảnh**
-đưa một ảnh upload vào hàng đợi để agent trả top-10 gần nhất. Với `selected_duplicate`, notifier gửi
-cặp (ảnh gốc, ảnh đã chọn, kèm mã đơn) qua Telegram; **Xác nhận** gọi `set_orders_duplicate_status`
-để gắn Trùng lặp, **Từ chối** chuyển order sang Không trùng lặp. Các order `no_match`/`ai_wrong` vẫn
-nằm ở tab **Chưa kiểm tra** cho tới khi Support gõ `/handle` để chuyển chúng sang Không trùng lặp.
+đưa một ảnh upload vào hàng đợi để agent trả top-10 gần nhất.
+
+Mỗi lần bấm check tạo một **lô** (một `comparison_jobs`, tên hiển thị `N đơn · giờ · ngày`). Trong
+lô, mỗi order đã so sánh nằm đúng một giai đoạn (`item_stage` trong `support_compare.py`): *cần duyệt*
+(`pending_review`), *chưa gửi* / *đang chờ* (`selected_duplicate`, candidate `pending`, chưa/đã có
+`telegram_notified_at`), *đã verify trùng* (candidate `duplicate`, order chưa có tag), *đã chuyển Trùng
+lặp* (candidate `duplicate`, order đã tag, chờ gắn link) và *không trùng* (`no_match`, `ai_wrong`, hoặc
+candidate `non_duplicate`). Trang ẩn có ba tab theo lô: **1. Chờ xử lý**, **2. Không trùng lặp**,
+**3. Gắn link**.
+
+Telegram không còn tự gửi và **không gắn tag**. `POST /support-review/jobs/{id}/send` gửi các cặp chưa
+gửi của lô cho Support hoặc cho một Admin đã liên kết Telegram (`GET /support-review/telegram-admins`);
+**Xác nhận**/**Từ chối** (Support hoặc Admin được chọn đều bấm được) chỉ ghi `decision_status` của
+candidate. Order chỉ đổi tag khi Support bấm `POST /support-review/jobs/{id}/tag` (`to=duplicate` cho các
+đơn đã verify, `to=non_duplicate` cho nhóm không trùng); đơn đã chia cho designer hoặc đã có tag khác bị
+bỏ qua và liệt kê lại. `POST /support-review/items/{id}/link` ghi link Support dán thành một
+`OrderWorkNote` (`Link đơn trùng: <url>`, Admin và designer thấy), chỉ cho đơn đã tag Trùng lặp. Các
+order `no_match`/`ai_wrong` ngoài lô vẫn có thể chuyển bằng `/handle`.
 
 Bốn tab của Support chia danh sách thành các phần không chồng nhau, nên tổng bốn tab bằng số
 đơn Support đang thấy: **Trùng lặp** và **Không trùng lặp** theo tag (tag được ưu tiên, kể cả khi đơn

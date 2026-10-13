@@ -34,6 +34,7 @@ from app.domain.access import (
     DUPLICATE_CHECK_DUPLICATE,
     DUPLICATE_CHECK_NON_DUPLICATE,
     DUPLICATE_CHECK_UNCHECK,
+    ROLE_ADMIN,
     ROLE_SUPPORT,
     SUPPORT_CLASSIFICATION_STATES,
     WORK_DOMAIN_DUPLICATE,
@@ -212,8 +213,8 @@ def notify_completed_support_compare_jobs(session: Session, *, limit: int = 20) 
                 f"• Nghi trùng (cần duyệt ở trang Duyệt trùng): <b>{duplicates}</b>\n"
                 f"• Không thấy trùng: <b>{max(processed - duplicates, 0)}</b>\n"
                 f"• Lỗi: <b>{errors}</b>\n\n"
-                "Mở trang Duyệt trùng trên web để duyệt các đơn nghi trùng. "
-                "Cặp ảnh bạn chọn sẽ được gửi lại ở đây để xác nhận."
+                "Mở trang Duyệt trùng trên web để duyệt các đơn nghi trùng, rồi gửi cặp ảnh "
+                "xác nhận cho Support hoặc Admin ở tab Chờ xử lý của lô."
             )
         else:
             error = escape((job.last_error or "Không rõ lỗi")[:1000])
@@ -477,8 +478,13 @@ def _new_action(
     )
 
 
-def notify_duplicate_candidate(session: Session, candidate_id: uuid.UUID) -> bool:
+def notify_duplicate_candidate(
+    session: Session, candidate_id: uuid.UUID, recipients: list[User] | None = None
+) -> bool:
     """Send the candidate Support picked on the web review to Telegram.
+
+    ``recipients`` are the chosen Telegram accounts (Support sending to themselves or to one
+    Admin); None means every linked Support account of the platform.
 
     The candidate itself remains pending until a Support callback invokes the
     existing duplicate application service.
@@ -502,9 +508,10 @@ def notify_duplicate_candidate(session: Session, candidate_id: uuid.UUID) -> boo
         logger.warning("comparison candidate %s has no matching production order", candidate_id)
         return False
 
-    recipients = _support_recipients(session, item.platform_id)
+    if recipients is None:
+        recipients = _support_recipients(session, item.platform_id)
     if not recipients:
-        logger.info("no linked Support Telegram account for platform %s", item.platform_id)
+        logger.info("no linked Telegram account to send candidate %s to", candidate_id)
         return False
 
     action_rows: list[tuple[TelegramActionLog, TelegramActionLog, str]] = []
@@ -566,7 +573,7 @@ def notify_duplicate_candidate(session: Session, candidate_id: uuid.UUID) -> boo
                 (
                     f"👉 Đơn <b>{escape(item.external_order_id)}</b> trùng với đơn "
                     f"<b>{escape(candidate.matched_external_order_id or 'không rõ')}</b>? "
-                    "Xác nhận để gắn tag Trùng lặp, Từ chối để đưa vào Không trùng lặp."
+                    "Xác nhận = đã verify trùng, Từ chối = không trùng. Việc chuyển trạng thái đơn làm trên web."
                 ),
                 reply_markup=_keyboard(confirm.callback_token, reject.callback_token),
             )
@@ -592,29 +599,110 @@ def notify_duplicate_candidate(session: Session, candidate_id: uuid.UUID) -> boo
         return False
 
 
-def notify_pending_duplicate_candidates(session: Session, *, limit: int = 20) -> int:
-    """Send every candidate Support selected on the web review."""
-    candidates = (
-        session.query(SupportCompareCandidate)
-        .join(
-            SupportCompareItem,
-            SupportCompareItem.selected_candidate_id == SupportCompareCandidate.id,
+STAGE_TODO = "todo"  # model suspects a duplicate, Support has not chosen yet
+STAGE_UNSENT = "unsent"  # Support chose a pair, not sent to Telegram yet
+STAGE_WAITING = "waiting"  # sent, nobody answered yet
+STAGE_VERIFIED = "verified"  # Telegram "Có": verified duplicate, order not tagged yet
+STAGE_LINKED = "linked"  # order tagged Trùng lặp, waiting for the link in the work note
+STAGE_NOT_DUPLICATE = "not_duplicate"  # no match / model wrong / rejected on Telegram
+STAGES = (STAGE_TODO, STAGE_UNSENT, STAGE_WAITING, STAGE_VERIFIED, STAGE_LINKED, STAGE_NOT_DUPLICATE)
+
+
+def item_stage(
+    *,
+    review_status: str | None,
+    decision_status: str | None,
+    notified_at: datetime | None,
+    order_tag: str | None,
+) -> str | None:
+    """Where a compared order stands in its lot, from the review and Telegram decision."""
+    if review_status == "pending_review":
+        return STAGE_TODO
+    if review_status in ("no_match", "ai_wrong"):
+        return STAGE_NOT_DUPLICATE
+    if review_status != "selected_duplicate":
+        return None
+    if decision_status == "non_duplicate":
+        return STAGE_NOT_DUPLICATE
+    if decision_status == "duplicate":
+        return STAGE_LINKED if order_tag == DUPLICATE_CHECK_DUPLICATE else STAGE_VERIFIED
+    return STAGE_WAITING if notified_at else STAGE_UNSENT
+
+
+def lot_stage_rows(session: Session, run_ids: list[uuid.UUID]) -> list[tuple]:
+    """(run_id, order_id, external_order_id, stage, order_tag, order_state) per completed item."""
+    if not run_ids:
+        return []
+    rows = (
+        session.query(
+            SupportCompareItem.run_id,
+            SupportCompareItem.order_id,
+            SupportCompareItem.external_order_id,
+            SupportCompareItem.review_status,
+            SupportCompareCandidate.decision_status,
+            SupportCompareCandidate.telegram_notified_at,
+            Order.duplicate_check_status,
+            Order.state,
         )
+        .outerjoin(SupportCompareCandidate, SupportCompareCandidate.id == SupportCompareItem.selected_candidate_id)
+        .outerjoin(Order, Order.id == SupportCompareItem.order_id)
+        .filter(SupportCompareItem.run_id.in_(run_ids), SupportCompareItem.processing_status == "completed")
+        .all()
+    )
+    out = []
+    for run_id, order_id, code, review, decision, notified, tag, state in rows:
+        stage = item_stage(review_status=review, decision_status=decision, notified_at=notified, order_tag=tag)
+        if stage:
+            out.append((run_id, order_id, code, stage, tag, state))
+    return out
+
+
+def send_lot_pairs(session: Session, *, run_id: uuid.UUID, recipients: list[User]) -> int:
+    """Send every not-yet-sent chosen pair of a lot to the chosen accounts."""
+    candidate_ids = [
+        row[0]
+        for row in session.query(SupportCompareCandidate.id)
+        .join(SupportCompareItem, SupportCompareItem.selected_candidate_id == SupportCompareCandidate.id)
         .filter(
+            SupportCompareItem.run_id == run_id,
             SupportCompareItem.review_status == "selected_duplicate",
             SupportCompareItem.processing_status == "completed",
             SupportCompareCandidate.decision_status == "pending",
             SupportCompareCandidate.telegram_notified_at.is_(None),
         )
-        .order_by(SupportCompareItem.reviewed_at.asc())
-        .limit(max(1, limit))
+        .order_by(SupportCompareItem.external_order_id)
         .all()
+    ]
+    return sum(1 for cid in candidate_ids if notify_duplicate_candidate(session, cid, recipients))
+
+
+def tag_lot_orders(
+    session: Session, *, actor: User, platform_id: uuid.UUID, run_id: uuid.UUID, target: str
+) -> tuple[int, list[dict]]:
+    """Move a lot's verified duplicates (target=duplicate) or its non-duplicates (target=non_duplicate).
+
+    Orders Admin already gave to a designer, or that carry a tag, are skipped and reported: the
+    batch must not fail because of one of them.
+    """
+    stage = STAGE_VERIFIED if target == DUPLICATE_CHECK_DUPLICATE else STAGE_NOT_DUPLICATE
+    movable: list[uuid.UUID] = []
+    skipped: list[dict] = []
+    for _run, order_id, code, row_stage, tag, state in lot_stage_rows(session, [run_id]):
+        if row_stage != stage:
+            continue
+        if (state or "").upper() not in SUPPORT_CLASSIFICATION_STATES:
+            skipped.append({"order_code": code, "reason": "Đã chia cho designer"})
+        elif (tag or DUPLICATE_CHECK_UNCHECK) != DUPLICATE_CHECK_UNCHECK:
+            if tag != target:
+                skipped.append({"order_code": code, "reason": "Đơn đã có tag khác"})
+        else:
+            movable.append(order_id)
+    if not movable:
+        return 0, skipped
+    moved = set_orders_duplicate_status(
+        session, actor=actor, platform_id=platform_id, order_ids=movable, duplicate_status=target
     )
-    notified = 0
-    for candidate in candidates:
-        if notify_duplicate_candidate(session, candidate.id):
-            notified += 1
-    return notified
+    return moved, skipped
 
 
 def withdraw_decided_pair_from_other_supports(session: Session, action_log: TelegramActionLog) -> int:
@@ -662,9 +750,9 @@ def execute_support_duplicate_decision(
     action_log: TelegramActionLog,
     decision_status: str,
 ) -> tuple[SupportCompareCandidate, Order]:
-    """Apply a Telegram decision through the existing Support order command."""
-    if actor.role != ROLE_SUPPORT:
-        raise ValueError("Chỉ tài khoản Support được xử lý candidate này")
+    """Record a Telegram verdict on the chosen pair. It only verifies: the order is tagged later, in bulk, on the web."""
+    if actor.role not in (ROLE_SUPPORT, ROLE_ADMIN):
+        raise ValueError("Chỉ tài khoản Support hoặc Admin được xử lý candidate này")
     if decision_status not in {DUPLICATE_CHECK_DUPLICATE, DUPLICATE_CHECK_NON_DUPLICATE}:
         raise ValueError("Quyết định duplicate không hợp lệ")
 
@@ -688,21 +776,8 @@ def execute_support_duplicate_decision(
         raise ValueError("Candidate này chưa được Support chọn trên trang Duyệt trùng")
     if order.platform_id != item.platform_id:
         raise ValueError("Candidate không cùng platform với order")
-
-    # Same rule as the web: an order Admin has already given to a designer cannot be tagged.
-    # No expected order version here: the order legitimately changes between the notification and
-    # Support's click (status sync bumps it), and the service re-checks scope under a row lock.
-    # Idempotent: a previous click may have changed the order and then been interrupted (deploy
-    # restart) before the candidate/action were closed. Finish that instead of failing on the
-    # "already classified" check, which would leave the buttons stuck.
-    if (order.duplicate_check_status or DUPLICATE_CHECK_UNCHECK) != decision_status:
-        set_orders_duplicate_status(
-            session,
-            actor=actor,
-            platform_id=item.platform_id,
-            order_ids=[order.id],
-            duplicate_status=decision_status,
-        )
+    if actor.platform_id is not None and actor.platform_id != item.platform_id:
+        raise ValueError("Tài khoản không thuộc platform của đơn này")
 
     candidate.decision_status = decision_status
     candidate.decided_by_id = actor.id

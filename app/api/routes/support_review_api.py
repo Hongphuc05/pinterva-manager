@@ -22,11 +22,25 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.adapters.db.models import SupportCompareJob, SupportSearchJob, User
+from app.adapters.db.models import Order, OrderWorkNote, SupportCompareJob, SupportSearchJob, User
 from app.api.deps import get_current_platform_id, get_db, require_any_role
 from app.application import support_review_access as access_svc
 from app.application import support_worker as sw
-from app.domain.access import ROLE_SUPPORT
+from app.application.duplicate_board import DuplicateBoardError
+from app.application.order_work_notes import create_work_note
+from app.application.support_compare import (
+    STAGES,
+    item_stage,
+    lot_stage_rows,
+    send_lot_pairs,
+    tag_lot_orders,
+)
+from app.domain.access import (
+    DUPLICATE_CHECK_DUPLICATE,
+    DUPLICATE_CHECK_NON_DUPLICATE,
+    ROLE_ADMIN,
+    ROLE_SUPPORT,
+)
 
 S = "support_compare_image"
 # States in which the reviewer may still change the decision. Once the pair was sent to
@@ -221,7 +235,14 @@ def list_jobs(
         ),
         {"pid": platform_id, "limit": max(1, min(limit, 50))},
     ).fetchall()
-    return {"jobs": [_job_row(r) for r in rows]}
+    jobs = [_job_row(r) for r in rows]
+    run_ids = [uuid.UUID(j["run_id"]) for j in jobs if j["run_id"]]
+    counts: dict[str, dict[str, int]] = {}
+    for run_id, _order, _code, stage, _tag, _state in lot_stage_rows(db, run_ids):
+        counts.setdefault(str(run_id), dict.fromkeys(STAGES, 0))[stage] += 1
+    for job in jobs:
+        job["stages"] = counts.get(job["run_id"] or "", dict.fromkeys(STAGES, 0))
+    return {"jobs": jobs}
 
 
 def _get_job_or_404(db: Session, job_id: uuid.UUID, platform_id: uuid.UUID) -> SupportCompareJob:
@@ -250,9 +271,11 @@ def get_job(
         item_rows = db.execute(
             text(
                 f"""SELECT i.id, i.external_order_id, i.product_name, i.image_url, i.is_duplicate,
-                           i.review_status, i.selected_candidate_id, i.reviewed_at, o.custom_config
+                           i.review_status, i.selected_candidate_id, i.reviewed_at, o.custom_config,
+                           i.order_id, o.duplicate_check_status, sc.decision_status, sc.telegram_notified_at
                     FROM {S}.comparison_items i
                     LEFT JOIN public.orders o ON o.id = i.order_id
+                    LEFT JOIN {S}.comparison_candidates sc ON sc.id = i.selected_candidate_id
                     WHERE i.run_id = :run AND i.processing_status = 'completed'
                     ORDER BY (i.review_status = 'pending_review') DESC, i.external_order_id"""
             ),
@@ -281,6 +304,7 @@ def get_job(
                     "sent_to_telegram": r[11] is not None, "decision": r[12], "custom_config": r[13],
                 }
             )
+        links = _link_notes(db, [r[9] for r in item_rows if r[9]])
         for r in item_rows:
             items.append(
                 {
@@ -290,9 +314,19 @@ def get_job(
                     "selected_candidate_id": str(r[6]) if r[6] else None,
                     "reviewed_at": _iso(r[7]),
                     "custom_config": r[8],
+                    "order_tag": r[10],
+                    "decision": r[11],
+                    "stage": item_stage(
+                        review_status=r[5], decision_status=r[11], notified_at=r[12], order_tag=r[10]
+                    ),
+                    "link": links.get(r[9]),
                     "candidates": by_item.get(r[0], []),
                 }
             )
+        out["stages"] = dict.fromkeys(STAGES, 0)
+        for item in items:
+            if item["stage"]:
+                out["stages"][item["stage"]] += 1
         if job.status == "running":
             out["processed_count"] = len(items)
             out["duplicate_count"] = sum(1 for i in items if i["model_says_duplicate"])
@@ -372,6 +406,144 @@ def reject_item(
     )
     db.commit()
     return {"item_id": str(item_id), "review_status": "ai_wrong"}
+
+
+LINK_NOTE_PREFIX = "Link đơn trùng:"
+
+
+def _link_notes(db: Session, order_ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
+    """The latest "Link đơn trùng" work note of each order, as the URL Support pasted."""
+    if not order_ids:
+        return {}
+    rows = (
+        db.query(OrderWorkNote.order_id, OrderWorkNote.body)
+        .filter(OrderWorkNote.order_id.in_(order_ids), OrderWorkNote.body.like(f"{LINK_NOTE_PREFIX}%"))
+        .order_by(OrderWorkNote.created_at.asc())
+        .all()
+    )
+    return {order_id: body[len(LINK_NOTE_PREFIX):].strip() for order_id, body in rows}
+
+
+class SendBody(BaseModel):
+    target: str = Field(pattern="^(support|admin)$")
+    admin_id: uuid.UUID | None = None
+
+
+class TagBody(BaseModel):
+    to: str = Field(pattern="^(duplicate|non_duplicate)$")
+
+
+class LinkBody(BaseModel):
+    url: str = Field(min_length=1, max_length=2000)
+
+
+def _telegram_admins(db: Session, platform_id: uuid.UUID) -> list[User]:
+    return (
+        db.query(User)
+        .filter(
+            User.role == ROLE_ADMIN,
+            User.active.is_(True),
+            User.telegram_chat_id.isnot(None),
+            (User.platform_id == platform_id) | (User.platform_id.is_(None)),
+        )
+        .order_by(User.full_name, User.username)
+        .all()
+    )
+
+
+@router.get("/telegram-admins")
+def list_telegram_admins(
+    _u: User = Depends(require_unlock),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Admins linked to the Telegram bot: the accounts Support may send a lot's pairs to."""
+    return {
+        "admins": [
+            {"id": str(a.id), "name": a.full_name or a.username, "telegram_username": a.telegram_username}
+            for a in _telegram_admins(db, platform_id)
+        ]
+    }
+
+
+@router.post("/jobs/{job_id}/send")
+def send_job_pairs(
+    job_id: uuid.UUID,
+    body: SendBody,
+    user: User = Depends(require_unlock),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Send every chosen, not-yet-sent pair of a lot to Support's own Telegram or to one Admin."""
+    job = _get_job_or_404(db, job_id, platform_id)
+    if job.run_id is None:
+        raise HTTPException(409, "Lô này chưa có kết quả so sánh")
+    if body.target == "admin":
+        admin = next((a for a in _telegram_admins(db, platform_id) if a.id == body.admin_id), None)
+        if admin is None:
+            raise HTTPException(409, "Admin này chưa liên kết Telegram hoặc không thuộc platform")
+        recipients = [admin]
+    else:
+        recipients = None  # every linked Support account, as before
+    sent = send_lot_pairs(db, run_id=job.run_id, recipients=recipients)
+    if sent == 0:
+        raise HTTPException(409, "Không có đơn nào chưa gửi, hoặc không gửi được qua Telegram")
+    return {"sent": sent}
+
+
+@router.post("/jobs/{job_id}/tag")
+def tag_job_orders(
+    job_id: uuid.UUID,
+    body: TagBody,
+    user: User = Depends(require_unlock),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Move the lot's verified duplicates to Trùng lặp, or its non-duplicates to Không trùng lặp."""
+    job = _get_job_or_404(db, job_id, platform_id)
+    if job.run_id is None:
+        raise HTTPException(409, "Lô này chưa có kết quả so sánh")
+    target = DUPLICATE_CHECK_DUPLICATE if body.to == "duplicate" else DUPLICATE_CHECK_NON_DUPLICATE
+    try:
+        moved, skipped = tag_lot_orders(db, actor=user, platform_id=platform_id, run_id=job.run_id, target=target)
+    except DuplicateBoardError as exc:
+        db.rollback()
+        raise HTTPException(409, str(exc)) from exc
+    if moved == 0 and not skipped:
+        raise HTTPException(409, "Không có đơn nào để chuyển")
+    return {"moved": moved, "skipped": skipped}
+
+
+@router.post("/items/{item_id}/link")
+async def save_item_link(
+    item_id: uuid.UUID,
+    body: LinkBody,
+    user: User = Depends(require_unlock),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Write the link Support pasted into the order's work note (visible to Admin and designers)."""
+    url = body.url.strip()
+    if urlparse(url).scheme not in ("http", "https") or not urlparse(url).netloc:
+        raise HTTPException(422, "Link phải bắt đầu bằng http:// hoặc https://")
+    row = db.execute(
+        text(f"SELECT order_id FROM {S}.comparison_items WHERE id = :id AND platform_id = :pid"),
+        {"id": item_id, "pid": platform_id},
+    ).fetchone()
+    order = db.get(Order, row[0]) if row else None
+    if order is None or order.platform_id != platform_id:
+        raise HTTPException(404, "Không tìm thấy đơn")
+    if order.duplicate_check_status != DUPLICATE_CHECK_DUPLICATE:
+        raise HTTPException(409, "Chỉ gắn link cho đơn đã chuyển sang Trùng lặp")
+    await create_work_note(
+        db,
+        order_id=order.id,
+        author=user,
+        body=f"{LINK_NOTE_PREFIX} {url}",
+        idempotency_key=f"dup-link:{item_id}:{uuid.uuid4().hex}",
+        images=[],
+    )
+    return {"item_id": str(item_id), "link": url}
 
 
 @router.post("/jobs/{job_id}/cancel")

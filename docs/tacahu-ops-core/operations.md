@@ -73,10 +73,13 @@ Luồng vận hành một lô (ví dụ 100 order admin vừa crawl về Waiting
    thấy trùng và số lỗi.
 5. Support mở khu vực ẩn **Quản lý trùng lặp** (`/duplicate-review`, không có trong menu; vào bằng Alt+Shift+D hoặc bấm nhanh 5 lần vào logo; mật khẩu riêng,
    lần đầu mở thì đặt, đổi ở mục Cài đặt; khóa 10 phút sau 5 lần nhập sai). Với mỗi order nghi trùng:
-   **Chọn trùng** (Telegram gửi cặp ảnh kèm mã đơn trong ≤60 giây) hoặc **Model sai**. Quên mật khẩu:
-   xóa dòng của platform trong `support_compare_image.review_access` để đặt lại ở lần mở sau.
-6. Trên Telegram: **Xác nhận trùng** gắn tag Trùng lặp và chuyển order sang tab Trùng lặp;
-   **Từ chối** chuyển sang Không trùng lặp.
+   **Chọn trùng** hoặc **Model sai**. Đơn đã chọn vào tab **1. Chờ xử lý** của lô; Support bấm
+   **Gửi cho Support** hoặc chọn một Admin đã liên kết Telegram rồi **Gửi cho Admin** để gửi cả loạt
+   cặp ảnh. Quên mật khẩu: xóa dòng của platform trong `support_compare_image.review_access` để đặt
+   lại ở lần mở sau.
+6. Trên Telegram: **Xác nhận trùng** chỉ đánh dấu đã verify, **Từ chối** đưa đơn sang tab **2. Không
+   trùng lặp**; chưa có tag nào đổi. Cuối mỗi tab có nút chuyển toàn bộ sang Trùng lặp / Không trùng
+   lặp. Tab **3. Gắn link** nhận các đơn đã chuyển Trùng lặp để Support dán link vào note làm việc.
 7. `/handle` đếm các order đã so mà không trùng (không thấy trùng hoặc **Model sai**, không còn
    review đang mở), hỏi xác nhận rồi chuyển chúng sang Không trùng lặp. `/help` liệt kê lệnh.
 

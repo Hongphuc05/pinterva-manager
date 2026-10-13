@@ -1,5 +1,5 @@
 import { Loader2, Maximize2 } from 'lucide-react'
-import { isDone, isSent, isTodo, type Item } from '../types'
+import { canReview, type Item } from '../types'
 import { StatusBadge } from './StatusBadge'
 import { CandidateCard } from './CandidateCard'
 import { Figure } from './Figure'
@@ -16,7 +16,7 @@ interface Props {
 }
 
 export function OrderCard({ item, active, busy, onSelect, onReject, onZoom, onFocus, onDetail }: Props) {
-  const canAct = !isSent(item) && (isTodo(item) || isDone(item))
+  const canAct = canReview(item)
   return (
     <article
       data-testid={`order-${item.order_code}`}
@@ -26,7 +26,7 @@ export function OrderCard({ item, active, busy, onSelect, onReject, onZoom, onFo
       <div className="flex items-center gap-2.5 border-b border-dup-line px-3 py-2">
         <span className="font-mono text-[13px] font-medium text-dup-brand">{item.order_code}</span>
         <span className="min-w-0 flex-1 truncate text-dup-dim" title={item.product_name ?? ''}>{item.product_name}</span>
-        <StatusBadge status={item.review_status} />
+        <StatusBadge item={item} />
         {item.candidates.length > 0 && (
           <button
             type="button"

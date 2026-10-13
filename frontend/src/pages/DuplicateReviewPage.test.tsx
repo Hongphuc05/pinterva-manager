@@ -20,6 +20,7 @@ const job: Job = {
   id: 'j1', status: 'completed', requested_count: 3, processed_count: 3, duplicate_count: 2,
   error_count: 0, run_id: 'r1', created_at: '2026-09-24T10:03:38Z', finished_at: null,
 }
+const admins = [{ id: 'a1', name: 'Admin POD', telegram_username: 'PODdesigner' }]
 
 const candidates = (n: number) =>
   [1, 2].map((r) => ({
@@ -33,6 +34,7 @@ const item = (n: number, review_status: Item['review_status'], selected: string 
   id: `i${n}`, order_code: `DJ000${n}`, product_name: `Sản phẩm ${n}`, image_url: `https://img.test/n${n}.png`,
   model_says_duplicate: review_status !== 'no_match', review_status, selected_candidate_id: selected,
   reviewed_at: null, candidates: candidates(n),
+  stage: review_status === 'pending_review' ? 'todo' : review_status === 'selected_duplicate' ? 'unsent' : 'not_duplicate',
 })
 
 let items: Item[]
@@ -75,6 +77,9 @@ beforeEach(() => {
     if (path === '/support-review/access') return Promise.resolve(access)
     if (path.startsWith('/support-review/jobs?')) return Promise.resolve({ jobs: [job] })
     if (path === '/support-review/jobs/j1') return Promise.resolve({ job, items })
+    if (path === '/support-review/telegram-admins') return Promise.resolve({ admins })
+    if (path === '/support-review/jobs/j1/tag') return Promise.resolve({ moved: 1, skipped: [] })
+    if (path === '/support-review/jobs/j1/send') return Promise.resolve({ sent: 1 })
     if (path.startsWith('/support-review/search?')) return Promise.resolve({ id: `s${++searchN}` })
     if (path.startsWith('/support-review/search/s')) {
       return Promise.resolve({ id: path.split('/').pop(), status: 'completed', error: null, result: searchResult(`DJ-S${searchN}`) })
@@ -101,10 +106,10 @@ describe('duplicate review page', () => {
     renderPage()
     await screen.findByTestId('order-DJ0001')
     expect(screen.getByRole('tab', { name: /Cần duyệt/ })).toHaveTextContent('1')
-    await userEvent.click(screen.getByRole('tab', { name: /Đã duyệt/ }))
+    await userEvent.click(screen.getByRole('tab', { name: /1\. Chờ xử lý/ }))
     expect(screen.getByTestId('order-DJ0002')).toBeInTheDocument()
     expect(screen.queryByTestId('order-DJ0001')).not.toBeInTheDocument()
-    await userEvent.click(screen.getByRole('tab', { name: /Không thấy trùng/ }))
+    await userEvent.click(screen.getByRole('tab', { name: /2\. Không trùng lặp/ }))
     expect(screen.getByTestId('order-DJ0003')).toBeInTheDocument()
   })
 
@@ -175,13 +180,52 @@ describe('duplicate review page', () => {
   })
 
   it('freezes a pair that was already sent to Telegram', async () => {
-    items = [{ ...item(2, 'selected_duplicate', 'i2-c2'), candidates: candidates(2).map((c) => ({ ...c, sent_to_telegram: c.id === 'i2-c2' })) }]
+    items = [{ ...item(2, 'selected_duplicate', 'i2-c2'), stage: 'waiting', candidates: candidates(2).map((c) => ({ ...c, sent_to_telegram: c.id === 'i2-c2' })) }]
     renderPage()
-    await userEvent.click(await screen.findByRole('tab', { name: /Đã duyệt/ }))
+    await userEvent.click(await screen.findByRole('tab', { name: /1\. Chờ xử lý/ }))
     const card = await screen.findByTestId('order-DJ0002')
     expect(within(card).getByText('Đã gửi Telegram')).toBeInTheDocument()
     expect(within(card).queryByRole('button', { name: /Model sai/ })).not.toBeInTheDocument()
     expect(within(card).queryByRole('button', { name: 'Chọn trùng' })).not.toBeInTheDocument()
+  })
+
+  it('names the lot by its size and time and sends the chosen pairs to Support or to a chosen Admin', async () => {
+    items = [item(2, 'selected_duplicate', 'i2-c2'), { ...item(4, 'selected_duplicate', 'i4-c1'), stage: 'verified' }]
+    renderPage()
+    expect(await screen.findByText(/Lô 3 đơn · \d{2}h\d{2} · 24\/09/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('tab', { name: /1\. Chờ xử lý/ }))
+    const panel = await screen.findByTestId('lot-pending')
+    expect(panel).toHaveTextContent('1 chưa gửi · 0 đang chờ · 1 đã verify trùng')
+
+    await userEvent.click(within(panel).getByRole('button', { name: 'Gửi cho Support' }))
+    await waitFor(() => expect(posted('/support-review/jobs/j1/send', { target: 'support', admin_id: null })).toBe(true))
+
+    await waitFor(() => expect(within(panel).getByLabelText('Admin nhận')).toHaveValue('a1'))
+    await userEvent.click(within(panel).getByRole('button', { name: 'Gửi cho Admin' }))
+    await waitFor(() => expect(posted('/support-review/jobs/j1/send', { target: 'admin', admin_id: 'a1' })).toBe(true))
+  })
+
+  it('moves the verified orders to Trùng lặp and the rest to Không trùng lặp from the lot', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    items = [{ ...item(4, 'selected_duplicate', 'i4-c1'), stage: 'verified' }, item(3, 'no_match')]
+    renderPage()
+    await userEvent.click(await screen.findByRole('tab', { name: /1\. Chờ xử lý/ }))
+    await userEvent.click(await screen.findByRole('button', { name: /Chuyển toàn bộ đơn đã verify thành Trùng lặp \(1\)/ }))
+    await waitFor(() => expect(posted('/support-review/jobs/j1/tag', { to: 'duplicate' })).toBe(true))
+
+    await userEvent.click(screen.getByRole('tab', { name: /2\. Không trùng lặp/ }))
+    await userEvent.click(await screen.findByRole('button', { name: /Chuyển toàn bộ thành Không trùng lặp \(1\)/ }))
+    await waitFor(() => expect(posted('/support-review/jobs/j1/tag', { to: 'non_duplicate' })).toBe(true))
+  })
+
+  it('pastes a link for a tagged duplicate in the Gắn link tab', async () => {
+    items = [{ ...item(5, 'selected_duplicate', 'i5-c1'), stage: 'linked', order_tag: 'duplicate' }]
+    renderPage()
+    await userEvent.click(await screen.findByRole('tab', { name: /3\. Gắn link/ }))
+    const row = await screen.findByTestId('link-DJ0005')
+    await userEvent.type(within(row).getByLabelText('Link cho DJ0005'), 'https://drive.test/x')
+    await userEvent.click(within(row).getByRole('button', { name: 'Lưu link' }))
+    await waitFor(() => expect(posted('/support-review/items/i5/link', { url: 'https://drive.test/x' })).toBe(true))
   })
 
   it('queues an uploaded picture for a Support machine, then lists the matches with codes and configuration', async () => {

@@ -1,5 +1,8 @@
 export type ReviewStatus = 'pending_review' | 'selected_duplicate' | 'ai_wrong' | 'no_match'
 
+/** Where a compared order stands in its lot (same values as the API `stage`). */
+export type Stage = 'todo' | 'unsent' | 'waiting' | 'verified' | 'linked' | 'not_duplicate'
+
 export interface Job {
   id: string
   status: string
@@ -10,6 +13,7 @@ export interface Job {
   run_id: string | null
   created_at: string | null
   finished_at: string | null
+  stages?: Record<Stage, number>
 }
 
 export interface Candidate {
@@ -37,19 +41,40 @@ export interface Item {
   review_status: ReviewStatus | null
   selected_candidate_id: string | null
   reviewed_at: string | null
+  stage: Stage | null
+  order_tag?: string | null
+  decision?: string | null
+  link?: string | null
   custom_config?: CustomConfig | null
   candidates: Candidate[]
 }
 
-export type TabKey = 'todo' | 'done' | 'nomatch'
+export type TabKey = 'todo' | 'pending' | 'notdup' | 'link'
 
-export const isTodo = (i: Item) => i.review_status === 'pending_review'
-export const isDone = (i: Item) => i.review_status === 'selected_duplicate' || i.review_status === 'ai_wrong'
-export const isNoMatch = (i: Item) => i.review_status === 'no_match'
+export const TAB_OF: Record<Stage, TabKey> = {
+  todo: 'todo',
+  unsent: 'pending',
+  waiting: 'pending',
+  verified: 'pending',
+  not_duplicate: 'notdup',
+  linked: 'link',
+}
 
 /** A pair already sent to Telegram is frozen. */
 export const isSent = (i: Item) =>
   i.candidates.some((c) => c.id === i.selected_candidate_id && c.sent_to_telegram)
+
+/** The choice can still be made or changed: not yet sent, and not already settled. */
+export const canReview = (i: Item) =>
+  !isSent(i) && (i.stage === 'todo' || i.stage === 'unsent' || i.review_status === 'ai_wrong')
+
+/** The name of a lot: how many orders and when it was made, e.g. "100 đơn · 09h00 · 13/10". */
+export function lotName(job: Pick<Job, 'requested_count' | 'created_at'>): string {
+  if (!job.created_at) return `${job.requested_count} đơn`
+  const d = new Date(job.created_at)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${job.requested_count} đơn · ${pad(d.getHours())}h${pad(d.getMinutes())} · ${pad(d.getDate())}/${pad(d.getMonth() + 1)}`
+}
 
 export interface ConfigEntry {
   key: string

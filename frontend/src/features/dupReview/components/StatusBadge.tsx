@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import type { ReviewStatus } from '../types'
+import type { Item } from '../types'
 
 const base = 'inline-flex items-center gap-1 whitespace-nowrap rounded px-1.5 py-px text-[11px] font-medium'
 
@@ -15,9 +15,21 @@ export function Badge({ tone, children }: { tone: keyof typeof tones; children: 
   return <span className={`${base} ${tones[tone]}`}>{children}</span>
 }
 
-export function StatusBadge({ status }: { status: ReviewStatus | null }) {
-  if (status === 'ai_wrong') return <Badge tone="bad">Model sai</Badge>
-  if (status === 'selected_duplicate') return <Badge tone="ok">Đã chọn</Badge>
-  if (status === 'no_match') return <Badge tone="info">Không thấy trùng</Badge>
-  return <Badge tone="warn">Chờ duyệt</Badge>
+export function StatusBadge({ item }: { item: Item }) {
+  switch (item.stage) {
+    case 'unsent':
+      return <Badge tone="warn">Chưa gửi</Badge>
+    case 'waiting':
+      return <Badge tone="info">Đang chờ</Badge>
+    case 'verified':
+      return <Badge tone="ok">Đã verify trùng</Badge>
+    case 'linked':
+      return <Badge tone="ok">Đã chuyển Trùng lặp</Badge>
+    case 'not_duplicate':
+      if (item.review_status === 'ai_wrong') return <Badge tone="bad">Model sai</Badge>
+      if (item.review_status === 'no_match') return <Badge tone="info">Không thấy trùng</Badge>
+      return <Badge tone="dim">Bị từ chối</Badge>
+    default:
+      return <Badge tone="warn">Chờ duyệt</Badge>
+  }
 }

@@ -12,6 +12,33 @@ export const selectCandidate = (itemId: string, candidateId: string) =>
 
 export const rejectItem = (itemId: string) => reviewFetch(`${BASE}/items/${itemId}/reject`, { method: 'POST' })
 
+export interface TelegramAdmin {
+  id: string
+  name: string
+  telegram_username: string | null
+}
+
+export const fetchTelegramAdmins = () =>
+  reviewFetch<{ admins: TelegramAdmin[] }>(`${BASE}/telegram-admins`).then((r) => r.admins)
+
+/** Send every chosen, not-yet-sent pair of a lot to Support's own Telegram or to one Admin. */
+export const sendLot = (jobId: string, target: 'support' | 'admin', adminId?: string) =>
+  reviewFetch<{ sent: number }>(`${BASE}/jobs/${jobId}/send`, {
+    method: 'POST',
+    body: JSON.stringify({ target, admin_id: adminId ?? null }),
+  })
+
+export interface TagResult {
+  moved: number
+  skipped: { order_code: string; reason: string }[]
+}
+
+export const tagLot = (jobId: string, to: 'duplicate' | 'non_duplicate') =>
+  reviewFetch<TagResult>(`${BASE}/jobs/${jobId}/tag`, { method: 'POST', body: JSON.stringify({ to }) })
+
+export const saveLink = (itemId: string, url: string) =>
+  reviewFetch<{ link: string }>(`${BASE}/items/${itemId}/link`, { method: 'POST', body: JSON.stringify({ url }) })
+
 export const cancelJob = (jobId: string) => reviewFetch(`${BASE}/jobs/${jobId}/cancel`, { method: 'POST' })
 
 export type SearchStage = 'queued' | 'running'

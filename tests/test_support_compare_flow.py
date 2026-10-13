@@ -26,11 +26,27 @@ from app.application.support_compare import (
     count_handleable_orders,
     count_support_unchecked_orders,
     execute_support_duplicate_decision,
-    notify_pending_duplicate_candidates,
+    notify_duplicate_candidate,
 )
 from app.domain.models import OrderState
 
 CHAT_ID = "554433"
+
+
+def notify_pending_duplicate_candidates(session) -> int:
+    """Send every chosen, unsent pair to the linked Support accounts (what the lot's send button does)."""
+    ids = [
+        c.id
+        for c in session.query(SupportCompareCandidate)
+        .join(SupportCompareItem, SupportCompareItem.selected_candidate_id == SupportCompareCandidate.id)
+        .filter(
+            SupportCompareItem.review_status == "selected_duplicate",
+            SupportCompareCandidate.decision_status == "pending",
+            SupportCompareCandidate.telegram_notified_at.is_(None),
+        )
+        .all()
+    ]
+    return sum(1 for cid in ids if notify_duplicate_candidate(session, cid))
 
 
 @pytest.fixture()
@@ -227,7 +243,9 @@ def test_decision_requires_the_localhost_selection(db_session, setup):
         db_session, actor=setup.support, action_log=action, decision_status="duplicate"
     )
     db_session.refresh(order)
-    assert order.duplicate_check_status == "duplicate"
+    candidate_row = db_session.get(SupportCompareCandidate, candidate.id)
+    assert candidate_row.decision_status == "duplicate"
+    assert order.duplicate_check_status == "uncheck"  # verified only: the web moves the order
 
 
 def _login_headers(client, user: User) -> dict[str, str]:
@@ -488,8 +506,8 @@ def _press(client, data: str, *, delete_ok: bool):
 
 
 @pytest.mark.parametrize(("button", "status", "toast"), [
-    ("SUPPORT_COMPARE_CONFIRM_DUPLICATE", "duplicate", "Đã xác nhận trùng"),
-    ("SUPPORT_COMPARE_REJECT_DUPLICATE", "non_duplicate", "Đã đưa vào Không trùng lặp"),
+    ("SUPPORT_COMPARE_CONFIRM_DUPLICATE", "duplicate", "Đã verify trùng"),
+    ("SUPPORT_COMPARE_REJECT_DUPLICATE", "non_duplicate", "Đã verify không trùng"),
 ])
 def test_deciding_a_pair_deletes_its_messages_from_the_chat(client, db_session, setup, button, status, toast):
     order, tokens = _notify_selected_pair(db_session, setup, f"DJ-DEL-{status}")
@@ -502,7 +520,8 @@ def test_deciding_a_pair_deletes_its_messages_from_the_chat(client, db_session, 
     send.assert_not_called()  # nothing is left in the chat
     clear.assert_not_called()
     db_session.refresh(order)
-    assert order.duplicate_check_status == status
+    assert order.duplicate_check_status == "uncheck"  # Telegram only verifies; tagging is a web action
+    assert db_session.query(SupportCompareCandidate).one().decision_status == status
 
 
 def test_when_the_messages_cannot_be_deleted_the_prompt_is_closed_and_the_result_is_sent(client, db_session, setup):
@@ -542,7 +561,7 @@ def test_decision_still_works_when_the_order_version_changed_after_the_notificat
     send, _, delete, answer = _press(client, f"scdup_yes:{tokens['SUPPORT_COMPARE_CONFIRM_DUPLICATE']}", delete_ok=True)
 
     db_session.refresh(order)
-    assert order.duplicate_check_status == "duplicate"
+    assert db_session.query(SupportCompareCandidate).one().decision_status == "duplicate"
     delete.assert_called_once()
     send.assert_not_called()
 
@@ -568,7 +587,7 @@ def test_a_decision_interrupted_after_the_order_changed_is_finished_by_the_next_
     send, _, delete, answer = _press(client, f"scdup_yes:{tokens['SUPPORT_COMPARE_CONFIRM_DUPLICATE']}", delete_ok=True)
 
     delete.assert_called_once()
-    assert "Đã xác nhận trùng" in answer.call_args.args[1]
+    assert "Đã verify trùng" in answer.call_args.args[1]
     send.assert_not_called()
     statuses = {a.action_type: a.status for a in db_session.query(TelegramActionLog).filter(TelegramActionLog.order_id == order.id)}
     assert statuses["SUPPORT_COMPARE_CONFIRM_DUPLICATE"] == "executed"
@@ -666,7 +685,7 @@ def test_when_one_support_decides_the_pair_is_withdrawn_from_the_other_supports(
     withdrawn.assert_called_once_with(other_chat, [11, 12, 13])
 
     db_session.expire_all()
-    assert db_session.query(Order).get(order.id).duplicate_check_status == "duplicate"
+    assert db_session.query(SupportCompareCandidate).one().decision_status == "duplicate"
     statuses = {
         a.payload["chat_id"]: a.status for a in db_session.query(TelegramActionLog).filter(TelegramActionLog.order_id == order.id)
     }
@@ -677,7 +696,7 @@ def test_when_one_support_decides_the_pair_is_withdrawn_from_the_other_supports(
     send.assert_not_called()
     assert "đã được xử lý" in answer.call_args.args[1]
     db_session.expire_all()
-    assert db_session.query(Order).get(order.id).duplicate_check_status == "duplicate"
+    assert db_session.query(SupportCompareCandidate).one().decision_status == "duplicate"
 
 
 def _press_as(client, chat_id: str, data: str):
@@ -690,3 +709,160 @@ def _press_as(client, chat_id: str, data: str):
     ):
         client.post("/api/telegram/webhook", json={"callback_query": {"id": "cb2", "data": data, "from": {"id": int(chat_id)}}})
     return send, clear, delete, answer
+
+
+# ----------------------------------------------------------------------------- lots (batches)
+
+ADMIN_CHAT = "777000"
+
+
+def _lot(db_session, setup):
+    from app.adapters.db.models import SupportCompareJob
+
+    job = SupportCompareJob(platform_id=setup.platform.id, chat_id=CHAT_ID, status="completed", run_id=setup.run.id)
+    db_session.add(job)
+    db_session.commit()
+    return job
+
+
+def _chosen_pair(db_session, setup, code: str, *, decision: str = "pending", notified: bool = False, state=None):
+    order = _order(db_session, setup, code, state or OrderState.WAITING.value)
+    item = _item(db_session, setup, order, "selected_duplicate", is_duplicate=True)
+    candidate = _candidate(db_session, item, 1)
+    item.selected_candidate_id = candidate.id
+    candidate.decision_status = decision
+    candidate.telegram_notified_at = datetime.now(UTC) if notified else None
+    db_session.commit()
+    return order, item, candidate
+
+
+def _admin(db_session, setup, chat=ADMIN_CHAT, name="Admin POD") -> User:
+    admin = User(
+        username=f"admin-{chat}", full_name=name, role="admin", password_hash=hash_password("pass"),
+        telegram_chat_id=chat, active=True, platform_id=setup.platform.id,
+    )
+    db_session.add(admin)
+    db_session.commit()
+    return admin
+
+
+def test_a_lot_places_every_compared_order_in_exactly_one_stage(client, db_session, setup):
+    job = _lot(db_session, setup)
+    todo = _order(db_session, setup, "DJ-L-TODO")
+    _item(db_session, setup, todo, "pending_review", is_duplicate=True)
+    _chosen_pair(db_session, setup, "DJ-L-UNSENT")
+    _chosen_pair(db_session, setup, "DJ-L-WAIT", notified=True)
+    _chosen_pair(db_session, setup, "DJ-L-VERIFIED", decision="duplicate", notified=True)
+    linked, _, _ = _chosen_pair(db_session, setup, "DJ-L-LINKED", decision="duplicate", notified=True)
+    linked.duplicate_check_status = "duplicate"
+    _chosen_pair(db_session, setup, "DJ-L-REJECTED", decision="non_duplicate", notified=True)
+    _item(db_session, setup, _order(db_session, setup, "DJ-L-NOMATCH"), "no_match")
+    db_session.commit()
+    headers = _bearer(setup.support)
+
+    stages = client.get("/api/support-review/jobs", headers=headers).json()["jobs"][0]["stages"]
+    assert stages == {
+        "todo": 1, "unsent": 1, "waiting": 1, "verified": 1, "linked": 1, "not_duplicate": 2,
+    }
+    items = client.get(f"/api/support-review/jobs/{job.id}", headers=headers).json()["items"]
+    assert {i["order_code"]: i["stage"] for i in items}["DJ-L-VERIFIED"] == "verified"
+    assert sum(stages.values()) == len(items)
+
+
+def test_support_sends_a_lot_to_the_admin_it_chose_and_that_admin_verifies(client, db_session, setup):
+    job = _lot(db_session, setup)
+    order, item, candidate = _chosen_pair(db_session, setup, "DJ-L-SEND")
+    admin = _admin(db_session, setup)
+    headers = _bearer(setup.support)
+
+    listed = client.get("/api/support-review/telegram-admins", headers=headers).json()["admins"]
+    assert [a["id"] for a in listed] == [str(admin.id)]
+
+    stranger = _admin(db_session, setup, chat="888", name="Other")
+    stranger.telegram_chat_id = None
+    db_session.commit()
+    refused = client.post(
+        f"/api/support-review/jobs/{job.id}/send", json={"target": "admin", "admin_id": str(stranger.id)}, headers=headers
+    )
+    assert refused.status_code == 409
+
+    with patch("app.application.support_compare.send_media_group", return_value=[{"message_id": 11}]), \
+            patch("app.application.support_compare.send_message", return_value={"message_id": 13}):
+        res = client.post(
+            f"/api/support-review/jobs/{job.id}/send", json={"target": "admin", "admin_id": str(admin.id)}, headers=headers
+        )
+    assert res.status_code == 200 and res.json() == {"sent": 1}
+    chats = {a.payload["chat_id"] for a in db_session.query(TelegramActionLog).filter(TelegramActionLog.order_id == order.id)}
+    assert chats == {ADMIN_CHAT}  # the linked Support account got nothing
+
+    again = client.post(
+        f"/api/support-review/jobs/{job.id}/send", json={"target": "admin", "admin_id": str(admin.id)}, headers=headers
+    )
+    assert again.status_code == 409  # nothing left unsent
+
+    tokens = {
+        a.action_type: a.callback_token
+        for a in db_session.query(TelegramActionLog).filter(TelegramActionLog.order_id == order.id)
+    }
+    _, _, _, answer = _press_as(client, ADMIN_CHAT, f"scdup_yes:{tokens['SUPPORT_COMPARE_CONFIRM_DUPLICATE']}")
+    assert "Đã verify trùng" in answer.call_args.args[1]
+    db_session.expire_all()
+    assert db_session.get(SupportCompareCandidate, candidate.id).decision_status == "duplicate"
+    assert db_session.get(Order, order.id).duplicate_check_status == "uncheck"
+
+
+def test_a_stranger_admin_chat_cannot_answer_a_pair(client, db_session, setup):
+    order, tokens = _notify_selected_pair(db_session, setup, "DJ-L-STRANGER")
+    send, _, _, _ = _press_as(client, "424242", f"scdup_yes:{tokens['SUPPORT_COMPARE_CONFIRM_DUPLICATE']}")
+    db_session.expire_all()
+    assert db_session.query(SupportCompareCandidate).one().decision_status == "pending"
+
+
+def test_tagging_a_lot_moves_verified_duplicates_and_skips_orders_already_with_a_designer(client, db_session, setup):
+    job = _lot(db_session, setup)
+    ok, _, _ = _chosen_pair(db_session, setup, "DJ-T-OK", decision="duplicate", notified=True)
+    given, _, _ = _chosen_pair(
+        db_session, setup, "DJ-T-ASSIGNED", decision="duplicate", notified=True, state=OrderState.IN_PROGRESS.value
+    )
+    waiting, _, _ = _chosen_pair(db_session, setup, "DJ-T-STILL-WAITING", notified=True)
+    no_match = _order(db_session, setup, "DJ-T-NOMATCH")
+    _item(db_session, setup, no_match, "no_match")
+    headers = _bearer(setup.support)
+
+    res = client.post(f"/api/support-review/jobs/{job.id}/tag", json={"to": "duplicate"}, headers=headers)
+    assert res.status_code == 200
+    assert res.json()["moved"] == 1
+    assert res.json()["skipped"] == [{"order_code": "DJ-T-ASSIGNED", "reason": "Đã chia cho designer"}]
+    db_session.expire_all()
+    assert db_session.get(Order, ok.id).duplicate_check_status == "duplicate"
+    assert db_session.get(Order, given.id).duplicate_check_status == "uncheck"
+    assert db_session.get(Order, waiting.id).duplicate_check_status == "uncheck"
+
+    res = client.post(f"/api/support-review/jobs/{job.id}/tag", json={"to": "non_duplicate"}, headers=headers)
+    assert res.status_code == 200 and res.json()["moved"] == 1
+    db_session.expire_all()
+    assert db_session.get(Order, no_match.id).duplicate_check_status == "non_duplicate"
+    assert db_session.get(Order, waiting.id).duplicate_check_status == "uncheck"  # not verified yet
+
+
+def test_the_link_goes_into_a_work_note_only_for_a_tagged_duplicate(client, db_session, setup):
+    from app.adapters.db.models import OrderWorkNote
+
+    job = _lot(db_session, setup)
+    order, item, _ = _chosen_pair(db_session, setup, "DJ-LINK", decision="duplicate", notified=True)
+    headers = _bearer(setup.support)
+    url = "https://drive.google.com/file/d/abc"
+
+    early = client.post(f"/api/support-review/items/{item.id}/link", json={"url": url}, headers=headers)
+    assert early.status_code == 409  # not tagged yet
+
+    client.post(f"/api/support-review/jobs/{job.id}/tag", json={"to": "duplicate"}, headers=headers)
+    assert client.post(
+        f"/api/support-review/items/{item.id}/link", json={"url": "not a link"}, headers=headers
+    ).status_code == 422
+    assert client.post(f"/api/support-review/items/{item.id}/link", json={"url": url}, headers=headers).status_code == 200
+
+    note = db_session.query(OrderWorkNote).filter_by(order_id=order.id).one()
+    assert url in note.body and note.author_id == setup.support.id
+    shown = client.get(f"/api/support-review/jobs/{job.id}", headers=headers).json()["items"][0]
+    assert shown["stage"] == "linked" and shown["link"] == url

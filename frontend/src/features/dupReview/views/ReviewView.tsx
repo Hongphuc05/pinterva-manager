@@ -1,17 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Loader2, RefreshCw } from 'lucide-react'
 import { fetchJob, fetchJobs, rejectItem, selectCandidate } from '../api'
-import { isDone, isNoMatch, isSent, isTodo, type Item, type Job, type TabKey } from '../types'
+import { canReview, lotName, TAB_OF, type Item, type Job, type TabKey } from '../types'
 import { OrderCard } from '../components/OrderCard'
 import { Empty, Loading } from '../components/Empty'
 import { DetailModal } from '../components/DetailModal'
+import { LinkRow } from '../components/LinkRow'
+import { LotPanel } from '../components/LotPanel'
 import { useToast } from '../toast'
-import { STATUS, when } from './JobsView'
+import { STATUS } from './JobsView'
 
 const TABS: { key: TabKey; label: string; hint: string }[] = [
-  { key: 'todo', label: 'Cần duyệt', hint: 'Model nghi trùng' },
-  { key: 'done', label: 'Đã duyệt', hint: 'Đã chọn hoặc model sai' },
-  { key: 'nomatch', label: 'Không thấy trùng', hint: 'Model không thấy ảnh giống' },
+  { key: 'todo', label: 'Cần duyệt', hint: 'Model nghi trùng, chưa chọn' },
+  { key: 'pending', label: '1. Chờ xử lý', hint: 'Đã chọn ảnh trùng: gửi Telegram để verify' },
+  { key: 'notdup', label: '2. Không trùng lặp', hint: 'Không thấy trùng, model sai hoặc bị từ chối' },
+  { key: 'link', label: '3. Gắn link', hint: 'Đơn đã chuyển Trùng lặp: gắn link vào note làm việc' },
 ]
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e))
@@ -93,7 +96,11 @@ export function ReviewView({ jobId, onJobChange, onZoom, zoomOpen }: Props) {
   }, [running, job, loadJob])
 
   const groups = useMemo(
-    () => ({ todo: items.filter(isTodo), done: items.filter(isDone), nomatch: items.filter(isNoMatch) }),
+    () => {
+      const by: Record<TabKey, Item[]> = { todo: [], pending: [], notdup: [], link: [] }
+      for (const i of items) if (i.stage) by[TAB_OF[i.stage]].push(i)
+      return by
+    },
     [items],
   )
   const list = groups[tab]
@@ -121,7 +128,7 @@ export function ReviewView({ jobId, onJobChange, onZoom, zoomOpen }: Props) {
 
   const onSelect = useCallback(
     (itemId: string, candidateId: string) =>
-      act(itemId, () => selectCandidate(itemId, candidateId), 'Đã chọn ảnh trùng. Telegram gửi cặp ảnh trong ≤60 giây.'),
+      act(itemId, () => selectCandidate(itemId, candidateId), 'Đã chọn ảnh trùng. Vào tab Chờ xử lý để gửi cho Support hoặc Admin.'),
     [act],
   )
   const onReject = useCallback(
@@ -136,7 +143,7 @@ export function ReviewView({ jobId, onJobChange, onZoom, zoomOpen }: Props) {
       if (e.metaKey || e.ctrlKey || e.altKey || zoomOpen || detail || ['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName)) return
       if (e.key === 'j' || e.key === 'ArrowDown') setActive((i) => Math.min(i + 1, Math.max(list.length - 1, 0)))
       else if (e.key === 'k' || e.key === 'ArrowUp') setActive((i) => Math.max(i - 1, 0))
-      else if (current && !busy.has(current.id) && !isSent(current) && (isTodo(current) || isDone(current))) {
+      else if (current && !busy.has(current.id) && canReview(current)) {
         const n = e.key === '0' ? 10 : /^[1-9]$/.test(e.key) ? Number(e.key) : 0
         if (n && current.candidates[n - 1]) void onSelect(current.id, current.candidates[n - 1].id)
         else if (e.key === 'd') setDetail({ itemId: current.id, index: 0 })
@@ -188,11 +195,12 @@ export function ReviewView({ jobId, onJobChange, onZoom, zoomOpen }: Props) {
                       className={`w-full px-3 py-2.5 text-left transition ${selected ? 'bg-blue-50/70' : 'hover:bg-slate-50'}`}
                     >
                       <span className="flex items-center justify-between gap-2">
-                        <span className={`text-[13px] font-semibold ${selected ? 'text-blue-700' : 'text-slate-800'}`}>{when(j.created_at)}</span>
+                        <span className={`text-[13px] font-semibold ${selected ? 'text-blue-700' : 'text-slate-800'}`}>{lotName(j)}</span>
                         <span className={`rounded-full px-2 py-px text-[10px] font-bold ring-1 ${status.tone}`}>{status.label}</span>
                       </span>
                       <span className="mt-0.5 block text-[11px] text-slate-500">
-                        {j.processed_count}/{j.requested_count} đơn · {j.duplicate_count} nghi trùng
+                        so sánh {j.processed_count}/{j.requested_count} · {j.duplicate_count} nghi trùng
+                        {j.stages && ` · chờ xử lý ${j.stages.unsent + j.stages.waiting} · verify ${j.stages.verified + j.stages.linked}`}
                         {j.error_count > 0 && <b className="text-red-600"> · {j.error_count} lỗi</b>}
                       </span>
                     </button>
@@ -209,7 +217,7 @@ export function ReviewView({ jobId, onJobChange, onZoom, zoomOpen }: Props) {
           <div className="mb-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <h2 className="text-sm font-bold text-slate-900">Job {when(job.created_at)}</h2>
+                <h2 className="text-sm font-bold text-slate-900">Lô {lotName(job)}</h2>
                 <p className="text-xs text-slate-500">
                   {running ? <b className="text-blue-700">Đang chạy</b> : (STATUS[job.status]?.label ?? job.status)} · {job.processed_count}/{job.requested_count} đơn đã so
                   {job.error_count > 0 && <b className="text-red-600"> · {job.error_count} lỗi</b>}
@@ -224,7 +232,7 @@ export function ReviewView({ jobId, onJobChange, onZoom, zoomOpen }: Props) {
                 <div className="h-full bg-blue-600 transition-all" style={{ width: `${pct}%` }} />
               </div>
             )}
-            <div className="mt-4 grid grid-cols-3 gap-2" role="tablist">
+            <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4" role="tablist">
               {TABS.map(({ key, label, hint }) => (
                 <button
                   key={key}
@@ -248,12 +256,18 @@ export function ReviewView({ jobId, onJobChange, onZoom, zoomOpen }: Props) {
           </div>
         )}
 
+        {job && (tab === 'pending' || tab === 'notdup') && (
+          <LotPanel jobId={job.id} items={items} tab={tab} onChanged={() => loadJob(job.id)} />
+        )}
+
         {loading ? (
           <Loading />
         ) : error ? (
           <Empty error title="Không tải được dữ liệu" note={error} />
         ) : !jobs?.length ? (
-          <Empty title="Chưa có job nào" note="Bấm Có sau lệnh /check trên Telegram để tạo job." />
+          <Empty title="Chưa có job nào" note="Bấm Kiểm tra trùng ở tab Điều khiển (hoặc /check trên Telegram) để tạo lô." />
+        ) : list.length && tab === 'link' ? (
+          list.map((item) => <LinkRow key={item.id} item={item} onSaved={() => (job ? loadJob(job.id) : Promise.resolve())} />)
         ) : list.length ? (
           list.map((item, idx) => (
             <OrderCard
