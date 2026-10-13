@@ -627,6 +627,12 @@ def item_stage(
         return STAGE_NOT_DUPLICATE
     if decision_status == "duplicate":
         return STAGE_LINKED if order_tag == DUPLICATE_CHECK_DUPLICATE else STAGE_VERIFIED
+    # The pair has no answer yet, but the order may already be settled by another route (a manual
+    # tag on the orders page, or /handle after "Model sai"): it must not keep waiting for Telegram.
+    if order_tag == DUPLICATE_CHECK_NON_DUPLICATE:
+        return STAGE_NOT_DUPLICATE
+    if order_tag == DUPLICATE_CHECK_DUPLICATE:
+        return STAGE_LINKED
     return STAGE_WAITING if notified_at else STAGE_UNSENT
 
 
@@ -670,7 +676,10 @@ def send_lot_pairs(
         row[0]
         for row in session.query(SupportCompareCandidate.id)
         .join(SupportCompareItem, SupportCompareItem.selected_candidate_id == SupportCompareCandidate.id)
+        .join(Order, Order.id == SupportCompareItem.order_id)
         .filter(
+            # an order already tagged (manually or by /handle) has nothing left to verify
+            or_(Order.duplicate_check_status.is_(None), Order.duplicate_check_status == DUPLICATE_CHECK_UNCHECK),
             SupportCompareItem.run_id == run_id,
             SupportCompareItem.review_status == "selected_duplicate",
             SupportCompareItem.processing_status == "completed",

@@ -769,6 +769,33 @@ def test_a_lot_places_every_compared_order_in_exactly_one_stage(client, db_sessi
     assert sum(stages.values()) == len(items)
 
 
+def test_an_order_already_tagged_elsewhere_does_not_wait_for_telegram(client, db_session, setup):
+    """Model sai -> /handle (order -> Không trùng lặp) -> a pair is chosen afterwards: it is settled."""
+    job = _lot(db_session, setup)
+    handled, _, _ = _chosen_pair(db_session, setup, "DJ-L-HANDLED", notified=True)
+    handled.duplicate_check_status = "non_duplicate"
+    tagged, _, _ = _chosen_pair(db_session, setup, "DJ-L-TAGGED-DUP")
+    tagged.duplicate_check_status = "duplicate"
+    _chosen_pair(db_session, setup, "DJ-L-STILL-WAITING", notified=True)
+    db_session.commit()
+    headers = _bearer(setup.support)
+
+    stages = client.get("/api/support-review/jobs", headers=headers).json()["jobs"][0]["stages"]
+    assert stages["waiting"] == 1 and stages["unsent"] == 0  # only the untouched order still waits
+    assert stages["not_duplicate"] == 1 and stages["linked"] == 1
+    by_code = {i["order_code"]: i["stage"] for i in
+               client.get(f"/api/support-review/jobs/{job.id}", headers=headers).json()["items"]}
+    assert by_code["DJ-L-HANDLED"] == "not_duplicate" and by_code["DJ-L-TAGGED-DUP"] == "linked"
+
+    # Sending the lot (even the "again" option) never re-sends a pair of an order that is settled.
+    with patch("app.application.support_compare.send_media_group", return_value=[{"message_id": 1}, {"message_id": 2}]), \
+            patch("app.application.support_compare.send_message", return_value={"message_id": 3}):
+        from app.application.support_compare import send_lot_pairs
+
+        sent = send_lot_pairs(db_session, run_id=setup.run.id, recipients=None, include_waiting=True)
+    assert sent == 1  # DJ-L-STILL-WAITING only
+
+
 def test_support_sends_a_lot_to_the_admin_it_chose_and_that_admin_verifies(client, db_session, setup):
     job = _lot(db_session, setup)
     order, item, candidate = _chosen_pair(db_session, setup, "DJ-L-SEND")
