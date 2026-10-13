@@ -179,14 +179,58 @@ describe('duplicate review page', () => {
     await waitFor(() => expect(posted('/support-review/items/i1/reject')).toBe(true))
   })
 
-  it('freezes a pair that was already sent to Telegram', async () => {
+  it('shows only the original and the picked image in Chờ xử lý, frozen once sent to Telegram', async () => {
     items = [{ ...item(2, 'selected_duplicate', 'i2-c2'), stage: 'waiting', candidates: candidates(2).map((c) => ({ ...c, sent_to_telegram: c.id === 'i2-c2' })) }]
     renderPage()
     await userEvent.click(await screen.findByRole('tab', { name: /1\. Chờ xử lý/ }))
     const card = await screen.findByTestId('order-DJ0002')
-    expect(within(card).getByText('Đã gửi Telegram')).toBeInTheDocument()
+    expect(within(card).getByText('Đang chờ')).toBeInTheDocument()
+    expect(within(card).getByText('OLD-22')).toBeInTheDocument() // the picked image
+    expect(within(card).queryByText('OLD-21')).not.toBeInTheDocument() // the other candidates are gone
     expect(within(card).queryByRole('button', { name: /Model sai/ })).not.toBeInTheDocument()
     expect(within(card).queryByRole('button', { name: 'Chọn trùng' })).not.toBeInTheDocument()
+  })
+
+  it('lets an unsent pair go back to be picked again, and hides Model sai once the model is already wrong', async () => {
+    items = [item(2, 'selected_duplicate', 'i2-c2'), item(6, 'ai_wrong')]
+    renderPage()
+    await userEvent.click(await screen.findByRole('tab', { name: /1\. Chờ xử lý/ }))
+    await userEvent.click(within(await screen.findByTestId('order-DJ0002')).getByRole('button', { name: /Model sai/ }))
+    await waitFor(() => expect(posted('/support-review/items/i2/reject')).toBe(true))
+
+    await userEvent.click(screen.getByRole('tab', { name: /2\. Không trùng lặp/ }))
+    const wrong = await screen.findByTestId('order-DJ0006')
+    expect(within(wrong).queryByRole('button', { name: /Model sai/ })).not.toBeInTheDocument()
+    expect(within(wrong).getAllByRole('button', { name: 'Chọn trùng' }).length).toBeGreaterThan(0) // can still pick
+  })
+
+  it('filters the orders of a tab by code or product name', async () => {
+    items = [item(3, 'no_match'), { ...item(7, 'no_match'), product_name: 'Áo Bills' }]
+    renderPage()
+    await userEvent.click(await screen.findByRole('tab', { name: /2\. Không trùng lặp/ }))
+    expect(screen.getByTestId('order-DJ0003')).toBeInTheDocument()
+    await userEvent.type(screen.getByLabelText('Lọc theo mã đơn hoặc tên'), 'bills')
+    expect(screen.queryByTestId('order-DJ0003')).not.toBeInTheDocument()
+    expect(screen.getByTestId('order-DJ0007')).toBeInTheDocument()
+  })
+
+  it('does not count orders already with a designer, and can re-send the pairs still waiting', async () => {
+    items = [
+      { ...item(2, 'selected_duplicate', 'i2-c2'), stage: 'waiting' },
+      { ...item(4, 'selected_duplicate', 'i4-c1'), stage: 'verified', taggable: false },
+      { ...item(8, 'selected_duplicate', 'i8-c1'), stage: 'verified', taggable: true },
+    ]
+    renderPage()
+    await userEvent.click(await screen.findByRole('tab', { name: /1\. Chờ xử lý/ }))
+    const panel = await screen.findByTestId('lot-pending')
+    expect(within(panel).getByRole('button', { name: /Trùng lặp \(1\)/ })).toBeEnabled()
+    expect(panel).toHaveTextContent('1 đơn đã verify nhưng Admin đã chia cho designer')
+    expect(within(panel).getByRole('button', { name: 'Gửi cho Support' })).toBeDisabled() // nothing unsent
+    await userEvent.click(within(panel).getByRole('checkbox'))
+    await userEvent.click(within(panel).getByRole('button', { name: 'Gửi cho Support' }))
+    await waitFor(() =>
+      expect(posted('/support-review/jobs/j1/send', { target: 'support', admin_id: null, include_waiting: true })).toBe(true),
+    )
   })
 
   it('names the lot by its size and time and sends the chosen pairs to Support or to a chosen Admin', async () => {

@@ -40,6 +40,7 @@ from app.domain.access import (
     DUPLICATE_CHECK_NON_DUPLICATE,
     ROLE_ADMIN,
     ROLE_SUPPORT,
+    SUPPORT_CLASSIFICATION_STATES,
 )
 
 S = "support_compare_image"
@@ -272,7 +273,8 @@ def get_job(
             text(
                 f"""SELECT i.id, i.external_order_id, i.product_name, i.image_url, i.is_duplicate,
                            i.review_status, i.selected_candidate_id, i.reviewed_at, o.custom_config,
-                           i.order_id, o.duplicate_check_status, sc.decision_status, sc.telegram_notified_at
+                           i.order_id, o.duplicate_check_status, sc.decision_status, sc.telegram_notified_at,
+                           o.state
                     FROM {S}.comparison_items i
                     LEFT JOIN public.orders o ON o.id = i.order_id
                     LEFT JOIN {S}.comparison_candidates sc ON sc.id = i.selected_candidate_id
@@ -315,6 +317,9 @@ def get_job(
                     "reviewed_at": _iso(r[7]),
                     "custom_config": r[8],
                     "order_tag": r[10],
+                    # Support may tag only an order still in Waiting that has no tag yet.
+                    "taggable": (r[13] or "").upper() in SUPPORT_CLASSIFICATION_STATES
+                    and (r[10] or "uncheck") == "uncheck",
                     "decision": r[11],
                     "stage": item_stage(
                         review_status=r[5], decision_status=r[11], notified_at=r[12], order_tag=r[10]
@@ -427,6 +432,7 @@ def _link_notes(db: Session, order_ids: list[uuid.UUID]) -> dict[uuid.UUID, str]
 class SendBody(BaseModel):
     target: str = Field(pattern="^(support|admin)$")
     admin_id: uuid.UUID | None = None
+    include_waiting: bool = False
 
 
 class TagBody(BaseModel):
@@ -485,9 +491,11 @@ def send_job_pairs(
         recipients = [admin]
     else:
         recipients = None  # every linked Support account, as before
-    sent = send_lot_pairs(db, run_id=job.run_id, recipients=recipients)
+    sent = send_lot_pairs(
+        db, run_id=job.run_id, recipients=recipients, include_waiting=body.include_waiting
+    )
     if sent == 0:
-        raise HTTPException(409, "Không có đơn nào chưa gửi, hoặc không gửi được qua Telegram")
+        raise HTTPException(409, "Không có đơn nào để gửi, hoặc không gửi được qua Telegram")
     return {"sent": sent}
 
 

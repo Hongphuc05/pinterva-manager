@@ -22,10 +22,10 @@ export const fetchTelegramAdmins = () =>
   reviewFetch<{ admins: TelegramAdmin[] }>(`${BASE}/telegram-admins`).then((r) => r.admins)
 
 /** Send every chosen, not-yet-sent pair of a lot to Support's own Telegram or to one Admin. */
-export const sendLot = (jobId: string, target: 'support' | 'admin', adminId?: string) =>
+export const sendLot = (jobId: string, target: 'support' | 'admin', adminId?: string, includeWaiting = false) =>
   reviewFetch<{ sent: number }>(`${BASE}/jobs/${jobId}/send`, {
     method: 'POST',
-    body: JSON.stringify({ target, admin_id: adminId ?? null }),
+    body: JSON.stringify({ target, admin_id: adminId ?? null, ...(includeWaiting ? { include_waiting: true } : {}) }),
   })
 
 export interface TagResult {

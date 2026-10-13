@@ -866,3 +866,30 @@ def test_the_link_goes_into_a_work_note_only_for_a_tagged_duplicate(client, db_s
     assert url in note.body and note.author_id == setup.support.id
     shown = client.get(f"/api/support-review/jobs/{job.id}", headers=headers).json()["items"][0]
     assert shown["stage"] == "linked" and shown["link"] == url
+
+
+def test_pairs_already_sent_can_be_sent_again_to_someone_else_on_request(client, db_session, setup):
+    job = _lot(db_session, setup)
+    order, _, _ = _chosen_pair(db_session, setup, "DJ-L-RESEND", notified=True)  # sent by the old auto-notifier
+    admin = _admin(db_session, setup)
+    headers = _bearer(setup.support)
+    body = {"target": "admin", "admin_id": str(admin.id)}
+
+    assert client.post(f"/api/support-review/jobs/{job.id}/send", json=body, headers=headers).status_code == 409
+
+    with patch("app.application.support_compare.send_media_group", return_value=[{"message_id": 11}]), \
+            patch("app.application.support_compare.send_message", return_value={"message_id": 13}):
+        res = client.post(
+            f"/api/support-review/jobs/{job.id}/send", json={**body, "include_waiting": True}, headers=headers
+        )
+    assert res.status_code == 200 and res.json() == {"sent": 1}
+    chats = {a.payload["chat_id"] for a in db_session.query(TelegramActionLog).filter(TelegramActionLog.order_id == order.id)}
+    assert chats == {ADMIN_CHAT}
+
+
+def test_an_order_given_to_a_designer_is_not_offered_for_tagging(client, db_session, setup):
+    job = _lot(db_session, setup)
+    _item(db_session, setup, _order(db_session, setup, "DJ-TG-WAITING"), "no_match")
+    _item(db_session, setup, _order(db_session, setup, "DJ-TG-GIVEN", OrderState.IN_PROGRESS.value), "no_match")
+    items = client.get(f"/api/support-review/jobs/{job.id}", headers=_bearer(setup.support)).json()["items"]
+    assert {i["order_code"]: i["taggable"] for i in items} == {"DJ-TG-WAITING": True, "DJ-TG-GIVEN": False}

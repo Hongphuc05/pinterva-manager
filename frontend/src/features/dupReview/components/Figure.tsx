@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { isHttpUrl, useProxiedSrc } from './ProxiedImg'
 
 interface FigureProps {
@@ -14,14 +14,37 @@ interface FigureProps {
   children?: ReactNode
 }
 
+/** True once the element is near the viewport: off-screen images are not fetched at all. */
+function useNearViewport() {
+  const ref = useRef<HTMLDivElement>(null)
+  const [near, setNear] = useState(typeof IntersectionObserver === 'undefined')
+  useEffect(() => {
+    const el = ref.current
+    if (near || !el) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setNear(true)
+          observer.disconnect()
+        }
+      },
+      { rootMargin: '600px' },
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [near])
+  return [ref, near] as const
+}
+
 /** An image with its order code underneath. Every image in the tool carries a code. */
 export function Figure({ imageUrl, code, name, tag, chosen, onZoom, rawSrc, children }: FigureProps) {
-  const proxied = useProxiedSrc(rawSrc ? null : imageUrl)
-  const src = rawSrc ? imageUrl : proxied
+  const [ref, near] = useNearViewport()
+  const proxied = useProxiedSrc(rawSrc || !near ? null : imageUrl)
+  const src = rawSrc ? imageUrl : near ? proxied : 'loading'
   const hasUrl = rawSrc ? Boolean(imageUrl) : isHttpUrl(imageUrl)
-  const failed = !rawSrc && hasUrl && proxied === null
+  const failed = !rawSrc && near && hasUrl && proxied === null
   return (
-    <div className="w-36 flex-none">
+    <div ref={ref} className="w-36 flex-none">
       {src && src !== 'loading' ? (
         <button
           type="button"

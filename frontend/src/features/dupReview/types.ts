@@ -43,6 +43,8 @@ export interface Item {
   reviewed_at: string | null
   stage: Stage | null
   order_tag?: string | null
+  /** Support may still tag this order: it is in Waiting and carries no tag yet. */
+  taggable?: boolean
   decision?: string | null
   link?: string | null
   custom_config?: CustomConfig | null

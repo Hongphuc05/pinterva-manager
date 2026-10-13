@@ -38,7 +38,7 @@ export function OrderCard({ item, active, busy, onSelect, onReject, onZoom, onFo
             Chi tiết
           </button>
         )}
-        {canAct && (
+        {canAct && item.review_status !== 'ai_wrong' && (
           <button
             type="button"
             disabled={busy}

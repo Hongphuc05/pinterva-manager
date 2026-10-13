@@ -7,6 +7,7 @@ import { Empty, Loading } from '../components/Empty'
 import { DetailModal } from '../components/DetailModal'
 import { LinkRow } from '../components/LinkRow'
 import { LotPanel } from '../components/LotPanel'
+import { PairCard } from '../components/PairCard'
 import { useToast } from '../toast'
 import { STATUS } from './JobsView'
 
@@ -38,6 +39,7 @@ export function ReviewView({ jobId, onJobChange, onZoom, zoomOpen }: Props) {
   const [busy, setBusy] = useState<Set<string>>(new Set())
   const [detail, setDetail] = useState<{ itemId: string; index: number } | null>(null)
   const [active, setActive] = useState(0)
+  const [query, setQuery] = useState('')
 
   const loadJob = useCallback(async (id: string) => {
     try {
@@ -103,7 +105,14 @@ export function ReviewView({ jobId, onJobChange, onZoom, zoomOpen }: Props) {
     },
     [items],
   )
-  const list = groups[tab]
+  const needle = query.trim().toLowerCase()
+  const list = useMemo(
+    () =>
+      needle
+        ? groups[tab].filter((i) => i.order_code.toLowerCase().includes(needle) || (i.product_name ?? '').toLowerCase().includes(needle))
+        : groups[tab],
+    [groups, tab, needle],
+  )
   const current = list[Math.min(active, list.length - 1)]
 
   const act = useCallback(
@@ -256,6 +265,20 @@ export function ReviewView({ jobId, onJobChange, onZoom, zoomOpen }: Props) {
           </div>
         )}
 
+        {job && (
+          <input
+            type="search"
+            aria-label="Lọc theo mã đơn hoặc tên"
+            placeholder="Lọc theo mã đơn hoặc tên sản phẩm"
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value)
+              setActive(0)
+            }}
+            className="mb-3 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs shadow-sm"
+          />
+        )}
+
         {job && (tab === 'pending' || tab === 'notdup') && (
           <LotPanel jobId={job.id} items={items} tab={tab} onChanged={() => loadJob(job.id)} />
         )}
@@ -267,7 +290,19 @@ export function ReviewView({ jobId, onJobChange, onZoom, zoomOpen }: Props) {
         ) : !jobs?.length ? (
           <Empty title="Chưa có job nào" note="Bấm Kiểm tra trùng ở tab Điều khiển (hoặc /check trên Telegram) để tạo lô." />
         ) : list.length && tab === 'link' ? (
-          list.map((item) => <LinkRow key={item.id} item={item} onSaved={() => (job ? loadJob(job.id) : Promise.resolve())} />)
+          list.map((item) => (
+            <LinkRow key={item.id} item={item} onZoom={onZoom} onSaved={() => (job ? loadJob(job.id) : Promise.resolve())} />
+          ))
+        ) : list.length && tab === 'pending' ? (
+          list.map((item) => (
+            <PairCard
+              key={item.id}
+              item={item}
+              onZoom={onZoom}
+              busy={busy.has(item.id)}
+              onReject={item.stage === 'unsent' ? onReject : undefined}
+            />
+          ))
         ) : list.length ? (
           list.map((item, idx) => (
             <OrderCard

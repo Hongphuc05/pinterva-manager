@@ -479,12 +479,13 @@ def _new_action(
 
 
 def notify_duplicate_candidate(
-    session: Session, candidate_id: uuid.UUID, recipients: list[User] | None = None
+    session: Session, candidate_id: uuid.UUID, recipients: list[User] | None = None, *, resend: bool = False
 ) -> bool:
     """Send the candidate Support picked on the web review to Telegram.
 
     ``recipients`` are the chosen Telegram accounts (Support sending to themselves or to one
-    Admin); None means every linked Support account of the platform.
+    Admin); None means every linked Support account of the platform. ``resend`` sends a pair that
+    already went out once (to another person, or again): the first answer settles it for everyone.
 
     The candidate itself remains pending until a Support callback invokes the
     existing duplicate application service.
@@ -492,7 +493,7 @@ def notify_duplicate_candidate(
     candidate = session.get(SupportCompareCandidate, candidate_id)
     if candidate is None:
         return False
-    if candidate.decision_status != "pending" or candidate.telegram_notified_at is not None:
+    if candidate.decision_status != "pending" or (candidate.telegram_notified_at is not None and not resend):
         return False
 
     item = session.get(SupportCompareItem, candidate.comparison_item_id)
@@ -657,8 +658,14 @@ def lot_stage_rows(session: Session, run_ids: list[uuid.UUID]) -> list[tuple]:
     return out
 
 
-def send_lot_pairs(session: Session, *, run_id: uuid.UUID, recipients: list[User]) -> int:
-    """Send every not-yet-sent chosen pair of a lot to the chosen accounts."""
+def send_lot_pairs(
+    session: Session, *, run_id: uuid.UUID, recipients: list[User] | None, include_waiting: bool = False
+) -> int:
+    """Send every not-yet-sent chosen pair of a lot to the chosen accounts.
+
+    ``include_waiting`` also re-sends the pairs already sent but not answered yet.
+    """
+    unsent_only = [] if include_waiting else [SupportCompareCandidate.telegram_notified_at.is_(None)]
     candidate_ids = [
         row[0]
         for row in session.query(SupportCompareCandidate.id)
@@ -668,12 +675,14 @@ def send_lot_pairs(session: Session, *, run_id: uuid.UUID, recipients: list[User
             SupportCompareItem.review_status == "selected_duplicate",
             SupportCompareItem.processing_status == "completed",
             SupportCompareCandidate.decision_status == "pending",
-            SupportCompareCandidate.telegram_notified_at.is_(None),
+            *unsent_only,
         )
         .order_by(SupportCompareItem.external_order_id)
         .all()
     ]
-    return sum(1 for cid in candidate_ids if notify_duplicate_candidate(session, cid, recipients))
+    return sum(
+        1 for cid in candidate_ids if notify_duplicate_candidate(session, cid, recipients, resend=include_waiting)
+    )
 
 
 def tag_lot_orders(

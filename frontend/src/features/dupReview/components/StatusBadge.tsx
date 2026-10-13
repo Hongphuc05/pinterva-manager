@@ -15,7 +15,18 @@ export function Badge({ tone, children }: { tone: keyof typeof tones; children: 
   return <span className={`${base} ${tones[tone]}`}>{children}</span>
 }
 
+/** The stage badge, plus a note when Admin already gave the order to a designer (Support cannot move it). */
 export function StatusBadge({ item }: { item: Item }) {
+  const given = item.taggable === false && (item.stage === 'verified' || item.stage === 'not_duplicate') && (!item.order_tag || item.order_tag === 'uncheck')
+  return (
+    <>
+      <StageBadge item={item} />
+      {given && <Badge tone="dim">Đã chia designer</Badge>}
+    </>
+  )
+}
+
+function StageBadge({ item }: { item: Item }) {
   switch (item.stage) {
     case 'unsent':
       return <Badge tone="warn">Chưa gửi</Badge>

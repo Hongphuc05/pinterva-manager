@@ -94,11 +94,12 @@ candidate `non_duplicate`). Trang ẩn có ba tab theo lô: **1. Chờ xử lý*
 **3. Gắn link**.
 
 Telegram không còn tự gửi và **không gắn tag**. `POST /support-review/jobs/{id}/send` gửi các cặp chưa
-gửi của lô cho Support hoặc cho một Admin đã liên kết Telegram (`GET /support-review/telegram-admins`);
+gửi của lô cho Support hoặc cho một Admin đã liên kết Telegram (`GET /support-review/telegram-admins`;
+`include_waiting` gửi lại cả các cặp đã gửi mà chưa ai trả lời);
 **Xác nhận**/**Từ chối** (Support hoặc Admin được chọn đều bấm được) chỉ ghi `decision_status` của
 candidate. Order chỉ đổi tag khi Support bấm `POST /support-review/jobs/{id}/tag` (`to=duplicate` cho các
 đơn đã verify, `to=non_duplicate` cho nhóm không trùng); đơn đã chia cho designer hoặc đã có tag khác bị
-bỏ qua và liệt kê lại. `POST /support-review/items/{id}/link` ghi link Support dán thành một
+bỏ qua và liệt kê lại (API trả `taggable` cho từng đơn để UI không đếm chúng). `POST /support-review/items/{id}/link` ghi link Support dán thành một
 `OrderWorkNote` (`Link đơn trùng: <url>`, Admin và designer thấy), chỉ cho đơn đã tag Trùng lặp. Các
 order `no_match`/`ai_wrong` ngoài lô vẫn có thể chuyển bằng `/handle`.
 
