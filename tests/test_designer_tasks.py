@@ -141,10 +141,36 @@ def test_paid_fix_resubmission_returns_to_done_without_a_new_qc_request(db_sessi
     assert order.is_paid is True
     assert result["state"] == OrderState.DONE.value
     assert result["sync_printerval_review"] is True
-    assert result["sync_printerval_note"] is None
+    assert result["sync_printerval_note"] == url
     assert result["sync_printerval_expected_state"] == OrderState.DONE.value
     assert result["expected_fix_approved"] is True
     assert db_session.query(ApprovalRequest).filter_by(target_id=order.id).count() == 0
+
+
+def test_fix_resubmission_uses_the_new_link_or_the_latest_one_when_none_is_given(db_session):
+    designer, assignment, order = _seed_task(db_session, state=OrderState.REVISION.value)
+    order.fix_approved_by_admin = True
+    order.fix_return_count = 1
+    db_session.add_all([
+        ResultVersion(assignment_id=assignment.id, drive_url="https://drive.google.com/file/d/first/view", version_marker=1, validated=True),
+        ResultVersion(assignment_id=assignment.id, drive_url="https://drive.google.com/file/d/latest/view", version_marker=2, validated=True),
+    ])
+    db_session.commit()
+    drive = FakeDriveAdapter({"first", "latest", "fixed"})
+
+    kept = submit_result(db_session, drive, assignment.id, designer.id, "Đã hoàn thành", "fix-keep", "fp-keep")
+    assert kept["sync_printerval_note"] == "https://drive.google.com/file/d/latest/view"
+
+    order.state = OrderState.REVISION.value
+    order.fix_approved_by_admin = True
+    db_session.commit()
+    new_url = "https://drive.google.com/file/d/fixed/view"
+    changed = submit_result(db_session, drive, assignment.id, designer.id, new_url, "fix-new", "fp-new")
+    assert changed["sync_printerval_note"] == new_url
+    newest = (
+        db_session.query(ResultVersion).filter_by(assignment_id=assignment.id).order_by(ResultVersion.version_marker.desc()).first()
+    )
+    assert newest.drive_url == new_url
 
 
 def test_submit_result_rejects_unverified_drive_without_state_change(db_session):

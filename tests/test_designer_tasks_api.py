@@ -5,7 +5,7 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
-from app.adapters.db.models import Assignment, Batch, Order, User
+from app.adapters.db.models import Assignment, Batch, Order, Platform, ResultVersion, User
 from app.adapters.google.fake_drive_adapter import FakeDriveAdapter
 from app.api.deps import get_db
 from app.api.main import create_app
@@ -225,11 +225,78 @@ def test_fix_resubmission_queues_printerval_review_sync(client, db_session, monk
     assert response.status_code == 200
     assert response.json()["state"] == OrderState.QC_PENDING.value
     assert queued == [
-        ((str(order.id), None, "Review"), {
+        ((str(order.id), "https://drive.google.com/file/d/known-file/view", "Review"), {
             "expected_state": OrderState.QC_PENDING.value,
             "expected_fix_approved": True,
         })
     ]
+
+
+def _on_platform(db_session, designer, order) -> None:
+    platform = Platform(name=f"P-{uuid.uuid4()}", account_username=f"p-{uuid.uuid4()}@print.com", is_active=True)
+    db_session.add(platform)
+    db_session.flush()
+    designer.platform_id = platform.id
+    order.platform_id = platform.id
+    db_session.commit()
+
+
+def test_fix_resubmission_through_the_state_route_writes_the_new_link_and_keeps_the_feedback(
+    client, db_session, monkeypatch
+):
+    designer = _login(client, db_session, "designer", "fix-state-resubmitter")
+    assignment, order = _seed_owned_task(db_session, designer, OrderState.REVISION.value)
+    order.fix_approved_by_admin = True
+    order.fix_return_count = 1
+    order.note_outsource = "QC: chỉnh lại màu chữ"
+    _on_platform(db_session, designer, order)
+    queued: list[tuple] = []
+    from app.workers import assignment_sync_tasks
+
+    monkeypatch.setattr(
+        assignment_sync_tasks.sync_order_review_to_printerval_task,
+        "delay",
+        lambda *args, **kwargs: queued.append((args, kwargs)),
+    )
+    link = "https://drive.google.com/file/d/fixed-version/view"
+
+    response = client.patch(
+        f"/api/orders/{order.id}/state", json={"state": "QC_PENDING", "drive_url": link, "note_outsource": link}
+    )
+
+    assert response.status_code == 200
+    db_session.refresh(order)
+    assert order.note_outsource == link
+    assert order.previous_note_outsource == "QC: chỉnh lại màu chữ"
+    assert db_session.query(ResultVersion).filter_by(assignment_id=assignment.id).one().drive_url == link
+    assert queued[0][0] == (str(order.id), link, "Review")
+
+
+def test_fix_resubmission_without_a_link_keeps_the_latest_submitted_one(client, db_session, monkeypatch):
+    designer = _login(client, db_session, "designer", "fix-keeps-link")
+    assignment, order = _seed_owned_task(db_session, designer, OrderState.REVISION.value)
+    order.fix_approved_by_admin = True
+    order.fix_return_count = 1
+    order.note_outsource = "QC: sai size"
+    _on_platform(db_session, designer, order)
+    db_session.add_all([
+        ResultVersion(assignment_id=assignment.id, drive_url="https://drive.test/first", version_marker=1, validated=True),
+        ResultVersion(assignment_id=assignment.id, drive_url="https://drive.test/latest", version_marker=2, validated=True),
+    ])
+    db_session.commit()
+    queued: list[tuple] = []
+    from app.workers import assignment_sync_tasks
+
+    monkeypatch.setattr(
+        assignment_sync_tasks.sync_order_review_to_printerval_task,
+        "delay",
+        lambda *args, **kwargs: queued.append((args, kwargs)),
+    )
+
+    r = client.patch(f"/api/orders/{order.id}/state", json={"state": "QC_PENDING"})
+    assert r.status_code == 200, r.text
+
+    assert queued[0][0] == (str(order.id), "https://drive.test/latest", "Review")
 
 
 def test_paid_fix_resubmission_returns_done_and_syncs_printerval_review(client, db_session, monkeypatch):
@@ -259,7 +326,7 @@ def test_paid_fix_resubmission_returns_done_and_syncs_printerval_review(client, 
     assert response.status_code == 200
     assert response.json()["state"] == OrderState.DONE.value
     assert queued == [
-        ((str(order.id), None, "Review"), {
+        ((str(order.id), "https://drive.google.com/file/d/known-file/view", "Review"), {
             "expected_state": OrderState.DONE.value,
             "expected_fix_approved": True,
         })

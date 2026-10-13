@@ -349,19 +349,18 @@ def submit_result(
         if order.state not in (OrderState.IN_PROGRESS.value, OrderState.WAITING.value, OrderState.REVISION.value):
             raise ValueError(f"Task must be in progress, waiting, or revision to submit (current state: {order.state})")
         effective_drive_url = (drive_url or "").strip()
-        if is_fix_resubmission or not effective_drive_url or effective_drive_url == "Đã hoàn thành":
-            first_rv = (
+        if not effective_drive_url or effective_drive_url == "Đã hoàn thành":
+            # No new link: keep the latest one the Designer already submitted.
+            last_rv = (
                 session.query(ResultVersion)
                 .filter(ResultVersion.assignment_id == assignment.id)
-                .order_by(ResultVersion.version_marker.asc())
+                .order_by(ResultVersion.version_marker.desc())
                 .first()
             )
-            if first_rv and first_rv.drive_url:
-                effective_drive_url = first_rv.drive_url
+            if last_rv and last_rv.drive_url:
+                effective_drive_url = last_rv.drive_url
             # Newer orders keep result links by ResultVersion rather than on
-            # Order.  If a legacy Fix has no first version yet, retain the
-            # link the Designer supplied instead of dereferencing a removed
-            # Order.drive_url field.
+            # Order.  A legacy order with no version yet keeps its own link.
             elif getattr(order, "drive_url", None):
                 effective_drive_url = order.drive_url
 
@@ -417,12 +416,11 @@ def submit_result(
             "version_marker": result_version.version_marker,
             "state": order.state,
             "version": order.version,
-            # Every submission must move the corresponding Printerval order to
-            # Review.  A Fix resubmission only changes that status; its existing
-            # Printerval result link must not be overwritten.  An initial
-            # submission additionally attaches the newly supplied design link.
+            # Every submission moves the Printerval order to Review and writes the
+            # result link into its outsource note (Printerval's own feedback now
+            # goes through the per-order chat, so the note only carries the link).
             "sync_printerval_review": True,
-            "sync_printerval_note": None if is_fix_resubmission else effective_drive_url,
+            "sync_printerval_note": effective_drive_url,
             "sync_printerval_expected_state": target_state.value,
             "expected_fix_approved": is_fix_resubmission,
         }

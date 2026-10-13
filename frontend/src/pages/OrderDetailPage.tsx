@@ -265,8 +265,8 @@ export function OrderDetailPage() {
           method: 'PATCH',
           body: JSON.stringify({
             state: 'QC_PENDING',
-            drive_url: hasFixTag ? undefined : (submittedText || undefined),
-            note_outsource: hasFixTag ? undefined : (submittedText || undefined),
+            drive_url: submittedText || undefined,
+            note_outsource: submittedText || undefined,
             ...(usesOrderConcurrency ? { expected_version: order.version } : {}),
           }),
         })
@@ -997,44 +997,37 @@ export function OrderDetailPage() {
                 }}
               >
                 <div className="flex flex-col sm:flex-row gap-3">
-                  {!hasFixTag && (
-                    <div className="relative flex-1">
-                      <input
-                        type="text"
-                        disabled={isReview || busyAssignment}
-                        className={`w-full px-3.5 py-2 text-xs rounded-xl border font-mono transition-all focus:outline-none ${
-                          isReview
-                            ? 'bg-slate-100 text-slate-500 border-slate-200 cursor-not-allowed pr-40'
-                            : 'bg-white text-slate-900 border-slate-300 focus:border-[#0052CC] focus:ring-1 focus:ring-[#0052CC] pr-24'
-                        }`}
-                        placeholder={
-                          isReview
-                            ? 'Đã nộp bài - Đang ở Review (Bấm "Doing" ở trên nếu muốn sửa nộp lại)'
+                  <div className="relative flex-1">
+                    <input
+                      type="text"
+                      disabled={isReview || busyAssignment}
+                      className={`w-full px-3.5 py-2 text-xs rounded-xl border font-mono transition-all focus:outline-none ${
+                        isReview
+                          ? 'bg-slate-100 text-slate-500 border-slate-200 cursor-not-allowed pr-40'
+                          : 'bg-white text-slate-900 border-slate-300 focus:border-[#0052CC] focus:ring-1 focus:ring-[#0052CC] pr-24'
+                      }`}
+                      placeholder={
+                        isReview
+                          ? 'Đã nộp bài - Đang ở Review (Bấm "Doing" ở trên nếu muốn sửa nộp lại)'
+                          : hasFixTag
+                            ? 'Link bài đã sửa (để trống = giữ link cũ)...'
                             : 'Nhập link Drive, link ảnh hoặc ghi chú hoàn thành (tùy chọn)...'
-                        }
-                        value={driveUrl}
-                        onChange={(e) => setDriveUrl(e.target.value)}
-                      />
-                      {!isReview && (
-                        <span className="absolute right-1.5 top-1/2 -translate-y-1/2">
-                          <OpenExternalLinkButton url={driveUrl} label="Mở" />
-                        </span>
-                      )}
-                      {isReview && (
-                        <span className="absolute right-2.5 top-1.5 text-[10px] font-bold text-purple-800 bg-purple-100 px-2 py-1 rounded-md border border-purple-200 flex items-center gap-1 shadow-2xs select-none">
-                          <Lock className="h-3 w-3" />
-                          <span>Đã khóa ở Review</span>
-                        </span>
-                      )}
-                    </div>
-                  )}
-
-                  {hasFixTag && !isReview && (
-                    <div className="flex-1 flex items-center gap-2 text-xs font-semibold text-orange-900 bg-orange-50 border border-orange-200/80 px-3.5 py-2 rounded-xl">
-                      <AlertCircle className="h-4 w-4 text-orange-600 shrink-0" />
-                      <span>Đơn có tag Fix (Fix × {order.fix_return_count || 1}). Bài nộp giữ nguyên link gốc từ kho lưu trữ. Bạn thực hiện sửa bài và bấm Cập nhật đơn để gửi Review.</span>
-                    </div>
-                  )}
+                      }
+                      value={driveUrl}
+                      onChange={(e) => setDriveUrl(e.target.value)}
+                    />
+                    {!isReview && (
+                      <span className="absolute right-1.5 top-1/2 -translate-y-1/2">
+                        <OpenExternalLinkButton url={driveUrl} label="Mở" />
+                      </span>
+                    )}
+                    {isReview && (
+                      <span className="absolute right-2.5 top-1.5 text-[10px] font-bold text-purple-800 bg-purple-100 px-2 py-1 rounded-md border border-purple-200 flex items-center gap-1 shadow-2xs select-none">
+                        <Lock className="h-3 w-3" />
+                        <span>Đã khóa ở Review</span>
+                      </span>
+                    )}
+                  </div>
 
                   <button
                     type="submit"
