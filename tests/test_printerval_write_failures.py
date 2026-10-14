@@ -40,7 +40,8 @@ class FakeClient:
         self.find_calls: list[tuple] = []
         self.status_calls: list[tuple] = []
 
-    def __call__(self, **_kwargs):
+    def __call__(self, **kwargs):
+        self.kwargs = kwargs
         return self
 
     def __enter__(self):
@@ -111,6 +112,7 @@ def test_review_push_uses_one_lookup_for_the_locale_and_saves_the_status(world, 
     _run(world.order)
 
     assert fake.find_calls == [("DJ4141056", ("doing",))]  # one queue, not every status
+    assert fake.kwargs["timeout"] == tasks.REVIEW_SYNC_TIMEOUT_SECONDS
     assert fake.status_calls == [(4141056, "review", "uk")]
     world.session.refresh(world.order)
     assert world.order.printerval_status == "review"

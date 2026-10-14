@@ -200,6 +200,8 @@ def sync_assignment_to_printerval_task(order_id: str, designer_id: str) -> None:
 
 # Printerval is sometimes very slow: a failed Review push is retried before Admin is asked to do it.
 REVIEW_SYNC_RETRY_DELAYS = (60, 180, 420)
+# A background write can wait longer than a web request: the cookie probe alone took 30s+ on 14/10.
+REVIEW_SYNC_TIMEOUT_SECONDS = 60.0
 
 
 class ReviewSyncFailed(Exception):
@@ -327,6 +329,7 @@ def sync_order_review_to_printerval_task(
                 password=platform.account_password,
                 team_outsource=platform.team_outsource,
                 session_cookie=platform.session_cookie,
+                timeout=REVIEW_SYNC_TIMEOUT_SECONDS,
             ) as client:
                 if _push_review(client, order, note_outsource, target_status, is_still_expected):
                     session.commit()
