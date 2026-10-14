@@ -99,6 +99,8 @@ function schedulePoll(delay: number) {
   if (pollTimer) clearTimeout(pollTimer)
   if (listeners.size === 0) return
   pollTimer = setTimeout(() => {
+    // A hidden tab has nobody looking at the status; check again later.
+    if (document.hidden) return schedulePoll(IDLE_POLL_MS)
     void refreshSyncStatus()
   }, delay)
 }

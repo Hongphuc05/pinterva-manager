@@ -196,7 +196,9 @@ function JobRow({ job, index }: { job: QueueJob; index: number }) {
   useEffect(() => {
     if (!open) return
     void load()
-    const timer = setInterval(() => void load(), REFRESH_MS)
+    const timer = setInterval(() => {
+      if (!document.hidden) void load()
+    }, REFRESH_MS)
     return () => clearInterval(timer)
   }, [open, load])
 
@@ -280,7 +282,9 @@ export function SupportQueuePage() {
 
   useEffect(() => {
     void load()
-    const timer = setInterval(() => void load(), REFRESH_MS)
+    const timer = setInterval(() => {
+      if (!document.hidden) void load()
+    }, REFRESH_MS)
     return () => clearInterval(timer)
   }, [load])
 

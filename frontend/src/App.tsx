@@ -1,3 +1,4 @@
+import { Suspense, lazy } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './auth/AuthContext'
 import { PlatformProvider } from './auth/PlatformContext'
@@ -5,22 +6,23 @@ import { GallerySyncProvider } from './context/GallerySyncContext'
 import { ToastProvider } from './context/ToastContext'
 import { ProtectedRoute } from './auth/ProtectedRoute'
 import { LoginPage } from './pages/LoginPage'
-import { OrdersListPage } from './pages/OrdersListPage'
-import { OrderDetailPage } from './pages/OrderDetailPage'
-import { UsersPage } from './pages/UsersPage'
-import { DesignerBoardPage } from './pages/DesignerBoardPage'
-import { DesignerSubmissionsPage } from './pages/DesignerSubmissionsPage'
-import { OrderHistoryPage } from './pages/OrderHistoryPage'
-import { FinancePage } from './pages/FinancePage'
-import { DuplicateBoardPage } from './pages/DuplicateBoardPage'
-import { PlatformHubPage } from './pages/PlatformHubPage'
-import { TelegramManagementPage } from './pages/TelegramManagementPage'
-import { DuplicateReviewPage } from './pages/DuplicateReviewPage'
-import { SupportQueuePage } from './pages/SupportQueuePage'
-import { AccountantPaymentsPage } from './pages/AccountantPaymentsPage'
 import { RootRedirect } from './auth/RootRedirect'
 import { WorkerProvider } from './features/worker/WorkerProvider'
 import { ConsentDialog } from './features/worker/ConsentDialog'
+
+const OrdersListPage = lazy(() => import('./pages/OrdersListPage').then((m) => ({ default: m.OrdersListPage })))
+const OrderDetailPage = lazy(() => import('./pages/OrderDetailPage').then((m) => ({ default: m.OrderDetailPage })))
+const UsersPage = lazy(() => import('./pages/UsersPage').then((m) => ({ default: m.UsersPage })))
+const DesignerBoardPage = lazy(() => import('./pages/DesignerBoardPage').then((m) => ({ default: m.DesignerBoardPage })))
+const DesignerSubmissionsPage = lazy(() => import('./pages/DesignerSubmissionsPage').then((m) => ({ default: m.DesignerSubmissionsPage })))
+const OrderHistoryPage = lazy(() => import('./pages/OrderHistoryPage').then((m) => ({ default: m.OrderHistoryPage })))
+const FinancePage = lazy(() => import('./pages/FinancePage').then((m) => ({ default: m.FinancePage })))
+const DuplicateBoardPage = lazy(() => import('./pages/DuplicateBoardPage').then((m) => ({ default: m.DuplicateBoardPage })))
+const PlatformHubPage = lazy(() => import('./pages/PlatformHubPage').then((m) => ({ default: m.PlatformHubPage })))
+const TelegramManagementPage = lazy(() => import('./pages/TelegramManagementPage').then((m) => ({ default: m.TelegramManagementPage })))
+const DuplicateReviewPage = lazy(() => import('./pages/DuplicateReviewPage').then((m) => ({ default: m.DuplicateReviewPage })))
+const SupportQueuePage = lazy(() => import('./pages/SupportQueuePage').then((m) => ({ default: m.SupportQueuePage })))
+const AccountantPaymentsPage = lazy(() => import('./pages/AccountantPaymentsPage').then((m) => ({ default: m.AccountantPaymentsPage })))
 
 function App() {
   return (
@@ -30,6 +32,7 @@ function App() {
           <ToastProvider>
             <GallerySyncProvider>
               <WorkerProvider ConsentDialog={ConsentDialog}>
+              <Suspense fallback={<div className="p-8 text-sm text-slate-500">Đang tải…</div>}>
               <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route
@@ -150,6 +153,7 @@ function App() {
           />
           <Route path="/" element={<RootRedirect />} />
         </Routes>
+              </Suspense>
               </WorkerProvider>
             </GallerySyncProvider>
           </ToastProvider>

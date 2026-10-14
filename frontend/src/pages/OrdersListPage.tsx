@@ -7,6 +7,7 @@ import { DashboardLayout } from '../components/DashboardLayout'
 import { ImageModal } from '../components/ImageModal'
 import { StatusDropdown } from '../components/StatusDropdown'
 import { Pagination, paginate } from '../components/Pagination'
+import { AutoSyncCountdown } from '../components/AutoSyncCountdown'
 import { CopyableOrderCode } from '../components/CopyableOrderCode'
 import { CopyableProductName } from '../components/CopyableProductName'
 import { ProductQuickViewModal } from '../components/ProductQuickViewModal'
@@ -362,7 +363,7 @@ export function OrdersListPage() {
   })
 
   // Review and Done tabs auto-sync their visible cards every five minutes.
-  const [tabAutoSyncCountdown, setTabAutoSyncCountdown] = useState(300)
+  const [autoSyncResetKey, setAutoSyncResetKey] = useState(0)
 
   // Highlight state for newly crawled jobs and recently tab-moved jobs
   const [newlyCrawledOrderIds, setNewlyCrawledOrderIds] = useState<string[]>([])
@@ -1269,24 +1270,10 @@ export function OrdersListPage() {
     [adminTab, doneOrders, reviewOrders],
   )
 
-  // Review and Done Tab 5-Minute Auto-Sync Interval Timer
-  useEffect(() => {
-    if (!isAdmin || (adminTab !== 'review' && adminTab !== 'done')) return
-
-    const timer = setInterval(() => {
-      setTabAutoSyncCountdown((prev) => {
-        if (prev <= 1) {
-          if (autoSyncOrderIds.length > 0) {
-            handleSyncPlatformStatus(autoSyncOrderIds)
-          }
-          return 300
-        }
-        return prev - 1
-      })
-    }, 1000)
-
-    return () => clearInterval(timer)
-  }, [isAdmin, adminTab, autoSyncOrderIds])
+  // Review and Done tab 5-minute auto-sync: the countdown lives in <AutoSyncCountdown>.
+  const fireAutoSync = () => {
+    if (autoSyncOrderIds.length > 0) void handleSyncPlatformStatus(autoSyncOrderIds)
+  }
 
   // Designer Workflow groups
   const designerDoingOrders = orders.filter(
@@ -1932,12 +1919,12 @@ export function OrdersListPage() {
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] font-mono font-semibold px-2.5 py-1.5 rounded-xl bg-purple-50 text-purple-700 border border-purple-200 inline-flex items-center gap-1.5 shadow-2xs">
                     <Clock className="h-3 w-3 text-purple-600" />
-                    <span>Tự động sync: {Math.floor(tabAutoSyncCountdown / 60)}:{(tabAutoSyncCountdown % 60).toString().padStart(2, '0')}</span>
+                    <AutoSyncCountdown resetKey={autoSyncResetKey} onFire={fireAutoSync} />
                   </span>
                   <button
                     type="button"
                     onClick={() => {
-                      setTabAutoSyncCountdown(300)
+                      setAutoSyncResetKey((k) => k + 1)
                       handleSyncPlatformStatus(reviewOrders.map((o) => o.id))
                     }}
                     disabled={isTriggering || !!syncStatus?.is_running || reviewOrders.length === 0}
@@ -2029,12 +2016,12 @@ export function OrdersListPage() {
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] font-mono font-semibold px-2.5 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 inline-flex items-center gap-1.5 shadow-2xs">
                     <Clock className="h-3 w-3 text-emerald-600" />
-                    <span>Tự động sync: {Math.floor(tabAutoSyncCountdown / 60)}:{(tabAutoSyncCountdown % 60).toString().padStart(2, '0')}</span>
+                    <AutoSyncCountdown resetKey={autoSyncResetKey} onFire={fireAutoSync} />
                   </span>
                   <button
                     type="button"
                     onClick={() => {
-                      setTabAutoSyncCountdown(300)
+                      setAutoSyncResetKey((k) => k + 1)
                       handleSyncPlatformStatus(doneOrders.map((o) => o.id))
                     }}
                     disabled={isTriggering || !!syncStatus?.is_running || doneOrders.length === 0}

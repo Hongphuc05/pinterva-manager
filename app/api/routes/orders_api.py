@@ -915,17 +915,21 @@ def api_orders_list(
     designer_map = {a.order_id: u.full_name or u.username for a, u in assignments}
     designer_id_map = {a.order_id: u.id for a, u in assignments}
     assignment_id_map = {a.order_id: a.id for a, _ in assignments}
+    # Only the newest request per order is shown, so let Postgres pick it (DISTINCT ON)
+    # instead of pulling every request ever made for every order.
     requests = (
         db.query(PrintervalAssignmentRequest)
         .filter(PrintervalAssignmentRequest.order_id.in_(order_ids))
-        .order_by(PrintervalAssignmentRequest.created_at.desc())
+        .distinct(PrintervalAssignmentRequest.order_id)
+        .order_by(
+            PrintervalAssignmentRequest.order_id,
+            PrintervalAssignmentRequest.created_at.desc(),
+        )
         .all()
         if order_ids
         else []
     )
-    request_map = {}
-    for request in requests:
-        request_map.setdefault(request.order_id, request)
+    request_map = {request.order_id: request for request in requests}
 
     is_admin = user.role == ROLE_ADMIN
     out_list = []

@@ -93,7 +93,9 @@ export function ReviewView({ jobId, onJobChange, onZoom, zoomOpen }: Props) {
   const running = job?.status === 'running'
   useEffect(() => {
     if (!running || !job) return
-    const timer = setInterval(() => void loadJob(job.id), 8000)
+    const timer = setInterval(() => {
+      if (!document.hidden) void loadJob(job.id)
+    }, 8000)
     return () => clearInterval(timer)
   }, [running, job, loadJob])
 

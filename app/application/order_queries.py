@@ -188,7 +188,7 @@ def list_orders_for_user(
             return []
         query = query.filter(Order.batch_id == batch_uuid)
 
-    return query.distinct().order_by(Order.created_at.desc()).all()
+    return query.order_by(Order.created_at.desc()).all()
 
 
 def get_order_detail_for_user(

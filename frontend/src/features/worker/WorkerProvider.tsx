@@ -78,7 +78,9 @@ export function WorkerProvider({ children, ConsentDialog }: { children: ReactNod
   useEffect(() => {
     if (!isSupport) return
     void refresh()
-    const timer = setInterval(() => void refresh(), PROBE_MS)
+    const timer = setInterval(() => {
+      if (!document.hidden) void refresh()
+    }, PROBE_MS)
     return () => clearInterval(timer)
   }, [isSupport, refresh])
 

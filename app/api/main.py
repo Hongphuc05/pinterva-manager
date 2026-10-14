@@ -6,6 +6,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm.exc import StaleDataError
@@ -80,8 +81,24 @@ def _is_deprecated_path(path: str) -> bool:
     return path in DEPRECATED_PATHS or any(pattern.fullmatch(path) for pattern in DEPRECATED_PATH_PATTERNS)
 
 
+class CachedStaticFiles(StaticFiles):
+    """StaticFiles with a Cache-Control header (hashed SPA bundles can be immutable)."""
+
+    def __init__(self, *args, cache_control: str, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._cache_control = cache_control
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        if response.status_code == 200:
+            response.headers["Cache-Control"] = self._cache_control
+        return response
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="Tacahu Ops Dashboard")
+    # The order list is several MB of repetitive JSON; gzip cuts it ~10x on the wire.
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
     settings = get_settings()
     allowed_origins = [
         origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()
@@ -182,12 +199,19 @@ def create_app() -> FastAPI:
 
     CRAWLED_ASSETS_DIR.mkdir(parents=True, exist_ok=True)
     app.mount(
-        "/crawled_assets", StaticFiles(directory=CRAWLED_ASSETS_DIR), name="crawled-assets"
+        "/crawled_assets",
+        CachedStaticFiles(directory=CRAWLED_ASSETS_DIR, cache_control="public, max-age=3600"),
+        name="crawled-assets",
     )
 
     if FRONTEND_DIST.exists():
         app.mount(
-            "/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="spa-assets"
+            "/assets",
+            CachedStaticFiles(
+                directory=FRONTEND_DIST / "assets",
+                cache_control="public, max-age=31536000, immutable",
+            ),
+            name="spa-assets",
         )
 
         @app.get("/{full_path:path}")

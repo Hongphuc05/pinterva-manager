@@ -37,7 +37,9 @@ export function ControlView() {
 
   useEffect(() => {
     void load()
-    const timer = setInterval(() => void load(), REFRESH_MS)
+    const timer = setInterval(() => {
+      if (!document.hidden) void load()
+    }, REFRESH_MS)
     return () => clearInterval(timer)
   }, [load])
 
