@@ -541,6 +541,8 @@ describe('OrdersListPage', () => {
                   state: 'IN_PROGRESS',
                   template_missing: false,
                   deadline_tacahu: '2026-10-20T03:00:00Z',
+                  order_created_at_ext: '2026-10-14T05:30:00Z',
+                  status_changed_at: '2026-10-14T00:01:00Z',
                   batch_id: null,
                   sku: 'SKU-IN',
                   thumbnail_url: null,
@@ -553,6 +555,8 @@ describe('OrdersListPage', () => {
                   state: 'IN_PROGRESS',
                   template_missing: false,
                   deadline_tacahu: '2026-11-05T12:00:00Z',
+                  order_created_at_ext: '2026-10-15T05:31:00Z',
+                  status_changed_at: '2026-10-15T00:01:00Z',
                   batch_id: null,
                   sku: 'SKU-OUT',
                   thumbnail_url: null,
@@ -573,6 +577,9 @@ describe('OrdersListPage', () => {
     )
 
     await screen.findByText('Designer Deadline In')
+    expect(screen.getByRole('columnheader', { name: 'Order At' })).toBeInTheDocument()
+    expect(screen.getByText('12:30:00')).toBeInTheDocument()
+    expect(screen.getByText('12:31:00')).toBeInTheDocument()
     expect(screen.getByRole('columnheader', { name: 'Deadline Tacahu' })).toBeInTheDocument()
     expect(screen.getByText('10:00:00')).toBeInTheDocument()
     expect(screen.getByText('20/10/2026')).toBeInTheDocument()

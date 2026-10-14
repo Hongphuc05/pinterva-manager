@@ -382,10 +382,13 @@ export function OrdersListPage() {
 
   const setFlash = (msg: string | null) => { if (msg) showToast(msg, 'success') }
   const setError = (err: string | null) => { if (err) showToast(err, 'error') }
+  const defaultDateSortField: 'order_created_at_ext' | 'created_at' | 'status_changed_at' = isDesigner
+    ? 'order_created_at_ext'
+    : 'status_changed_at'
   const [dateSort, setDateSort] = useState<{ field: 'order_created_at_ext' | 'created_at' | 'status_changed_at'; direction: 'asc' | 'desc' }>({
     field: restoreAdminFilters && ['order_created_at_ext', 'created_at', 'status_changed_at'].includes(String(restoredViewState.dateSortField))
       ? restoredViewState.dateSortField as 'order_created_at_ext' | 'created_at' | 'status_changed_at'
-      : 'status_changed_at',
+      : defaultDateSortField,
     direction: restoreAdminFilters && restoredViewState.dateSortDirection === 'asc' ? 'asc' : 'desc',
   })
   const { status: syncStatus, triggerRun, isTriggering } = useSyncStatus()
@@ -1337,14 +1340,24 @@ export function OrdersListPage() {
     setSearchParams(next, { replace: true })
   }, [statusFilter, platformStatusFilter, designerFilter, batchFilter, searchQuery, dateFilterType, dateFrom, dateTo, activeDesignerTab, adminTab, dateSort, syncedImagesFilter, fixReturnedFilter])
 
-  // Reset sort to newest status_changed_at when tab changes
+  // Designers see Order At as their primary time column; managers keep the
+  // operational status-change time as their default sort.
   useEffect(() => {
     if (!didInitializeTabSort.current) {
       didInitializeTabSort.current = true
       return
     }
-    setDateSort({ field: 'status_changed_at', direction: 'desc' })
-  }, [adminTab, activeDesignerTab])
+    setDateSort({ field: isDesigner ? 'order_created_at_ext' : 'status_changed_at', direction: 'desc' })
+  }, [adminTab, activeDesignerTab, isDesigner])
+
+  // Migrate a persisted Designer sort from the old status-change column to
+  // the Order At column after the authenticated role becomes available.
+  useEffect(() => {
+    if (!isDesigner) return
+    setDateSort((current) => current.field === 'status_changed_at'
+      ? { field: 'order_created_at_ext', direction: current.direction }
+      : current)
+  }, [isDesigner])
 
   function toggleDateSort(field: 'order_created_at_ext' | 'created_at' | 'status_changed_at') {
     setDateSort((current) => ({
@@ -2602,14 +2615,14 @@ export function OrdersListPage() {
                   <th className="py-3 px-4 w-36 whitespace-nowrap">
                     <button
                       type="button"
-                      onClick={() => toggleDateSort('status_changed_at')}
+                      onClick={() => toggleDateSort('order_created_at_ext')}
                       className={`inline-flex items-center gap-1.5 transition-colors ${
-                        dateSort.field === 'status_changed_at' ? 'text-[#0052CC] font-bold' : 'hover:text-[#0052CC]'
+                        dateSort.field === 'order_created_at_ext' ? 'text-[#0052CC] font-bold' : 'hover:text-[#0052CC]'
                       }`}
-                      title={getDateSortTooltip('status_changed_at', 'Thời Gian')}
+                      title={getDateSortTooltip('order_created_at_ext', 'Order At')}
                     >
-                      <span>Thời Gian</span>
-                      {renderDateSortIcon('status_changed_at')}
+                      <span>Order At</span>
+                      {renderDateSortIcon('order_created_at_ext')}
                     </button>
                   </th>
                   <th className="py-3 px-4 w-36 whitespace-nowrap">Deadline Tacahu</th>
@@ -3382,13 +3395,13 @@ export function OrdersListPage() {
                             </div>
                           </td>
 
-                          {/* 4. Thời Gian */}
+                          {/* 4. Order At */}
                           <td className="py-3 px-4 whitespace-nowrap">
                             {(() => {
-                              const split = formatUtc7Split(o.status_changed_at)
+                              const split = formatUtc7Split(o.order_created_at_ext)
                               if (!split) return <span className="text-slate-300 font-mono text-xs">-</span>
                               return (
-                                <div className="flex flex-col leading-tight" title="Thời gian chuyển vào tab / cập nhật gần nhất (UTC+7)">
+                                <div className="flex flex-col leading-tight" title="Thời gian khách đặt hàng (Order At)">
                                   <span className="font-mono text-xs font-bold text-slate-800">{split.time}</span>
                                   <span className="font-mono text-[11px] text-slate-500">{split.date}</span>
                                 </div>
