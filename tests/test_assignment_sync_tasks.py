@@ -20,6 +20,9 @@ class _FakeSession:
     def commit(self):
         pass
 
+    def rollback(self):
+        pass
+
     def close(self):
         self.closed = True
 
@@ -83,6 +86,9 @@ class _FakePrintervalAssignmentRequest:
     def __init__(self, id, platform_id):
         self.id = id
         self.platform_id = platform_id
+        self.order_id = uuid.uuid4()
+        self.designer_option = "Linh Designer - 2D Prin"
+        self.target_status = "Doing"
         self.lifecycle = "pending"
         self.error_class = None
         self.error_message = None

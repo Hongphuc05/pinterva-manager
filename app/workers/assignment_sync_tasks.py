@@ -16,6 +16,25 @@ from app.workers.celery_app import celery_app
 logger = logging.getLogger(__name__)
 
 
+def _alert_admins(session, order: Order | None, *, action: str, error: str, manual: str) -> None:
+    """A write to Printerval failed for good: ask the Admins to do it by hand (never raises)."""
+    if order is None:
+        return
+    from app.application.telegram_service import notify_admin_printerval_write_failed
+
+    notify_admin_printerval_write_failed(session, order, action=action, error=error, manual_fix=manual)
+
+
+def _request_wording(request: PrintervalAssignmentRequest, code: str) -> tuple[str, str]:
+    parts = []
+    if request.designer_option:
+        parts.append(f"Designer thành {request.designer_option}")
+    if request.target_status:
+        parts.append(f"trạng thái sang {request.target_status}")
+    change = " và ".join(parts) or "cập nhật đơn"
+    return f"đổi {change}", f"vào Printerval đổi {change} cho đơn {code}"
+
+
 @celery_app.task(name="app.workers.assignment_sync_tasks.sync_printerval_assignment_request")
 def sync_printerval_assignment_request(request_id: str) -> None:
     """Run one explicit per-order Designer/Status request for its own platform."""
@@ -25,12 +44,15 @@ def sync_printerval_assignment_request(request_id: str) -> None:
         if request is None:
             logger.error("Printerval assignment request %s not found", request_id)
             return
+        order = session.get(Order, request.order_id)
+        action, manual = _request_wording(request, order.external_order_id if order else "")
         platform = session.get(Platform, request.platform_id)
         if platform is None or not (platform.account_password or platform.session_cookie):
             request.lifecycle = "failed"
             request.error_class = "AUTH"
             request.error_message = "Platform credentials are unavailable"
             session.commit()
+            _alert_admins(session, order, action=action, error=request.error_message, manual=manual)
             return
         # A real browser fallback matters here specifically when a password is
         # available. Cookie-only platforms stay HTTP-only, avoiding a pointless
@@ -74,8 +96,22 @@ def sync_printerval_assignment_request(request_id: str) -> None:
         finally:
             if session_cm is not None:
                 session_cm.__exit__(None, None, None)
-    except Exception:
+        if request.lifecycle in ("failed", "unknown_outcome"):
+            _alert_admins(
+                session, order, action=action,
+                error=f"{request.error_class}: {request.error_message or 'không rõ'}", manual=manual,
+            )
+    except Exception as exc:
         logger.exception("Printerval assignment request %s crashed", request_id)
+        session.rollback()
+        try:
+            request = session.get(PrintervalAssignmentRequest, uuid.UUID(request_id))
+            order = session.get(Order, request.order_id) if request else None
+            if request is not None:
+                action, manual = _request_wording(request, order.external_order_id if order else "")
+                _alert_admins(session, order, action=action, error=f"{type(exc).__name__}: {exc}", manual=manual)
+        except Exception:
+            logger.exception("could not alert Admins about request %s", request_id)
     finally:
         session.close()
 
@@ -104,12 +140,18 @@ def sync_assignment_to_printerval_task(order_id: str, designer_id: str) -> None:
             # Not an error — this designer just isn't registered on Printerval.
             return
 
+        action = f"giao Designer {designer.printerval_designer_option} (Designer + Doing)"
+        manual = (
+            f"vào Printerval đặt Designer {designer.printerval_designer_option} và trạng thái Doing "
+            f"cho đơn {order.external_order_id}"
+        )
         platform = session.get(Platform, order.platform_id) if order.platform_id else None
         if platform is None or not platform.account_password:
             logger.error(
                 "sync_assignment_to_printerval_task: platform credentials missing for order %s",
                 order.external_order_id,
             )
+            _alert_admins(session, order, action=action, error="Platform chưa có mật khẩu Printerval", manual=manual)
             return
 
         clean_slug = platform.account_username.replace("@", "_").replace(".", "_").replace("+", "_")
@@ -117,10 +159,13 @@ def sync_assignment_to_printerval_task(order_id: str, designer_id: str) -> None:
         try:
             session_cm = playwright_session(profile_dir=profile_dir, headless=True)
             page = session_cm.__enter__()
-        except Exception:
+        except Exception as exc:
             logger.exception(
                 "sync_assignment_to_printerval_task: Playwright session failed to open for order %s",
                 order.external_order_id,
+            )
+            _alert_admins(
+                session, order, action=action, error=f"Không mở được trình duyệt: {type(exc).__name__}", manual=manual
             )
             return
 
@@ -136,19 +181,86 @@ def sync_assignment_to_printerval_task(order_id: str, designer_id: str) -> None:
                     "sync_assignment_to_printerval_task result for %s: %s",
                     order.external_order_id, result,
                 )
-            except Exception:
+                if not result.get("synced") and result.get("stage"):
+                    _alert_admins(
+                        session, order, action=action, error=f"Lỗi ở bước {result['stage']}", manual=manual
+                    )
+            except Exception as exc:
                 logger.exception(
                     "sync_assignment_to_printerval_task: unexpected exception mid-run for order %s",
                     order.external_order_id,
                 )
+                session.rollback()
+                _alert_admins(session, order, action=action, error=f"{type(exc).__name__}: {exc}", manual=manual)
         finally:
             session_cm.__exit__(None, None, None)
     finally:
         session.close()
 
 
-@celery_app.task(name="app.workers.assignment_sync_tasks.sync_order_review_to_printerval_task")
+# Printerval is sometimes very slow: a failed Review push is retried before Admin is asked to do it.
+REVIEW_SYNC_RETRY_DELAYS = (60, 180, 420)
+
+
+class ReviewSyncFailed(Exception):
+    """The Review/note write did not go through. ``retryable`` is False when retrying cannot help."""
+
+    def __init__(self, message: str, *, error_class: str, retryable: bool = True):
+        super().__init__(message)
+        self.error_class = error_class
+        self.retryable = retryable
+
+
+def _push_review(client: PrintervalApiClient, order: Order, note_outsource: str | None, target_status: str,
+                 is_still_expected) -> bool:
+    """One attempt over the HTTP API. Returns False when the order moved on (stale job, nothing done)."""
+    from datetime import UTC, datetime
+
+    client.login()
+    code = order.external_order_id
+    numeric_id = code[2:] if code.upper().startswith("DJ") else code
+    row_id = int(numeric_id)
+    locale = "en"
+    try:
+        # One lookup in the order's current queue only (not every status): the id is already in
+        # the code, the row is needed just for its locale (us, uk, fr...). A slow or missing
+        # lookup must not block the write.
+        row = client.find_order(code, statuses=((order.printerval_status or "doing").lower(),))
+        if row:
+            row_id = int(row.get("id") or row_id)
+            locale = row.get("local_code") or locale
+    except Exception:
+        logger.warning("locale lookup failed for %s, writing with the default locale", code, exc_info=True)
+
+    if note_outsource and note_outsource.strip():
+        if not is_still_expected():
+            logger.info("Skipping stale Printerval note sync for %s", code)
+            return False
+        if not client.update_order_note_outsource(row_id, note_outsource.strip()):
+            raise ReviewSyncFailed("Printerval không nhận ghi chú (note outsource)", error_class="UNKNOWN_OUTCOME")
+        logger.info("HTTP update_order_note_outsource for %s: True", code)
+
+    if target_status:
+        if not is_still_expected():
+            logger.info("Skipping stale Printerval status sync (%s) for %s", target_status, code)
+            return False
+        if not client.update_order_status(row_id, target_status.lower(), locale):
+            raise ReviewSyncFailed(
+                f"Printerval không nhận đổi trạng thái sang {target_status}", error_class="UNKNOWN_OUTCOME"
+            )
+        logger.info("HTTP update_order_status (%s) for %s: True", target_status, code)
+        order.printerval_status = target_status.lower()
+        order.printerval_status_synced_at = datetime.now(UTC)
+    return True
+
+
+@celery_app.task(
+    bind=True,
+    name="app.workers.assignment_sync_tasks.sync_order_review_to_printerval_task",
+    max_retries=len(REVIEW_SYNC_RETRY_DELAYS),
+)
 def sync_order_review_to_printerval_task(
+    self,
     order_id: str,
     note_outsource: str | None = None,
     target_status: str = "Review",
@@ -163,9 +275,11 @@ def sync_order_review_to_printerval_task(
     Fix request and incorrectly overwrite Printerval's Fix status.  Callers
     that represent a state transition must therefore pass the state they
     observed when enqueueing the job.
-    """
-    from datetime import UTC, datetime
 
+    A transient failure (slow Printerval, network) is retried after 1, 3 and 7 minutes; when it
+    still fails, or cannot be retried, a DeadLetter is written and the Admins are told on Telegram
+    to change the status by hand. There is no browser fallback: it cannot run in production.
+    """
     logger.disabled = False
     session = SessionLocal()
     try:
@@ -196,15 +310,16 @@ def sync_order_review_to_printerval_task(
             )
             return
 
+        action = f"đổi trạng thái sang {target_status}" if target_status else "ghi note outsource"
         platform = session.get(Platform, order.platform_id) if order.platform_id else None
         if platform is None or not (platform.account_password or platform.session_cookie):
-            logger.error(
-                "sync_order_review_to_printerval_task: platform credentials missing for order %s",
-                order.external_order_id,
+            _review_sync_gave_up(
+                session, order, action, target_status,
+                ReviewSyncFailed("Platform chưa có cookie hoặc mật khẩu Printerval", error_class="AUTH",
+                                 retryable=False),
             )
             return
 
-        # 1. Primary: Direct lightning-fast HTTP API via PrintervalApiClient (no Cloudflare blocks, <1s)
         try:
             with PrintervalApiClient(
                 base_url="https://printerval.com",
@@ -213,110 +328,65 @@ def sync_order_review_to_printerval_task(
                 team_outsource=platform.team_outsource,
                 session_cookie=platform.session_cookie,
             ) as client:
-                client.login()
-                row = client.find_order(order.external_order_id)
-                code = order.external_order_id
-                numeric_id = code[2:] if code.upper().startswith("DJ") else code
-                row_id = int(row.get("id")) if (row and row.get("id")) else int(numeric_id)
-                locale = (row.get("local_code") if row else None) or "en"
-
-                note_ok = True
-                if note_outsource and note_outsource.strip():
-                    if not is_still_expected():
-                        logger.info("Skipping stale Printerval note sync for %s", order.external_order_id)
-                        return
-                    note_ok = client.update_order_note_outsource(row_id, note_outsource.strip())
-                    logger.info(
-                        "HTTP update_order_note_outsource for %s: %s",
-                        order.external_order_id,
-                        note_ok,
-                    )
-
-                status_ok = True
-                if target_status:
-                    if not is_still_expected():
-                        logger.info(
-                            "Skipping stale Printerval status sync (%s) for %s",
-                            target_status,
-                            order.external_order_id,
-                        )
-                        return
-                    status_ok = client.update_order_status(row_id, target_status.lower(), locale)
-                    logger.info(
-                        "HTTP update_order_status (%s) for %s: %s",
-                        target_status,
-                        order.external_order_id,
-                        status_ok,
-                    )
-                    if status_ok:
-                        order.printerval_status = target_status.lower()
-                        order.printerval_status_synced_at = datetime.now(UTC)
-                        session.commit()
-
-                if note_ok and status_ok:
+                if _push_review(client, order, note_outsource, target_status, is_still_expected):
+                    session.commit()
                     logger.info(
                         "sync_order_review_to_printerval_task succeeded via HTTP API for %s",
                         order.external_order_id,
                     )
-                    return
-        except Exception:
-            logger.exception(
-                "sync_order_review_to_printerval_task: HTTP API failed for %s, trying Playwright fallback",
-                order.external_order_id,
-            )
-
-        # 2. Secondary fallback: Playwright browser session
-        if not platform.account_password:
-            return
-
-        clean_slug = platform.account_username.replace("@", "_").replace(".", "_").replace("+", "_")
-        profile_dir = f"chrome-profile-{clean_slug}"
-        try:
-            session_cm = playwright_session(profile_dir=profile_dir, headless=True)
-            page = session_cm.__enter__()
-        except Exception:
-            logger.exception(
-                "sync_order_review_to_printerval_task: Playwright session failed to open for order %s",
-                order.external_order_id,
-            )
-            return
-
-        try:
-            adapter = PlaywrightPrintervalAdapter(
-                page=page,
-                crawl_username=platform.account_username,
-                crawl_password=platform.account_password,
-            )
-            if note_outsource and note_outsource.strip():
-                if not is_still_expected():
-                    logger.info("Skipping stale Printerval note fallback for %s", order.external_order_id)
-                    return
-                try:
-                    res_note = adapter.attach_result_link(order.external_order_id, note_outsource.strip())
-                    logger.info("attach_result_link for %s: %s", order.external_order_id, res_note)
-                except Exception:
-                    logger.exception("Failed attach_result_link for %s", order.external_order_id)
-
-            if target_status:
-                if not is_still_expected():
-                    logger.info(
-                        "Skipping stale Printerval status fallback (%s) for %s",
-                        target_status,
-                        order.external_order_id,
-                    )
-                    return
-                try:
-                    res_status = adapter.set_status(order.external_order_id, target_status)
-                    logger.info(
-                        "set_status (%s) for %s: %s", target_status, order.external_order_id, res_status
-                    )
-                    if res_status.success:
-                        order.printerval_status = target_status.lower()
-                        order.printerval_status_synced_at = datetime.now(UTC)
-                        session.commit()
-                except Exception:
-                    logger.exception("Failed set_status for %s", order.external_order_id)
-        finally:
-            session_cm.__exit__(None, None, None)
+                return
+        except Exception as exc:
+            session.rollback()
+            failure = _as_review_failure(exc)
+            attempt = self.request.retries
+            if failure.retryable and attempt < len(REVIEW_SYNC_RETRY_DELAYS):
+                logger.warning(
+                    "Review sync for %s failed (%s: %s), retry %s/%s",
+                    order.external_order_id, failure.error_class, failure,
+                    attempt + 1, len(REVIEW_SYNC_RETRY_DELAYS),
+                )
+                raise self.retry(countdown=REVIEW_SYNC_RETRY_DELAYS[attempt], exc=exc) from exc
+            _review_sync_gave_up(session, order, action, target_status, failure)
     finally:
         session.close()
+
+
+def _as_review_failure(exc: Exception) -> ReviewSyncFailed:
+    from app.adapters.printerval.api_client import PrintervalApiError
+
+    if isinstance(exc, ReviewSyncFailed):
+        return exc
+    if isinstance(exc, PrintervalApiError):
+        error_class = getattr(exc.error_class, "value", str(exc.error_class))
+        # A rejected session cannot fix itself by waiting; everything else may.
+        return ReviewSyncFailed(str(exc), error_class=error_class, retryable=error_class != "AUTH")
+    return ReviewSyncFailed(f"{type(exc).__name__}: {exc}", error_class="TRANSIENT_NETWORK")
+
+
+def _review_sync_gave_up(session, order: Order, action: str, target_status: str | None,
+                         failure: ReviewSyncFailed) -> None:
+    """Record the failure and ask the Admins to do the change on Printerval by hand."""
+    from app.adapters.db.models import DeadLetter
+    from app.application.telegram_service import notify_admin_printerval_write_failed
+
+    manual = (
+        f"vào Printerval chuyển đơn {order.external_order_id} sang {target_status}"
+        if target_status
+        else f"vào Printerval ghi lại note outsource cho đơn {order.external_order_id}"
+    )
+    logger.error("Review sync for %s gave up: %s (%s)", order.external_order_id, failure, failure.error_class)
+    try:
+        session.add(
+            DeadLetter(
+                source="printerval.review_sync",
+                payload={"order_id": str(order.id), "order_code": order.external_order_id,
+                         "target_status": target_status, "error": str(failure)[:500]},
+                error_class=failure.error_class,
+                recovery_action=manual[:512],
+            )
+        )
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception("could not record the Review sync failure of %s", order.external_order_id)
+    notify_admin_printerval_write_failed(session, order, action=action, error=str(failure), manual_fix=manual)

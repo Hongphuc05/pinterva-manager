@@ -1065,3 +1065,27 @@ def notify_admin_system_alert(
     for cid in chat_ids:
         send_message(cid, text)
     return True
+
+
+def notify_admin_printerval_write_failed(
+    session: Session,
+    order: Order,
+    *,
+    action: str,
+    error: str,
+    manual_fix: str,
+) -> bool:
+    """Tell the platform's Admins a write to Printerval failed for good, so they can do it by hand."""
+    message = (
+        f"Đơn {order.external_order_id}: {action} lên Printerval thất bại.\n"
+        f"Lỗi: {error[:300]}\n"
+        f"Cần làm tay: {manual_fix}"
+    )
+    try:
+        return notify_admin_system_alert(
+            session, order.platform_id, f"Không cập nhật được Printerval ({order.external_order_id})", message
+        )
+    except Exception:
+        logger.warning("could not alert Admins about a Printerval write failure", exc_info=True)
+        return False
+

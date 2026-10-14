@@ -163,8 +163,26 @@ class PrintervalApiClient:
                 if test_res.status_code == 200 and not redirected_to_login and is_json:
                     self._authenticated = True
                     return
-            except httpx.HTTPError:
-                pass
+                if test_res.status_code == 429 or test_res.status_code >= 500:
+                    error_class, retryable = _classify_http_status(test_res.status_code)
+                    raise PrintervalApiError(
+                        error_class,
+                        f"Printerval tạm thời lỗi khi kiểm tra đăng nhập (HTTP {test_res.status_code})",
+                        retryable=retryable,
+                    )
+            except httpx.TimeoutException as exc:
+                # A slow Printerval is not an expired cookie: report it as transient so callers retry.
+                raise PrintervalApiError(
+                    ErrorClass.TRANSIENT_NETWORK,
+                    "Printerval phản hồi quá chậm khi kiểm tra đăng nhập (hết thời gian chờ)",
+                    retryable=True,
+                ) from exc
+            except httpx.HTTPError as exc:
+                raise PrintervalApiError(
+                    ErrorClass.TRANSIENT_NETWORK,
+                    "Không kết nối được Printerval khi kiểm tra đăng nhập",
+                    retryable=True,
+                ) from exc
             # If session cookie probe failed, do not fall back to form login on Cloud datacenter IPs
             # because form login will be blocked by Cloudflare WAF 403 anyway.
             raise PrintervalApiError(

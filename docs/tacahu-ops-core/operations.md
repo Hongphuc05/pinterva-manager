@@ -115,6 +115,22 @@ pytest phải chạy tuần tự trên database test riêng.
 Chạy DB-backed pytest tuần tự. Không chạy parallel trên cùng `pinterval_test` vì có thể
 deadlock/che lỗi concurrency.
 
+### Ghi lên Printerval thất bại: thử lại và báo Admin
+
+Mọi thao tác **ghi** lên Printerval (đẩy Review/trạng thái và note khi designer nộp bài hay Admin
+duyệt/từ chối Fix, đổi Designer/trạng thái qua `PrintervalAssignmentRequest`, giao designer) đều báo
+Admin qua Telegram khi thất bại hẳn, kèm việc cần làm tay trên Printerval (mẫu `admin_system_alert`).
+
+- Đẩy Review (`sync_order_review_to_printerval_task`): lỗi tạm thời (Printerval chậm, mạng, 5xx/429)
+  được thử lại sau 1, 3 rồi 7 phút; cookie bị từ chối (`AUTH`) thì báo ngay. Hết lượt thử thì ghi
+  `dead_letters` (`source=printerval.review_sync`, có `recovery_action`) rồi báo Admin. Không còn
+  fallback Playwright cho job này (không chạy được trong container production).
+- `login()` bằng cookie: hết thời gian chờ được báo là `TRANSIENT_NETWORK`, không còn bị báo nhầm là
+  "cookie hết hạn" (sự cố DJ4141056 ngày 14/10).
+- Chỉ tra locale (`local_code`) một lần ở đúng queue hiện tại của đơn; tra lỗi thì vẫn ghi với
+  locale mặc định thay vì bỏ cả lượt.
+- Các request **đọc** (crawl, đồng bộ status) không báo Telegram: lượt sau tự chạy lại.
+
 ## Monitoring cần xem
 
 - API health, error/latency command và HTTP 409 conflict.
