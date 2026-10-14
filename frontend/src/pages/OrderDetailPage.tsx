@@ -1201,7 +1201,7 @@ export function OrderDetailPage() {
           </div>
         )}
 
-        <OrderChatCard orderId={order.id} />
+        {isAdmin && <OrderChatCard orderId={order.id} />}
 
         <OrderWorkNotesCard orderId={order.id} />
 

@@ -49,10 +49,10 @@ phải enforce role + platform + assignment ở backend.
 
 ## Chat Printerval của đơn
 
-Chỉ đọc, Admin (cùng platform) và designer **đang được giao** đơn đó (`can_read_chat`); Support,
-Kế toán và designer khác nhận 403, đơn platform khác nhận 404. Khác với `note_outsource` gốc (ẩn với
-designer), chat QC được hiển thị cho designer được giao theo quyết định vận hành 2026-10-14. Nội dung
-chat luôn render dạng text; ảnh chỉ nhận link http/https.
+Chỉ đọc và **chỉ Admin** (cùng platform) xem được (`can_read_chat`). Designer, Support và Kế toán nhận
+403, đơn platform khác nhận 404; toast và huy hiệu cũng chỉ dành cho Admin. Quyết định vận hành
+2026-10-14: chat QC chưa cho designer xem, Admin đọc rồi viết lại hướng dẫn như với `note_outsource`.
+Nội dung chat luôn render dạng text; ảnh chỉ nhận link http/https.
 
 ## Attachment ảnh Note làm việc
 

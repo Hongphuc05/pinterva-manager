@@ -66,7 +66,7 @@ PostgreSQL, không ghi gì ngược lại:
 - `order_chat_messages`: mỗi tin một dòng, khóa duy nhất `(order_id, external_id)`; có `fix_round`,
   `message_type` (`fix_open`...), `sender_type` (`staff` = phía Printerval), `mine`, `content`,
   `image_urls` (chỉ http/https), `sent_at` (Printerval trả giờ Việt Nam không kèm múi giờ).
-- `order_chat_reads`: tin cuối mỗi tài khoản đã xem trên từng đơn. Đây là trạng thái chưa đọc của
+- `order_chat_reads`: tin cuối mỗi Admin đã xem trên từng đơn. Đây là trạng thái chưa đọc của
   riêng Tacahu, vì Printerval tính "đã đọc" cho cả đội ngay khi một request `messages` được gọi.
 - `orders.chat_last_message_id` (con trỏ `after_id`) và `orders.chat_synced_at`.
 - Giữ 30 ngày (`ORDER_CHAT_RETENTION_DAYS`) sau khi đơn Done/Cancelled rồi xóa toàn bộ tin, trạng thái

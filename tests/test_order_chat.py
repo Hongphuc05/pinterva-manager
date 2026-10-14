@@ -153,7 +153,7 @@ def test_history_is_baseline_and_only_recent_messages_are_unread(world):
     assert items[0]["snippet"] == "hi" and items[0]["sender_name"] == "QC Người"
 
 
-def test_unread_is_per_user_scoped_to_the_assigned_designer_and_ignores_own_messages(world):
+def test_unread_is_admin_only_platform_scoped_and_ignores_own_messages(world):
     client = FakeChatClient({
         4100001: [_msg(30), _msg(31, mine=True, content="mine")],
         4100002: [_msg(40)],
@@ -163,13 +163,12 @@ def test_unread_is_per_user_scoped_to_the_assigned_designer_and_ignores_own_mess
     plat = world.platform.id
 
     assert {i["order_code"] for i in chat.unread_for_user(world.session, world.admin, plat)} == {"DJ4100001", "DJ4100002"}
-    assert [i["order_code"] for i in chat.unread_for_user(world.session, world.des_a, plat)] == ["DJ4100001"]
+    assert chat.unread_for_user(world.session, world.des_a, plat) == []  # designers never see the chat
     assert chat.unread_for_user(world.session, world.support, plat) == []
     assert chat.unread_for_user(world.session, world.other_admin, world.other.id) == []
 
     chat.mark_read(world.session, world.o1, world.admin)
     assert [i["order_code"] for i in chat.unread_for_user(world.session, world.admin, plat)] == ["DJ4100002"]
-    assert [i["order_code"] for i in chat.unread_for_user(world.session, world.des_a, plat)] == ["DJ4100001"]  # own marker
 
 
 def test_purge_removes_the_chat_of_orders_closed_long_ago_only(world):
@@ -193,24 +192,21 @@ def test_purge_removes_the_chat_of_orders_closed_long_ago_only(world):
     assert old.chat_last_message_id is None and old.chat_synced_at is None
 
 
-def test_chat_api_access_rules_and_read_marker(client, world, monkeypatch):
+def test_chat_api_is_admin_only_with_a_read_marker(client, world, monkeypatch):
     chat_client = FakeChatClient({4100001: [_msg(60)]})
     monkeypatch.setattr(chat, "printerval_client_for", lambda _p: chat_client)
     _sync(world, chat_client, world.o1)
     path = f"/api/orders/{world.o1.id}/chat"
 
-    mine = client.get(path, headers=_bearer(world.des_a))
-    assert mine.status_code == 200
-    body = mine.json()
+    body = client.get(path, headers=_bearer(world.admin)).json()
     assert [m["id"] for m in body["messages"]] == [60] and body["last_read_external_id"] == 0
-    assert client.get(path, headers=_bearer(world.admin)).status_code == 200
-    assert client.get(path, headers=_bearer(world.des_b)).status_code in (403, 404)  # not his order
-    assert client.get(path, headers=_bearer(world.support)).status_code in (403, 404)
+    for outsider in (world.des_a, world.des_b, world.support):  # even the assigned designer
+        assert client.get(path, headers=_bearer(outsider)).status_code in (403, 404)
+        assert client.post(f"{path}/read", headers=_bearer(outsider)).status_code in (403, 404)
+        assert client.get("/api/chat/unread", headers=_bearer(outsider)).json()["items"] == []
     assert client.get(path, headers=_bearer(world.other_admin)).status_code == 404  # other platform
 
-    unread = client.get("/api/chat/unread", headers=_bearer(world.des_a)).json()["items"]
+    unread = client.get("/api/chat/unread", headers=_bearer(world.admin)).json()["items"]
     assert [i["order_code"] for i in unread] == ["DJ4100001"]
-
-    assert client.post(f"{path}/read", headers=_bearer(world.des_a)).json() == {"last_read_external_id": 60}
-    assert client.get("/api/chat/unread", headers=_bearer(world.des_a)).json()["items"] == []
-    assert client.get(path, headers=_bearer(world.des_a)).json()["last_read_external_id"] == 60
+    assert client.post(f"{path}/read", headers=_bearer(world.admin)).json() == {"last_read_external_id": 60}
+    assert client.get("/api/chat/unread", headers=_bearer(world.admin)).json()["items"] == []

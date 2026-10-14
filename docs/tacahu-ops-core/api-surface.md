@@ -24,7 +24,7 @@ origin hoặc origin kèm `/api` nhưng không được tạo `/api/api`.
   `stale: true`) kèm `last_read_external_id` của người gọi.
 - `POST /api/orders/{id}/chat/read`: đánh dấu đã đọc tới tin mới nhất.
 - `GET /api/chat/unread`: các đơn có tin phía Printerval chưa đọc trong 7 ngày gần nhất (toast và huy
-  hiệu trên danh sách). Admin theo platform, designer theo đơn được giao.
+  hiệu trên danh sách). Chỉ Admin (theo platform); các role khác nhận danh sách rỗng.
 
 ## Contract command
 

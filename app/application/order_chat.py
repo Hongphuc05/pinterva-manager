@@ -17,7 +17,6 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.adapters.db.models import (
-    Assignment,
     Order,
     OrderChatMessage,
     OrderChatRead,
@@ -25,7 +24,7 @@ from app.adapters.db.models import (
     User,
 )
 from app.adapters.printerval.api_client import PrintervalApiClient
-from app.domain.access import ROLE_ADMIN, ROLE_DESIGNER, ROLE_DESIGNER_TRELLO
+from app.domain.access import ROLE_ADMIN
 from app.domain.models import OrderState
 
 logger = logging.getLogger(__name__)
@@ -105,7 +104,7 @@ def parse_message(raw: dict) -> dict | None:
 
 
 def eligible_readers(session: Session, order: Order) -> list[User]:
-    """Accounts that may read this order's chat: platform Admins and its assigned designers."""
+    """Accounts that may read this order's chat: the platform Admins (designers never see it)."""
     admins = (
         session.query(User)
         .filter(
@@ -115,40 +114,14 @@ def eligible_readers(session: Session, order: Order) -> list[User]:
         )
         .all()
     )
-    designers = (
-        session.query(User)
-        .join(Assignment, Assignment.designer_id == User.id)
-        .filter(
-            Assignment.order_id == order.id,
-            Assignment.status != "cancelled",
-            User.role.in_((ROLE_DESIGNER, ROLE_DESIGNER_TRELLO)),
-            User.active.is_(True),
-        )
-        .all()
-    )
-    seen: dict[uuid.UUID, User] = {}
-    for user in [*admins, *designers]:
-        seen[user.id] = user
-    return list(seen.values())
+    return admins
 
 
 def can_read_chat(session: Session, user: User, order: Order) -> bool:
-    if not user.active:
+    """Admin only: the Printerval chat is not shown to designers (operator decision 2026-10-14)."""
+    if not user.active or user.role != ROLE_ADMIN:
         return False
-    if user.role == ROLE_ADMIN:
-        return order.platform_id is None or user.platform_id in (None, order.platform_id)
-    if user.role in (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO):
-        return (
-            session.query(Assignment.id)
-            .filter(
-                Assignment.order_id == order.id,
-                Assignment.designer_id == user.id,
-                Assignment.status != "cancelled",
-            )
-            .first()
-            is not None
-        )
-    return False
+    return order.platform_id is None or user.platform_id in (None, order.platform_id)
 
 
 def _set_read_marker(session: Session, order_id: uuid.UUID, user_id: uuid.UUID, external_id: int) -> None:
@@ -318,15 +291,9 @@ def mark_read(session: Session, order: Order, user: User) -> int:
 
 def unread_for_user(session: Session, user: User, platform_id: uuid.UUID) -> list[dict]:
     """Orders with Printerval-side messages this user has not seen, newest first."""
-    if user.role == ROLE_ADMIN:
-        scope = [Order.platform_id == platform_id]
-    elif user.role in (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO):
-        mine = select(Assignment.order_id).where(
-            Assignment.designer_id == user.id, Assignment.status != "cancelled"
-        )
-        scope = [Order.platform_id == platform_id, Order.id.in_(mine)]
-    else:
+    if user.role != ROLE_ADMIN:
         return []
+    scope = [Order.platform_id == platform_id]
     window = datetime.now(UTC) - UNREAD_WINDOW
     rows = (
         session.query(

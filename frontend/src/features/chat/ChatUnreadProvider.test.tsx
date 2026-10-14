@@ -46,8 +46,8 @@ describe('chat unread', () => {
     expect(toast.showToast).toHaveBeenCalledTimes(2)
   })
 
-  it('does nothing for roles that cannot read chat', async () => {
-    auth.user = { id: 's1', role: 'support' }
+  it('does nothing for roles that cannot read chat (designers included)', async () => {
+    auth.user = { id: 's1', role: 'designer' }
     api.apiFetch.mockReset()
     render(<ChatUnreadProvider><span>x</span></ChatUnreadProvider>)
     await vi.advanceTimersByTimeAsync(31_000)

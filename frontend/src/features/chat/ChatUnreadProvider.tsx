@@ -19,7 +19,7 @@ interface ChatUnreadValue {
 }
 
 const POLL_MS = 30_000
-const CHAT_ROLES = ['admin', 'designer', 'designer-trello']
+const CHAT_ROLES = ['admin']
 const Context = createContext<ChatUnreadValue>({ unread: {}, refresh: async () => {} })
 
 export const useChatUnread = () => useContext(Context)

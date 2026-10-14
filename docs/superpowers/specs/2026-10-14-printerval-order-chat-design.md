@@ -27,7 +27,7 @@ read-only channel.
 | Topic | Decision |
 |---|---|
 | Scope | Read only, never post to Printerval |
-| Who sees | Admin (whole platform) and the designer currently assigned to the order |
+| Who sees | Admin only (whole platform). Designers do not see the chat (changed 2026-10-14) |
 | What | The whole conversation, both sides, exactly as on Printerval |
 | Sync | Every 2 minutes, orders in Doing / Review / Fix; plus on opening an order |
 | Read state | Tacahu fetches content itself and keeps its own per-user unread state. Accepted: the web-mẹ badge is cleared by Tacahu and Printerval sees "read" early |
