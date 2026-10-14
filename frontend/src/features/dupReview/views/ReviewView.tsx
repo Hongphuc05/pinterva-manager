@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Loader2, RefreshCw } from 'lucide-react'
 import { fetchJob, fetchJobs, rejectItem, selectCandidate } from '../api'
-import { canReview, lotName, TAB_OF, type Item, type Job, type TabKey } from '../types'
+import { canMarkModelWrong, canReview, lotName, TAB_OF, type Item, type Job, type TabKey } from '../types'
 import { OrderCard } from '../components/OrderCard'
 import { Empty, Loading } from '../components/Empty'
 import { DetailModal } from '../components/DetailModal'
@@ -158,7 +158,7 @@ export function ReviewView({ jobId, onJobChange, onZoom, zoomOpen }: Props) {
         const n = e.key === '0' ? 10 : /^[1-9]$/.test(e.key) ? Number(e.key) : 0
         if (n && current.candidates[n - 1]) void onSelect(current.id, current.candidates[n - 1].id)
         else if (e.key === 'd') setDetail({ itemId: current.id, index: 0 })
-        else if (e.key === 'x') void onReject(current.id)
+        else if (e.key === 'x' && canMarkModelWrong(current)) void onReject(current.id)
       }
     }
     window.addEventListener('keydown', onKey)

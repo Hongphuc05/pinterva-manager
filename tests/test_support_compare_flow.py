@@ -920,3 +920,38 @@ def test_an_order_given_to_a_designer_is_not_offered_for_tagging(client, db_sess
     _item(db_session, setup, _order(db_session, setup, "DJ-TG-GIVEN", OrderState.IN_PROGRESS.value), "no_match")
     items = client.get(f"/api/support-review/jobs/{job.id}", headers=_bearer(setup.support)).json()["items"]
     assert {i["order_code"]: i["taggable"] for i in items} == {"DJ-TG-WAITING": True, "DJ-TG-GIVEN": False}
+
+
+def test_a_no_match_order_can_still_be_picked_as_a_duplicate_and_returns_to_waiting_for_review(client, db_session, setup):
+    job = _lot(db_session, setup)
+    missed = _order(db_session, setup, "DJ-MISSED")
+    item = _item(db_session, setup, missed, "no_match")
+    candidate = _candidate(db_session, item, 1)
+    headers = _bearer(setup.support)
+
+    first = client.get(f"/api/support-review/jobs/{job.id}", headers=headers).json()["items"][0]
+    assert first["stage"] == "not_duplicate"
+
+    res = client.post(
+        f"/api/support-review/items/{item.id}/select", json={"candidate_id": str(candidate.id)}, headers=headers
+    )
+    assert res.status_code == 200
+    again = client.get(f"/api/support-review/jobs/{job.id}", headers=headers).json()["items"][0]
+    assert again["stage"] == "unsent"  # back in tab 1, waiting to be sent
+    assert client.post(f"/api/support-review/items/{item.id}/reject", headers=headers).status_code == 200
+
+
+def test_picking_a_duplicate_is_refused_once_the_order_was_moved_to_a_tag(client, db_session, setup):
+    moved = _order(db_session, setup, "DJ-ALREADY-MOVED")
+    moved.duplicate_check_status = "non_duplicate"
+    db_session.commit()
+    item = _item(db_session, setup, moved, "no_match")
+    candidate = _candidate(db_session, item, 1)
+
+    res = client.post(
+        f"/api/support-review/items/{item.id}/select",
+        json={"candidate_id": str(candidate.id)},
+        headers=_bearer(setup.support),
+    )
+    assert res.status_code == 409
+    assert "chuyển lại về Chưa kiểm tra" in res.json()["detail"]

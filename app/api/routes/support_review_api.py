@@ -47,6 +47,8 @@ S = "support_compare_image"
 # States in which the reviewer may still change the decision. Once the pair was sent to
 # Telegram (telegram_notified_at set) the choice is frozen.
 REVIEWABLE = ("pending_review", "ai_wrong", "selected_duplicate")
+# Picking a duplicate is also allowed from "no_match": the model may have missed it.
+SELECTABLE = (*REVIEWABLE, "no_match")
 MAX_UPLOAD_BYTES = 10_000_000
 
 router = APIRouter(prefix="/support-review")
@@ -342,26 +344,37 @@ def get_job(
     return {"job": out, "items": items}
 
 
-def _load_reviewable(db: Session, item_id: uuid.UUID, platform_id: uuid.UUID) -> None:
+def _load_reviewable(
+    db: Session,
+    item_id: uuid.UUID,
+    platform_id: uuid.UUID,
+    allowed: tuple[str, ...] = REVIEWABLE,
+) -> None:
     row = db.execute(
         text(
             f"""SELECT i.review_status,
                        EXISTS (SELECT 1 FROM {S}.comparison_candidates c
                                WHERE c.id = i.selected_candidate_id
-                                 AND c.telegram_notified_at IS NOT NULL)
+                                 AND c.telegram_notified_at IS NOT NULL),
+                       o.duplicate_check_status
                 FROM {S}.comparison_items i
+                LEFT JOIN public.orders o ON o.id = i.order_id
                 WHERE i.id = :id AND i.platform_id = :pid AND i.processing_status = 'completed'
-                FOR UPDATE"""
+                FOR UPDATE OF i"""
         ),
         {"id": item_id, "pid": platform_id},
     ).fetchone()
     if row is None:
         raise HTTPException(404, "Không tìm thấy đơn trong kết quả so sánh")
-    review_status, already_sent = row
-    if review_status not in REVIEWABLE:
+    review_status, already_sent, order_tag = row
+    if review_status not in allowed:
         raise HTTPException(409, f"Đơn ở trạng thái '{review_status}', không thể duyệt")
     if already_sent:
         raise HTTPException(409, "Cặp ảnh đã được gửi Telegram, không đổi được nữa")
+    if order_tag in ("duplicate", "non_duplicate"):
+        raise HTTPException(
+            409, "Đơn đã được chuyển trạng thái trùng lặp, chuyển lại về Chưa kiểm tra rồi mới chọn được"
+        )
 
 
 @router.post("/items/{item_id}/select")
@@ -372,7 +385,7 @@ def select_candidate(
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    _load_reviewable(db, item_id, platform_id)
+    _load_reviewable(db, item_id, platform_id, SELECTABLE)
     ok = db.execute(
         text(f"SELECT 1 FROM {S}.comparison_candidates WHERE id = :cid AND comparison_item_id = :iid"),
         {"cid": body.candidate_id, "iid": item_id},

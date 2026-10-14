@@ -103,6 +103,11 @@ bỏ qua và liệt kê lại (API trả `taggable` cho từng đơn để UI kh
 `OrderWorkNote` (`Link đơn trùng: <url>`, Admin và designer thấy), chỉ cho đơn đã tag Trùng lặp. Các
 order `no_match`/`ai_wrong` ngoài lô vẫn có thể chuyển bằng `/handle`.
 
+Đơn model báo `no_match` (hoặc `ai_wrong`) vẫn chọn lại được là trùng ngay ở tab **2**: `POST
+/support-review/items/{id}/select` nhận cả `no_match`, đơn chuyển sang `selected_duplicate` và quay
+về tab **1** (Chưa gửi). Không chọn lại được khi cặp đã gửi Telegram hoặc order đã mang tag trùng lặp
+(`duplicate`/`non_duplicate`): API trả 409, phải chuyển order về Chưa kiểm tra trước.
+
 Bốn tab của Support chia danh sách thành các phần không chồng nhau, nên tổng bốn tab bằng số
 đơn Support đang thấy: **Trùng lặp** và **Không trùng lặp** theo tag (tag được ưu tiên, kể cả khi đơn
 đã được chia); **Chưa kiểm tra** là đơn chưa gắn tag còn `Waiting`; **Đang làm** là đơn chưa gắn tag

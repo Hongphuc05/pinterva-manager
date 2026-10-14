@@ -204,6 +204,24 @@ describe('duplicate review page', () => {
     expect(within(wrong).getAllByRole('button', { name: 'Chọn trùng' }).length).toBeGreaterThan(0) // can still pick
   })
 
+  it('lets a "Không thấy trùng" order be picked as a duplicate, without a Model sai button', async () => {
+    items = [item(3, 'no_match')]
+    renderPage()
+    await userEvent.click(await screen.findByRole('tab', { name: /2\. Không trùng lặp/ }))
+    const card = await screen.findByTestId('order-DJ0003')
+    expect(within(card).queryByRole('button', { name: /Model sai/ })).not.toBeInTheDocument()
+    await userEvent.click(within(card).getAllByRole('button', { name: 'Chọn trùng' })[0])
+    await waitFor(() => expect(posted('/support-review/items/i3/select', { candidate_id: 'i3-c1' })).toBe(true))
+  })
+
+  it('does not offer to pick a duplicate for an order already moved to a tag', async () => {
+    items = [{ ...item(3, 'no_match'), order_tag: 'non_duplicate' }]
+    renderPage()
+    await userEvent.click(await screen.findByRole('tab', { name: /2\. Không trùng lặp/ }))
+    const card = await screen.findByTestId('order-DJ0003')
+    expect(within(card).queryByRole('button', { name: 'Chọn trùng' })).not.toBeInTheDocument()
+  })
+
   it('filters the orders of a tab by code or product name', async () => {
     items = [item(3, 'no_match'), { ...item(7, 'no_match'), product_name: 'Áo Bills' }]
     renderPage()

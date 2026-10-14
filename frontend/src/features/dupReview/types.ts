@@ -66,9 +66,16 @@ export const TAB_OF: Record<Stage, TabKey> = {
 export const isSent = (i: Item) =>
   i.candidates.some((c) => c.id === i.selected_candidate_id && c.sent_to_telegram)
 
-/** The choice can still be made or changed: not yet sent, and not already settled. */
+/** The choice can still be made or changed: not yet sent, not already settled by a tag, and the
+ * model may have missed a duplicate ("Không thấy trùng") or been marked wrong. */
 export const canReview = (i: Item) =>
-  !isSent(i) && (i.stage === 'todo' || i.stage === 'unsent' || i.review_status === 'ai_wrong')
+  !isSent(i) &&
+  i.order_tag !== 'duplicate' &&
+  i.order_tag !== 'non_duplicate' &&
+  (i.stage === 'todo' || i.stage === 'unsent' || i.review_status === 'ai_wrong' || i.review_status === 'no_match')
+
+/** "Model sai" only makes sense while the model still claims a duplicate. */
+export const canMarkModelWrong = (i: Item) => canReview(i) && i.review_status !== 'ai_wrong' && i.review_status !== 'no_match'
 
 /** The name of a lot: how many orders and when it was made, e.g. "100 đơn · 09h00 · 13/10". */
 export function lotName(job: Pick<Job, 'requested_count' | 'created_at'>): string {

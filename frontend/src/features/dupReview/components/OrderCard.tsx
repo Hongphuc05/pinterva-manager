@@ -1,5 +1,5 @@
 import { Loader2, Maximize2 } from 'lucide-react'
-import { canReview, type Item } from '../types'
+import { canMarkModelWrong, canReview, type Item } from '../types'
 import { StatusBadge } from './StatusBadge'
 import { CandidateCard } from './CandidateCard'
 import { Figure } from './Figure'
@@ -38,7 +38,7 @@ export function OrderCard({ item, active, busy, onSelect, onReject, onZoom, onFo
             Chi tiết
           </button>
         )}
-        {canAct && item.review_status !== 'ai_wrong' && (
+        {canMarkModelWrong(item) && (
           <button
             type="button"
             disabled={busy}
