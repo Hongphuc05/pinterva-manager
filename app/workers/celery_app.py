@@ -70,13 +70,18 @@ def build_beat_schedule(settings):
             "task": "app.workers.status_sync_tasks.sync_order_statuses",
             "schedule": settings.status_sync_interval_seconds,
         },
-        # A full per-order pass starts two minutes after the half-hour.  The
-        # active-feed sync continues every five minutes; PlatformSyncState's
-        # lease prevents the two read-only jobs from running on one platform at
-        # the same time if their schedules ever overlap.
-        "sync-full-database-order-statuses": {
-            "task": "app.workers.status_sync_tasks.sync_full_database_order_statuses",
+        # Orders created in the last 7 days are refreshed twice an hour, the last
+        # 60 days once a night at 02:00 (celery_timezone); older orders are not
+        # synced automatically.  The active-feed sync continues every five minutes;
+        # PlatformSyncState's lease keeps these read-only jobs from overlapping on
+        # one platform.
+        "sync-recent-order-statuses": {
+            "task": "app.workers.status_sync_tasks.sync_recent_order_statuses",
             "schedule": crontab(minute="2,32"),
+        },
+        "sync-nightly-order-statuses": {
+            "task": "app.workers.status_sync_tasks.sync_nightly_order_statuses",
+            "schedule": crontab(hour=2, minute=0),
         },
     }
     if settings.order_sheet_backup_enabled:

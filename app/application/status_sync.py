@@ -14,7 +14,7 @@ import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime, timedelta
-from time import monotonic
+from time import monotonic, sleep
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -26,7 +26,7 @@ from app.adapters.db.models import Order, Platform, PlatformSyncState, WorkflowE
 from app.adapters.db.session import SessionLocal
 from app.adapters.playwright_support import with_retry
 from app.adapters.printerval.api_adapter import PrintervalApiAdapter
-from app.adapters.printerval.api_client import PrintervalApiClient
+from app.adapters.printerval.api_client import PrintervalApiClient, PrintervalApiError
 from app.adapters.printerval.interface import ALL_JOB_TYPES, PrintervalAdapter
 from app.adapters.printerval.row_mapper import parse_order_detail_from_row
 from app.application.crawl import (
@@ -49,6 +49,17 @@ ACTIVE_PRINTERVAL_STATUS_FILTERS = ("doing", "fix")
 STATUS_SYNC_READ_TIMEOUT_SECONDS = 60.0
 DISCOVER_MAX_ATTEMPTS = 3
 DISCOVER_RETRY_BASE_DELAY_SECONDS = 3.0
+
+# Scheduled sync windows (2026-10-14 data: no order went back to Fix more than 12
+# days after creation, nor more than 7 days after reaching Review/Done).  The
+# half-hourly pass covers orders created in the last 7 days; the 02:00 nightly pass
+# covers 60 days.  Older orders are no longer synced automatically.
+RECENT_SYNC_WINDOW = timedelta(days=7)
+NIGHTLY_SYNC_WINDOW = timedelta(days=60)
+# Every queue an order we track can sit in.  Waiting is crawl-only; cancelled and
+# unassigned orders are not in these queues and fall back to a per-order lookup.
+LISTED_PRINTERVAL_STATUSES = ("doing", "fix", "review", "confirm", "done")
+LIST_PAGE_SIZE = 100
 
 ProgressCallback = Callable[[dict[str, Any]], object]
 
@@ -192,6 +203,11 @@ def reclaim_stale_platform_sync_leases(session: Session) -> int:
     if reclaimed:
         session.commit()
     return reclaimed
+
+
+def _numeric_order_id(external_order_id: str) -> str:
+    """``DJ4030002`` -> ``4030002``: the Printerval row ``id`` of a tracked order."""
+    return external_order_id[2:] if external_order_id.upper().startswith("DJ") else external_order_id
 
 
 def _status_guess_order(last_known: str | None) -> tuple[str, ...]:
@@ -480,8 +496,12 @@ def sync_selected_order_statuses(
     actor_id: object | None = None,
     api_client: PrintervalApiClient | None = None,
     progress_callback: ProgressCallback | None = None,
+    prefetched_rows: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, int]:
     """Fast, manually requested status mirror for one visible UI tab.
+
+    ``prefetched_rows`` (Printerval row id -> row, from a queue listing) skips the
+    per-order lookup for every order it contains; the rest are looked up as usual.
 
     This deliberately does *not* re-crawl source/SKU/detail. Each chosen order
     is looked up by its own DJ code, first using its last observed Printerval state.
@@ -506,7 +526,6 @@ def sync_selected_order_statuses(
         # A single designer-options fetch is cached on the client, before its HTTP
         # connection is used concurrently for read-only order searches.
         designer_map = client.get_designer_map()
-        worker_count = min(max(1, get_settings().printerval_manual_sync_concurrency), len(orders))
         _emit_progress(
             progress_callback,
             {
@@ -520,10 +539,14 @@ def sync_selected_order_statuses(
 
         # Never let worker threads touch ORM state.  Their only job is HTTP
         # lookup; all database reads/writes stay on this caller thread.
-        lookups = [
-            (order.id, order.external_order_id, order.printerval_status)
-            for order in orders
-        ]
+        lookups = []
+        for order in orders:
+            row = (prefetched_rows or {}).get(_numeric_order_id(order.external_order_id))
+            if row is not None:
+                rows_by_order_id[order.id] = row
+            else:
+                lookups.append((order.id, order.external_order_id, order.printerval_status))
+        worker_count = min(max(1, get_settings().printerval_manual_sync_concurrency), max(1, len(lookups)))
 
         def find(
             order_id: object, external_order_id: str, printerval_status: str | None
@@ -875,33 +898,89 @@ def sync_platform_order_statuses(
             client.close()
 
 
-def sync_full_database_platform_orders(
+def _list_page_with_retry(client: PrintervalApiClient, **kwargs: Any) -> list[dict[str, Any]]:
+    for attempt in range(1, DISCOVER_MAX_ATTEMPTS + 1):
+        try:
+            return client.discover_page(page_size=LIST_PAGE_SIZE, **kwargs).orders
+        except PrintervalApiError as exc:
+            if not exc.retryable or attempt == DISCOVER_MAX_ATTEMPTS:
+                raise
+            sleep(DISCOVER_RETRY_BASE_DELAY_SECONDS * 2 ** (attempt - 1))
+    raise AssertionError("unreachable")
+
+
+def _list_rows_created_since(client: PrintervalApiClient, since: datetime) -> dict[str, dict[str, Any]]:
+    """Every row of the listed queues created since ``since``, keyed by row id.
+
+    One request per 100 orders instead of one (or more) per order.  The filter
+    starts a day early so a timezone or crawl-delay difference never hides an
+    order; any failure raises, so absence from this listing is never treated as
+    a cancellation.
+    """
+    date_from = (since - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+    rows: dict[str, dict[str, Any]] = {}
+    for status in LISTED_PRINTERVAL_STATUSES:
+        page_id = 0
+        while True:
+            page = _list_page_with_retry(client, status=status, page_id=page_id, date_from=date_from)
+            new_ids = {str(row.get("id")) for row in page} - rows.keys()
+            rows.update((str(row.get("id")), row) for row in page)
+            # A short page is the last one; a page with nothing new means the
+            # endpoint ignored page_id, so stop instead of looping forever.
+            if len(page) < LIST_PAGE_SIZE or not new_ids:
+                break
+            page_id += 1
+    return rows
+
+
+def sync_platform_orders_created_since(
     session: Session,
     platform: Platform,
     *,
+    since: datetime,
     api_client: PrintervalApiClient | None = None,
     progress_callback: ProgressCallback | None = None,
 ) -> dict[str, int]:
-    """Refresh Printerval status for every order already tracked for one platform.
+    """Refresh the Printerval status of every tracked order created since ``since``.
 
-    This intentionally reuses the per-order read-only mirror used by tab syncs:
-    it does not discover external history or write back to Printerval.  It does,
-    however, see a Print Fix for paid Done orders and returns those cards to Fix
-    while retaining their payment tag.
+    Reads the queue listings once, then applies each order's row through the same
+    per-order rules as a tab sync; only orders missing from the listings (e.g.
+    cancelled) are looked up one by one.  Read-only towards Printerval.
     """
     orders = (
         session.query(Order)
-        .filter(Order.platform_id == platform.id)
+        .filter(Order.platform_id == platform.id, Order.created_at >= since)
         .order_by(Order.created_at.asc(), Order.id.asc())
         .all()
     )
-    return sync_selected_order_statuses(
-        session,
-        platform,
-        orders,
-        api_client=api_client,
-        progress_callback=progress_callback,
+    if not orders:
+        return {"checked": 0, "updated": 0, "not_found": 0, "failed": 0}
+    owns_client = api_client is None
+    client = api_client or PrintervalApiClient(
+        base_url="https://printerval.com",
+        username=platform.account_username,
+        password=platform.account_password,
+        team_outsource=platform.team_outsource,
+        session_cookie=platform.session_cookie,
+        timeout=STATUS_SYNC_READ_TIMEOUT_SECONDS,
     )
+    try:
+        _emit_progress(
+            progress_callback,
+            {"phase": "listing", "processed": 0, "total": len(orders), "updated": 0, "failed": 0},
+        )
+        rows = _list_rows_created_since(client, since)
+        return sync_selected_order_statuses(
+            session,
+            platform,
+            orders,
+            api_client=client,
+            progress_callback=progress_callback,
+            prefetched_rows=rows,
+        )
+    finally:
+        if owns_client:
+            client.close()
 
 
 def _claim_platform_sync_lease(
@@ -1082,29 +1161,18 @@ def sync_all_platforms(session: Session, *, worker_task_id: str | None = None) -
     return _run_platform_syncs(session, run_platform=run_platform, worker_task_id=worker_task_id)
 
 
-def sync_all_platforms_full_database(
+def sync_all_platforms_created_since(
     session: Session,
     *,
+    window: timedelta,
     worker_task_id: str | None = None,
 ) -> dict[str, dict]:
-    """Refresh the Printerval status of every tracked order for every platform."""
+    """Refresh every platform's tracked orders created within ``window``."""
+    since = datetime.now(UTC) - window
+
     def run_platform(platform: Platform, progress_callback: ProgressCallback) -> dict:
-        client = PrintervalApiClient(
-            base_url="https://printerval.com",
-            username=platform.account_username,
-            password=platform.account_password,
-            team_outsource=platform.team_outsource,
-            session_cookie=platform.session_cookie,
-            timeout=STATUS_SYNC_READ_TIMEOUT_SECONDS,
+        return sync_platform_orders_created_since(
+            session, platform, since=since, progress_callback=progress_callback
         )
-        try:
-            return sync_full_database_platform_orders(
-                session,
-                platform,
-                api_client=client,
-                progress_callback=progress_callback,
-            )
-        finally:
-            client.close()
 
     return _run_platform_syncs(session, run_platform=run_platform, worker_task_id=worker_task_id)

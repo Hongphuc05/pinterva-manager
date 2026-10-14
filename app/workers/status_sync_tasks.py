@@ -4,9 +4,11 @@ import logging
 
 from app.adapters.db.session import SessionLocal
 from app.application.status_sync import (
+    NIGHTLY_SYNC_WINDOW,
+    RECENT_SYNC_WINDOW,
     reclaim_stale_platform_sync_leases,
     sync_all_platforms,
-    sync_all_platforms_full_database,
+    sync_all_platforms_created_since,
 )
 from app.application.sync_jobs import (
     reclaim_stale_sync_jobs as reclaim_stale_sync_job_records,
@@ -32,18 +34,28 @@ def sync_order_statuses(self) -> None:
         session.close()
 
 
-@celery_app.task(bind=True, name="app.workers.status_sync_tasks.sync_full_database_order_statuses")
-def sync_full_database_order_statuses(self) -> None:
-    """Thirty-minute read-only reconciliation of all orders already in our database."""
+def _sync_created_within(task_id: str, window, label: str) -> None:
     logger.disabled = False
     session = SessionLocal()
     try:
-        results = sync_all_platforms_full_database(session, worker_task_id=self.request.id)
-        logger.info("sync_full_database_order_statuses cycle results: %s", results)
+        results = sync_all_platforms_created_since(session, window=window, worker_task_id=task_id)
+        logger.info("%s cycle results: %s", label, results)
     except Exception:
-        logger.exception("sync_full_database_order_statuses: unexpected exception mid-run")
+        logger.exception("%s: unexpected exception mid-run", label)
     finally:
         session.close()
+
+
+@celery_app.task(bind=True, name="app.workers.status_sync_tasks.sync_recent_order_statuses")
+def sync_recent_order_statuses(self) -> None:
+    """Half-hourly read-only refresh of orders created in the last 7 days."""
+    _sync_created_within(self.request.id, RECENT_SYNC_WINDOW, "sync_recent_order_statuses")
+
+
+@celery_app.task(bind=True, name="app.workers.status_sync_tasks.sync_nightly_order_statuses")
+def sync_nightly_order_statuses(self) -> None:
+    """02:00 read-only refresh of orders created in the last 60 days."""
+    _sync_created_within(self.request.id, NIGHTLY_SYNC_WINDOW, "sync_nightly_order_statuses")
 
 
 @celery_app.task(name="app.workers.status_sync_tasks.reclaim_stale_sync_jobs")

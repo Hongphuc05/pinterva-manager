@@ -14,7 +14,6 @@ from app.application.status_sync import (
     reclaim_stale_platform_sync_leases,
     reconcile_active_platform_orders,
     sync_all_platforms,
-    sync_full_database_platform_orders,
     sync_platform_order_statuses,
     sync_selected_order_statuses,
 )
@@ -835,55 +834,155 @@ def test_sync_platform_order_statuses_maps_designer_email_to_full_name(db_sessio
     assert order.printerval_designer_synced_at is not None
 
 
-def test_full_database_sync_checks_every_tracked_platform_order(db_session):
-    platform = Platform(name="Full sweep", account_username="acc@example.test", team_outsource="team-a")
-    db_session.add(platform)
-    db_session.flush()
-    review = Order(
-        external_order_id="DJ3999001",
-        platform_id=platform.id,
-        state="QC_PENDING",
-        printerval_status="review",
+def _listing_client(listed: list[dict], searchable: dict[str, dict] | None = None, fail_listing: bool = False):
+    """Serves queue listings (no ``search``) from ``listed`` and per-order lookups
+    from ``searchable``; records every request as ("list"|"search", status)."""
+    calls: list[tuple[str, str]] = []
+
+    def handler(request):
+        params = dict(request.url.params)
+        if request.url.path != FIND_PATH:
+            return httpx.Response(200, json={"status": "successful", "result": []})
+        if params.get("search"):
+            calls.append(("search", params["status"]))
+            row = (searchable or {}).get(params["search"])
+            result = [row] if row and row.get("status") == params["status"] else []
+            return httpx.Response(200, json={"status": "successful", "result": result})
+        calls.append(("list", params["status"]))
+        if fail_listing:
+            raise httpx.ReadTimeout("slow", request=request)
+        assert params["date_from"]
+        rows = [row for row in listed if row["status"] == params["status"]]
+        page_id, size = int(params["page_id"]), int(params["page_size"])
+        return httpx.Response(
+            200, json={"status": "successful", "result": rows[page_id * size : (page_id + 1) * size]}
+        )
+
+    client = PrintervalApiClient(
+        base_url="https://printerval.test",
+        username="op@example.test",
+        password="pw",
+        team_outsource="team-a",
+        session_cookie="cookie",
+        client=httpx.Client(base_url="https://printerval.test", transport=httpx.MockTransport(handler)),
     )
+    return client, calls
+
+
+def test_created_since_sync_reads_listings_and_skips_old_orders(db_session):
+    platform = Platform(name="Window", account_username="acc@example.test", team_outsource="team-a")
+    other_platform = Platform(name="Other", account_username="other@example.test", team_outsource="team-b")
+    db_session.add_all([platform, other_platform])
+    db_session.flush()
+    now = datetime.now(UTC)
+    review = Order(external_order_id="DJ3999001", platform_id=platform.id, state="QC_PENDING", printerval_status="review")
     paid_done = Order(
-        external_order_id="DJ3999002",
+        external_order_id="DJ3999002", platform_id=platform.id, state="DONE", is_paid=True, printerval_status="done"
+    )
+    old = Order(
+        external_order_id="DJ3999004",
         platform_id=platform.id,
         state="DONE",
-        is_paid=True,
         printerval_status="done",
+        created_at=now - timedelta(days=70),
     )
-    other_platform = Platform(name="Other", account_username="other@example.test", team_outsource="team-b")
-    db_session.add_all([review, paid_done, other_platform])
-    db_session.flush()
-    db_session.add(
-        Order(
-            external_order_id="DJ3999003",
-            platform_id=other_platform.id,
-            state="IN_PROGRESS",
-            printerval_status="doing",
-        )
+    elsewhere = Order(
+        external_order_id="DJ3999003", platform_id=other_platform.id, state="IN_PROGRESS", printerval_status="doing"
     )
+    db_session.add_all([review, paid_done, old, elsewhere])
     db_session.commit()
-
-    result = sync_full_database_platform_orders(
-        db_session,
-        platform,
-        api_client=_mock_client(
-            {
-                "DJ3999001": {"id": 3999001, "status": "done"},
-                "DJ3999002": {"id": 3999002, "status": "fix"},
-            }
-        ),
+    client, calls = _listing_client(
+        [
+            {"id": 3999001, "status": "done"},
+            {"id": 3999002, "status": "fix", "note": "Sửa lại logo"},
+            {"id": 3999004, "status": "fix"},
+        ]
     )
 
-    db_session.refresh(review)
-    db_session.refresh(paid_done)
+    result = status_sync_module.sync_platform_orders_created_since(
+        db_session, platform, since=now - timedelta(days=60), api_client=client
+    )
+
+    for order in (review, paid_done, old):
+        db_session.refresh(order)
     assert result == {"checked": 2, "updated": 2, "not_found": 0, "failed": 0}
+    assert all(kind == "list" for kind, _ in calls)
+    assert {status for _, status in calls} == set(status_sync_module.LISTED_PRINTERVAL_STATUSES)
     # Print Done does not bypass the Admin payment decision.
     assert review.state == "QC_PENDING"
+    assert review.printerval_status == "done"
     # A paid Done card still returns to Fix when Printerval explicitly requests it.
     assert paid_done.state == "REVISION"
     assert paid_done.is_paid is True
+    # Older than the window: untouched even though the listing says Fix.
+    assert old.state == "DONE"
+    assert old.printerval_status == "done"
+
+
+def test_created_since_sync_pages_through_a_long_queue(db_session):
+    platform = Platform(name="Pages", account_username="acc@example.test", team_outsource="team-a")
+    db_session.add(platform)
+    db_session.flush()
+    orders = [
+        Order(external_order_id=f"DJ{5000000 + i}", platform_id=platform.id, state="QC_PENDING", printerval_status="review")
+        for i in range(150)
+    ]
+    db_session.add_all(orders)
+    db_session.commit()
+    client, calls = _listing_client([{"id": 5000000 + i, "status": "done"} for i in range(150)])
+
+    result = status_sync_module.sync_platform_orders_created_since(
+        db_session, platform, since=datetime.now(UTC) - timedelta(days=7), api_client=client
+    )
+
+    assert result["updated"] == 150
+    assert calls.count(("list", "done")) == 2
+    assert not [call for call in calls if call[0] == "search"]
+
+
+def test_created_since_sync_looks_up_orders_missing_from_listings(db_session):
+    platform = Platform(name="Fallback", account_username="acc@example.test", team_outsource="team-a")
+    db_session.add(platform)
+    db_session.flush()
+    gone = Order(external_order_id="DJ3999005", platform_id=platform.id, state="IN_PROGRESS", printerval_status="doing")
+    unassigned = Order(external_order_id="DJ3999006", platform_id=platform.id, state="OPEN", printerval_status="doing")
+    db_session.add_all([gone, unassigned])
+    db_session.commit()
+    client, calls = _listing_client([], searchable={"DJ3999006": {"id": 3999006, "status": ""}})
+
+    status_sync_module.sync_platform_orders_created_since(
+        db_session, platform, since=datetime.now(UTC) - timedelta(days=7), api_client=client
+    )
+
+    db_session.refresh(gone)
+    db_session.refresh(unassigned)
+    assert ("search", "doing") in calls
+    assert gone.printerval_status == "cancelled"
+    assert unassigned.printerval_status == "doing"
+
+
+def test_created_since_sync_failing_listing_never_marks_orders_cancelled(db_session, monkeypatch):
+    monkeypatch.setattr(status_sync_module, "DISCOVER_RETRY_BASE_DELAY_SECONDS", 0.0)
+    platform = Platform(name="Listing down", account_username="acc@example.test", team_outsource="team-a")
+    db_session.add(platform)
+    db_session.flush()
+    order = Order(external_order_id="DJ3999007", platform_id=platform.id, state="IN_PROGRESS", printerval_status="doing")
+    db_session.add(order)
+    db_session.commit()
+    client, calls = _listing_client([], fail_listing=True)
+
+    try:
+        status_sync_module.sync_platform_orders_created_since(
+            db_session, platform, since=datetime.now(UTC) - timedelta(days=7), api_client=client
+        )
+    except Exception as exc:
+        assert getattr(exc, "error_class", None) is not None
+    else:
+        raise AssertionError("a failed listing must fail the run")
+
+    db_session.refresh(order)
+    assert calls == [("list", "doing")] * status_sync_module.DISCOVER_MAX_ATTEMPTS
+    assert order.printerval_status == "doing"
 
 
 def test_heartbeat_loop_persists_without_progress_argument(monkeypatch):

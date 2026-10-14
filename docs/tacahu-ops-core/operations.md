@@ -116,6 +116,26 @@ deadlock/che lỗi concurrency.
 - status-sync cycle, crawl cycle, private asset volume và database backup.
 - Cloudflare tunnel/HTTPS ở production.
 
+### Status sync: lịch 3 tầng
+
+Celery Beat chạy theo `CELERY_TIMEZONE` (mặc định `Asia/Ho_Chi_Minh`). Mọi tầng đều chỉ
+đọc từ Printerval và dùng chung lease `PlatformSyncState`, nên không chạy chồng nhau trên
+một platform (tầng đến sau bỏ lượt).
+
+| Tầng | Lịch | Đơn được sync | Cách đọc |
+|---|---|---|---|
+| Đang làm | mỗi `STATUS_SYNC_INTERVAL_SECONDS` (300s) | đơn trong queue `doing` + `fix` | danh sách 2 queue |
+| Gần đây | phút :02 và :32 | đơn tạo trong 7 ngày (`RECENT_SYNC_WINDOW`) | danh sách các queue `doing/fix/review/confirm/done` lọc `date_from` |
+| Hằng đêm | 02:00 | đơn tạo trong 60 ngày (`NIGHTLY_SYNC_WINDOW`) | như tầng gần đây |
+
+Hai tầng sau đọc danh sách queue (100 đơn mỗi request, `date_from` lùi thêm 1 ngày làm
+biên), rồi áp dụng từng dòng qua cùng luật với sync đơn được chọn. Chỉ đơn không có trong
+danh sách (bị huỷ, chưa gán) mới tra riêng từng đơn. Nếu đọc danh sách lỗi sau 3 lần thử
+thì cả lượt `failed`; vắng mặt trong danh sách không bao giờ bị coi là huỷ. Đơn tạo quá
+60 ngày không còn được sync tự động — Admin vẫn đồng bộ được qua nút đồng bộ đơn được
+chọn. Số liệu chọn khung (14/10/2026): không đơn nào quay lại Fix sau 12 ngày kể từ lúc
+tạo, hay sau 7 ngày kể từ lúc vào Review/Done.
+
 ### Status sync: heartbeat và tác vụ treo
 
 `GET /api/orders/sync-status` chỉ đọc `PlatformSyncState`; polling giao diện không được
@@ -133,7 +153,7 @@ dùng endpoint reset; sau đó kiểm tra `worker_task_id`, heartbeat cuối và
 khi chạy lại.
 
 Endpoint `design-job/find` của Printerval có lúc mất 10–30 giây hoặc hơn mới trả lời. Các
-client sync chạy nền (sync tự động, sync toàn DB, job "Đồng bộ" toàn bộ) dùng timeout 60
+client sync chạy nền (3 tầng ở trên, job "Đồng bộ" toàn bộ) dùng timeout 60
 giây và đọc lại mỗi trang queue tối đa 3 lần khi gặp lỗi `TRANSIENT_NETWORK` (nghỉ 3s, 6s,
 có jitter). Các đường gọi Printerval trong request web (Quét Đơn Print, đồng bộ đơn được
 chọn) vẫn giữ timeout 30 giây. Một deploy giữa lúc sync đang chạy sẽ cắt ngang lượt đó
