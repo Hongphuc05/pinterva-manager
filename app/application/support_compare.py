@@ -8,7 +8,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from html import escape
 
-from sqlalchemy import exists, or_
+from sqlalchemy import and_, exists, or_
 from sqlalchemy import text as sql_text
 from sqlalchemy.orm import Session
 
@@ -121,16 +121,50 @@ def count_support_unchecked_orders(session: Session, *, platform_id: uuid.UUID) 
     return session.query(Order).filter(*_checkable_filters(session, platform_id)).count()
 
 
+def _pair_answered_not_duplicate():
+    """EXISTS: the chosen pair of the item was answered "not a duplicate" (Telegram Từ chối)."""
+    return exists().where(
+        SupportCompareCandidate.id == SupportCompareItem.selected_candidate_id,
+        SupportCompareCandidate.decision_status == "non_duplicate",
+    )
+
+
+def _has_rejected_pair():
+    """EXISTS: a completed item Support chose a pair for, that the verifier then rejected."""
+    return exists().where(
+        SupportCompareItem.order_id == Order.id,
+        SupportCompareItem.processing_status == "completed",
+        SupportCompareItem.review_status == "selected_duplicate",
+        _pair_answered_not_duplicate(),
+    )
+
+
+def _has_open_item():
+    """EXISTS: an item still waiting for a person: not reviewed, or its pair is not rejected."""
+    return exists().where(
+        SupportCompareItem.order_id == Order.id,
+        SupportCompareItem.processing_status == "completed",
+        or_(
+            SupportCompareItem.review_status == "pending_review",
+            and_(
+                SupportCompareItem.review_status == "selected_duplicate",
+                ~_pair_answered_not_duplicate(),
+            ),
+        ),
+    )
+
+
 def _handleable_filters(platform_id: uuid.UUID) -> list:
+    """No-match / model-wrong orders, plus orders whose chosen pair was rejected on Telegram."""
     return [
         *_unchecked_scope(platform_id),
-        _has_item("no_match", "ai_wrong"),
-        ~_has_item("pending_review", "selected_duplicate"),
+        or_(_has_item("no_match", "ai_wrong"), _has_rejected_pair()),
+        ~_has_open_item(),
     ]
 
 
 def count_handleable_orders(session: Session, *, platform_id: uuid.UUID) -> int:
-    """Compared orders with no duplicate found (or model judged wrong) still in the tab."""
+    """Compared orders found not to be duplicates (no match, model wrong, or rejected pair) still in the tab."""
     return session.query(Order).filter(*_handleable_filters(platform_id)).count()
 
 

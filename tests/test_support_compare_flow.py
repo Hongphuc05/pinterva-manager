@@ -955,3 +955,28 @@ def test_picking_a_duplicate_is_refused_once_the_order_was_moved_to_a_tag(client
     )
     assert res.status_code == 409
     assert "chuyển lại về Chưa kiểm tra" in res.json()["detail"]
+
+
+def test_handle_also_moves_orders_whose_pair_was_rejected_on_telegram(client, db_session, setup):
+    from app.application.support_compare import handle_unchecked_orders
+
+    rejected, tokens = _notify_selected_pair(db_session, setup, "DJ-TG-REJECTED")
+    _press(client, f"scdup_no:{tokens['SUPPORT_COMPARE_REJECT_DUPLICATE']}", delete_ok=True)
+    waiting, _ = _notify_selected_pair(db_session, setup, "DJ-TG-STILL-WAITING")  # not answered yet
+    confirmed, ctokens = _notify_selected_pair(db_session, setup, "DJ-TG-CONFIRMED")
+    _press(client, f"scdup_yes:{ctokens['SUPPORT_COMPARE_CONFIRM_DUPLICATE']}", delete_ok=True)
+    plain = _order(db_session, setup, "DJ-TG-NO-MATCH")
+    _item(db_session, setup, plain, "no_match")
+    db_session.expire_all()
+    assert db_session.get(Order, rejected.id).duplicate_check_status == "uncheck"  # Telegram only verifies
+
+    assert count_handleable_orders(db_session, platform_id=setup.platform.id) == 2  # rejected + no_match
+
+    moved = handle_unchecked_orders(db_session, actor=setup.support, platform_id=setup.platform.id)
+
+    assert moved == 2
+    db_session.expire_all()
+    assert db_session.get(Order, rejected.id).duplicate_check_status == "non_duplicate"
+    assert db_session.get(Order, plain.id).duplicate_check_status == "non_duplicate"
+    assert db_session.get(Order, waiting.id).duplicate_check_status == "uncheck"
+    assert db_session.get(Order, confirmed.id).duplicate_check_status == "uncheck"  # verified, awaits the web move
