@@ -7,7 +7,7 @@ import { usePlatform } from '../auth/PlatformContext'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { ImageModal } from '../components/ImageModal'
 import { StatusDropdown } from '../components/StatusDropdown'
-import { Pagination, paginate } from '../components/Pagination'
+import { Pagination } from '../components/Pagination'
 import { AutoSyncCountdown } from '../components/AutoSyncCountdown'
 import { CopyableOrderCode } from '../components/CopyableOrderCode'
 import { CopyableProductName } from '../components/CopyableProductName'
@@ -133,32 +133,18 @@ function isSupportClassificationEditable(order: Pick<OrderSummary, 'state' | 'pl
 // it is read-only (the backend enforces the same rule).
 const canSupportClassify = isSupportClassificationEditable
 
-type SupportTab = 'all' | 'duplicate' | 'non_duplicate' | 'doing'
-
 type AdminTabKey = 'waiting' | 'doing' | 'review' | 'fix' | 'done'
 
-// Admin lists are paginated by the server (GET /orders/page): one page + counters for every tab.
-interface AdminPageMeta {
+// Order lists are paginated by the server (GET /orders/page): one page + counters for every tab.
+interface PageMeta {
   total: number
-  counts: Record<AdminTabKey, number> & {
-    doing_missing: number
-    doing_normal: number
-    fix_pending: number
-    fix_approved: number
-    fix_rejected: number
-  }
+  // Per-tab counters for the role (admin also has doing_missing / fix_pending ... sub-counters).
+  counts: Record<string, number>
   aux: { synced_images: number; fix_returned: number }
-  search_counts?: Record<AdminTabKey, number>
+  submitted_count?: number | null
+  search_counts?: Record<string, number>
   query: string
   search: string
-}
-
-// Every order Support sees belongs to exactly one tab, so the four counts add up to the list.
-// A tag wins over the state: "Đang làm" holds only the untagged orders that were already assigned.
-function supportTabOf(order: Pick<OrderSummary, 'state' | 'platform_status' | 'duplicate_check_status' | 'work_domain'>): SupportTab {
-  if (order.work_domain === 'duplicate' || order.duplicate_check_status === 'duplicate') return 'duplicate'
-  if (order.duplicate_check_status === 'non_duplicate') return 'non_duplicate'
-  return isSupportDoingOrder(order) ? 'doing' : 'all'
 }
 
 // Support may put a classified order back into "Chưa xử lý" until a designer has taken it.
@@ -170,10 +156,6 @@ function canReturnToUnchecked(
   return isSupportClassificationEditable(order)
 }
 
-function isSupportDoingOrder(order: Pick<OrderSummary, 'state' | 'platform_status'>) {
-  return SUPPORT_READ_ONLY_DOING_STATES.has((order.state || '').toUpperCase()) ||
-    (order.platform_status || '').toUpperCase() === 'DOING'
-}
 
 function parseUtcDate(dateInput: string | null | undefined): Date | null {
   if (!dateInput) return null
@@ -185,16 +167,6 @@ function parseUtcDate(dateInput: string | null | undefined): Date | null {
   return isNaN(d.getTime()) ? null : d
 }
 
-function getUtc7DateStr(dateInput: string | null | undefined): string | null {
-  const d = parseUtcDate(dateInput)
-  if (!d) return null
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Ho_Chi_Minh',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(d)
-}
 
 function formatUtc7Split(dateInput: string | null | undefined): { time: string; date: string } | null {
   const d = parseUtcDate(dateInput)
@@ -216,64 +188,40 @@ function formatUtc7Split(dateInput: string | null | undefined): { time: string; 
 }
 
 
-function getOrdersCacheKey(platformId: string | undefined, query: string) {
-  return `${ORDERS_CACHE_PREFIX}:${platformId || localStorage.getItem('activePlatformId') || 'default'}:${query || 'all'}`
-}
-
-function readOrdersCache(key: string): OrderSummary[] | null {
-  try {
-    const raw = sessionStorage.getItem(key)
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as { orders?: OrderSummary[]; savedAt?: number }
-    if (!Array.isArray(parsed.orders) || !parsed.savedAt || Date.now() - parsed.savedAt > 15 * 60_000) return null
-    return parsed.orders
-  } catch {
-    return null
-  }
-}
-
-function writeOrdersCache(key: string, orders: OrderSummary[]) {
-  try {
-    sessionStorage.setItem(key, JSON.stringify({ orders, savedAt: Date.now() }))
-  } catch {
-    // Session storage error ignore
-  }
-}
-
-// Admin pages: the last few visited pages are kept in sessionStorage so coming back from an order's
+// The last few visited pages are kept in sessionStorage so coming back from an order's
 // detail shows the list at once instead of loading it again.
-const ADMIN_PAGE_CACHE_MAX = 8
-const ADMIN_PAGE_CACHE_FRESH_MS = 30_000
-const ADMIN_PAGE_CACHE_TTL_MS = 30 * 60_000
+const PAGE_CACHE_MAX = 8
+const PAGE_CACHE_FRESH_MS = 30_000
+const PAGE_CACHE_TTL_MS = 30 * 60_000
 
-interface AdminPageCacheEntry {
+interface PageCacheEntry {
   items: OrderSummary[]
-  meta: AdminPageMeta
+  meta: PageMeta
   savedAt: number
 }
 
-function adminPageCacheKey(userId: string, platformId: string | undefined, query: string) {
-  return `${ORDERS_CACHE_PREFIX}:admin:${userId}:${platformId || 'default'}:${query}`
+function pageCacheKey(userId: string, platformId: string | undefined, query: string) {
+  return `${ORDERS_CACHE_PREFIX}:page:${userId}:${platformId || 'default'}:${query}`
 }
 
-function readAdminPageCache(key: string): AdminPageCacheEntry | null {
+function readPageCache(key: string): PageCacheEntry | null {
   try {
     const raw = sessionStorage.getItem(key)
     if (!raw) return null
-    const parsed = JSON.parse(raw) as AdminPageCacheEntry
-    if (!Array.isArray(parsed.items) || !parsed.meta || Date.now() - parsed.savedAt > ADMIN_PAGE_CACHE_TTL_MS) return null
+    const parsed = JSON.parse(raw) as PageCacheEntry
+    if (!Array.isArray(parsed.items) || !parsed.meta || Date.now() - parsed.savedAt > PAGE_CACHE_TTL_MS) return null
     return parsed
   } catch {
     return null
   }
 }
 
-function writeAdminPageCache(key: string, items: OrderSummary[], meta: AdminPageMeta) {
-  const indexKey = `${ORDERS_CACHE_PREFIX}:admin-index`
+function writePageCache(key: string, items: OrderSummary[], meta: PageMeta) {
+  const indexKey = `${ORDERS_CACHE_PREFIX}:page-index`
   try {
     const index: string[] = JSON.parse(sessionStorage.getItem(indexKey) || '[]').filter((k: string) => k !== key)
     index.push(key)
-    while (index.length > ADMIN_PAGE_CACHE_MAX) sessionStorage.removeItem(index.shift() as string)
+    while (index.length > PAGE_CACHE_MAX) sessionStorage.removeItem(index.shift() as string)
     sessionStorage.setItem(indexKey, JSON.stringify(index))
     sessionStorage.setItem(key, JSON.stringify({ items, meta, savedAt: Date.now() }))
   } catch {
@@ -314,13 +262,9 @@ export function OrdersListPage() {
   }))
 
   const [supportSubmittedCount, setSupportSubmittedCount] = useState<number | null>(null)
-  const [orders, setOrders] = useState<OrderSummary[]>(() =>
-    user?.role === 'admin' ? [] : readOrdersCache(getOrdersCacheKey(undefined, '')) ?? [],
-  )
-  const [ordersLoading, setOrdersLoading] = useState(() =>
-    user?.role === 'admin' ? true : readOrdersCache(getOrdersCacheKey(undefined, '')) === null,
-  )
-  const [pageMeta, setPageMeta] = useState<AdminPageMeta | null>(null)
+  const [orders, setOrders] = useState<OrderSummary[]>([])
+  const [ordersLoading, setOrdersLoading] = useState(true)
+  const [pageMeta, setPageMeta] = useState<PageMeta | null>(null)
   const viewSignatureRef = useRef('')
 
   // Admin 5 Sub-Tabs State
@@ -483,6 +427,8 @@ export function OrdersListPage() {
   const [deleteConfirmModalOpen, setDeleteConfirmModalOpen] = useState(false)
   const [isBulkDeleting, setIsBulkDeleting] = useState(false)
   const [quickDistributeOpen, setQuickDistributeOpen] = useState(false)
+  const [quickDistributeOrders, setQuickDistributeOrders] = useState<OrderSummary[]>([])
+  const [quickDistributeLoading, setQuickDistributeLoading] = useState(false)
 
   // Inline submission state for Designer
   const [inlineSubmissionLinks, setInlineSubmissionLinks] = useState<Record<string, string>>({})
@@ -687,7 +633,7 @@ export function OrdersListPage() {
 
 
   function handleSelectAll(checked: boolean) {
-    const pageOrders = (isAdmin ? orders : paginate(filteredOrders, currentPage)).filter(
+    const pageOrders = orders.filter(
       (order) => !isSupport || canSupportClassify(order),
     )
     if (checked) {
@@ -1057,11 +1003,11 @@ export function OrdersListPage() {
   }, [searchQuery])
 
   // Everything the Admin list depends on, as the query string of GET /orders/page.
-  const adminQuery = useMemo(() => {
+  const pageQuery = useMemo(() => {
     const params = new URLSearchParams()
-    params.set('tab', adminTab)
-    if (adminTab === 'doing' && adminDoingSubFilter !== 'all') params.set('doing_sub', adminDoingSubFilter)
-    if (adminTab === 'fix' && adminFixSubFilter !== 'all') params.set('fix_sub', adminFixSubFilter)
+    params.set('tab', isAdmin ? adminTab : isSupport ? supportTab : activeDesignerTab)
+    if (isAdmin && adminTab === 'doing' && adminDoingSubFilter !== 'all') params.set('doing_sub', adminDoingSubFilter)
+    if (isAdmin && adminTab === 'fix' && adminFixSubFilter !== 'all') params.set('fix_sub', adminFixSubFilter)
     if (debouncedSearch.trim()) params.set('q', debouncedSearch.trim())
     if (statusFilter) params.set('status', statusFilter)
     if (designerFilter) params.set('designer_id', designerFilter)
@@ -1079,16 +1025,37 @@ export function OrdersListPage() {
     params.set('sort_dir', dateSort.direction)
     if (currentPage > 1) params.set('page', String(currentPage))
     return params.toString()
-  }, [adminTab, adminDoingSubFilter, adminFixSubFilter, debouncedSearch, statusFilter, designerFilter, platformStatusFilter, batchFilter, dateFrom, dateTo, dateFilterType, fixReturnedFilter, syncedImagesFilter, chatUnreadFilter, dateSort, currentPage])
+  }, [isAdmin, isSupport, supportTab, activeDesignerTab, adminTab, adminDoingSubFilter, adminFixSubFilter, debouncedSearch, statusFilter, designerFilter, platformStatusFilter, batchFilter, dateFrom, dateTo, dateFilterType, fixReturnedFilter, syncedImagesFilter, chatUnreadFilter, dateSort, currentPage])
 
-  async function fetchTabOrderIds(tab: AdminTabKey, fixSub: string = 'all'): Promise<string[]> {
+  async function fetchTabOrderIds(tab: string, fixSub: string = 'all'): Promise<string[]> {
     const params = new URLSearchParams({ tab, ids_only: 'true' })
     if (tab === 'fix' && fixSub !== 'all') params.set('fix_sub', fixSub)
     const data = await apiFetch<{ ids: string[] }>(`/orders/page?${params.toString()}`)
     return data.ids
   }
 
-  async function syncAdminTab(tab: AdminTabKey, fixSub: string = 'all') {
+  // "Chia đơn nhanh" works on every Waiting order, not just the page on screen.
+  async function openQuickDistribute() {
+    setQuickDistributeLoading(true)
+    try {
+      const all: OrderSummary[] = []
+      for (let page = 1; ; page += 1) {
+        const data = await apiFetch<{ items: OrderSummary[]; total: number }>(
+          `/orders/page?tab=waiting&sort_field=created_at&sort_dir=desc&page=${page}&page_size=200`,
+        )
+        all.push(...data.items)
+        if (data.items.length === 0 || all.length >= data.total) break
+      }
+      setQuickDistributeOrders(all)
+      setQuickDistributeOpen(true)
+    } catch (err: any) {
+      showToast(err?.message || 'Không tải được danh sách đơn Waiting.', 'error')
+    } finally {
+      setQuickDistributeLoading(false)
+    }
+  }
+
+  async function syncAdminTab(tab: string, fixSub: string = 'all') {
     try {
       await handleSyncPlatformStatus(await fetchTabOrderIds(tab, fixSub))
     } catch (err: any) {
@@ -1096,85 +1063,20 @@ export function OrdersListPage() {
     }
   }
 
-  async function loadOrders() {
-    if (isAdmin) return loadAdminPage()
-    const params = new URLSearchParams()
-    if (statusFilter) params.set('status', statusFilter)
-    if (batchFilter) params.set('batch_id', batchFilter)
-    if (designerFilter && designerFilter !== 'unassigned') params.set('designer_id', designerFilter)
-    if (designerFilter === 'unassigned') params.set('designer_id', 'unassigned')
-    const qs = params.toString()
-    setOrdersLoading(true)
-    try {
-      const data = await apiFetch<{ orders: OrderSummary[]; submitted_count?: number | null }>(`/orders${qs ? `?${qs}` : ''}`)
-      setSupportSubmittedCount(data.submitted_count ?? null)
-      setOrders((prevOrders) => {
-        if (prevOrders.length > 0) {
-          const prevMap = new Map(prevOrders.map((o) => [o.id, o]))
-          const existingIds = new Set(prevOrders.map((o) => o.id))
-          const newIds = data.orders.filter((o) => !existingIds.has(o.id)).map((o) => o.id)
-          if (newIds.length > 0) {
-            setNewlyCrawledOrderIds((prev) => Array.from(new Set([...prev, ...newIds])))
-            setTimeout(() => {
-              setNewlyCrawledOrderIds((prev) => prev.filter((id) => !newIds.includes(id)))
-            }, 300000)
-          }
+  const loadOrders = () => loadOrdersPage()
 
-          // Check tab state changes & Web mẹ status/designer changes
-          const movedIds: string[] = []
-          const nowTs = Date.now()
-          const newPrinChanges: Record<string, { statusChanged?: boolean; designerChanged?: boolean; timestamp: number }> = {}
-
-          data.orders.forEach((newOrd) => {
-            const oldOrd = prevMap.get(newOrd.id)
-            if (oldOrd) {
-              if (oldOrd.state !== newOrd.state) {
-                movedIds.push(newOrd.id)
-              }
-              const stChanged = Boolean(oldOrd.platform_status && newOrd.platform_status && oldOrd.platform_status !== newOrd.platform_status)
-              const desChanged = Boolean(oldOrd.platform_designer && newOrd.platform_designer && oldOrd.platform_designer !== newOrd.platform_designer)
-              if (stChanged || desChanged) {
-                newPrinChanges[newOrd.id] = {
-                  statusChanged: stChanged,
-                  designerChanged: desChanged,
-                  timestamp: nowTs,
-                }
-              }
-            }
-          })
-
-          if (movedIds.length > 0) {
-            setRecentTabMovedOrderIds((prev) => Array.from(new Set([...prev, ...movedIds])))
-            setTimeout(() => {
-              setRecentTabMovedOrderIds((prev) => prev.filter((id) => !movedIds.includes(id)))
-            }, 300000)
-          }
-
-          if (Object.keys(newPrinChanges).length > 0) {
-            setRecentPlatformChanges((prev) => ({ ...prev, ...newPrinChanges }))
-          }
-        }
-        return data.orders
-      })
-      writeOrdersCache(getOrdersCacheKey(activePlatform?.id, qs), data.orders)
-      return data.orders
-    } finally {
-      setOrdersLoading(false)
-    }
-  }
-
-
-  async function loadAdminPage(silent = false) {
-    const query = adminQuery
+  async function loadOrdersPage(silent = false) {
+    const query = pageQuery
     if (!silent) setOrdersLoading(true)
     try {
-      const data = await apiFetch<AdminPageMeta & { items: OrderSummary[] }>(`/orders/page?${query}`)
+      const data = await apiFetch<PageMeta & { items: OrderSummary[] }>(`/orders/page?${query}`)
+      setSupportSubmittedCount(data.submitted_count ?? null)
       // Highlight new / moved orders only against a previous load of the same view.
       const sameView = viewSignatureRef.current === query
       viewSignatureRef.current = query
-      const meta: AdminPageMeta = { ...data, query, search: debouncedSearch.trim() }
+      const meta: PageMeta = { ...data, query, search: debouncedSearch.trim() }
       setPageMeta(meta)
-      if (user) writeAdminPageCache(adminPageCacheKey(user.id, activePlatform?.id, query), data.items, meta)
+      if (user) writePageCache(pageCacheKey(user.id, activePlatform?.id, query), data.items, meta)
       setOrders((prevOrders) => {
         if (sameView && prevOrders.length > 0) {
           const prevMap = new Map(prevOrders.map((o) => [o.id, o]))
@@ -1212,28 +1114,20 @@ export function OrdersListPage() {
   }
 
   useEffect(() => {
-    // The role decides which endpoint to call (Admin: paged), so wait until it is known.
+    // The query depends on the role, so wait until it is known.
     if (!user) return
-    const params = new URLSearchParams()
-    if (statusFilter) params.set('status', statusFilter)
-    if (batchFilter) params.set('batch_id', batchFilter)
-    if (designerFilter) params.set('designer_id', designerFilter)
-    const cachedOrders = isAdmin ? null : readOrdersCache(getOrdersCacheKey(activePlatform?.id, params.toString()))
-    const cachedPage = isAdmin ? readAdminPageCache(adminPageCacheKey(user.id, activePlatform?.id, adminQuery)) : null
+    const cachedPage = readPageCache(pageCacheKey(user.id, activePlatform?.id, pageQuery))
     if (cachedPage) {
       // Back from an order's detail (or a revisit): show the page at once, refresh quietly if it is old.
-      viewSignatureRef.current = adminQuery
+      viewSignatureRef.current = pageQuery
       setOrders(cachedPage.items)
       setPageMeta(cachedPage.meta)
-      setOrdersLoading(false)
-    } else if (cachedOrders !== null) {
-      setOrders(cachedOrders)
       setOrdersLoading(false)
     } else {
       setOrdersLoading(true)
     }
-    if (!cachedPage || Date.now() - cachedPage.savedAt > ADMIN_PAGE_CACHE_FRESH_MS) {
-      const refresh = cachedPage ? loadAdminPage(true) : loadOrders()
+    if (!cachedPage || Date.now() - cachedPage.savedAt > PAGE_CACHE_FRESH_MS) {
+      const refresh = cachedPage ? loadOrdersPage(true) : loadOrdersPage()
       refresh.catch((e) => {
         setError(e instanceof ApiError ? e.message : 'Không tải được danh sách đơn.')
       })
@@ -1244,7 +1138,7 @@ export function OrdersListPage() {
     }
     window.addEventListener('orders-updated', handleOrdersUpdated)
     return () => window.removeEventListener('orders-updated', handleOrdersUpdated)
-  }, [user?.id, activePlatform?.id, statusFilter, batchFilter, designerFilter, isAdmin ? adminQuery : ''])
+  }, [user?.id, activePlatform?.id, pageQuery])
 
   async function flagMissingTemplate(order: OrderSummary) {
     if (!order.assignment_id) {
@@ -1374,131 +1268,6 @@ export function OrdersListPage() {
   }, [syncStatus?.is_running, syncStatus?.last_finished_at])
 
   // Support's four tabs partition the list (see supportTabOf).
-  const supportUncheckedOrders = useMemo(() => orders.filter((o) => supportTabOf(o) === 'all'), [orders])
-  const supportDuplicateOrders = useMemo(() => orders.filter((o) => supportTabOf(o) === 'duplicate'), [orders])
-  const supportNonDuplicateOrders = useMemo(() => orders.filter((o) => supportTabOf(o) === 'non_duplicate'), [orders])
-  const supportDoingOrders = useMemo(() => orders.filter((o) => supportTabOf(o) === 'doing'), [orders])
-
-  // Admin operational tabs stay scoped to standard work, except Fix: every
-  // returned Fix needs the same central Admin decision before any designer can
-  // resume, including cards on the shared duplicate board.
-  const waitingOrders = useMemo(() => {
-    return orders.filter((o) => {
-      const st = (o.state || '').toUpperCase()
-      return ['WAITING', 'OPEN_FOR_ALLOCATION', 'DISCOVERED', 'PENDING', 'OPEN'].includes(st)
-    })
-  }, [orders])
-
-  const doingOrders = useMemo(() => {
-    return orders.filter((o) => {
-      const st = (o.state || '').toUpperCase()
-      return ['IN_PROGRESS', 'DOING', 'ASSIGNED'].includes(st)
-    })
-  }, [orders])
-
-  const missingTemplateDoingOrders = useMemo(() => {
-    return doingOrders.filter((o) => !!o.template_missing)
-  }, [doingOrders])
-
-  const normalDoingOrders = useMemo(() => {
-    return doingOrders.filter((o) => !o.template_missing)
-  }, [doingOrders])
-
-  const filteredDoingOrders = useMemo(() => {
-    if (adminDoingSubFilter === 'missing') return missingTemplateDoingOrders
-    if (adminDoingSubFilter === 'normal') return normalDoingOrders
-    return doingOrders
-  }, [adminDoingSubFilter, doingOrders, missingTemplateDoingOrders, normalDoingOrders])
-
-  const reviewOrders = useMemo(() => {
-    return orders.filter((o) => {
-      const st = (o.state || '').toUpperCase()
-      return ['QC_PENDING', 'RESULT_SUBMITTED', 'SUBMITTING_TO_SITE', 'REVIEW'].includes(st)
-    })
-  }, [orders])
-
-  const fixOrders = useMemo(() => {
-    return orders.filter((o) => {
-      const st = (o.state || '').toUpperCase()
-      return ['REVISION', 'REVISION_REQUESTED', 'FIX'].includes(st)
-    })
-  }, [orders])
-
-  const pendingFixOrders = useMemo(() => {
-    return fixOrders.filter((o) => !o.fix_approved_by_admin && !o.fix_rejected_by_admin)
-  }, [fixOrders])
-
-  const approvedFixOrders = useMemo(() => {
-    return fixOrders.filter((o) => !!o.fix_approved_by_admin)
-  }, [fixOrders])
-
-  const rejectedFixOrders = useMemo(() => {
-    return fixOrders.filter((o) => !!o.fix_rejected_by_admin)
-  }, [fixOrders])
-
-  const filteredFixOrders = useMemo(() => {
-    if (adminFixSubFilter === 'pending') return pendingFixOrders
-    if (adminFixSubFilter === 'approved') return approvedFixOrders
-    if (adminFixSubFilter === 'rejected') return rejectedFixOrders
-    return fixOrders
-  }, [adminFixSubFilter, fixOrders, pendingFixOrders, approvedFixOrders, rejectedFixOrders])
-
-  const doneOrders = useMemo(() => {
-    return orders.filter((o) => {
-      const st = (o.state || '').toUpperCase()
-      return ['DONE', 'CLAIMED_IMPORTED', 'COMPLETED', 'SKIPPED'].includes(st)
-    })
-  }, [orders])
-
-
-  // Review and Done tab 5-minute auto-sync: the countdown lives in <AutoSyncCountdown>.
-  const fireAutoSync = () => {
-    if (adminTab === 'review' || adminTab === 'done') void syncAdminTab(adminTab)
-  }
-
-  // Designer Workflow groups
-  // Admin pages hold one tab at a time: the tab buttons show the server's counters.
-  const adminCounts = isAdmin ? pageMeta?.counts : undefined
-  const tabCounts = {
-    waiting: adminCounts?.waiting ?? waitingOrders.length,
-    doing: adminCounts?.doing ?? doingOrders.length,
-    doingMissing: adminCounts?.doing_missing ?? missingTemplateDoingOrders.length,
-    doingNormal: adminCounts?.doing_normal ?? normalDoingOrders.length,
-    review: adminCounts?.review ?? reviewOrders.length,
-    fix: adminCounts?.fix ?? fixOrders.length,
-    fixPending: adminCounts?.fix_pending ?? pendingFixOrders.length,
-    fixApproved: adminCounts?.fix_approved ?? approvedFixOrders.length,
-    fixRejected: adminCounts?.fix_rejected ?? rejectedFixOrders.length,
-    done: adminCounts?.done ?? doneOrders.length,
-  }
-
-  const designerDoingOrders = orders.filter(
-    (o) =>
-      !o.template_missing &&
-      !o.is_paid &&
-      ['IN_PROGRESS', 'ASSIGNED', 'DOING'].includes(o.state.toUpperCase())
-  )
-  const designerFixOrders = orders.filter(
-    (o) =>
-      !o.template_missing &&
-      o.fix_approved_by_admin === true &&
-      ['REVISION', 'REVISION_REQUESTED', 'FIX'].includes(o.state.toUpperCase())
-  )
-  const designerReviewOrders = orders.filter(
-    (o) =>
-      !o.template_missing &&
-      !o.is_paid &&
-      ['QC_PENDING', 'RESULT_SUBMITTED', 'SUBMITTING_TO_SITE', 'REVIEW'].includes(o.state.toUpperCase())
-  )
-  const waitingUpdateOrders = orders.filter(
-    (o) => (o.template_missing || o.state.toUpperCase() === 'WAITING_UPDATE') && !o.is_paid
-  )
-  const designerPaidOrders = orders.filter((o) =>
-    o.is_paid && !designerFixOrders.some((fixOrder) => fixOrder.id === o.id)
-  )
-  const designerDoneOrders = orders.filter((o) =>
-    !o.is_paid && ['DONE', 'CLAIMED_IMPORTED', 'COMPLETED', 'SKIPPED'].includes(o.state.toUpperCase())
-  )
 
   // Auto-switch admin tab when the search has no match in the current tab but has one elsewhere.
   useEffect(() => {
@@ -1516,194 +1285,29 @@ export function OrdersListPage() {
     if (target) setAdminTab(target)
   }, [debouncedSearch, isAdmin, adminTab, pageMeta])
 
-  // Base list of orders depending on role and active tab
-  let baseOrders: OrderSummary[] = orders
-  if (isSupport) {
-    baseOrders =
-      supportTab === 'all'
-        ? supportUncheckedOrders
-        : supportTab === 'duplicate'
-          ? supportDuplicateOrders
-          : supportTab === 'non_duplicate'
-            ? supportNonDuplicateOrders
-            : supportDoingOrders
-  } else if (isAdmin) {
-    baseOrders =
-      adminTab === 'waiting'
-        ? waitingOrders
-        : adminTab === 'doing'
-          ? filteredDoingOrders
-          : adminTab === 'review'
-            ? reviewOrders
-            : adminTab === 'fix'
-              ? filteredFixOrders
-              : doneOrders
-  } else {
-    baseOrders =
-      activeDesignerTab === 'doing'
-        ? designerDoingOrders
-        : activeDesignerTab === 'fix'
-          ? designerFixOrders
-          : activeDesignerTab === 'review'
-            ? designerReviewOrders
-            : activeDesignerTab === 'waiting_update'
-              ? waitingUpdateOrders
-              : activeDesignerTab === 'paid'
-                ? designerPaidOrders
-                : designerDoneOrders
+
+  // The server returns one filtered, sorted page of the role's current tab.
+  const roleCounts = pageMeta?.counts ?? {}
+  const tabCount = (key: string) => roleCounts[key] ?? 0
+  // Review and Done tab 5-minute auto-sync: the countdown lives in <AutoSyncCountdown>.
+  const fireAutoSync = () => {
+    if (adminTab === 'review' || adminTab === 'done') void syncAdminTab(adminTab)
   }
 
-  const isOrderGallerySynced = useCallback(
-    (o: OrderSummary) => {
-      const dbCount =
-        o.product_image_urls && o.product_image_urls.length > 0
-          ? o.product_image_urls.length
-          : o.thumbnail_url
-            ? 1
-            : 0
-      const liveStatus = syncStatusMap[o.id]
-      const imgCount =
-        liveStatus?.status === 'success' && typeof liveStatus?.count === 'number'
-          ? Math.max(liveStatus.count, dbCount)
-          : dbCount
-      return imgCount > 1
-    },
-    [syncStatusMap]
-  )
-
-  const syncedOrdersCount = useMemo(() => {
-    if (isAdmin) return pageMeta?.aux.synced_images ?? 0
-    return baseOrders.filter(isOrderGallerySynced).length
-  }, [isAdmin, pageMeta, baseOrders, isOrderGallerySynced])
-
-  const fixReturnedOrdersCount = useMemo(() => {
-    if (isAdmin) return pageMeta?.aux.fix_returned ?? 0
-    return baseOrders.filter((order) => (order.fix_return_count || 0) > 0).length
-  }, [isAdmin, pageMeta, baseOrders])
-
-  // Filter client-side order list & sort newest first
-  const clientFilteredOrders = (isAdmin ? [] : baseOrders)
-    .filter((o) => {
-      if (isManager && syncedImagesFilter && !isOrderGallerySynced(o)) {
-        return false
-      }
-      if (isAdmin && fixReturnedFilter && (o.fix_return_count || 0) === 0) {
-        return false
-      }
-      if (chatUnreadFilter && !chatUnread[o.id]) {
-        return false
-      }
-      if (searchQuery) {
-        const q = searchQuery.toLowerCase().trim()
-        const matches = isAdmin
-          ? o.external_order_id.toLowerCase().includes(q) ||
-          (o.product_name && o.product_name.toLowerCase().includes(q)) ||
-          (o.assigned_designer_name && o.assigned_designer_name.toLowerCase().includes(q)) ||
-          (o.platform_designer && o.platform_designer.toLowerCase().includes(q))
-          : (o.product_name && o.product_name.toLowerCase().includes(q)) ||
-          // Support sees the order code, so it can search by it; a designer does not.
-          (isSupport && o.external_order_id.toLowerCase().includes(q))
-        if (!matches) return false
-      }
-
-      if (statusFilter) {
-        const sf = statusFilter.toUpperCase()
-        const oState = (o.state || '').toUpperCase()
-        const pState = (o.platform_status || '').toUpperCase()
-        if (sf === 'WAITING' || sf === 'OPEN_FOR_ALLOCATION' || sf === 'DISCOVERED' || sf === 'PENDING' || sf === 'OPEN') {
-          if (!['WAITING', 'OPEN_FOR_ALLOCATION', 'DISCOVERED', 'PENDING', 'OPEN'].includes(oState) && pState !== 'WAITING') {
-            return false
-          }
-        } else if (sf === 'DOING' || sf === 'IN_PROGRESS' || sf === 'ASSIGNED') {
-          if (!['IN_PROGRESS', 'ASSIGNED'].includes(oState) && pState !== 'DOING') {
-            return false
-          }
-        } else if (sf === 'REVIEW' || sf === 'QC_PENDING') {
-          if (!['QC_PENDING', 'RESULT_SUBMITTED', 'SUBMITTING_TO_SITE', 'REVIEW'].includes(oState) && pState !== 'REVIEW') {
-            return false
-          }
-        } else if (sf === 'FIX' || sf === 'REVISION') {
-          if (!['REVISION', 'REVISION_REQUESTED', 'FIX'].includes(oState) && pState !== 'FIX') {
-            return false
-          }
-        } else if (sf === 'DONE' || sf === 'CLAIMED_IMPORTED' || sf === 'COMPLETED') {
-          if (!['DONE', 'CLAIMED_IMPORTED', 'COMPLETED'].includes(oState) && pState !== 'DONE') {
-            return false
-          }
-        } else if (sf === 'CANCELLED') {
-          if (oState !== 'CANCELLED' && pState !== 'CANCELLED') {
-            return false
-          }
-        } else {
-          if (oState !== sf && pState !== sf) return false
-        }
-      }
-
-      if (designerFilter) {
-        if (designerFilter === 'unassigned') {
-          if (o.assigned_designer_name || o.platform_designer) return false
-        } else {
-          const desUser = usersList.find((u) => u.id === designerFilter)
-          if (desUser) {
-            const name = (desUser.full_name || desUser.username || '').toLowerCase().trim()
-            const opt = (desUser.platform_designer_option || '').toLowerCase().trim()
-            const assigned = (o.assigned_designer_name || '').toLowerCase().trim()
-            const pDes = (o.platform_designer || '').toLowerCase().trim()
-            const matches =
-              (name && assigned === name) ||
-              (name && pDes === name) ||
-              (opt && pDes === opt) ||
-              (name && pDes.includes(name))
-            if (!matches) return false
-          }
-        }
-      }
-
-      if (platformStatusFilter) {
-        const psf = platformStatusFilter.toLowerCase().trim()
-        const orderPStatus = (o.platform_status || '').toLowerCase().trim()
-        if (psf === 'unspecified') {
-          if (orderPStatus) return false
-        } else {
-          if (orderPStatus !== psf) return false
-        }
-      }
-
-      if (batchFilter) {
-        const bf = batchFilter.toLowerCase().trim()
-        if (bf && o.batch_id !== batchFilter && !o.external_order_id.toLowerCase().includes(bf)) {
-          return false
-        }
-      }
-
-      // Date Range Filter (By dateFilterType in UTC+7)
-      if (dateFrom || dateTo) {
-        const rawVal = o[dateFilterType] || (dateFilterType === 'status_changed_at' ? o.created_at : null)
-        if (!rawVal) return false
-        const itemDate = getUtc7DateStr(rawVal)
-        if (!itemDate) return false
-        if (dateFrom && itemDate < dateFrom) return false
-        if (dateTo && itemDate > dateTo) return false
-      }
-
-      return true
-    })
-    .sort((a, b) => {
-      // In the Admin Fix overview, untriaged returns need attention first.
-      // Accepted/rejected Fixes have already been handled, so keep them below
-      // regardless of their timestamps. Sub-filters contain one group only.
-      if (isAdmin && adminTab === 'fix' && adminFixSubFilter === 'all') {
-        const fixPriority = (order: OrderSummary) =>
-          !order.fix_approved_by_admin && !order.fix_rejected_by_admin ? 0 : 1
-        const priorityDifference = fixPriority(a) - fixPriority(b)
-        if (priorityDifference !== 0) return priorityDifference
-      }
-      const aValue = a[dateSort.field] || (dateSort.field === 'status_changed_at' ? a.created_at : null)
-      const bValue = b[dateSort.field] || (dateSort.field === 'status_changed_at' ? b.created_at : null)
-      const aTime = parseUtcDate(aValue)?.getTime() ?? 0
-      const bTime = parseUtcDate(bValue)?.getTime() ?? 0
-      return dateSort.direction === 'desc' ? bTime - aTime : aTime - bTime
-    })
+  const tabCounts = {
+    waiting: tabCount('waiting'),
+    doing: tabCount('doing'),
+    doingMissing: tabCount('doing_missing'),
+    doingNormal: tabCount('doing_normal'),
+    review: tabCount('review'),
+    fix: tabCount('fix'),
+    fixPending: tabCount('fix_pending'),
+    fixApproved: tabCount('fix_approved'),
+    fixRejected: tabCount('fix_rejected'),
+    done: tabCount('done'),
+  }
+  const syncedOrdersCount = pageMeta?.aux.synced_images ?? 0
+  const fixReturnedOrdersCount = pageMeta?.aux.fix_returned ?? 0
 
   // Reset page when filters change
   useEffect(() => {
@@ -1865,17 +1469,15 @@ export function OrdersListPage() {
 
   function handlePageChange(page: number) {
     setCurrentPage(page)
-    if (isAdmin) setSelectedOrderIds([])
+    setSelectedOrderIds([])
     const next = new URLSearchParams(searchParams)
     if (page > 1) next.set('page', String(page))
     else next.delete('page')
     setSearchParams(next, { replace: true })
   }
 
-  // Admin: the server already filtered, sorted and paginated; others page the local list.
-  const filteredOrders = isAdmin ? orders : clientFilteredOrders
-  const totalFiltered = isAdmin ? (pageMeta?.total ?? orders.length) : clientFilteredOrders.length
-  const paginatedOrders = isAdmin ? orders : paginate(clientFilteredOrders, currentPage)
+  const totalFiltered = pageMeta?.total ?? orders.length
+  const paginatedOrders = orders
 
   // Listen for Topbar sync button click
   useEffect(() => {
@@ -1883,27 +1485,13 @@ export function OrdersListPage() {
       window.dispatchEvent(new CustomEvent('sync-tab-handled'))
       if (isAdmin) {
         void syncAdminTab(adminTab, adminTab === 'fix' ? adminFixSubFilter : 'all')
-        return
+      } else {
+        void syncAdminTab(isSupport ? 'doing' : activeDesignerTab)
       }
-      const targetOrders: OrderSummary[] =
-        activeDesignerTab === 'doing'
-          ? designerDoingOrders
-          : activeDesignerTab === 'fix'
-            ? designerFixOrders
-            : activeDesignerTab === 'review'
-              ? designerReviewOrders
-              : activeDesignerTab === 'waiting_update'
-                ? waitingUpdateOrders
-                : activeDesignerTab === 'paid'
-                  ? designerPaidOrders
-                  : designerDoneOrders
-
-      const targetIds = targetOrders.map((o) => o.id)
-      void handleSyncPlatformStatus(targetIds)
     }
     window.addEventListener('request-sync-current-tab', handleRequestSync)
     return () => window.removeEventListener('request-sync-current-tab', handleRequestSync)
-  }, [isAdmin, activeDesignerTab, designerDoingOrders, designerFixOrders, designerReviewOrders, waitingUpdateOrders, designerPaidOrders, designerDoneOrders, adminTab, adminFixSubFilter, orders])
+  }, [isAdmin, isSupport, activeDesignerTab, adminTab, adminFixSubFilter, pageQuery])
 
   return (
     <DashboardLayout>
@@ -2230,7 +1818,7 @@ export function OrdersListPage() {
                   className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${supportTab === 'all' ? 'bg-white/25 text-white' : 'bg-amber-200/80 text-amber-900'
                     }`}
                 >
-                  {supportUncheckedOrders.length}
+                  {tabCount('all')}
                 </span>
               </button>
 
@@ -2249,7 +1837,7 @@ export function OrdersListPage() {
                   className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${supportTab === 'duplicate' ? 'bg-white/25 text-white' : 'bg-purple-200/80 text-purple-900'
                     }`}
                 >
-                  {supportDuplicateOrders.length}
+                  {tabCount('duplicate')}
                 </span>
               </button>
 
@@ -2268,7 +1856,7 @@ export function OrdersListPage() {
                   className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${supportTab === 'non_duplicate' ? 'bg-white/25 text-white' : 'bg-emerald-200/80 text-emerald-900'
                     }`}
                 >
-                  {supportNonDuplicateOrders.length}
+                  {tabCount('non_duplicate')}
                 </span>
               </button>
 
@@ -2287,17 +1875,17 @@ export function OrdersListPage() {
                   className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${supportTab === 'doing' ? 'bg-white/25 text-white' : 'bg-blue-200/80 text-blue-900'
                     }`}
                 >
-                  {supportDoingOrders.length}
+                  {tabCount('doing')}
                 </span>
               </button>
             </div>
           </div>
           <p className="mt-2 px-1 text-xs text-slate-500" data-testid="support-totals">
-            Tổng 4 tab: <b className="font-mono text-slate-800">{orders.length}</b>
+            Tổng 4 tab: <b className="font-mono text-slate-800">{tabCount('all') + tabCount('duplicate') + tabCount('non_duplicate') + tabCount('doing')}</b>
             {supportSubmittedCount !== null && (
               <>
                 {' '}· Đã nộp bài (đã ẩn): <b className="font-mono text-slate-800">{supportSubmittedCount}</b>
-                {' '}· Tổng cộng: <b className="font-mono text-slate-800">{orders.length + supportSubmittedCount}</b>
+                {' '}· Tổng cộng: <b className="font-mono text-slate-800">{tabCount('all') + tabCount('duplicate') + tabCount('non_duplicate') + tabCount('doing') + supportSubmittedCount}</b>
               </>
             )}
           </p>
@@ -2321,7 +1909,7 @@ export function OrdersListPage() {
                 className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${activeDesignerTab === 'doing' ? 'bg-white/20 text-white' : 'bg-blue-200/80 text-blue-900'
                   }`}
               >
-                {designerDoingOrders.length}
+                {tabCount('doing')}
               </span>
             </button>
 
@@ -2339,7 +1927,7 @@ export function OrdersListPage() {
                 className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${activeDesignerTab === 'fix' ? 'bg-white/20 text-white' : 'bg-rose-200/80 text-rose-900'
                   }`}
               >
-                {designerFixOrders.length}
+                {tabCount('fix')}
               </span>
             </button>
 
@@ -2356,7 +1944,7 @@ export function OrdersListPage() {
                 className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${activeDesignerTab === 'review' ? 'bg-white/20 text-white' : 'bg-purple-200/80 text-purple-900'
                   }`}
               >
-                {designerReviewOrders.length}
+                {tabCount('review')}
               </span>
             </button>
 
@@ -2374,7 +1962,7 @@ export function OrdersListPage() {
                 className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${activeDesignerTab === 'waiting_update' ? 'bg-white/20 text-white' : 'bg-amber-200/80 text-amber-800'
                   }`}
               >
-                {waitingUpdateOrders.length}
+                {tabCount('waiting_update')}
               </span>
             </button>
 
@@ -2392,7 +1980,7 @@ export function OrdersListPage() {
                 className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${activeDesignerTab === 'paid' ? 'bg-white/20 text-white' : 'bg-emerald-200/80 text-emerald-900'
                   }`}
               >
-                {designerPaidOrders.length}
+                {tabCount('paid')}
               </span>
             </button>
 
@@ -2871,19 +2459,20 @@ export function OrdersListPage() {
           {isAdmin && adminTab === 'waiting' && tabCounts.waiting > 0 && (
             <button
               type="button"
-              onClick={() => setQuickDistributeOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-[#0052CC] hover:bg-[#0041A3] rounded-lg shadow-2xs transition-all cursor-pointer hover:shadow-xs"
+              onClick={() => void openQuickDistribute()}
+              disabled={quickDistributeLoading}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-[#0052CC] hover:bg-[#0041A3] rounded-lg shadow-2xs transition-all cursor-pointer hover:shadow-xs disabled:opacity-60"
               title="Chia nhanh đơn từ trên xuống dưới cho Designer"
             >
-              <Zap className="h-3.5 w-3.5 fill-current" />
-              <span>Chia đơn nhanh</span>
+              {quickDistributeLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5 fill-current" />}
+              <span>{quickDistributeLoading ? 'Đang tải đơn…' : 'Chia đơn nhanh'}</span>
             </button>
           )}
 
           {(searchQuery || statusFilter || platformStatusFilter || designerFilter || batchFilter || dateFrom || dateTo || syncedImagesFilter || fixReturnedFilter) && (
             <div className="inline-flex items-center gap-1.5 text-xs text-slate-500 bg-slate-100/80 px-2.5 py-1 rounded-md border border-slate-200/60">
               <span className="text-slate-400">Đang lọc từ:</span>
-              <span className="font-mono font-bold text-slate-700">{isAdmin ? tabCounts[adminTab] : baseOrders.length}</span>
+              <span className="font-mono font-bold text-slate-700">{tabCount(isAdmin ? adminTab : isSupport ? supportTab : activeDesignerTab)}</span>
               <span>task trong tab</span>
               {syncedImagesFilter && (
                 <span className="inline-flex items-center gap-1 ml-1 px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">
@@ -4377,7 +3966,7 @@ export function OrdersListPage() {
       <QuickDistributeModal
         isOpen={quickDistributeOpen}
         onClose={() => setQuickDistributeOpen(false)}
-        waitingOrders={waitingOrders}
+        waitingOrders={quickDistributeOrders}
         designers={regularDesigners}
         onSuccess={async () => { await loadOrders() }}
         setFlash={setFlash}

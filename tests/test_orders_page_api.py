@@ -78,12 +78,54 @@ def test_page_ids_only_and_designer_filter(client, db_session):  # noqa: F811
     assert client.get("/api/orders/page?tab=review&designer_id=unassigned").json()["total"] == 4
 
 
-def test_page_is_admin_only_and_validates_tab(client, db_session):  # noqa: F811
+def test_page_validates_tab_per_role_and_rejects_accountant(client, db_session):  # noqa: F811
     _seed(db_session)
-    _login(client, db_session, "designer", "designer_page")
-    assert client.get("/api/orders/page?tab=review").status_code == 403
     _login(client, db_session, "admin", "admin_page_validate")
     assert client.get("/api/orders/page?tab=nope").status_code == 422
+    assert client.get("/api/orders/page?tab=paid").status_code == 422  # a designer tab
+    _login(client, db_session, "accountant", "accountant_page")
+    assert client.get("/api/orders/page?tab=review").status_code == 403
+
+
+def test_designer_page_only_has_own_orders_and_cannot_search_by_code(client, db_session):  # noqa: F811
+    _seed_platform(db_session)
+    designer = _login(client, db_session, "designer", "designer_page_tabs")
+    mine = [
+        _order(db_session, "MINE-DOING", "IN_PROGRESS", product_name="Blue hoodie"),
+        _order(db_session, "MINE-REVIEW", "QC_PENDING", product_name="Blue cap"),
+        _order(db_session, "MINE-MISSING", "IN_PROGRESS", template_missing=True),
+        _order(db_session, "MINE-PAID", "DONE", is_paid=True),
+        _order(db_session, "MINE-FIX", "REVISION", fix_approved_by_admin=True),
+    ]
+    _order(db_session, "NOT-MINE", "IN_PROGRESS", product_name="Blue other")
+    for order in mine:
+        db_session.add(Assignment(order_id=order.id, designer_id=designer.id, status="approved"))
+    db_session.commit()
+
+    body = client.get("/api/orders/page").json()  # default tab = first designer tab (doing)
+    assert body["total"] == 1 and body["items"][0]["product_name"] == "Blue hoodie"
+    assert body["counts"] == {"doing": 1, "fix": 1, "review": 1, "waiting_update": 1, "paid": 1, "done": 0}
+
+    assert client.get("/api/orders/page?tab=review&q=MINE-REVIEW").json()["total"] == 0  # code is private
+    assert client.get("/api/orders/page?tab=review&q=cap").json()["total"] == 1
+    assert client.get("/api/orders/page?tab=waiting").status_code == 422
+
+
+def test_support_page_tabs_partition_visible_orders(client, db_session):  # noqa: F811
+    _seed_platform(db_session)
+    _login(client, db_session, "support", "support_page_tabs")
+    _order(db_session, "S-UNCHECKED", "WAITING")
+    _order(db_session, "S-DUP", "WAITING", duplicate_check_status="duplicate")
+    _order(db_session, "S-NONDUP", "WAITING", duplicate_check_status="non_duplicate")
+    _order(db_session, "S-DOING", "IN_PROGRESS")
+    _order(db_session, "S-HIDDEN", "DONE")
+    db_session.commit()
+
+    body = client.get("/api/orders/page?tab=all").json()
+    assert body["counts"] == {"all": 1, "duplicate": 1, "non_duplicate": 1, "doing": 1}
+    assert [o["external_order_id"] for o in body["items"]] == ["S-UNCHECKED"]
+    assert body["submitted_count"] == 1
+    assert client.get("/api/orders/page?tab=review").status_code == 422
 
 
 def test_platform_designers_lists_distinct_names(client, db_session):  # noqa: F811

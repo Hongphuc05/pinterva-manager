@@ -25,44 +25,88 @@ const TAB_STATES: Record<string, string[]> = {
   done: ['DONE', 'CLAIMED_IMPORTED', 'COMPLETED', 'SKIPPED'],
 }
 
+const DESIGNER_TABS = ['doing', 'fix', 'review', 'waiting_update', 'paid', 'done']
+const SUPPORT_TABS = ['all', 'duplicate', 'non_duplicate', 'doing']
+
+function inState(o: any, tab: string) {
+  return TAB_STATES[tab].includes((o.state || '').toUpperCase())
+}
+
+// Same tab rules as app/application/order_pages.py, per role.
+function designerTabOf(o: any): string | null {
+  const releasedFix = !o.template_missing && o.fix_approved_by_admin === true && inState(o, 'fix')
+  if (releasedFix) return 'fix'
+  if (o.is_paid) return 'paid'
+  if (o.template_missing || (o.state || '').toUpperCase() === 'WAITING_UPDATE') return 'waiting_update'
+  if (inState(o, 'doing')) return 'doing'
+  if (inState(o, 'review')) return 'review'
+  if (inState(o, 'done')) return 'done'
+  return null
+}
+
+function supportTabOf(o: any): string {
+  if (o.work_domain === 'duplicate' || o.duplicate_check_status === 'duplicate') return 'duplicate'
+  if (o.duplicate_check_status === 'non_duplicate') return 'non_duplicate'
+  const doing = ['IN_PROGRESS', 'ASSIGNED'].includes((o.state || '').toUpperCase()) || (o.platform_status || '').toUpperCase() === 'DOING'
+  return doing ? 'doing' : 'all'
+}
+
 function adminPageAdapter(handler: (url: string, ...rest: any[]) => any) {
+  let role: Promise<string> | null = null
+  const roleOf = (...rest: any[]) => {
+    role ??= Promise.resolve(handler('/api/me', ...rest)).then(async (res: any) => (await res.json()).role as string)
+    return role
+  }
   return (url: string, ...rest: any[]) => {
     if (!url.includes('/api/orders/page')) return handler(url, ...rest)
     const params = new URL(url, 'http://localhost').searchParams
-    return Promise.resolve(handler('/api/orders', ...rest)).then(async (res: any) => {
-      const all: any[] = ((await res.json()).orders ?? [])
-      const tabOf = (o: any) => Object.keys(TAB_STATES).find((t) => TAB_STATES[t].includes((o.state || '').toUpperCase()))
-      const tab = params.get('tab') || 'waiting'
+    return Promise.all([roleOf(...rest), Promise.resolve(handler('/api/orders', ...rest))]).then(async ([userRole, res]: any) => {
+      const legacy = await res.json()
+      const all: any[] = legacy.orders ?? []
+      const isAdmin = userRole === 'admin'
+      const isSupport = userRole === 'support'
+      const tabOf = (o: any) =>
+        isAdmin
+          ? Object.keys(TAB_STATES).find((t) => inState(o, t))
+          : isSupport
+            ? supportTabOf(o)
+            : designerTabOf(o)
+      const tabs = isAdmin ? Object.keys(TAB_STATES) : isSupport ? SUPPORT_TABS : DESIGNER_TABS
+      const tab = params.get('tab') || tabs[0]
       let items = all.filter((o) => tabOf(o) === tab)
       const doingSub = params.get('doing_sub')
       if (tab === 'doing' && doingSub === 'missing') items = items.filter((o) => o.template_missing)
       if (tab === 'doing' && doingSub === 'normal') items = items.filter((o) => !o.template_missing)
       const fixSub = params.get('fix_sub')
-      if (tab === 'fix' && fixSub === 'pending') items = items.filter((o) => !o.fix_approved_by_admin && !o.fix_rejected_by_admin)
-      if (tab === 'fix' && fixSub === 'approved') items = items.filter((o) => o.fix_approved_by_admin)
-      if (tab === 'fix' && fixSub === 'rejected') items = items.filter((o) => o.fix_rejected_by_admin)
+      if (isAdmin && tab === 'fix' && fixSub === 'pending') items = items.filter((o) => !o.fix_approved_by_admin && !o.fix_rejected_by_admin)
+      if (isAdmin && tab === 'fix' && fixSub === 'approved') items = items.filter((o) => o.fix_approved_by_admin)
+      if (isAdmin && tab === 'fix' && fixSub === 'rejected') items = items.filter((o) => o.fix_rejected_by_admin)
       const q = (params.get('q') || '').toLowerCase()
-      if (q) items = items.filter((o) => `${o.external_order_id} ${o.product_name ?? ''}`.toLowerCase().includes(q))
+      if (q) items = items.filter((o) => `${isAdmin || isSupport ? o.external_order_id : ''} ${o.product_name ?? ''}`.toLowerCase().includes(q))
       const psf = (params.get('platform_status') || '').toLowerCase()
       if (psf) items = items.filter((o) => ((o.platform_status || '').toLowerCase().trim() === psf) || (psf === 'unspecified' && !o.platform_status))
       const tabAll = all.filter((o) => tabOf(o) === tab)
       const synced = (o: any) => (o.product_image_urls?.length ?? 0) > 1
       if (params.get('fix_returned') === 'true') items = items.filter((o) => (o.fix_return_count || 0) > 0)
       if (params.get('synced_images') === 'true') items = items.filter(synced)
-      const count = (t: string) => all.filter((o) => tabOf(o) === t).length
+      const counts: Record<string, number> = {}
+      tabs.forEach((t) => {
+        counts[t] = all.filter((o) => tabOf(o) === t).length
+      })
+      if (isAdmin) {
+        counts.doing_missing = all.filter((o) => tabOf(o) === 'doing' && o.template_missing).length
+        counts.doing_normal = all.filter((o) => tabOf(o) === 'doing' && !o.template_missing).length
+        counts.fix_pending = all.filter((o) => tabOf(o) === 'fix' && !o.fix_approved_by_admin && !o.fix_rejected_by_admin).length
+        counts.fix_approved = all.filter((o) => tabOf(o) === 'fix' && o.fix_approved_by_admin).length
+        counts.fix_rejected = all.filter((o) => tabOf(o) === 'fix' && o.fix_rejected_by_admin).length
+      }
       const body = {
         items,
         total: items.length,
+        submitted_count: legacy.submitted_count,
         page: 1,
         page_size: 100,
-        counts: {
-          waiting: count('waiting'), doing: count('doing'), review: count('review'), fix: count('fix'), done: count('done'),
-          doing_missing: all.filter((o) => tabOf(o) === 'doing' && o.template_missing).length,
-          doing_normal: all.filter((o) => tabOf(o) === 'doing' && !o.template_missing).length,
-          fix_pending: all.filter((o) => tabOf(o) === 'fix' && !o.fix_approved_by_admin && !o.fix_rejected_by_admin).length,
-          fix_approved: all.filter((o) => tabOf(o) === 'fix' && o.fix_approved_by_admin).length,
-          fix_rejected: all.filter((o) => tabOf(o) === 'fix' && o.fix_rejected_by_admin).length,
-        },
+        counts,
         aux: { synced_images: tabAll.filter(synced).length, fix_returned: tabAll.filter((o) => (o.fix_return_count || 0) > 0).length },
       }
       return { ok: true, status: 200, json: async () => body }
@@ -1359,7 +1403,8 @@ describe('OrdersListPage', () => {
     // Click it to open modal
     fireEvent.click(quickBtn)
 
-    expect(screen.getByText('Chia Đơn Nhanh Cho Designer')).toBeInTheDocument()
+    // The modal opens once every Waiting order has been fetched.
+    expect(await screen.findByText('Chia Đơn Nhanh Cho Designer')).toBeInTheDocument()
     expect(screen.getByText('Designer A')).toBeInTheDocument()
   })
   it('shows a recently loaded admin page from the cache instead of loading it again', async () => {

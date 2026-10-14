@@ -989,7 +989,7 @@ def api_orders_platform_designers(
 
 @router.get("/orders/page")
 def api_orders_page(
-    tab: str = Query(default="waiting"),
+    tab: str | None = None,
     doing_sub: str = "all",
     fix_sub: str = "all",
     q: str = "",
@@ -1008,12 +1008,16 @@ def api_orders_page(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=100, ge=1, le=order_pages.MAX_PAGE_SIZE),
     ids_only: bool = False,
-    user: User = Depends(require_role(ROLE_ADMIN)),
+    user: User = Depends(
+        require_any_role(ROLE_ADMIN, ROLE_SUPPORT, ROLE_DESIGNER, ROLE_DESIGNER_TRELLO)
+    ),
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
-    """One page of the Admin order list: tab, filters, sort and pagination run in SQL."""
-    if tab not in order_pages.TAB_STATES:
+    """One page of the role's order list: tab, filters, sort and pagination run in SQL."""
+    role_tabs = order_pages.tabs_for_role(user.role)
+    tab = tab or role_tabs[0]
+    if tab not in role_tabs:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "tab không hợp lệ")
     if date_field not in order_pages.DATE_FIELDS or sort_field not in order_pages.DATE_FIELDS:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "trường ngày không hợp lệ")
@@ -1021,6 +1025,7 @@ def api_orders_page(
     if chat_unread:
         only_ids = [uuid.UUID(item["order_id"]) for item in order_chat.unread_for_user(db, user, platform_id)]
     params = order_pages.PageParams(
+        role=user.role,
         tab=tab,
         doing_sub=doing_sub,
         fix_sub=fix_sub,
@@ -1040,8 +1045,8 @@ def api_orders_page(
         page=page,
         page_size=page_size,
     )
-    loaded = order_pages.load_admin_page(db, user, platform_id, params)
-    empty_counts = {key: 0 for key in order_pages.TAB_STATES}
+    loaded = order_pages.load_orders_page(db, user, platform_id, params)
+    empty_counts = {key: 0 for key in role_tabs}
     if loaded is None:
         return {"items": [], "ids": [], "total": 0, "page": page, "page_size": page_size,
                 "counts": empty_counts, "aux": {"synced_images": 0, "fix_returned": 0}}
@@ -1054,6 +1059,11 @@ def api_orders_page(
     rows = ordered.offset((page - 1) * page_size).limit(page_size).all()
     return {
         "items": _summarize_orders(db, user, rows),
+        "submitted_count": (
+            count_support_submitted_orders(db, user.platform_id)
+            if user.role == ROLE_SUPPORT and user.platform_id
+            else None
+        ),
         "total": total,
         "page": page,
         "page_size": page_size,

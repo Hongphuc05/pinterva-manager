@@ -76,13 +76,15 @@ vì callback duplicate chỉ xác thực chat riêng.
 - `POST /orders/duplicate-check-status` và `POST /orders/duplicate-domain` cho phép Admin/Support,
   nhưng Support chỉ thao tác được trên order ở `Waiting` hoặc state legacy tương đương. Order đã
   được chia trả HTTP 400, kể cả khi chưa gắn tag; callback Telegram áp dụng cùng quy tắc.
-- `GET /orders/page` (chỉ Admin): trang danh sách đơn phân trang ở server — `tab`
-  (`waiting|doing|review|fix|done`), `doing_sub`, `fix_sub`, `q`, `status`, `designer_id`,
+- `GET /orders/page` (Admin, Support, Designer, Designer-Trello; Accountant bị chặn): trang danh sách đơn phân
+  trang ở server, tab theo role — Admin `waiting|doing|review|fix|done`, Support
+  `all|duplicate|non_duplicate|doing`, Designer `doing|fix|review|waiting_update|paid|done`. Tham số: `doing_sub`, `fix_sub`, `q`, `status`, `designer_id`,
   `platform_status`, `batch`, `date_field`/`date_from`/`date_to` (ngày theo UTC+7), `fix_returned`,
   `synced_images`, `chat_unread`, `sort_field`/`sort_dir`, `page`/`page_size` (≤200). Trả `items`, `total`,
   `counts` (số đơn từng tab, không áp bộ lọc), `aux` và `search_counts` khi có `q`. `ids_only=true` trả
   danh sách id của tab (tối đa 5000) cho nút đồng bộ cả tab. `GET /orders/platform-designers` trả tên
-  designer Printerval cho bộ lọc quét đơn. Admin UI không còn tải toàn bộ `GET /orders`.
+  designer Printerval cho bộ lọc quét đơn. Danh sách đơn trên web không còn tải toàn bộ `GET /orders`. Designer chỉ tìm theo tên sản phẩm; `batch` chỉ
+  Admin/Support dùng.
 - Response API được nén gzip; `/assets` có `Cache-Control: immutable` (tên file có hash).
 - `GET /orders` với role Support chỉ trả order `Waiting`/`Doing` và thêm `submitted_count`: số order
   đã qua Doing (Review/Fix/Done) của platform, không trả nội dung. `GET /orders/{id}` trả 404 cho
