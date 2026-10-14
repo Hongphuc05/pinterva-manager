@@ -336,12 +336,10 @@ export function OrdersListPage() {
     if (!isManager && syncedImagesFilter) setSyncedImagesFilter(false)
   }, [isManager, syncedImagesFilter])
 
-  // Date Filter State (4 modes; deadline_tacahu is Admin-only)
-  type DateFilterType = 'status_changed_at' | 'order_created_at_ext' | 'created_at' | 'deadline_tacahu'
-  const DATE_FILTER_TYPES: DateFilterType[] = ['status_changed_at', 'order_created_at_ext', 'created_at', 'deadline_tacahu']
-  const [dateFilterType, setDateFilterType] = useState<DateFilterType>(
-    DATE_FILTER_TYPES.includes(restoredViewState.dateFilterType as DateFilterType)
-      ? (restoredViewState.dateFilterType as DateFilterType)
+  // Date Filter State (3 Modes: status_changed_at, order_created_at_ext, created_at)
+  const [dateFilterType, setDateFilterType] = useState<'status_changed_at' | 'order_created_at_ext' | 'created_at'>(
+    ['status_changed_at', 'order_created_at_ext', 'created_at'].includes(String(restoredViewState.dateFilterType))
+      ? restoredViewState.dateFilterType as 'status_changed_at' | 'order_created_at_ext' | 'created_at'
       : 'status_changed_at',
   )
   const [dateFrom, setDateFrom] = useState(String(restoreAdminFilters ? restoredViewState.dateFrom || '' : ''))
@@ -2399,13 +2397,12 @@ export function OrdersListPage() {
             {/* Select Date Column */}
             <select
               value={dateFilterType}
-              onChange={(e) => setDateFilterType(e.target.value as DateFilterType)}
+              onChange={(e) => setDateFilterType(e.target.value as any)}
               className="text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 bg-slate-50 font-semibold focus:outline-none focus:border-[#0052CC] text-[#0052CC]"
             >
               <option value="status_changed_at">Thời Gian (Vào tab)</option>
               <option value="order_created_at_ext">Order At (Giờ đặt)</option>
               {isAdmin && <option value="created_at">Ngày tạo (crawl)</option>}
-              {isAdmin && <option value="deadline_tacahu">Deadline Tacahu</option>}
             </select>
 
             {/* Date Inputs (UTC+7) */}
@@ -3631,8 +3628,9 @@ export function OrdersListPage() {
 
                                 return (
                                   <div className="space-y-2">
+                                    {/* Fix reuses the first submission; Designer cannot replace its link. */}
                                     <div className="flex items-center gap-1.5">
-                                      {<input
+                                      {!isFixOrder && <input
                                         type="url"
                                         value={currentLink}
                                         onChange={(e) => setInlineSubmissionLinks((prev) => ({ ...prev, [o.id]: e.target.value }))}
@@ -3642,11 +3640,11 @@ export function OrdersListPage() {
                                             handleInlineSubmit(o, currentLink)
                                           }
                                         }}
-                                        placeholder={isFixOrder ? 'Link bài đã sửa (để trống = giữ link cũ)...' : 'Dán link thiết kế (Drive, Canva, DropBox...)'}
+                                        placeholder={isFixOrder ? 'Link thiết kế (Tùy chọn với đơn Fix)...' : 'Dán link thiết kế (Drive, Canva, DropBox...)'}
                                         disabled={isSubmitting || Boolean(o.template_missing)}
                                         className="flex-1 min-w-[200px] rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900 placeholder:text-slate-400 focus:border-[#0052CC] focus:ring-1 focus:ring-[#0052CC] shadow-2xs disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed"
                                       />}
-                                      <OpenExternalLinkButton url={currentLink} label="Mở" />
+                                      {!isFixOrder && <OpenExternalLinkButton url={currentLink} label="Mở" />}
                                       <button
                                         type="button"
                                         onClick={() => handleInlineSubmit(o, currentLink)}

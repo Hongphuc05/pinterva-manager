@@ -67,11 +67,7 @@ transition nhưng application layer không được tự động recover.
 6. **Fix**: Fix trước hết nằm ở Admin. Admin duyệt sẽ release hướng dẫn riêng cho
    Designer, Designer sửa và nộp lại Review. Admin từ chối Fix thì trả về `QC_PENDING`
    cùng ghi chú phản hồi cho platform. Không expose trực tiếp upstream `note_outsource`
-   cho Designer. Nộp lại sau Fix **không khóa link**: Designer có thể dán link bài đã sửa
-   (tạo `ResultVersion` mới, validate Drive, đẩy vào `note_outsource` trên Printerval); để trống
-   thì dùng lại link `ResultVersion` gần nhất. Phản hồi QC cũ được giữ ở
-   `previous_note_outsource`; trao đổi với Printerval đi qua khung chat từng đơn của web mẹ,
-   nên `note_outsource` chỉ còn mang link nộp.
+   cho Designer.
 
 ## Duplicate Board
 

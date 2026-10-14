@@ -2365,25 +2365,11 @@ def api_update_order_state(
         or old_state in (OrderState.REVISION.value, "FIX", "REVISION_REQUESTED")
         or order.fix_approved_by_admin
     )
-    # A Fix resubmission carries the link too (the note only holds the link now); any other
-    # change of a Fix order leaves its note untouched.
-    carries_link = not is_fix_order or target_state == OrderState.QC_PENDING
-    if is_fix_order and target_state == OrderState.QC_PENDING and not submitted_link:
-        # No new link: keep the latest one the Designer already submitted.
-        last_link = (
-            db.query(ResultVersion.drive_url)
-            .join(Assignment, Assignment.id == ResultVersion.assignment_id)
-            .filter(Assignment.order_id == order.id, Assignment.status != "cancelled")
-            .order_by(ResultVersion.version_marker.desc())
-            .limit(1)
-            .scalar()
-        )
-        submitted_link = (last_link or "").strip()
-    if carries_link and (submitted_link or submitted_note):
-        new_note = submitted_link or submitted_note
-        if is_fix_order and new_note != order.note_outsource:
-            order.previous_note_outsource = order.note_outsource
-        order.note_outsource = new_note
+    if not is_fix_order:
+        if submitted_link:
+            order.note_outsource = submitted_link
+        elif submitted_note:
+            order.note_outsource = submitted_note
 
     actor_name = user.full_name or user.username
     des_name = None
@@ -2401,7 +2387,7 @@ def api_update_order_state(
         des_name = order.printerval_designer
 
     # Record submitted version if drive link provided and not fix order
-    if submitted_link and curr_assignment and carries_link:
+    if submitted_link and curr_assignment and not is_fix_order:
         v_count = db.query(ResultVersion).filter(ResultVersion.assignment_id == curr_assignment.id).count()
         rv = ResultVersion(
             assignment_id=curr_assignment.id,
@@ -2495,9 +2481,7 @@ def api_update_order_state(
 
             sync_order_review_to_printerval_task.delay(
                 str(order.id),
-                # A Fix order whose note still holds Printerval's feedback (no link
-                # known) must not push that text back.
-                order.note_outsource if (submitted_link or not is_fix_order) else None,
+                None if is_fix_order else order.note_outsource,
                 "Review",
                 expected_state=OrderState.QC_PENDING.value,
                 expected_fix_approved=is_fix_order,
