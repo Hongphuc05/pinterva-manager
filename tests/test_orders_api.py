@@ -854,6 +854,14 @@ def test_resolve_missing_template_returns_assigned_order_to_doing(client, db_ses
     assert assignment.sub_status == "doing"
     assert order.template_resolved_at is not None
 
+    work_notes = client.get(f"/api/orders/{order.id}/work-notes")
+    assert work_notes.status_code == 200
+    assert [note["body"] for note in work_notes.json()["notes"]] == [
+        "Temp: https://example.com/template"
+    ]
+    assert work_notes.json()["notes"][0]["author_role"] == "admin"
+    assert response.json()["work_note_id"] == work_notes.json()["notes"][0]["id"]
+
     detail_after = client.get(f"/api/orders/{order.id}")
     assert detail_after.status_code == 200
     assert detail_after.json()["order"]["template_missing"] is False

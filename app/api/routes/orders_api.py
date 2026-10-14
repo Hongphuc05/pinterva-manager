@@ -76,7 +76,11 @@ from app.application.order_queries import (
     list_orders_for_user,
 )
 from app.application.order_transitions import apply_transition
-from app.application.order_work_notes import PRIVATE_WORK_NOTE_ASSETS_DIR, create_work_note
+from app.application.order_work_notes import (
+    PRIVATE_WORK_NOTE_ASSETS_DIR,
+    create_text_work_note,
+    create_work_note,
+)
 from app.application.printerval_assignment_requests import (
     PRINTERVAL_STATUSES,
     PrintervalAssignmentValidationError,
@@ -2336,12 +2340,20 @@ def api_resolve_missing_template(
         raise HTTPException(status.HTTP_409_CONFLICT, "Đơn thiếu assignment đang hoạt động")
 
     old_state = order.state
-    # The shared Work Note is the normal place for the new temp. Preserve an
-    # existing Designer instruction when the Admin resolves from that note;
-    # the optional field remains for older clients that send one directly.
+    # Keep the released instruction for the Designer and append the same text
+    # to the shared Work Note in this transaction. Older clients may still
+    # resolve without a note, so the field remains optional.
     supplied_note = payload.designer_note.strip()
+    work_note = None
     if supplied_note:
         order.designer_note = supplied_note
+        work_note = create_text_work_note(
+            db,
+            order_id=order.id,
+            author=user,
+            body=supplied_note,
+            idempotency_key=f"resolve-missing-template:{order.id}:{order.version}",
+        )
     # This is an explicit Admin release to the assigned Designer. The legacy
     # column name is retained for schema compatibility, but now represents a
     # note released to the active task (Fix or resolved missing template).
@@ -2372,6 +2384,7 @@ def api_resolve_missing_template(
         "ok": True,
         "state": order.state,
         "designer_note": order.designer_note,
+        "work_note_id": str(work_note.id) if work_note else None,
         "template_resolved_at": order.template_resolved_at,
     }
 

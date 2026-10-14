@@ -18,6 +18,44 @@ MAX_IMAGE_BYTES = 10 * 1024 * 1024
 PRIVATE_WORK_NOTE_ASSETS_DIR = Path(__file__).resolve().parent.parent.parent / "private_work_note_assets"
 
 
+def create_text_work_note(
+    session: Session,
+    *,
+    order_id: uuid.UUID,
+    author: User,
+    body: str,
+    idempotency_key: str,
+) -> OrderWorkNote:
+    """Append a text-only note inside the caller's transaction.
+
+    The resolve-missing-template command needs the note and the state change to
+    commit together, so this helper deliberately does not commit or create
+    attachments. The existing ``create_work_note`` path remains responsible
+    for the standalone multipart note endpoint.
+    """
+    clean_body = body.strip()
+    if not clean_body:
+        raise ValueError("Work note body cannot be empty")
+
+    existing = (
+        session.query(OrderWorkNote)
+        .filter_by(order_id=order_id, author_id=author.id, idempotency_key=idempotency_key)
+        .one_or_none()
+    )
+    if existing is not None:
+        return existing
+
+    note = OrderWorkNote(
+        order_id=order_id,
+        author_id=author.id,
+        body=clean_body,
+        idempotency_key=idempotency_key,
+    )
+    session.add(note)
+    session.flush()
+    return note
+
+
 def _image_type(content: bytes) -> tuple[str, str] | None:
     """Accept only formats browsers safely render as raster images."""
     if content.startswith(b"\x89PNG\r\n\x1a\n"):

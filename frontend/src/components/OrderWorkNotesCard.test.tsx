@@ -20,10 +20,30 @@ describe('OrderWorkNotesCard', () => {
     apiFetchBlob.mockReset()
     apiFetch.mockResolvedValueOnce({ notes: [] })
     vi.stubGlobal('crypto', { randomUUID: () => 'request-1' })
-    vi.stubGlobal('URL', {
+    vi.stubGlobal('URL', Object.assign(globalThis.URL, {
       createObjectURL: vi.fn(() => 'blob:preview'),
       revokeObjectURL: vi.fn(),
+    }))
+  })
+
+  it('renders a template link loaded from the shared work notes', async () => {
+    apiFetch.mockReset()
+    apiFetch.mockResolvedValueOnce({
+      notes: [{
+        id: 'note-temp',
+        body: 'Temp: https://example.com/template',
+        author_name: 'Admin',
+        author_role: 'admin',
+        created_at: '2026-09-20T00:00:00Z',
+        attachments: [],
+      }],
     })
+
+    render(<OrderWorkNotesCard orderId="order-1" />)
+
+    const link = await screen.findByRole('link', { name: 'https://example.com/template' })
+    expect(link).toHaveAttribute('href', 'https://example.com/template')
+    expect(screen.getByText('Admin · Admin')).toBeInTheDocument()
   })
 
   it('turns a pasted image into a preview and submits it with the note', async () => {
