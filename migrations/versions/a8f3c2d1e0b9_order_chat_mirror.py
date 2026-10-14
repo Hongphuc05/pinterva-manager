@@ -1,7 +1,7 @@
 """order_chat_messages, order_chat_reads and the chat cursor columns on orders
 
 Revision ID: a8f3c2d1e0b9
-Revises: f5d6e7f8a9b0
+Revises: b9c0d1e2f3a4
 Create Date: 2026-10-14
 """
 
@@ -10,7 +10,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "a8f3c2d1e0b9"
-down_revision = "f5d6e7f8a9b0"
+down_revision = "b9c0d1e2f3a4"
 branch_labels = None
 depends_on = None
 
