@@ -45,7 +45,7 @@ function latestTimestamp(...values: Array<string | null | undefined>): string | 
     .sort((left, right) => Date.parse(right) - Date.parse(left))[0] ?? null
 }
 
-function toSyncStatus(job: SyncJob | null, platformStatus: SyncStatus | null): SyncStatus {
+export function toSyncStatus(job: SyncJob | null, platformStatus: SyncStatus | null): SyncStatus {
   const jobIsRunning = job?.status === 'queued' || job?.status === 'running'
   const platformIsRunning = platformStatus?.is_running === true
   const jobProgress: Record<string, unknown> | null = job
@@ -71,6 +71,11 @@ function toSyncStatus(job: SyncJob | null, platformStatus: SyncStatus | null): S
     last_error: job?.error_summary ?? null,
   }
 
+  // Only the run that finished last decides the error badge: a manual job that
+  // succeeded after a failed scheduled run clears it, and vice versa.
+  const jobFinishedAt = Date.parse(job?.finished_at ?? '') || 0
+  const platformFinishedAt = Date.parse(platformStatus?.last_finished_at ?? '') || 0
+
   return {
     // Manual tab/header jobs and Celery's scheduled status mirror are durable,
     // independent server-side jobs.  The header must reflect either one after
@@ -86,7 +91,8 @@ function toSyncStatus(job: SyncJob | null, platformStatus: SyncStatus | null): S
     last_result: jobIsRunning || !platformStatus?.last_result
       ? jobStatus.last_result
       : platformStatus.last_result,
-    last_error: jobStatus.last_error || platformStatus?.last_error || null,
+    last_error:
+      (jobFinishedAt >= platformFinishedAt ? jobStatus.last_error : platformStatus?.last_error) || null,
   }
 }
 
