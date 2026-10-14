@@ -514,6 +514,81 @@ describe('OrdersListPage', () => {
     expect(screen.getByText('Báo thiếu temp')).toBeInTheDocument()
   })
 
+  it('renders and filters the Deadline Tacahu column for Designer', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(adminPageAdapter((url: string) => {
+        if (url.includes('/api/me')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ id: 'des-deadline', role: 'designer', full_name: 'Designer Deadline' }),
+          })
+        }
+        if (url.includes('/api/platforms')) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ platforms: [] }) })
+        }
+        if (url.includes('/api/orders')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              orders: [
+                {
+                  id: 'designer-deadline-in',
+                  external_order_id: 'DJ-DEADLINE-IN',
+                  product_name: 'Designer Deadline In',
+                  state: 'IN_PROGRESS',
+                  template_missing: false,
+                  deadline_tacahu: '2026-10-20T03:00:00Z',
+                  batch_id: null,
+                  sku: 'SKU-IN',
+                  thumbnail_url: null,
+                  created_at: '2026-10-01T00:00:00Z',
+                },
+                {
+                  id: 'designer-deadline-out',
+                  external_order_id: 'DJ-DEADLINE-OUT',
+                  product_name: 'Designer Deadline Out',
+                  state: 'IN_PROGRESS',
+                  template_missing: false,
+                  deadline_tacahu: '2026-11-05T12:00:00Z',
+                  batch_id: null,
+                  sku: 'SKU-OUT',
+                  thumbnail_url: null,
+                  created_at: '2026-10-01T00:00:00Z',
+                },
+              ],
+            }),
+          })
+        }
+        return Promise.reject(new Error(`unexpected fetch: ${url}`))
+      })),
+    )
+
+    render(
+      <BrowserRouter>
+        <AuthProvider><PlatformProvider><ToastProvider><GallerySyncProvider><OrdersListPage /></GallerySyncProvider></ToastProvider></PlatformProvider></AuthProvider>
+      </BrowserRouter>,
+    )
+
+    await screen.findByText('Designer Deadline In')
+    expect(screen.getByRole('columnheader', { name: 'Deadline Tacahu' })).toBeInTheDocument()
+    expect(screen.getByText('10:00:00')).toBeInTheDocument()
+    expect(screen.getByText('20/10/2026')).toBeInTheDocument()
+    expect(screen.getByText('19:00:00')).toBeInTheDocument()
+    expect(screen.getByText('05/11/2026')).toBeInTheDocument()
+
+    const dateSelect = screen.getByDisplayValue('Thời Gian (Vào tab)') as HTMLSelectElement
+    expect(within(dateSelect).getByRole('option', { name: 'Deadline Tacahu' })).toBeInTheDocument()
+    fireEvent.change(dateSelect, { target: { value: 'deadline_tacahu' } })
+    fireEvent.change(screen.getByTitle('Từ ngày (UTC+7)'), { target: { value: '2026-10-20' } })
+    fireEvent.change(screen.getByTitle('Đến ngày (UTC+7)'), { target: { value: '2026-10-20' } })
+
+    await waitFor(() => expect(screen.queryByText('Designer Deadline Out')).not.toBeInTheDocument())
+    expect(screen.getByText('Designer Deadline In')).toBeInTheDocument()
+  })
+
   it('only shows Admin-approved Fix orders in the designer Fix tab', async () => {
     vi.stubGlobal(
       'fetch',

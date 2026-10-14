@@ -260,6 +260,7 @@ export function OrdersListPage() {
   const { activePlatform } = usePlatform()
   const isAdmin = user?.role === 'admin'
   const isSupport = user?.role === 'support'
+  const isDesigner = user?.role === 'designer' || user?.role === 'designer-trello'
   const isManager = isAdmin || isSupport
   const [restoredViewState] = useState(() => readViewState('orders-list', user?.role, {
     adminTab: 'waiting',
@@ -372,7 +373,7 @@ export function OrdersListPage() {
     if (!isManager && syncedImagesFilter) setSyncedImagesFilter(false)
   }, [isManager, syncedImagesFilter])
 
-  // Date Filter State (3 Modes: status_changed_at, order_created_at_ext, created_at)
+  // Date Filter State (4 Modes: status_changed_at, order_created_at_ext, created_at, deadline_tacahu)
   const [dateFilterType, setDateFilterType] = useState<'status_changed_at' | 'order_created_at_ext' | 'created_at' | 'deadline_tacahu'>(
     ['status_changed_at', 'order_created_at_ext', 'created_at', 'deadline_tacahu'].includes(String(restoredViewState.dateFilterType))
       ? restoredViewState.dateFilterType as 'status_changed_at' | 'order_created_at_ext' | 'created_at' | 'deadline_tacahu'
@@ -2173,7 +2174,7 @@ export function OrdersListPage() {
               <option value="status_changed_at">Thời Gian (Vào tab)</option>
               <option value="order_created_at_ext">Order At (Giờ đặt)</option>
               {isAdmin && <option value="created_at">Ngày tạo (crawl)</option>}
-              {isAdmin && <option value="deadline_tacahu">Deadline Tacahu</option>}
+              {(isAdmin || isDesigner) && <option value="deadline_tacahu">Deadline Tacahu</option>}
             </select>
 
             {/* Date Inputs (UTC+7) */}
@@ -2627,6 +2628,7 @@ export function OrdersListPage() {
                       {renderDateSortIcon('status_changed_at')}
                     </button>
                   </th>
+                  <th className="py-3 px-4 w-36 whitespace-nowrap">Deadline Tacahu</th>
                   {activeDesignerTab === 'doing' && (
                     <th className="py-3 px-4 min-w-[320px]">Nộp Link Bài Thiết Kế</th>
                   )}
@@ -2636,7 +2638,7 @@ export function OrdersListPage() {
             <tbody className="divide-y divide-slate-100 text-xs">
               {paginatedOrders.length === 0 ? (
                 <tr>
-                  <td colSpan={isSupport ? 4 : isAdmin ? 9 : 5} className="py-12 text-center text-slate-400">
+                  <td colSpan={isSupport ? 4 : isAdmin ? 9 : activeDesignerTab === 'doing' ? 6 : 5} className="py-12 text-center text-slate-400">
                     {ordersLoading ? (
                       <>
                         <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin opacity-50 text-[#0052CC]" />
@@ -3407,6 +3409,20 @@ export function OrdersListPage() {
                                 <div className="flex flex-col leading-tight" title="Thời gian chuyển vào tab / cập nhật gần nhất (UTC+7)">
                                   <span className="font-mono text-xs font-bold text-slate-800">{split.time}</span>
                                   <span className="font-mono text-[11px] text-slate-500">{split.date}</span>
+                                </div>
+                              )
+                            })()}
+                          </td>
+
+                          {/* Deadline Tacahu (UTC+7) */}
+                          <td className="py-3 px-4 whitespace-nowrap">
+                            {(() => {
+                              const split = formatUtc7Split(o.deadline_tacahu)
+                              if (!split) return <span className="text-slate-300 font-mono text-xs">-</span>
+                              return (
+                                <div className="flex flex-col leading-tight" title="Deadline Tacahu (UTC+7)">
+                                  <span className="font-mono text-xs font-bold text-amber-700">{split.time}</span>
+                                  <span className="font-mono text-[11px] text-amber-600">{split.date}</span>
                                 </div>
                               )
                             })()}

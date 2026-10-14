@@ -154,3 +154,31 @@ def test_page_date_range_can_filter_by_tacahu_deadline(client, db_session):  # n
     ).json()
 
     assert [o["external_order_id"] for o in body["items"]] == ["DL-IN"]
+
+
+def test_designer_page_date_range_can_filter_by_tacahu_deadline(client, db_session):  # noqa: F811
+    _seed_platform(db_session)
+    designer = _login(client, db_session, "designer", "designer_page_deadline")
+    in_range = _order(
+        db_session,
+        "DES-DL-IN",
+        "IN_PROGRESS",
+        product_name="Designer deadline in range",
+        deadline_tacahu=datetime(2026, 10, 20, 3, 0, tzinfo=UTC),
+    )
+    _order(
+        db_session,
+        "DES-DL-OUT",
+        "IN_PROGRESS",
+        product_name="Designer deadline out of range",
+        deadline_tacahu=datetime(2026, 11, 5, 3, 0, tzinfo=UTC),
+    )
+    db_session.add(Assignment(order_id=in_range.id, designer_id=designer.id, status="approved"))
+    db_session.commit()
+
+    body = client.get(
+        "/api/orders/page?tab=doing&date_field=deadline_tacahu&date_from=2026-10-20&date_to=2026-10-20"
+    ).json()
+
+    assert [o["external_order_id"] for o in body["items"]] == ["DES-DL-IN"]
+    assert body["items"][0]["deadline_tacahu"] == "2026-10-20T03:00:00Z"
