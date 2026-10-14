@@ -471,6 +471,7 @@ export function OrdersListPage() {
   const [updatingPlatformStatus, setUpdatingPlatformStatus] = useState(false)
   const [flaggingMissingOrderId, setFlaggingMissingOrderId] = useState<string | null>(null)
   const [resolvingTemplateOrderId, setResolvingTemplateOrderId] = useState<string | null>(null)
+  const [missingTemplateNotes, setMissingTemplateNotes] = useState<Record<string, string>>({})
 
   // Bulk Selection State & Range Selection
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([])
@@ -1267,13 +1268,23 @@ export function OrdersListPage() {
   }
 
   async function resolveMissingTemplate(order: OrderSummary) {
+    const designerNote = (
+      missingTemplateNotes[order.id] !== undefined
+        ? missingTemplateNotes[order.id]
+        : order.designer_note || ''
+    ).trim()
     setResolvingTemplateOrderId(order.id)
     try {
       await apiFetch(`/orders/${order.id}/resolve-missing-template`, {
         method: 'POST',
-        body: JSON.stringify({ expected_version: order.version }),
+        body: JSON.stringify({ designer_note: designerNote, expected_version: order.version }),
       })
       showToast(`Đã cập nhật temp cho đơn ${order.external_order_id} và trả về Doing.`, 'success')
+      setMissingTemplateNotes((current) => {
+        const next = { ...current }
+        delete next[order.id]
+        return next
+      })
       markTabMoved(order.id)
       await loadOrders()
     } catch (err: any) {
@@ -3556,16 +3567,33 @@ export function OrdersListPage() {
                               {adminTab === 'doing' && (
                                 <>
                                   {o.template_missing && (
-                                    <button
-                                      type="button"
-                                      onClick={() => resolveMissingTemplate(o)}
-                                      disabled={resolvingTemplateOrderId === o.id}
-                                      className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1 rounded-lg transition-colors cursor-pointer shadow-2xs disabled:opacity-50"
-                                      title="Sau khi đã thêm temp vào Note làm việc, trả đơn này về Doing cho Designer"
-                                    >
-                                      {resolvingTemplateOrderId === o.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
-                                      <span>{resolvingTemplateOrderId === o.id ? 'Đang cập nhật…' : 'Cập nhật temp'}</span>
-                                    </button>
+                                    <div className="flex w-full min-w-[320px] items-end gap-1.5">
+                                      <textarea
+                                        aria-label={`Note làm việc cho ${o.external_order_id}`}
+                                        rows={2}
+                                        value={missingTemplateNotes[o.id] !== undefined ? missingTemplateNotes[o.id] : (o.designer_note || '')}
+                                        onChange={(event) => setMissingTemplateNotes((current) => ({ ...current, [o.id]: event.target.value }))}
+                                        onKeyDown={(event) => {
+                                          if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                                            event.preventDefault()
+                                            void resolveMissingTemplate(o)
+                                          }
+                                        }}
+                                        placeholder="Dán link temp hoặc ghi chú gửi Designer..."
+                                        disabled={resolvingTemplateOrderId === o.id}
+                                        className="min-h-[42px] min-w-0 flex-1 resize-y rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:bg-slate-50 disabled:text-slate-400"
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => resolveMissingTemplate(o)}
+                                        disabled={resolvingTemplateOrderId === o.id}
+                                        className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-bold text-emerald-700 shadow-2xs transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                        title="Lưu Note làm việc, bổ sung temp và trả đơn về Doing cho Designer"
+                                      >
+                                        {resolvingTemplateOrderId === o.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                                        <span>{resolvingTemplateOrderId === o.id ? 'Đang cập nhật…' : 'Cập nhật temp'}</span>
+                                      </button>
+                                    </div>
                                   )}
                                   <button
                                     type="button"

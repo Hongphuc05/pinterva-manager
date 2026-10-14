@@ -210,6 +210,76 @@ describe('OrdersListPage', () => {
     expect(await screen.findByText('DJ-FIX-VISIBLE')).toBeInTheDocument()
   })
 
+  it('lets Admin add the Designer note and resolve a missing template from the Doing list', async () => {
+    let resolved = false
+    let resolveRequest: { url: string; init?: RequestInit } | null = null
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string, init?: RequestInit) => {
+        if (url.includes('/api/me')) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ id: 'admin-inline-temp', role: 'admin', full_name: 'Admin' }) })
+        }
+        if (url.includes('/api/platforms')) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ platforms: [] }) })
+        }
+        if (url.includes('/api/users')) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => [] })
+        }
+        if (url.includes('/api/orders/inline-missing/resolve-missing-template')) {
+          resolveRequest = { url, init }
+          resolved = true
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ ok: true, state: 'IN_PROGRESS', designer_note: 'https://drive.google.com/temp-1' }),
+          })
+        }
+        if (url.includes('/api/orders')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              orders: resolved
+                ? []
+                : [{
+                    id: 'inline-missing',
+                    version: 7,
+                    external_order_id: 'DJ-INLINE-TEMP',
+                    product_name: 'Inline temp order',
+                    state: 'IN_PROGRESS',
+                    template_missing: true,
+                    assignment_id: 'assignment-inline',
+                    platform_status: 'doing',
+                    created_at: '2026-10-14T00:00:00Z',
+                  }],
+            }),
+          })
+        }
+        return Promise.reject(new Error(`unexpected fetch: ${url}`))
+      }),
+    )
+
+    window.history.pushState({}, '', '/orders?tab=doing')
+    render(
+      <BrowserRouter>
+        <AuthProvider><PlatformProvider><ToastProvider><GallerySyncProvider><OrdersListPage /></GallerySyncProvider></ToastProvider></PlatformProvider></AuthProvider>
+      </BrowserRouter>,
+    )
+
+    await screen.findByText('DJ-INLINE-TEMP')
+    const note = screen.getByPlaceholderText('Dán link temp hoặc ghi chú gửi Designer...')
+    fireEvent.change(note, { target: { value: 'https://drive.google.com/temp-1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Cập nhật temp' }))
+
+    await waitFor(() => expect(resolveRequest).not.toBeNull())
+    expect(JSON.parse(resolveRequest!.init?.body as string)).toEqual({
+      designer_note: 'https://drive.google.com/temp-1',
+      expected_version: 7,
+    })
+    await waitFor(() => expect(screen.queryByText('DJ-INLINE-TEMP')).not.toBeInTheDocument())
+  })
+
   it('lets an admin filter the current tab to orders that have entered Fix', async () => {
     vi.stubGlobal(
       'fetch',
