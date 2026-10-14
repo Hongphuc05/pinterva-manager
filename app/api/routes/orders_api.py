@@ -93,6 +93,7 @@ from app.application.sanitization import (
     sanitize_order_summary_for_designer,
     sanitize_workflow_event_for_designer,
 )
+from app.application.support_compare import notify_support_new_waiting_orders
 from app.config import get_settings
 from app.domain.access import (
     ROLE_ADMIN,
@@ -1895,6 +1896,9 @@ def api_orders_refresh(
             f"{summary['added']} đơn mới"
         )
         flash += "."
+        notify_support_new_waiting_orders(
+            db, platform_id=platform_id, added=int(summary.get("added_waiting", 0))
+        )
         return RefreshResponse(flash=flash, summary=summary)
     except DiscoverFailedError:
         db.rollback()

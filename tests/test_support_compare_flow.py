@@ -980,3 +980,151 @@ def test_handle_also_moves_orders_whose_pair_was_rejected_on_telegram(client, db
     assert db_session.get(Order, plain.id).duplicate_check_status == "non_duplicate"
     assert db_session.get(Order, waiting.id).duplicate_check_status == "uncheck"
     assert db_session.get(Order, confirmed.id).duplicate_check_status == "uncheck"  # verified, awaits the web move
+
+
+# ------------------------------------------------------- new Waiting orders → Support Telegram
+
+
+def test_support_is_told_how_many_new_waiting_orders_a_crawl_brought(db_session, setup):
+    from app.application.support_compare import notify_support_new_waiting_orders
+
+    _order(db_session, setup, "DJ-NEW-1")
+    _order(db_session, setup, "DJ-NEW-2")
+    silent = User(
+        username="support-no-tg", full_name="No Telegram", role="support", password_hash=hash_password("pass"),
+        telegram_chat_id=None, active=True, platform_id=setup.platform.id,
+    )
+    db_session.add(silent)
+    db_session.commit()
+
+    with patch("app.application.support_compare.send_message", return_value={"message_id": 1}) as send, patch(
+        "app.application.support_compare.get_settings", return_value=SimpleNamespace(support_compare_enabled=True)
+    ):
+        sent = notify_support_new_waiting_orders(db_session, platform_id=setup.platform.id, added=2)
+
+    assert sent == 1  # only the linked account
+    chat, text = send.call_args.args
+    assert chat == CHAT_ID
+    assert "<b>2</b> đơn mới ở Waiting" in text and "/check" in text and "<b>2</b> đơn chưa kiểm tra" in text
+    button = send.call_args.kwargs["reply_markup"]["inline_keyboard"][0][0]
+    assert button["text"].endswith("Claim lô này") and button["callback_data"].startswith("scclaim:")
+
+
+def test_no_message_when_nothing_new_and_a_failing_bot_never_raises(db_session, setup):
+    from app.application.support_compare import notify_support_new_waiting_orders
+
+    with patch("app.application.support_compare.send_message") as send:
+        assert notify_support_new_waiting_orders(db_session, platform_id=setup.platform.id, added=0) == 0
+    send.assert_not_called()
+
+    with patch("app.application.support_compare.send_message", side_effect=RuntimeError("telegram down")), patch(
+        "app.application.support_compare.get_settings", return_value=SimpleNamespace(support_compare_enabled=False)
+    ):
+        assert notify_support_new_waiting_orders(db_session, platform_id=setup.platform.id, added=3) == 0
+
+
+def test_admin_crawl_notifies_support_once_with_the_new_waiting_count(client, db_session, setup):
+    from unittest.mock import MagicMock
+
+    admin = User(
+        username="admin-crawl", full_name="Admin", role="admin", password_hash=hash_password("pass"),
+        active=True, platform_id=setup.platform.id,
+    )
+    setup.platform.account_password = "secret"
+    setup.platform.team_outsource = "team"
+    db_session.add(admin)
+    db_session.commit()
+    summary = {"scanned": 5, "added": 3, "added_waiting": 3, "updated": 2}
+
+    with (
+        patch("app.api.routes.orders_api.PrintervalApiClient", MagicMock()),
+        patch("app.api.routes.orders_api.PrintervalApiAdapter", MagicMock()),
+        patch("app.api.routes.orders_api.scan_orders_fast", return_value=summary),
+        patch("app.application.support_compare.send_message", return_value={"message_id": 1}) as send,
+        patch("app.application.support_compare.get_settings", return_value=SimpleNamespace(support_compare_enabled=True)),
+    ):
+        res = client.post(
+            "/api/orders/refresh",
+            json={"deadline_tacahu": "2026-10-20T10:00:00", "printerval_status": "waiting"},
+            headers=_bearer(admin),
+        )
+
+    assert res.status_code == 200 and res.json()["summary"]["added_waiting"] == 3
+    assert send.call_count == 1
+    assert "<b>3</b> đơn mới ở Waiting" in send.call_args.args[1]
+
+
+def _claim_world(db_session, setup):
+    other_chat = "424243"
+    other = User(
+        username="support-second", full_name="Support B", role="support", password_hash=hash_password("pass"),
+        telegram_chat_id=other_chat, active=True, platform_id=setup.platform.id,
+    )
+    setup.support.full_name = "Support A"
+    db_session.add(other)
+    db_session.commit()
+    sent_ids = iter(range(100, 200))
+    from app.application.support_compare import notify_support_new_waiting_orders
+
+    with patch("app.application.support_compare.send_message", side_effect=lambda *a, **k: {"message_id": next(sent_ids)}), \
+            patch("app.application.support_compare.get_settings", return_value=SimpleNamespace(support_compare_enabled=True)):
+        assert notify_support_new_waiting_orders(db_session, platform_id=setup.platform.id, added=4) == 2
+    actions = db_session.query(TelegramActionLog).filter_by(action_type="SUPPORT_NEW_ORDERS_CLAIM").all()
+    by_chat = {a.payload["chat_id"]: a for a in actions}
+    return other, other_chat, by_chat
+
+
+def _press_claim(client, chat_id: str, token: str):
+    with (
+        patch("app.api.routes.telegram_api.get_settings", return_value=SimpleNamespace(support_compare_enabled=True, telegram_webhook_secret=None)),
+        patch("app.api.routes.telegram_api.send_message", return_value={"message_id": 1}),
+        patch("app.application.support_compare.send_message", return_value={"message_id": 2}) as notice,
+        patch("app.application.support_compare.clear_message_keyboard") as cleared,
+        patch("app.api.routes.telegram_api.answer_callback_query") as toast,
+    ):
+        client.post(
+            "/api/telegram/webhook",
+            json={"callback_query": {"id": "cb", "data": f"scclaim:{token}", "from": {"id": int(chat_id)}}},
+        )
+    return notice, cleared, toast
+
+
+def test_first_support_to_claim_takes_the_lot_and_everyone_loses_the_button(client, db_session, setup):
+    other, other_chat, by_chat = _claim_world(db_session, setup)
+    mine, theirs = by_chat[CHAT_ID], by_chat[other_chat]
+
+    notice, cleared, toast = _press_claim(client, CHAT_ID, mine.callback_token)
+
+    db_session.expire_all()
+    assert db_session.get(TelegramActionLog, mine.id).status == "executed"
+    assert db_session.get(TelegramActionLog, theirs.id).status == "superseded"
+    assert db_session.get(TelegramActionLog, mine.id).actor_id == setup.support.id
+    assert {c.args[0] for c in cleared.call_args_list} == {CHAT_ID, other_chat}  # buttons removed everywhere
+    texts = {c.args[0]: c.args[1] for c in notice.call_args_list}
+    assert set(texts) == {CHAT_ID, other_chat}
+    assert all("Support A" in t and "đã nhận lô" in t and "<b>4</b>" in t for t in texts.values())
+    assert "Bạn đã nhận lô này" in toast.call_args.args[1]
+
+
+def test_a_late_claim_is_refused_and_names_who_was_first(client, db_session, setup):
+    other, other_chat, by_chat = _claim_world(db_session, setup)
+    _press_claim(client, CHAT_ID, by_chat[CHAT_ID].callback_token)
+
+    notice, cleared, toast = _press_claim(client, other_chat, by_chat[other_chat].callback_token)
+
+    notice.assert_not_called()
+    cleared.assert_not_called()
+    db_session.expire_all()
+    executed = db_session.query(TelegramActionLog).filter_by(action_type="SUPPORT_NEW_ORDERS_CLAIM", status="executed")
+    assert [a.actor_id for a in executed] == [setup.support.id]  # exactly one winner
+    assert toast.called  # the late presser is told it was taken
+
+
+def test_claim_buttons_only_work_from_the_chat_they_were_sent_to(client, db_session, setup):
+    other, other_chat, by_chat = _claim_world(db_session, setup)
+
+    notice, cleared, _ = _press_claim(client, other_chat, by_chat[CHAT_ID].callback_token)  # B uses A's token
+
+    notice.assert_not_called()
+    db_session.expire_all()
+    assert db_session.get(TelegramActionLog, by_chat[CHAT_ID].id).status == "pending"

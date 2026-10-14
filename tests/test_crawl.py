@@ -42,7 +42,7 @@ def test_fast_scan_records_initial_tab_entry_time(db_session):
     result = scan_orders_fast(db_session, adapter, platform_id=platform.id, status="Waiting")
 
     order = db_session.query(Order).filter_by(external_order_id="DJ0000999").one()
-    assert result == {"scanned": 1, "added": 1, "updated": 0}
+    assert result == {"scanned": 1, "added": 1, "added_waiting": 1, "updated": 0}
     assert order.status_changed_at is not None
     assert order.printerval_status == "waiting"
 
@@ -115,7 +115,7 @@ def test_fast_scan_can_filter_orders_without_a_printerval_designer(db_session):
         designer="__unassigned__",
     )
 
-    assert result == {"scanned": 1, "added": 1, "updated": 0}
+    assert result == {"scanned": 1, "added": 1, "added_waiting": 1, "updated": 0}
     assert db_session.query(Order).filter_by(external_order_id="DJ0001001").count() == 1
     assert db_session.query(Order).filter_by(external_order_id="DJ0001002").count() == 0
 
@@ -139,7 +139,7 @@ def test_fast_scan_can_filter_printerval_choose_designer_default(db_session):
 
     # Printerval's edit form displays "Choose Designer", while its list API
     # returns null for the same default selection. Both must be crawlable.
-    assert result == {"scanned": 2, "added": 2, "updated": 0}
+    assert result == {"scanned": 2, "added": 2, "added_waiting": 2, "updated": 0}
     assert db_session.query(Order).filter_by(external_order_id="DJ0001003").count() == 1
     assert db_session.query(Order).filter_by(external_order_id="DJ0001004").count() == 1
     assert db_session.query(Order).filter_by(external_order_id="DJ0001005").count() == 0

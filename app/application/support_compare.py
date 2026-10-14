@@ -24,12 +24,14 @@ from app.adapters.db.models import (
 )
 from app.application.duplicate_board import set_orders_duplicate_status
 from app.application.telegram_service import (
+    clear_message_keyboard,
     delete_messages,
     render_telegram_template,
     send_media_group,
     send_message,
     send_photo,
 )
+from app.config import get_settings
 from app.domain.access import (
     DUPLICATE_CHECK_DUPLICATE,
     DUPLICATE_CHECK_NON_DUPLICATE,
@@ -54,6 +56,8 @@ ACTION_HANDLE_YES = "SUPPORT_COMPARE_HANDLE_YES"
 ACTION_HANDLE_NO = "SUPPORT_COMPARE_HANDLE_NO"
 CALLBACK_HANDLE_YES_PREFIX = "schandle_yes"
 CALLBACK_HANDLE_NO_PREFIX = "schandle_no"
+ACTION_CLAIM = "SUPPORT_NEW_ORDERS_CLAIM"
+CALLBACK_CLAIM_PREFIX = "scclaim"
 ACTION_EXPIRY = timedelta(hours=24)
 
 
@@ -375,6 +379,114 @@ def _support_recipients(session: Session, platform_id: uuid.UUID) -> list[User]:
         .order_by(User.id)
         .all()
     )
+
+
+def claim_keyboard(token: str) -> dict:
+    return {"inline_keyboard": [[{"text": "🙋 Claim lô này", "callback_data": f"{CALLBACK_CLAIM_PREFIX}:{token}"}]]}
+
+
+def notify_support_new_waiting_orders(session: Session, *, platform_id: uuid.UUID, added: int) -> int:
+    """Tell the platform's linked Support accounts that a crawl brought new Waiting orders.
+
+    One message per crawl (not per order), each with a Claim button: the first Support to press it
+    takes the lot and the button disappears for everyone (see ``claim_new_orders``). Returns how many
+    chats got it. Never raises: Telegram is a side channel and must not fail the crawl that committed.
+    """
+    if added <= 0:
+        return 0
+    try:
+        recipients = _support_recipients(session, platform_id)
+        if not recipients:
+            return 0
+        text = f"📥 Có <b>{added}</b> đơn mới ở Waiting vừa được quét về."
+        if get_settings().support_compare_enabled:
+            unchecked = count_support_unchecked_orders(session, platform_id=platform_id)
+            text += (
+                f"\nHiện có <b>{unchecked}</b> đơn chưa kiểm tra trùng."
+                "\nGõ /check để kiểm tra trùng."
+            )
+        claim_id = str(uuid.uuid4())
+        expires_at = datetime.now(UTC) + ACTION_EXPIRY
+        actions = [
+            TelegramActionLog(
+                order_id=None,
+                action_type=ACTION_CLAIM,
+                callback_token=secrets.token_urlsafe(16),
+                payload={
+                    "chat_id": str(recipient.telegram_chat_id),
+                    "platform_id": str(platform_id),
+                    "claim_id": claim_id,
+                    "order_count": added,
+                },
+                expires_at=expires_at,
+            )
+            for recipient in recipients
+        ]
+        session.add_all(actions)
+        session.commit()
+        sent = 0
+        for action in actions:
+            chat_id = action.payload["chat_id"]
+            message = send_message(chat_id, text, reply_markup=claim_keyboard(action.callback_token))
+            if message is not None:
+                action.payload = {**action.payload, "message_id": message.get("message_id")}
+                sent += 1
+            else:
+                action.status = "superseded"  # nobody can press a button that was never delivered
+        session.commit()
+        return sent
+    except Exception:
+        session.rollback()
+        logger.warning("new-orders notification to Support failed", exc_info=True)
+        return 0
+
+
+def claim_new_orders(session: Session, *, action_log: TelegramActionLog, actor: User) -> dict:
+    """First Support to press Claim takes the lot; every copy of the message loses its button.
+
+    Returns ``{"claimed": True, ...}`` for the winner, or ``{"claimed": False, "by": name}`` when
+    somebody was first.
+    """
+    payload = action_log.payload or {}
+    claim_id = str(payload.get("claim_id") or "")
+    # One claim per lot, even when two Supports press at the same moment.
+    session.execute(sql_text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {"key": f"support-claim:{claim_id}"})
+    session.refresh(action_log)
+    siblings = [
+        a
+        for a in session.query(TelegramActionLog).filter(TelegramActionLog.action_type == ACTION_CLAIM).all()
+        if str((a.payload or {}).get("claim_id") or "") == claim_id
+    ]
+    winner = next((a for a in siblings if a.status == "executed"), None)
+    if winner is not None or action_log.status != "pending":
+        by = session.get(User, winner.actor_id) if winner is not None and winner.actor_id else None
+        session.rollback()
+        return {"claimed": False, "by": (by.full_name or by.username) if by else None}
+
+    now = datetime.now(UTC)
+    action_log.status = "executed"
+    action_log.actor_id = actor.id
+    action_log.executed_at = now
+    for sibling in siblings:
+        if sibling.id != action_log.id and sibling.status == "pending":
+            sibling.status = "superseded"
+    session.commit()
+
+    name = actor.full_name or actor.username
+    count = int(payload.get("order_count") or 0)
+    notice = f"✅ <b>{escape(name)}</b> đã nhận lô <b>{count}</b> đơn mới."
+    for sibling in siblings:
+        chat = str((sibling.payload or {}).get("chat_id") or "")
+        message_id = (sibling.payload or {}).get("message_id")
+        if not chat:
+            continue
+        try:
+            if message_id is not None:
+                clear_message_keyboard(chat, int(message_id))
+            send_message(chat, notice)
+        except Exception:
+            logger.warning("failed to tell chat %s about the claim", chat, exc_info=True)
+    return {"claimed": True, "by": name, "order_count": count}
 
 
 def _caption_for_new(session: Session, item: SupportCompareItem) -> str:

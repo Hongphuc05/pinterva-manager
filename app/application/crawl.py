@@ -195,6 +195,7 @@ def scan_orders_fast(
     cursor: str | None = None
     seen: set[str] = set()
     added = 0
+    added_waiting = 0
     updated = 0
     while True:
         result = adapter.discover_orders(
@@ -248,6 +249,8 @@ def scan_orders_fast(
                 )
                 session.add(order)
                 added += 1
+                if incoming_status == "waiting":
+                    added_waiting += 1
             else:
                 if summary.designer:
                     order.printerval_designer = summary.designer
@@ -307,7 +310,7 @@ def scan_orders_fast(
         cursor = result.cursor
     session.commit()
     export_platform_orders_csv(session, platform_id)
-    return {"scanned": len(seen), "added": added, "updated": updated}
+    return {"scanned": len(seen), "added": added, "added_waiting": added_waiting, "updated": updated}
 
 
 def find_unclaimed_order_ids(session: Session, platform_id: uuid.UUID | None) -> list[str]:

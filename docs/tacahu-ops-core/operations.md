@@ -57,6 +57,12 @@ notifier chạy.
 
 Luồng vận hành một lô (ví dụ 100 order admin vừa crawl về Waiting):
 
+**Thông báo lô mới (trước bước 1):** mỗi lần Admin quét đơn (Quét Đơn Print) mà có đơn mới ở Waiting
+   (`added_waiting` > 0), bot gửi **một tin** cho các Support đã liên kết Telegram của platform: số
+   đơn mới, số đơn chưa kiểm tra và nhắc gõ `/check`, kèm nút **Claim**. Support nào bấm trước thì
+   nhận lô: nút biến mất ở mọi tin và cả nhóm nhận thêm "Support A đã nhận lô N đơn mới". Claim chỉ
+   là phối hợp, không tự chạy `/check`. Lỗi Telegram không làm hỏng lượt quét.
+
 1. Support gõ `/check` (hoặc bấm **Kiểm tra trùng (N)** trên web). Bot báo số order chưa từng được
    so sánh và chưa nằm trong job nào rồi hỏi **Có**/**Không**. Gõ lại `/check` hoặc `/handle` sẽ
    thay prompt còn chờ trước đó.

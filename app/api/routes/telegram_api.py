@@ -26,6 +26,9 @@ from app.application.support_compare import (
     ACTION_CHECK_YES as SUPPORT_COMPARE_ACTION_CHECK_YES,
 )
 from app.application.support_compare import (
+    ACTION_CLAIM as SUPPORT_COMPARE_ACTION_CLAIM,
+)
+from app.application.support_compare import (
     ACTION_CONFIRM as SUPPORT_COMPARE_ACTION_CONFIRM,
 )
 from app.application.support_compare import (
@@ -44,6 +47,9 @@ from app.application.support_compare import (
     CALLBACK_CHECK_YES_PREFIX as SUPPORT_COMPARE_CALLBACK_CHECK_YES,
 )
 from app.application.support_compare import (
+    CALLBACK_CLAIM_PREFIX as SUPPORT_COMPARE_CALLBACK_CLAIM,
+)
+from app.application.support_compare import (
     CALLBACK_CONFIRM_PREFIX as SUPPORT_COMPARE_CALLBACK_CONFIRM,
 )
 from app.application.support_compare import (
@@ -56,6 +62,7 @@ from app.application.support_compare import (
     CALLBACK_REJECT_PREFIX as SUPPORT_COMPARE_CALLBACK_REJECT,
 )
 from app.application.support_compare import (
+    claim_new_orders,
     count_handleable_orders,
     count_support_unchecked_orders,
     create_support_compare_job,
@@ -549,6 +556,51 @@ async def api_telegram_webhook(
         # delegates the actual order mutation to the scoped comparison service.
         # The normal Support web command remains Waiting-only; this callback
         # additionally permits an unclassified Doing order from this source.
+        if ":" in cb_data and cb_data.split(":", 1)[0] == SUPPORT_COMPARE_CALLBACK_CLAIM:
+            token = cb_data.split(":", 1)[1]
+            claimer = (
+                db.query(User)
+                .filter(
+                    User.telegram_chat_id == user_chat_id,
+                    User.role == ROLE_SUPPORT,
+                    User.active.is_(True),
+                )
+                .first()
+            )
+            callback_id = str(callback_query.get("id") or "")
+            if not claimer:
+                logger.warning("Unauthorized Support claim callback from chat_id %s", user_chat_id)
+                return {"ok": True}
+            action_log = (
+                db.query(TelegramActionLog)
+                .filter(
+                    TelegramActionLog.callback_token == token,
+                    TelegramActionLog.action_type == SUPPORT_COMPARE_ACTION_CLAIM,
+                )
+                .first()
+            )
+            payload = (action_log.payload or {}) if action_log else {}
+            if (
+                not action_log
+                or str(payload.get("chat_id") or "") != user_chat_id
+                or (action_log.expires_at is not None and action_log.expires_at < datetime.now(UTC))
+            ):
+                _reply_to_stale_button(callback_query, user_chat_id)
+                return {"ok": True}
+            try:
+                result = claim_new_orders(db, action_log=action_log, actor=claimer)
+            except Exception:  # never answer a callback with an error status: Telegram would retry it
+                db.rollback()
+                logger.exception("Support claim failed for action %s", action_log.id)
+                return {"ok": True}
+            if callback_id:
+                if result["claimed"]:
+                    answer_callback_query(callback_id, "Bạn đã nhận lô này")
+                else:
+                    who = f"{result['by']} " if result.get("by") else "người khác "
+                    answer_callback_query(callback_id, f"Lô này đã được {who}nhận")
+            return {"ok": True}
+
         check_prefixes = {
             SUPPORT_COMPARE_CALLBACK_CHECK_YES,
             SUPPORT_COMPARE_CALLBACK_CHECK_NO,
