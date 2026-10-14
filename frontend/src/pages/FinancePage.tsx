@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { apiFetch, ApiError, resolveAssetUrl } from '../api/client'
+import { apiFetch, ApiError, peekApi, resolveAssetUrl } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { DashboardLayout } from '../components/DashboardLayout'
@@ -486,7 +486,6 @@ export function FinancePage() {
   // Load Finance Stats
   async function loadData() {
     if (!user || authLoading) return
-    setLoading(true)
     try {
       const params = new URLSearchParams()
       params.set('page', currentPage.toString())
@@ -498,7 +497,15 @@ export function FinancePage() {
       if (startDate) params.set('start_date', startDate)
       if (endDate) params.set('end_date', endDate)
 
-      const res = await apiFetch<FinanceStatsResponse>(`/finance/stats?${params.toString()}`)
+      const path = `/finance/stats?${params.toString()}`
+      const cached = peekApi<FinanceStatsResponse>(path)
+      if (cached !== undefined) {
+        setData(cached)
+        setLoading(false)
+      } else {
+        setLoading(true)
+      }
+      const res = await apiFetch<FinanceStatsResponse>(path)
       setData(res)
       if (res.standard_rate !== undefined) setStandardRate(res.standard_rate)
       if (res.duplicate_rate !== undefined) setDuplicateRate(res.duplicate_rate)

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { apiFetch, resolveAssetUrl } from '../api/client'
+import { apiFetch, peekApi, resolveAssetUrl } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { ImageModal } from '../components/ImageModal'
@@ -133,7 +133,14 @@ export function DesignerBoardPage() {
   }, [])
 
   async function loadWorkload() {
-    setLoading(true)
+    // Opened before: paint the last response at once and refresh quietly.
+    const cached = peekApi<DesignerWorkload[]>('/designers/workload')
+    if (cached !== undefined) {
+      setDesigners(cached || [])
+      setLoading(false)
+    } else {
+      setLoading(true)
+    }
     try {
       const data = await apiFetch<DesignerWorkload[]>('/designers/workload')
       setDesigners(data || [])

@@ -48,6 +48,27 @@ function publishOrderVersionConflict(detail: unknown) {
   }))
 }
 
+// Last successful GET response per (user, platform, path), kept in memory so a page that is
+// opened again can paint at once while it refreshes in the background (see peekApi).
+const API_CACHE_MAX = 80
+// Shared by peekApi and by pages that cache their own view (e.g. the order list pages).
+export const memoryCache = new Map<string, unknown>()
+const apiCache = memoryCache
+
+function apiCacheKey(path: string) {
+  const token = localStorage.getItem('token') || ''
+  return `${token.slice(-24)}|${localStorage.getItem('activePlatformId') || ''}|${path}`
+}
+
+/** The last response of `GET path` this session, or undefined. Always refetch after using it. */
+export function peekApi<T>(path: string): T | undefined {
+  return apiCache.get(apiCacheKey(path)) as T | undefined
+}
+
+export function clearApiCache() {
+  apiCache.clear()
+}
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const token = localStorage.getItem('token')
   const activePlatformId = localStorage.getItem('activePlatformId')
@@ -97,7 +118,14 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     throw new ApiError(resp.status, message, detail)
   }
   if (resp.status === 204) return undefined as T
-  return resp.json() as Promise<T>
+  const data = (await resp.json()) as T
+  if (!init?.method || init.method.toUpperCase() === 'GET') {
+    const key = apiCacheKey(path)
+    apiCache.delete(key)
+    apiCache.set(key, data)
+    while (apiCache.size > API_CACHE_MAX) apiCache.delete(apiCache.keys().next().value as string)
+  }
+  return data
 }
 
 /** Fetch a private binary asset with the same bearer/platform credentials as API data. */

@@ -1,8 +1,9 @@
 from datetime import UTC, datetime
 
+from test_orders_api import _login, _seed_platform, client  # noqa: F401
+
 from app.adapters.db.models import Assignment, Order
 from app.api.deps import DEFAULT_PLATFORM_ID
-from tests.test_orders_api import _login, _seed_platform, client  # noqa: F401
 
 
 def _order(db, code, state, **kw):
@@ -138,3 +139,18 @@ def test_platform_designers_lists_distinct_names(client, db_session):  # noqa: F
     db_session.commit()
 
     assert client.get("/api/orders/platform-designers").json() == {"designers": ["Alpha", "Beta"]}
+
+
+def test_page_date_range_can_filter_by_tacahu_deadline(client, db_session):  # noqa: F811
+    _seed_platform(db_session)
+    _login(client, db_session, "admin", "admin_page_deadline")
+    _order(db_session, "DL-IN", "WAITING", deadline_tacahu=datetime(2026, 10, 20, 3, 0, tzinfo=UTC))
+    _order(db_session, "DL-OUT", "WAITING", deadline_tacahu=datetime(2026, 11, 5, 3, 0, tzinfo=UTC))
+    _order(db_session, "DL-NONE", "WAITING")
+    db_session.commit()
+
+    body = client.get(
+        "/api/orders/page?tab=waiting&date_field=deadline_tacahu&date_from=2026-10-20&date_to=2026-10-20"
+    ).json()
+
+    assert [o["external_order_id"] for o in body["items"]] == ["DL-IN"]

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { DashboardLayout } from '../components/DashboardLayout'
-import { apiFetch, ApiError } from '../api/client'
+import { apiFetch, ApiError, peekApi } from '../api/client'
 import { 
   Users, 
   UserPlus, 
@@ -79,11 +79,20 @@ export function UsersPage() {
   }, [showAddModal, submitting, deletingUser, deleting, passwordUser, changingPasswordUser, savingPassword])
 
   async function loadUsers() {
-    setLoading(true)
     setError('')
+    const usersPath = `/users${showLocked ? '?include_locked=true' : ''}`
+    const cachedUsers = peekApi<UserItem[]>(usersPath)
+    const cachedUnassigned = peekApi<UserItem[]>('/users/unassigned')
+    if (cachedUsers !== undefined && cachedUnassigned !== undefined) {
+      setUsers(sortUsersByRoleAndName(cachedUsers))
+      setUnassignedUsers(sortUsersByRoleAndName(cachedUnassigned))
+      setLoading(false)
+    } else {
+      setLoading(true)
+    }
     try {
       const [data, unassigned] = await Promise.all([
-        apiFetch<UserItem[]>(`/users${showLocked ? '?include_locked=true' : ''}`),
+        apiFetch<UserItem[]>(usersPath),
         apiFetch<UserItem[]>('/users/unassigned'),
       ])
       setUsers(sortUsersByRoleAndName(data))

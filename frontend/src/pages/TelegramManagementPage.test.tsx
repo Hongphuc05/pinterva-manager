@@ -11,6 +11,7 @@ vi.mock('../components/DashboardLayout', () => ({
 
 vi.mock('../api/client', () => ({
   apiFetch: vi.fn(),
+  peekApi: vi.fn(() => undefined),
   ApiError: class ApiError extends Error {},
 }))
 

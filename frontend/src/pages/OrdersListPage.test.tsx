@@ -83,6 +83,17 @@ function adminPageAdapter(handler: (url: string, ...rest: any[]) => any) {
       if (isAdmin && tab === 'fix' && fixSub === 'rejected') items = items.filter((o) => o.fix_rejected_by_admin)
       const q = (params.get('q') || '').toLowerCase()
       if (q) items = items.filter((o) => `${isAdmin || isSupport ? o.external_order_id : ''} ${o.product_name ?? ''}`.toLowerCase().includes(q))
+      const dateFrom = params.get('date_from')
+      const dateTo = params.get('date_to')
+      if (dateFrom || dateTo) {
+        const field = params.get('date_field') || 'status_changed_at'
+        const day = (raw: string | null | undefined) =>
+          raw ? new Date(new Date(raw).getTime() + 7 * 3600_000).toISOString().slice(0, 10) : null
+        items = items.filter((o) => {
+          const d = day(o[field] ?? (field === 'status_changed_at' ? o.created_at : null))
+          return d !== null && (!dateFrom || d >= dateFrom) && (!dateTo || d <= dateTo)
+        })
+      }
       const psf = (params.get('platform_status') || '').toLowerCase()
       if (psf) items = items.filter((o) => ((o.platform_status || '').toLowerCase().trim() === psf) || (psf === 'unspecified' && !o.platform_status))
       const tabAll = all.filter((o) => tabOf(o) === tab)
@@ -177,6 +188,61 @@ describe('OrdersListPage', () => {
     expect(screen.getByText('Tất cả trạng thái Print')).toBeInTheDocument()
   })
 
+  it('lets Admin filter the list by the Tacahu deadline', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(adminPageAdapter((url: string) => {
+        if (url.includes('/api/me')) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ id: '1', role: 'admin', full_name: 'Admin' }) })
+        }
+        if (url.includes('/api/platforms')) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ platforms: [] }) })
+        }
+        if (url.includes('/api/orders')) {
+          const base = { state: 'WAITING', platform_status: 'waiting', batch_id: null, sku: 'S', thumbnail_url: null, created_at: '2026-10-01T00:00:00Z' }
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              orders: [
+                { ...base, id: 'd1', external_order_id: 'DJ-DL-IN', product_name: 'In range', deadline_tacahu: '2026-10-20T03:00:00Z' },
+                { ...base, id: 'd2', external_order_id: 'DJ-DL-OUT', product_name: 'Later', deadline_tacahu: '2026-11-05T03:00:00Z' },
+                { ...base, id: 'd3', external_order_id: 'DJ-DL-NONE', product_name: 'No deadline', deadline_tacahu: null },
+              ],
+            }),
+          })
+        }
+        return Promise.reject(new Error(`unexpected fetch: ${url}`))
+      }))
+    )
+
+    render(
+      <BrowserRouter>
+        <AuthProvider>
+          <PlatformProvider>
+            <ToastProvider>
+              <GallerySyncProvider>
+                <OrdersListPage />
+              </GallerySyncProvider>
+            </ToastProvider>
+          </PlatformProvider>
+        </AuthProvider>
+      </BrowserRouter>
+    )
+    await waitFor(() => expect(screen.getByText('DJ-DL-IN')).toBeInTheDocument())
+    expect(screen.getByText('DJ-DL-OUT')).toBeInTheDocument()
+
+    const select = screen.getByRole('option', { name: 'Deadline Tacahu' }).closest('select') as HTMLSelectElement
+    fireEvent.change(select, { target: { value: 'deadline_tacahu' } })
+    fireEvent.change(screen.getByTitle('Từ ngày (UTC+7)'), { target: { value: '2026-10-20' } })
+    fireEvent.change(screen.getByTitle('Đến ngày (UTC+7)'), { target: { value: '2026-10-20' } })
+
+    await waitFor(() => expect(screen.queryByText('DJ-DL-OUT')).not.toBeInTheDocument())
+    expect(screen.getByText('DJ-DL-IN')).toBeInTheDocument()
+    // An order without a deadline never matches a deadline range.
+    expect(screen.queryByText('DJ-DL-NONE')).not.toBeInTheDocument()
+  })
+
   it('does not let stale tab filters hide Doing or Fix orders', async () => {
     localStorage.setItem(
       'tacahu:view-state:v1:orders-list:admin',
@@ -260,7 +326,7 @@ describe('OrdersListPage', () => {
 
     vi.stubGlobal(
       'fetch',
-      vi.fn((url: string, init?: RequestInit) => {
+      vi.fn(adminPageAdapter((url: string, init?: RequestInit) => {
         if (url.includes('/api/me')) {
           return Promise.resolve({ ok: true, status: 200, json: async () => ({ id: 'admin-inline-temp', role: 'admin', full_name: 'Admin' }) })
         }
@@ -301,7 +367,7 @@ describe('OrdersListPage', () => {
           })
         }
         return Promise.reject(new Error(`unexpected fetch: ${url}`))
-      }),
+      })),
     )
 
     window.history.pushState({}, '', '/orders?tab=doing')

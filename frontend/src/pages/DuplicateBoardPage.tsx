@@ -20,7 +20,7 @@ import {
   UserRound,
   X,
 } from 'lucide-react'
-import { ApiError, apiFetch, resolveAssetUrl } from '../api/client'
+import { ApiError, apiFetch, peekApi, resolveAssetUrl } from '../api/client'
 import { resolveExternalUrl } from '../utils/statusTranslation'
 import { useAuth } from '../auth/AuthContext'
 import { DashboardLayout } from '../components/DashboardLayout'
@@ -239,9 +239,17 @@ export function DuplicateBoardPage() {
   }
 
   const loadBoard = useCallback(async () => {
-    setLoading(true)
+    type BoardResponse = { columns: DuplicateColumn[]; cross_designer_drag_enabled: boolean }
+    const cached = peekApi<BoardResponse>('/duplicate-board')
+    if (cached !== undefined) {
+      setColumns(cached.columns)
+      setCrossDesignerDragEnabled(cached.cross_designer_drag_enabled)
+      setLoading(false)
+    } else {
+      setLoading(true)
+    }
     try {
-      const result = await apiFetch<{ columns: DuplicateColumn[]; cross_designer_drag_enabled: boolean }>('/duplicate-board')
+      const result = await apiFetch<BoardResponse>('/duplicate-board')
       setColumns(result.columns)
       setCrossDesignerDragEnabled(result.cross_designer_drag_enabled)
       setError(null)

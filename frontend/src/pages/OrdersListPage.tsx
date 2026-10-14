@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { ChatBadge, useChatUnread } from '../features/chat/ChatUnreadProvider'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
-import { apiFetch, ApiError, resolveAssetUrl } from '../api/client'
+import { apiFetch, ApiError, memoryCache, resolveAssetUrl } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { usePlatform } from '../auth/PlatformContext'
 import { DashboardLayout } from '../components/DashboardLayout'
@@ -204,7 +204,14 @@ function pageCacheKey(userId: string, platformId: string | undefined, query: str
   return `${ORDERS_CACHE_PREFIX}:page:${userId}:${platformId || 'default'}:${query}`
 }
 
+// In memory first (survives every in-app navigation, no size limit worth caring about), then
+// sessionStorage as a best-effort copy so an F5 can still paint at once.
+const MEMORY_PAGE_CACHE_MAX = 30
+const MEMORY_PAGE_PREFIX = 'orders-page|'
+
 function readPageCache(key: string): PageCacheEntry | null {
+  const live = memoryCache.get(MEMORY_PAGE_PREFIX + key) as PageCacheEntry | undefined
+  if (live && Date.now() - live.savedAt <= PAGE_CACHE_TTL_MS) return live
   try {
     const raw = sessionStorage.getItem(key)
     if (!raw) return null
@@ -217,15 +224,31 @@ function readPageCache(key: string): PageCacheEntry | null {
 }
 
 function writePageCache(key: string, items: OrderSummary[], meta: PageMeta) {
+  const entry: PageCacheEntry = { items, meta, savedAt: Date.now() }
+  memoryCache.delete(MEMORY_PAGE_PREFIX + key)
+  memoryCache.set(MEMORY_PAGE_PREFIX + key, entry)
+  const pageKeys = [...memoryCache.keys()].filter((k) => k.startsWith(MEMORY_PAGE_PREFIX))
+  pageKeys.slice(0, Math.max(0, pageKeys.length - MEMORY_PAGE_CACHE_MAX)).forEach((k) => memoryCache.delete(k))
+
   const indexKey = `${ORDERS_CACHE_PREFIX}:page-index`
+  const store = (index: string[]) => {
+    sessionStorage.setItem(indexKey, JSON.stringify(index))
+    sessionStorage.setItem(key, JSON.stringify(entry))
+  }
   try {
-    const index: string[] = JSON.parse(sessionStorage.getItem(indexKey) || '[]').filter((k: string) => k !== key)
+    let index: string[] = JSON.parse(sessionStorage.getItem(indexKey) || '[]').filter((k: string) => k !== key)
     index.push(key)
     while (index.length > PAGE_CACHE_MAX) sessionStorage.removeItem(index.shift() as string)
-    sessionStorage.setItem(indexKey, JSON.stringify(index))
-    sessionStorage.setItem(key, JSON.stringify({ items, meta, savedAt: Date.now() }))
+    try {
+      store(index)
+    } catch {
+      // Quota: pages are big, so keep only this one in sessionStorage and try again.
+      index.slice(0, -1).forEach((k) => sessionStorage.removeItem(k))
+      index = [key]
+      store(index)
+    }
   } catch {
-    // Storage full or unavailable: the list simply loads again next time.
+    // Still no room: the in-memory copy keeps in-app navigation instant.
   }
 }
 
@@ -350,9 +373,9 @@ export function OrdersListPage() {
   }, [isManager, syncedImagesFilter])
 
   // Date Filter State (3 Modes: status_changed_at, order_created_at_ext, created_at)
-  const [dateFilterType, setDateFilterType] = useState<'status_changed_at' | 'order_created_at_ext' | 'created_at'>(
-    ['status_changed_at', 'order_created_at_ext', 'created_at'].includes(String(restoredViewState.dateFilterType))
-      ? restoredViewState.dateFilterType as 'status_changed_at' | 'order_created_at_ext' | 'created_at'
+  const [dateFilterType, setDateFilterType] = useState<'status_changed_at' | 'order_created_at_ext' | 'created_at' | 'deadline_tacahu'>(
+    ['status_changed_at', 'order_created_at_ext', 'created_at', 'deadline_tacahu'].includes(String(restoredViewState.dateFilterType))
+      ? restoredViewState.dateFilterType as 'status_changed_at' | 'order_created_at_ext' | 'created_at' | 'deadline_tacahu'
       : 'status_changed_at',
   )
   const [dateFrom, setDateFrom] = useState(String(restoreAdminFilters ? restoredViewState.dateFrom || '' : ''))
@@ -2150,6 +2173,7 @@ export function OrdersListPage() {
               <option value="status_changed_at">Thời Gian (Vào tab)</option>
               <option value="order_created_at_ext">Order At (Giờ đặt)</option>
               {isAdmin && <option value="created_at">Ngày tạo (crawl)</option>}
+              {isAdmin && <option value="deadline_tacahu">Deadline Tacahu</option>}
             </select>
 
             {/* Date Inputs (UTC+7) */}

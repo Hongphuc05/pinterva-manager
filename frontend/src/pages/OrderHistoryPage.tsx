@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { apiFetch, resolveAssetUrl } from '../api/client'
+import { apiFetch, peekApi, resolveAssetUrl } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { getStatusInfo, resolveExternalUrl } from '../utils/statusTranslation'
@@ -93,7 +93,6 @@ export function OrderHistoryPage() {
   }, [isAdmin])
 
   const fetchHistory = useCallback(async () => {
-    setLoading(true)
     setError(null)
     try {
       const params = new URLSearchParams()
@@ -110,7 +109,17 @@ export function OrderHistoryPage() {
         params.set('action', selectedAction)
       }
 
-      const res = await apiFetch<OrderHistoryResponse>(`/orders-history?${params.toString()}`)
+      const path = `/orders-history?${params.toString()}`
+      const cached = peekApi<OrderHistoryResponse>(path)
+      if (cached !== undefined) {
+        setHistoryItems(cached.items || [])
+        setTotal(cached.total || 0)
+        setTotalPages(cached.total_pages || 1)
+        setLoading(false)
+      } else {
+        setLoading(true)
+      }
+      const res = await apiFetch<OrderHistoryResponse>(path)
       setHistoryItems(res.items || [])
       setTotal(res.total || 0)
       setTotalPages(res.total_pages || 1)

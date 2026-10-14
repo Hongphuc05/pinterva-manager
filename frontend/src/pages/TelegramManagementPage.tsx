@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { TelegramHtmlPreview } from '../components/TelegramHtmlPreview'
-import { apiFetch, ApiError } from '../api/client'
+import { apiFetch, ApiError, peekApi } from '../api/client'
 import { useToast } from '../context/ToastContext'
 import {
   AlertCircle,
@@ -118,18 +118,29 @@ export function TelegramManagementPage() {
     setTemplatePreview('')
   }, [selectedTemplate])
 
+  function applyTelegramData(overviewData: TelegramOverview, templateData: TelegramTemplate[]) {
+    setOverview(overviewData)
+    setTemplates(templateData)
+    setGroupDrafts(Object.fromEntries(overviewData.designers.map((designer) => [designer.id, designer.group_chat_id || ''])))
+    setSelectedTemplateKey((current) => current || templateData[0]?.template_key || '')
+  }
+
   async function loadData() {
-    setLoading(true)
     setError('')
+    const cachedOverview = peekApi<TelegramOverview>('/telegram/admin/overview')
+    const cachedTemplates = peekApi<TelegramTemplate[]>('/telegram/admin/templates')
+    if (cachedOverview !== undefined && cachedTemplates !== undefined) {
+      applyTelegramData(cachedOverview, cachedTemplates)
+      setLoading(false)
+    } else {
+      setLoading(true)
+    }
     try {
       const [overviewData, templateData] = await Promise.all([
         apiFetch<TelegramOverview>('/telegram/admin/overview'),
         apiFetch<TelegramTemplate[]>('/telegram/admin/templates'),
       ])
-      setOverview(overviewData)
-      setTemplates(templateData)
-      setGroupDrafts(Object.fromEntries(overviewData.designers.map((designer) => [designer.id, designer.group_chat_id || ''])))
-      setSelectedTemplateKey((current) => current || templateData[0]?.template_key || '')
+      applyTelegramData(overviewData, templateData)
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : 'Không thể tải quản lý bot Telegram.')
     } finally {

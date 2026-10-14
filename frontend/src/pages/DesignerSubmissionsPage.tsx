@@ -20,7 +20,7 @@ import { useAuth } from '../auth/AuthContext'
 import { usePlatform } from '../auth/PlatformContext'
 import { sortUsersByRoleAndName } from '../utils/userSorting'
 import { useToast } from '../context/ToastContext'
-import { apiFetch } from '../api/client'
+import { apiFetch, peekApi } from '../api/client'
 import { ImageModal } from '../components/ImageModal'
 
 interface SubmittedVersion {
@@ -122,7 +122,6 @@ export function DesignerSubmissionsPage() {
   }, [])
 
   const fetchSubmissions = useCallback(async () => {
-    setLoading(true)
     try {
       const params = new URLSearchParams()
       params.set('page', page.toString())
@@ -133,7 +132,15 @@ export function DesignerSubmissionsPage() {
       if (dateFrom) params.set('date_from', new Date(dateFrom).toISOString())
       if (dateTo) params.set('date_to', new Date(dateTo + 'T23:59:59').toISOString())
 
-      const res = await apiFetch<SubmissionsResponse>(`/orders/designer-submissions?${params.toString()}`)
+      const path = `/orders/designer-submissions?${params.toString()}`
+      const cached = peekApi<SubmissionsResponse>(path)
+      if (cached !== undefined) {
+        setData(cached)
+        setLoading(false)
+      } else {
+        setLoading(true)
+      }
+      const res = await apiFetch<SubmissionsResponse>(path)
       setData(res)
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Không thể tải danh sách link nộp bài'

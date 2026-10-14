@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import { apiFetch, ApiError } from '../api/client'
+import { apiFetch, ApiError, clearApiCache } from '../api/client'
 
 export type User = {
   id: string
@@ -56,6 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // ignore logout fetch errors
     } finally {
       localStorage.removeItem('token')
+      clearApiCache()
       setUser(null)
     }
   }

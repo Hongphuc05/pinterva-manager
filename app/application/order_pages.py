@@ -29,7 +29,7 @@ TAB_STATES: dict[str, tuple[str, ...]] = {
 }
 DESIGNER_TABS = ("doing", "fix", "review", "waiting_update", "paid", "done")
 SUPPORT_TABS = ("all", "duplicate", "non_duplicate", "doing")
-DATE_FIELDS = ("status_changed_at", "order_created_at_ext", "created_at")
+DATE_FIELDS = ("status_changed_at", "order_created_at_ext", "created_at", "deadline_tacahu")
 MAX_PAGE_SIZE = 200
 MAX_IDS = 5000
 
