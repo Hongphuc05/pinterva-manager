@@ -58,7 +58,6 @@ class PageParams:
     date_to: date | None = None
     fix_returned: bool = False
     synced_images: bool = False
-    only_ids: list[uuid.UUID] | None = None
     sort_field: str = "status_changed_at"
     sort_desc: bool = True
     page: int = 1
@@ -198,8 +197,6 @@ def _apply_filters(query: Query, p: PageParams) -> Query:
         query = query.filter(Order.fix_return_count > 0)
     if p.synced_images:
         query = query.filter(func.coalesce(func.jsonb_array_length(Order.product_image_urls), 0) > 1)
-    if p.only_ids is not None:
-        query = query.filter(Order.id.in_(p.only_ids))
     return query
 
 

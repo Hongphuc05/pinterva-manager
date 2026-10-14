@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
-import { ChatBadge, useChatUnread } from '../features/chat/ChatUnreadProvider'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { apiFetch, ApiError, memoryCache, resolveAssetUrl } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
@@ -352,8 +351,6 @@ export function OrdersListPage() {
   const [searchQuery, setSearchQuery] = useState(String(restoreAdminFilters ? restoredViewState.searchQuery || '' : ''))
   const lastAutoSwitchedQueryRef = useRef<string>('')
   const [syncedImagesFilter, setSyncedImagesFilter] = useState(restoreAdminFilters && restoredViewState.syncedImagesFilter === true)
-  const { unread: chatUnread } = useChatUnread()
-  const [chatUnreadFilter, setChatUnreadFilter] = useState(false)
   const [fixReturnedFilter, setFixReturnedFilter] = useState(restoreAdminFilters && restoredViewState.fixReturnedFilter === true)
   const [noticeClock, setNoticeClock] = useState(() => Date.now())
 
@@ -1044,12 +1041,11 @@ export function OrdersListPage() {
     }
     if (fixReturnedFilter) params.set('fix_returned', 'true')
     if (syncedImagesFilter) params.set('synced_images', 'true')
-    if (chatUnreadFilter) params.set('chat_unread', 'true')
     params.set('sort_field', dateSort.field)
     params.set('sort_dir', dateSort.direction)
     if (currentPage > 1) params.set('page', String(currentPage))
     return params.toString()
-  }, [isAdmin, isSupport, supportTab, activeDesignerTab, adminTab, adminDoingSubFilter, adminFixSubFilter, debouncedSearch, statusFilter, designerFilter, platformStatusFilter, batchFilter, dateFrom, dateTo, dateFilterType, fixReturnedFilter, syncedImagesFilter, chatUnreadFilter, dateSort, currentPage])
+  }, [isAdmin, isSupport, supportTab, activeDesignerTab, adminTab, adminDoingSubFilter, adminFixSubFilter, debouncedSearch, statusFilter, designerFilter, platformStatusFilter, batchFilter, dateFrom, dateTo, dateFilterType, fixReturnedFilter, syncedImagesFilter, dateSort, currentPage])
 
   async function fetchTabOrderIds(tab: string, fixSub: string = 'all'): Promise<string[]> {
     const params = new URLSearchParams({ tab, ids_only: 'true' })
@@ -2443,18 +2439,6 @@ export function OrdersListPage() {
             <span className="text-xs text-slate-500 font-medium">task</span>
           </div>
 
-          {!isSupport && Object.keys(chatUnread).length > 0 && (
-            <button
-              type="button"
-              onClick={() => setChatUnreadFilter((v) => !v)}
-              className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-bold shadow-2xs cursor-pointer ${
-                chatUnreadFilter ? 'border-rose-300 bg-rose-50 text-rose-700' : 'border-slate-200 bg-white text-slate-700'
-              }`}
-            >
-              Có tin chat mới ({Object.keys(chatUnread).length})
-            </button>
-          )}
-
           {isSupport && supportTab === 'all' && supportCompare?.enabled && (
             <button
               type="button"
@@ -2732,7 +2716,6 @@ export function OrdersListPage() {
                             <div className="space-y-1.5">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <CopyableOrderCode code={o.external_order_id} />
-                                <ChatBadge orderId={o.id} />
                                 {o.template_missing && (
                                   <span className="inline-flex items-center gap-1 rounded border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700">
                                     <Flag className="h-2.5 w-2.5" />
@@ -2950,7 +2933,6 @@ export function OrdersListPage() {
                           <td className="py-2.5 px-4 font-semibold text-[#0052CC]">
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <CopyableOrderCode code={o.external_order_id} />
-                              <ChatBadge orderId={o.id} />
 
                               {/* Admin: Orange exclamation mark if NOT checked by support across ALL tabs */}
                               {(!o.duplicate_check_status || o.duplicate_check_status === 'uncheck') && (

@@ -92,15 +92,6 @@ Weight fine-tune ở phase 2 phải có `MODEL_VERSION` riêng. Nếu đổi dim
 model space, re-embed toàn bộ baseline trước khi so sánh; không trộn vector DINOv2 gốc với vector
 fine-tune.
 
-### Đồng bộ chat Printerval
-
-`order_chat_enabled` mặc định tắt. Khi bật, Celery Beat chạy `sync_order_chats` mỗi
-`ORDER_CHAT_INTERVAL_SECONDS` (120): một request `chat/unread` cho mỗi platform để biết đơn nào có tin
-mới, cộng `ORDER_CHAT_ROTATION_BATCH` (40) đơn xoay vòng theo `chat_synced_at` cũ nhất, rồi
-`chat/messages?after_id=<con trỏ>` cho từng đơn. Mỗi platform có advisory lock nên hai lượt không chồng
-nhau; một đơn lỗi không làm hỏng lượt. `purge_order_chats` chạy 03:15 mỗi đêm. Kéo tin làm huy hiệu
-đã đọc trên web mẹ tắt: đây là hành vi đã chấp nhận.
-
 ## Kiểm tra tối thiểu trước bàn giao
 
 ```bash

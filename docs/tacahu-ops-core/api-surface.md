@@ -18,14 +18,6 @@ origin hoặc origin kèm `/api` nhưng không được tạo `/api/api`.
 | External sync | crawl/gallery import, SyncJob, status sync và external assignment request |
 | Telegram | status/link/unlink/webhook; quản trị routing/template dưới `/telegram/admin`; là kênh phụ tùy cấu hình, không thay database authority |
 
-## Chat Printerval (chỉ đọc)
-
-- `GET /api/orders/{id}/chat`: tin đã lưu của đơn (kéo mới trước nếu lần cuối quá 30 giây; lỗi thì trả
-  `stale: true`) kèm `last_read_external_id` của người gọi.
-- `POST /api/orders/{id}/chat/read`: đánh dấu đã đọc tới tin mới nhất.
-- `GET /api/chat/unread`: các đơn có tin phía Printerval chưa đọc trong 7 ngày gần nhất (toast và huy
-  hiệu trên danh sách). Chỉ Admin (theo platform); các role khác nhận danh sách rỗng.
-
 ## Contract command
 
 - Command thay đổi order dùng `request_id`/idempotency theo endpoint.
@@ -80,7 +72,7 @@ vì callback duplicate chỉ xác thực chat riêng.
   trang ở server, tab theo role — Admin `waiting|doing|review|fix|done`, Support
   `all|duplicate|non_duplicate|doing`, Designer `doing|fix|review|waiting_update|paid|done`. Tham số: `doing_sub`, `fix_sub`, `q`, `status`, `designer_id`,
   `platform_status`, `batch`, `date_field`/`date_from`/`date_to` (ngày theo UTC+7), `fix_returned`,
-  `synced_images`, `chat_unread`, `sort_field`/`sort_dir`, `page`/`page_size` (≤200). Trả `items`, `total`,
+  `synced_images`, `sort_field`/`sort_dir`, `page`/`page_size` (≤200). Trả `items`, `total`,
   `counts` (số đơn từng tab, không áp bộ lọc), `aux` và `search_counts` khi có `q`. `ids_only=true` trả
   danh sách id của tab (tối đa 5000) cho nút đồng bộ cả tab. `GET /orders/platform-designers` trả tên
   designer Printerval cho bộ lọc quét đơn. Danh sách đơn trên web không còn tải toàn bộ `GET /orders`. Designer chỉ tìm theo tên sản phẩm; `batch` chỉ

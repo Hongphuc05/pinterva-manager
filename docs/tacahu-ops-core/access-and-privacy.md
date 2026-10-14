@@ -47,13 +47,6 @@ phải enforce role + platform + assignment ở backend.
   có hạn dùng, khóa theo chat/platform và không mở quyền cho tài khoản khác. Bấm **Không** chỉ
   hủy yêu cầu, không đổi trạng thái order.
 
-## Chat Printerval của đơn
-
-Chỉ đọc và **chỉ Admin** (cùng platform) xem được (`can_read_chat`). Designer, Support và Kế toán nhận
-403, đơn platform khác nhận 404; toast và huy hiệu cũng chỉ dành cho Admin. Quyết định vận hành
-2026-10-14: chat QC chưa cho designer xem, Admin đọc rồi viết lại hướng dẫn như với `note_outsource`.
-Nội dung chat luôn render dạng text; ảnh chỉ nhận link http/https.
-
 ## Attachment ảnh Note làm việc
 
 - Client gửi multipart để browser tự thiết lập boundary.

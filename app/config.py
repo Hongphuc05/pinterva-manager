@@ -61,11 +61,6 @@ class Settings(BaseSettings):
     # thresholds and Telegram recipient have been verified in production. The
     # embedding runtime itself belongs to the separately managed Support machine.
     support_compare_enabled: bool = False
-    # Printerval per-order chat mirror (read-only). Off until it is verified in production.
-    order_chat_enabled: bool = False
-    order_chat_interval_seconds: int = 120
-    order_chat_rotation_batch: int = 40
-    order_chat_retention_days: int = 30
     # Notification batch size for server-side Telegram delivery. The local
     # comparison worker has its own model/scan settings.
     support_compare_batch_limit: int = 100

@@ -20,7 +20,6 @@ celery_app = Celery(
         "app.workers.order_sheet_backup_tasks",
         "app.workers.telegram_tasks",
         "app.workers.support_compare_tasks",
-        "app.workers.order_chat_tasks",
     ],
 )
 
@@ -50,8 +49,6 @@ celery_app.conf.task_routes = {
     "app.workers.support_compare_tasks.notify_support_duplicate_candidates": {
         "queue": "celery"
     },
-    "app.workers.order_chat_tasks.sync_order_chats": {"queue": "celery"},
-    "app.workers.order_chat_tasks.purge_order_chats": {"queue": "celery"},
 }
 celery_app.conf.worker_prefetch_multiplier = 1
 celery_app.conf.task_track_started = True
@@ -89,15 +86,6 @@ def build_beat_schedule(settings):
                 hour=settings.order_sheet_backup_hour,
                 minute=settings.order_sheet_backup_minute,
             ),
-        }
-    if settings.order_chat_enabled:
-        schedule["sync-order-chats"] = {
-            "task": "app.workers.order_chat_tasks.sync_order_chats",
-            "schedule": float(settings.order_chat_interval_seconds),
-        }
-        schedule["purge-order-chats"] = {
-            "task": "app.workers.order_chat_tasks.purge_order_chats",
-            "schedule": crontab(hour=3, minute=15),
         }
     if settings.support_compare_enabled:
         # Jobs are created only when Support confirms /check; this task just

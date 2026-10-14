@@ -37,7 +37,6 @@ import {
 } from 'lucide-react'
 import { AdminFixActionModal } from '../components/AdminFixActionModal'
 import { LinkifiedText, OpenExternalLinkButton } from '../components/LinkifiedText'
-import { OrderChatCard } from '../components/OrderChatCard'
 import { OrderWorkNotesCard } from '../components/OrderWorkNotesCard'
 
 type ResultVersion = {
@@ -1200,8 +1199,6 @@ export function OrderDetailPage() {
             </p>
           </div>
         )}
-
-        {isAdmin && <OrderChatCard orderId={order.id} />}
 
         <OrderWorkNotesCard orderId={order.id} />
 

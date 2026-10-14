@@ -7,7 +7,6 @@ import { ToastProvider } from './context/ToastContext'
 import { ProtectedRoute } from './auth/ProtectedRoute'
 import { LoginPage } from './pages/LoginPage'
 import { RootRedirect } from './auth/RootRedirect'
-import { ChatUnreadProvider } from './features/chat/ChatUnreadProvider'
 import { WorkerProvider } from './features/worker/WorkerProvider'
 import { ConsentDialog } from './features/worker/ConsentDialog'
 
@@ -33,7 +32,6 @@ function App() {
           <ToastProvider>
             <GallerySyncProvider>
               <WorkerProvider ConsentDialog={ConsentDialog}>
-              <ChatUnreadProvider>
               <Suspense fallback={<div className="p-8 text-sm text-slate-500">Đang tải…</div>}>
               <Routes>
           <Route path="/login" element={<LoginPage />} />
@@ -156,7 +154,6 @@ function App() {
           <Route path="/" element={<RootRedirect />} />
         </Routes>
               </Suspense>
-              </ChatUnreadProvider>
               </WorkerProvider>
             </GallerySyncProvider>
           </ToastProvider>

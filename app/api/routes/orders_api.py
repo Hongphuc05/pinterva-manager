@@ -60,7 +60,7 @@ from app.api.deps import (
     require_any_role,
     require_role,
 )
-from app.application import order_chat, order_pages
+from app.application import order_pages
 from app.application.assignment_commands import (
     AssignmentCommandError,
     revoke_assignment_command,
@@ -1002,7 +1002,6 @@ def api_orders_page(
     date_to: date | None = None,
     fix_returned: bool = False,
     synced_images: bool = False,
-    chat_unread: bool = False,
     sort_field: str = "status_changed_at",
     sort_dir: str = "desc",
     page: int = Query(default=1, ge=1),
@@ -1021,9 +1020,6 @@ def api_orders_page(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "tab không hợp lệ")
     if date_field not in order_pages.DATE_FIELDS or sort_field not in order_pages.DATE_FIELDS:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "trường ngày không hợp lệ")
-    only_ids = None
-    if chat_unread:
-        only_ids = [uuid.UUID(item["order_id"]) for item in order_chat.unread_for_user(db, user, platform_id)]
     params = order_pages.PageParams(
         role=user.role,
         tab=tab,
@@ -1039,7 +1035,6 @@ def api_orders_page(
         date_to=date_to,
         fix_returned=fix_returned,
         synced_images=synced_images,
-        only_ids=only_ids,
         sort_field=sort_field,
         sort_desc=sort_dir != "asc",
         page=page,
