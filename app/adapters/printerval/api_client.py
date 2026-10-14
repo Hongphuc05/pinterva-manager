@@ -81,6 +81,7 @@ class PrintervalApiClient:
         team_outsource: str | None,
         session_cookie: str | None = None,
         client: httpx.Client | None = None,
+        timeout: float = 30.0,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.username = username
@@ -105,7 +106,7 @@ class PrintervalApiClient:
         self._client = client or httpx.Client(
             base_url=self.base_url,
             follow_redirects=False,
-            timeout=httpx.Timeout(30.0),
+            timeout=httpx.Timeout(timeout),
             headers=headers,
         )
         self._authenticated = False

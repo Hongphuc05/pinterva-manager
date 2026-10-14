@@ -122,6 +122,7 @@ class PrintervalApiAdapter:
             return DiscoverResult(
                 success=False,
                 error_class=error_cls,
+                retryable=isinstance(exc, PrintervalApiError) and exc.retryable,
                 evidence={"message": str(exc)},
             )
 

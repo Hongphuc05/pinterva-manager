@@ -16,6 +16,7 @@ from app.adapters.db.session import SessionLocal
 from app.adapters.printerval.api_adapter import PrintervalApiAdapter
 from app.adapters.printerval.api_client import PrintervalApiClient
 from app.application.status_sync import (
+    STATUS_SYNC_READ_TIMEOUT_SECONDS,
     SyncLeaseLost,
     reconcile_active_platform_orders,
     sync_selected_order_statuses,
@@ -274,6 +275,7 @@ def run_status_sync_job(
                 password=platform.account_password,
                 team_outsource=platform.team_outsource,
                 session_cookie=platform.session_cookie,
+                timeout=STATUS_SYNC_READ_TIMEOUT_SECONDS,
             )
             try:
                 result = reconcile_active_platform_orders(

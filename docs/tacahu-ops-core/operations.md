@@ -140,3 +140,10 @@ Watchdog Celery chạy mỗi phút và chỉ đánh dấu `SyncJob`/`PlatformSyn
 nhưng vẫn có heartbeat hợp lệ sẽ tiếp tục chạy bình thường. Nếu cần dừng cưỡng bức, admin
 dùng endpoint reset; sau đó kiểm tra `worker_task_id`, heartbeat cuối và log Celery trước
 khi chạy lại.
+
+Endpoint `design-job/find` của Printerval có lúc mất 10–30 giây hoặc hơn mới trả lời. Các
+client sync chạy nền (sync tự động, sync toàn DB, job "Đồng bộ" toàn bộ) dùng timeout 60
+giây và đọc lại mỗi trang queue tối đa 3 lần khi gặp lỗi `TRANSIENT_NETWORK` (nghỉ 3s, 6s,
+có jitter). Các đường gọi Printerval trong request web (Quét Đơn Print, đồng bộ đơn được
+chọn) vẫn giữ timeout 30 giây. Một deploy giữa lúc sync đang chạy sẽ cắt ngang lượt đó
+(Docker chỉ cho worker 10 giây để dừng); watchdog ở trên dọn lease, lượt sau chạy lại.

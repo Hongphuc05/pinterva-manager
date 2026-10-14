@@ -24,6 +24,7 @@ from sqlalchemy.orm.exc import StaleDataError
 
 from app.adapters.db.models import Order, Platform, PlatformSyncState, WorkflowEvent
 from app.adapters.db.session import SessionLocal
+from app.adapters.playwright_support import with_retry
 from app.adapters.printerval.api_adapter import PrintervalApiAdapter
 from app.adapters.printerval.api_client import PrintervalApiClient
 from app.adapters.printerval.interface import ALL_JOB_TYPES, PrintervalAdapter
@@ -41,6 +42,13 @@ from app.domain.models import OrderState
 # mirror therefore reads these two real source filters independently.  Waiting
 # is discovered only through Admin's explicit crawl, never by auto-sync.
 ACTIVE_PRINTERVAL_STATUS_FILTERS = ("doing", "fix")
+
+# Printerval's find endpoint sometimes takes 10-30s+ to answer (measured 2026-10-14).
+# Background, read-only sync clients wait longer than the 30s default and retry a
+# queue page a bounded number of times; web-request paths keep the default.
+STATUS_SYNC_READ_TIMEOUT_SECONDS = 60.0
+DISCOVER_MAX_ATTEMPTS = 3
+DISCOVER_RETRY_BASE_DELAY_SECONDS = 3.0
 
 ProgressCallback = Callable[[dict[str, Any]], object]
 
@@ -303,12 +311,16 @@ def reconcile_active_platform_orders(
             cursor: str | None = None
             page = 0
             while True:
-                discovered = adapter.discover_orders(
-                    status=source_status,
-                    job_type=ALL_JOB_TYPES,
-                    limit=100,
-                    cursor=cursor,
-                    platform_id=str(platform.id),
+                discovered = with_retry(
+                    lambda status=source_status, cursor=cursor: adapter.discover_orders(
+                        status=status,
+                        job_type=ALL_JOB_TYPES,
+                        limit=100,
+                        cursor=cursor,
+                        platform_id=str(platform.id),
+                    ),
+                    max_attempts=DISCOVER_MAX_ATTEMPTS,
+                    base_delay=DISCOVER_RETRY_BASE_DELAY_SECONDS,
                 )
                 if not discovered.success:
                     error_class = getattr(discovered.error_class, "value", discovered.error_class)
@@ -1055,6 +1067,7 @@ def sync_all_platforms(session: Session, *, worker_task_id: str | None = None) -
             password=platform.account_password,
             team_outsource=platform.team_outsource,
             session_cookie=platform.session_cookie,
+            timeout=STATUS_SYNC_READ_TIMEOUT_SECONDS,
         )
         try:
             return reconcile_active_platform_orders(
@@ -1082,6 +1095,7 @@ def sync_all_platforms_full_database(
             password=platform.account_password,
             team_outsource=platform.team_outsource,
             session_cookie=platform.session_cookie,
+            timeout=STATUS_SYNC_READ_TIMEOUT_SECONDS,
         )
         try:
             return sync_full_database_platform_orders(

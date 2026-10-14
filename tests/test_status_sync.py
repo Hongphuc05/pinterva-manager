@@ -5,8 +5,10 @@ import httpx
 
 import app.application.status_sync as status_sync_module
 from app.adapters.db.models import Order, Platform, PlatformSyncState, WorkflowEvent
+from app.adapters.printerval.api_adapter import PrintervalApiAdapter
 from app.adapters.printerval.api_client import FIND_PATH, LOGIN_PATH, PrintervalApiClient
 from app.adapters.printerval.fake_adapter import FakePrintervalAdapter
+from app.adapters.printerval.models import DiscoverResult
 from app.application.status_sync import (
     ACTIVE_PRINTERVAL_STATUS_FILTERS,
     reclaim_stale_platform_sync_leases,
@@ -297,6 +299,51 @@ def test_active_reconciliation_uses_independent_doing_and_fix_filters(db_session
     adapter = RecordingAdapter()
     reconcile_active_platform_orders(db_session, platform, adapter=adapter)
     assert adapter.status_filters == list(ACTIVE_PRINTERVAL_STATUS_FILTERS)
+
+
+def test_api_adapter_marks_a_queue_timeout_retryable():
+    def handler(request):
+        raise httpx.ReadTimeout("slow Printerval", request=request)
+
+    client = PrintervalApiClient(
+        base_url="https://printerval.test",
+        username="op@example.test",
+        password="pw",
+        team_outsource="team-a",
+        session_cookie="cookie",
+        client=httpx.Client(base_url="https://printerval.test", transport=httpx.MockTransport(handler)),
+    )
+    result = PrintervalApiAdapter(api_client=client, download_images=False).discover_orders(status="doing")
+
+    assert result.success is False
+    assert result.error_class == "TRANSIENT_NETWORK"
+    assert result.retryable is True
+
+
+def test_active_reconciliation_retries_a_transient_queue_failure(db_session, monkeypatch):
+    monkeypatch.setattr(status_sync_module, "DISCOVER_RETRY_BASE_DELAY_SECONDS", 0.0)
+    platform = Platform(name="P retry", account_username="acc@example.test", team_outsource="team-a")
+    db_session.add(platform)
+    db_session.commit()
+
+    class FlakyAdapter(FakePrintervalAdapter):
+        def __init__(self):
+            super().__init__()
+            self.calls: list[str] = []
+
+        def discover_orders(self, *, status, **kwargs):
+            self.calls.append(status)
+            if self.calls.count(status) == 1:
+                return DiscoverResult(success=False, error_class="TRANSIENT_NETWORK", retryable=True)
+            return super().discover_orders(status=status, **kwargs)
+
+    adapter = FlakyAdapter()
+    adapter.add_order(external_order_id="DJ-DOING", product_name="Doing", designer="Print Des", status="doing")
+
+    result = reconcile_active_platform_orders(db_session, platform, adapter=adapter)
+
+    assert adapter.calls == ["doing", "doing", "fix", "fix"]
+    assert result["checked"] == 1
 
 
 def test_selected_sync_with_unchanged_observation_keeps_order_version(db_session):
