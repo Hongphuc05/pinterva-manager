@@ -26,6 +26,7 @@ from app.application.support_compare import (
     count_handleable_orders,
     count_support_unchecked_orders,
     execute_support_duplicate_decision,
+    item_stage,
     notify_duplicate_candidate,
 )
 from app.domain.models import OrderState
@@ -1128,3 +1129,12 @@ def test_claim_buttons_only_work_from_the_chat_they_were_sent_to(client, db_sess
     notice.assert_not_called()
     db_session.expire_all()
     assert db_session.get(TelegramActionLog, by_chat[CHAT_ID].id).status == "pending"
+
+
+@pytest.mark.parametrize(
+    ("order_tag", "stage"),
+    [(None, "todo"), ("uncheck", "todo"), ("non_duplicate", "not_duplicate"), ("duplicate", "linked")],
+)
+def test_unreviewed_order_tagged_elsewhere_leaves_todo(order_tag: str | None, stage: str) -> None:
+    # A tagged order can no longer be reviewed (no Model sai / Chọn trùng), so it must not sit in tab 1.
+    assert item_stage(review_status="pending_review", decision_status=None, notified_at=None, order_tag=order_tag) == stage

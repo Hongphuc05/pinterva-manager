@@ -764,6 +764,11 @@ def item_stage(
 ) -> str | None:
     """Where a compared order stands in its lot, from the review and Telegram decision."""
     if review_status == "pending_review":
+        # Tagged elsewhere before review: it can no longer be reviewed, so it must not stay in "todo".
+        if order_tag == DUPLICATE_CHECK_NON_DUPLICATE:
+            return STAGE_NOT_DUPLICATE
+        if order_tag == DUPLICATE_CHECK_DUPLICATE:
+            return STAGE_LINKED
         return STAGE_TODO
     if review_status in ("no_match", "ai_wrong"):
         return STAGE_NOT_DUPLICATE

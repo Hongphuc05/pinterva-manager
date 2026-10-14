@@ -90,7 +90,8 @@ lô, mỗi order đã so sánh nằm đúng một giai đoạn (`item_stage` tro
 (`pending_review`), *chưa gửi* / *đang chờ* (`selected_duplicate`, candidate `pending`, chưa/đã có
 `telegram_notified_at`), *đã verify trùng* (candidate `duplicate`, order chưa có tag), *đã chuyển Trùng
 lặp* (candidate `duplicate`, order đã tag, chờ gắn link) và *không trùng* (`no_match`, `ai_wrong`, hoặc
-candidate `non_duplicate`). Trang ẩn có ba tab theo lô: **1. Chờ xử lý**, **2. Không trùng lặp**,
+candidate `non_duplicate`). Order *cần duyệt* nhưng đã bị tag ở chỗ khác thì đi theo tag (`non_duplicate`
+→ *không trùng*, `duplicate` → *đã chuyển Trùng lặp*), vì không còn chọn/Model sai được. Trang ẩn có ba tab theo lô: **1. Chờ xử lý**, **2. Không trùng lặp**,
 **3. Gắn link**.
 
 Telegram không còn tự gửi và **không gắn tag**. `POST /support-review/jobs/{id}/send` gửi các cặp chưa
