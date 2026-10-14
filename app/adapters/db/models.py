@@ -328,6 +328,10 @@ class Order(Base):
     # missing template. It powers a short-lived acknowledgement in the
     # Designer queue without changing the durable workflow state.
     template_resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Printerval chat mirror: id of the newest message already stored (the ``after_id`` cursor)
+    # and when this order's chat was last fetched. Both reset when its chat is purged.
+    chat_last_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    chat_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Set to True when Admin resolves a missing-template report so the Designer
     # does not see the Printerval note_outsource during that resolution cycle.
     # Cleared back to False when the order is next synced from the platform or
@@ -459,6 +463,49 @@ class OrderWorkNoteAttachment(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class OrderChatMessage(Base):
+    """One message of the Printerval per-order chat, mirrored read-only (see order_chat.py)."""
+
+    __tablename__ = "order_chat_messages"
+    __table_args__ = (
+        UniqueConstraint("order_id", "external_id", name="uq_order_chat_message_external"),
+        Index("ix_order_chat_messages_platform_sent", "platform_id", "sent_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    order_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("orders.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    platform_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    external_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    fix_round: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    message_type: Mapped[str] = mapped_column(String(32), nullable=False, default="", server_default=text("''"))
+    sender_type: Mapped[str] = mapped_column(String(32), nullable=False, default="", server_default=text("''"))
+    sender_name: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default=text("''"))
+    mine: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    content: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default=text("''"))
+    image_urls: Mapped[list] = mapped_column(JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"))
+    fix_reason_label: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default=text("''"))
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class OrderChatRead(Base):
+    """The newest Printerval-chat message a user has seen for an order (Tacahu's own unread state)."""
+
+    __tablename__ = "order_chat_reads"
+    __table_args__ = (UniqueConstraint("order_id", "user_id", name="uq_order_chat_read_user"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    order_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("orders.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    last_read_external_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
 
 
 class OrderWorkNoteRead(Base):

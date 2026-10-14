@@ -18,6 +18,14 @@ origin hoặc origin kèm `/api` nhưng không được tạo `/api/api`.
 | External sync | crawl/gallery import, SyncJob, status sync và external assignment request |
 | Telegram | status/link/unlink/webhook; quản trị routing/template dưới `/telegram/admin`; là kênh phụ tùy cấu hình, không thay database authority |
 
+## Chat Printerval (chỉ đọc)
+
+- `GET /api/orders/{id}/chat`: tin đã lưu của đơn (kéo mới trước nếu lần cuối quá 30 giây; lỗi thì trả
+  `stale: true`) kèm `last_read_external_id` của người gọi.
+- `POST /api/orders/{id}/chat/read`: đánh dấu đã đọc tới tin mới nhất.
+- `GET /api/chat/unread`: các đơn có tin phía Printerval chưa đọc trong 7 ngày gần nhất (toast và huy
+  hiệu trên danh sách). Admin theo platform, designer theo đơn được giao.
+
 ## Contract command
 
 - Command thay đổi order dùng `request_id`/idempotency theo endpoint.

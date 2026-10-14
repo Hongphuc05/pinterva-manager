@@ -440,6 +440,64 @@ class PrintervalApiClient:
                 ErrorClass.TRANSIENT_NETWORK, "Waiting queue retry failed", retryable=True
             ) from exc
 
+    CHAT_PATH = "/central/outsource/pod/design-job/chat"
+
+    def _chat_get(self, path: str, params: dict[str, str]) -> dict[str, Any]:
+        """GET a chat endpoint, logging in once more when the session expired."""
+        self._validate_configuration()
+
+        def once() -> httpx.Response:
+            try:
+                return self._client.get(f"{self.CHAT_PATH}/{path}", params=params)
+            except httpx.HTTPError as exc:
+                raise PrintervalApiError(
+                    ErrorClass.TRANSIENT_NETWORK, "Chat request failed", retryable=True
+                ) from exc
+
+        response = once()
+        redirected_to_login = (
+            response.status_code in (301, 302, 303, 307, 308)
+            and LOGIN_PATH in urlparse(response.headers.get("location", "")).path
+        )
+        if response.status_code in (401, 403) or redirected_to_login:
+            self._authenticated = False
+            self.login()
+            response = once()
+        if response.status_code >= 400:
+            error_class, retryable = _classify_http_status(response.status_code)
+            raise PrintervalApiError(error_class, "Chat request was rejected", retryable=retryable)
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise PrintervalApiError(ErrorClass.EXTERNAL_CHANGED, "Chat response was not JSON") from exc
+        if not isinstance(payload, dict) or payload.get("status") != "successful":
+            raise PrintervalApiError(ErrorClass.EXTERNAL_CHANGED, "Chat response changed or was rejected")
+        return payload
+
+    def fetch_chat_messages(self, design_job_id: int | str, after_id: int = 0) -> dict[str, Any]:
+        """Messages of one job after ``after_id``. NOTE: Printerval marks them read for the team."""
+        payload = self._chat_get(
+            "messages", {"design_job_id": str(int(design_job_id)), "after_id": str(int(after_id))}
+        )
+        messages = payload.get("messages")
+        if not isinstance(messages, list):
+            raise PrintervalApiError(ErrorClass.EXTERNAL_CHANGED, "Chat has no message list")
+        return {
+            "messages": [m for m in messages if isinstance(m, dict)],
+            "chat": payload.get("chat") if isinstance(payload.get("chat"), dict) else {},
+        }
+
+    def fetch_chat_unread(self, design_job_ids: list[int]) -> dict[str, Any]:
+        """Unread counts for the given jobs plus ``job_ids``: every job of the team with unread
+        messages. Reading this does not mark anything read."""
+        payload = self._chat_get("unread", {"ids": ",".join(str(int(i)) for i in design_job_ids) or "0"})
+        job_ids = payload.get("job_ids")
+        unread = payload.get("unread")
+        return {
+            "job_ids": [int(i) for i in job_ids] if isinstance(job_ids, list) else [],
+            "unread": unread if isinstance(unread, dict) else {},
+        }
+
     def update_order_note_outsource(self, design_job_id: int | str, note: str) -> bool:
         """Set outsource_note attribute on Printerval via direct HTTP API."""
         self._validate_configuration()
