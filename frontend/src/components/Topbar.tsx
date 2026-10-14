@@ -149,13 +149,8 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
   }
 
   function openCrawlFilter() {
-    apiFetch<{ orders: { platform_designer?: string | null }[] }>('/orders')
-      .then((result) => {
-        const options = result.orders
-          .map((order) => order.platform_designer)
-          .filter((item): item is string => Boolean(item))
-        setCrawlDesigners(Array.from(new Set(options)).sort())
-      })
+    apiFetch<{ designers: string[] }>('/orders/platform-designers')
+      .then((result) => setCrawlDesigners(result.designers))
       .catch(() => setCrawlDesigners([]))
     setShowCrawlModal(true)
   }

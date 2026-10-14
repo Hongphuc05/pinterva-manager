@@ -135,6 +135,24 @@ const canSupportClassify = isSupportClassificationEditable
 
 type SupportTab = 'all' | 'duplicate' | 'non_duplicate' | 'doing'
 
+type AdminTabKey = 'waiting' | 'doing' | 'review' | 'fix' | 'done'
+
+// Admin lists are paginated by the server (GET /orders/page): one page + counters for every tab.
+interface AdminPageMeta {
+  total: number
+  counts: Record<AdminTabKey, number> & {
+    doing_missing: number
+    doing_normal: number
+    fix_pending: number
+    fix_approved: number
+    fix_rejected: number
+  }
+  aux: { synced_images: number; fix_returned: number }
+  search_counts?: Record<AdminTabKey, number>
+  query: string
+  search: string
+}
+
 // Every order Support sees belongs to exactly one tab, so the four counts add up to the list.
 // A tag wins over the state: "Đang làm" holds only the untagged orders that were already assigned.
 function supportTabOf(order: Pick<OrderSummary, 'state' | 'platform_status' | 'duplicate_check_status' | 'work_domain'>): SupportTab {
@@ -222,6 +240,47 @@ function writeOrdersCache(key: string, orders: OrderSummary[]) {
   }
 }
 
+// Admin pages: the last few visited pages are kept in sessionStorage so coming back from an order's
+// detail shows the list at once instead of loading it again.
+const ADMIN_PAGE_CACHE_MAX = 8
+const ADMIN_PAGE_CACHE_FRESH_MS = 30_000
+const ADMIN_PAGE_CACHE_TTL_MS = 30 * 60_000
+
+interface AdminPageCacheEntry {
+  items: OrderSummary[]
+  meta: AdminPageMeta
+  savedAt: number
+}
+
+function adminPageCacheKey(userId: string, platformId: string | undefined, query: string) {
+  return `${ORDERS_CACHE_PREFIX}:admin:${userId}:${platformId || 'default'}:${query}`
+}
+
+function readAdminPageCache(key: string): AdminPageCacheEntry | null {
+  try {
+    const raw = sessionStorage.getItem(key)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as AdminPageCacheEntry
+    if (!Array.isArray(parsed.items) || !parsed.meta || Date.now() - parsed.savedAt > ADMIN_PAGE_CACHE_TTL_MS) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function writeAdminPageCache(key: string, items: OrderSummary[], meta: AdminPageMeta) {
+  const indexKey = `${ORDERS_CACHE_PREFIX}:admin-index`
+  try {
+    const index: string[] = JSON.parse(sessionStorage.getItem(indexKey) || '[]').filter((k: string) => k !== key)
+    index.push(key)
+    while (index.length > ADMIN_PAGE_CACHE_MAX) sessionStorage.removeItem(index.shift() as string)
+    sessionStorage.setItem(indexKey, JSON.stringify(index))
+    sessionStorage.setItem(key, JSON.stringify({ items, meta, savedAt: Date.now() }))
+  } catch {
+    // Storage full or unavailable: the list simply loads again next time.
+  }
+}
+
 export function OrdersListPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
@@ -255,8 +314,14 @@ export function OrdersListPage() {
   }))
 
   const [supportSubmittedCount, setSupportSubmittedCount] = useState<number | null>(null)
-  const [orders, setOrders] = useState<OrderSummary[]>(() => readOrdersCache(getOrdersCacheKey(undefined, '')) ?? [])
-  const [ordersLoading, setOrdersLoading] = useState(() => readOrdersCache(getOrdersCacheKey(undefined, '')) === null)
+  const [orders, setOrders] = useState<OrderSummary[]>(() =>
+    user?.role === 'admin' ? [] : readOrdersCache(getOrdersCacheKey(undefined, '')) ?? [],
+  )
+  const [ordersLoading, setOrdersLoading] = useState(() =>
+    user?.role === 'admin' ? true : readOrdersCache(getOrdersCacheKey(undefined, '')) === null,
+  )
+  const [pageMeta, setPageMeta] = useState<AdminPageMeta | null>(null)
+  const viewSignatureRef = useRef('')
 
   // Admin 5 Sub-Tabs State
   const activeTabParam = searchParams.get('tab') as 'waiting' | 'doing' | 'review' | 'fix' | 'done' | null
@@ -621,7 +686,7 @@ export function OrdersListPage() {
 
 
   function handleSelectAll(checked: boolean) {
-    const pageOrders = paginate(filteredOrders, currentPage).filter(
+    const pageOrders = (isAdmin ? orders : paginate(filteredOrders, currentPage)).filter(
       (order) => !isSupport || canSupportClassify(order),
     )
     if (checked) {
@@ -984,7 +1049,54 @@ export function OrdersListPage() {
     }
   }
 
+  const [debouncedSearch, setDebouncedSearch] = useState(searchQuery)
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
+
+  // Everything the Admin list depends on, as the query string of GET /orders/page.
+  const adminQuery = useMemo(() => {
+    const params = new URLSearchParams()
+    params.set('tab', adminTab)
+    if (adminTab === 'doing' && adminDoingSubFilter !== 'all') params.set('doing_sub', adminDoingSubFilter)
+    if (adminTab === 'fix' && adminFixSubFilter !== 'all') params.set('fix_sub', adminFixSubFilter)
+    if (debouncedSearch.trim()) params.set('q', debouncedSearch.trim())
+    if (statusFilter) params.set('status', statusFilter)
+    if (designerFilter) params.set('designer_id', designerFilter)
+    if (platformStatusFilter) params.set('platform_status', platformStatusFilter)
+    if (batchFilter) params.set('batch', batchFilter)
+    if (dateFrom || dateTo) {
+      params.set('date_field', dateFilterType)
+      if (dateFrom) params.set('date_from', dateFrom)
+      if (dateTo) params.set('date_to', dateTo)
+    }
+    if (fixReturnedFilter) params.set('fix_returned', 'true')
+    if (syncedImagesFilter) params.set('synced_images', 'true')
+    if (chatUnreadFilter) params.set('chat_unread', 'true')
+    params.set('sort_field', dateSort.field)
+    params.set('sort_dir', dateSort.direction)
+    if (currentPage > 1) params.set('page', String(currentPage))
+    return params.toString()
+  }, [adminTab, adminDoingSubFilter, adminFixSubFilter, debouncedSearch, statusFilter, designerFilter, platformStatusFilter, batchFilter, dateFrom, dateTo, dateFilterType, fixReturnedFilter, syncedImagesFilter, chatUnreadFilter, dateSort, currentPage])
+
+  async function fetchTabOrderIds(tab: AdminTabKey, fixSub: string = 'all'): Promise<string[]> {
+    const params = new URLSearchParams({ tab, ids_only: 'true' })
+    if (tab === 'fix' && fixSub !== 'all') params.set('fix_sub', fixSub)
+    const data = await apiFetch<{ ids: string[] }>(`/orders/page?${params.toString()}`)
+    return data.ids
+  }
+
+  async function syncAdminTab(tab: AdminTabKey, fixSub: string = 'all') {
+    try {
+      await handleSyncPlatformStatus(await fetchTabOrderIds(tab, fixSub))
+    } catch (err: any) {
+      showToast(err?.message || 'Không lấy được danh sách đơn của tab.', 'error')
+    }
+  }
+
   async function loadOrders() {
+    if (isAdmin) return loadAdminPage()
     const params = new URLSearchParams()
     if (statusFilter) params.set('status', statusFilter)
     if (batchFilter) params.set('batch_id', batchFilter)
@@ -1051,28 +1163,87 @@ export function OrdersListPage() {
   }
 
 
+  async function loadAdminPage(silent = false) {
+    const query = adminQuery
+    if (!silent) setOrdersLoading(true)
+    try {
+      const data = await apiFetch<AdminPageMeta & { items: OrderSummary[] }>(`/orders/page?${query}`)
+      // Highlight new / moved orders only against a previous load of the same view.
+      const sameView = viewSignatureRef.current === query
+      viewSignatureRef.current = query
+      const meta: AdminPageMeta = { ...data, query, search: debouncedSearch.trim() }
+      setPageMeta(meta)
+      if (user) writeAdminPageCache(adminPageCacheKey(user.id, activePlatform?.id, query), data.items, meta)
+      setOrders((prevOrders) => {
+        if (sameView && prevOrders.length > 0) {
+          const prevMap = new Map(prevOrders.map((o) => [o.id, o]))
+          const newIds = data.items.filter((o) => !prevMap.has(o.id)).map((o) => o.id)
+          if (newIds.length > 0) {
+            setNewlyCrawledOrderIds((prev) => Array.from(new Set([...prev, ...newIds])))
+            setTimeout(() => {
+              setNewlyCrawledOrderIds((prev) => prev.filter((id) => !newIds.includes(id)))
+            }, 300000)
+          }
+          const movedIds = data.items.filter((o) => prevMap.has(o.id) && prevMap.get(o.id)!.state !== o.state).map((o) => o.id)
+          if (movedIds.length > 0) {
+            setRecentTabMovedOrderIds((prev) => Array.from(new Set([...prev, ...movedIds])))
+            setTimeout(() => {
+              setRecentTabMovedOrderIds((prev) => prev.filter((id) => !movedIds.includes(id)))
+            }, 300000)
+          }
+          const changes: Record<string, { statusChanged?: boolean; designerChanged?: boolean; timestamp: number }> = {}
+          const nowTs = Date.now()
+          data.items.forEach((o) => {
+            const old = prevMap.get(o.id)
+            if (!old) return
+            const statusChanged = Boolean(old.platform_status && o.platform_status && old.platform_status !== o.platform_status)
+            const designerChanged = Boolean(old.platform_designer && o.platform_designer && old.platform_designer !== o.platform_designer)
+            if (statusChanged || designerChanged) changes[o.id] = { statusChanged, designerChanged, timestamp: nowTs }
+          })
+          if (Object.keys(changes).length > 0) setRecentPlatformChanges((prev) => ({ ...prev, ...changes }))
+        }
+        return data.items
+      })
+      return data.items
+    } finally {
+      setOrdersLoading(false)
+    }
+  }
+
   useEffect(() => {
+    // The role decides which endpoint to call (Admin: paged), so wait until it is known.
+    if (!user) return
     const params = new URLSearchParams()
     if (statusFilter) params.set('status', statusFilter)
     if (batchFilter) params.set('batch_id', batchFilter)
     if (designerFilter) params.set('designer_id', designerFilter)
-    const cachedOrders = readOrdersCache(getOrdersCacheKey(activePlatform?.id, params.toString()))
-    if (cachedOrders !== null) {
+    const cachedOrders = isAdmin ? null : readOrdersCache(getOrdersCacheKey(activePlatform?.id, params.toString()))
+    const cachedPage = isAdmin ? readAdminPageCache(adminPageCacheKey(user.id, activePlatform?.id, adminQuery)) : null
+    if (cachedPage) {
+      // Back from an order's detail (or a revisit): show the page at once, refresh quietly if it is old.
+      viewSignatureRef.current = adminQuery
+      setOrders(cachedPage.items)
+      setPageMeta(cachedPage.meta)
+      setOrdersLoading(false)
+    } else if (cachedOrders !== null) {
       setOrders(cachedOrders)
       setOrdersLoading(false)
     } else {
       setOrdersLoading(true)
     }
-    loadOrders().catch((e) => {
-      setError(e instanceof ApiError ? e.message : 'Không tải được danh sách đơn.')
-    })
+    if (!cachedPage || Date.now() - cachedPage.savedAt > ADMIN_PAGE_CACHE_FRESH_MS) {
+      const refresh = cachedPage ? loadAdminPage(true) : loadOrders()
+      refresh.catch((e) => {
+        setError(e instanceof ApiError ? e.message : 'Không tải được danh sách đơn.')
+      })
+    }
 
     function handleOrdersUpdated() {
       loadOrders().catch(() => { })
     }
     window.addEventListener('orders-updated', handleOrdersUpdated)
     return () => window.removeEventListener('orders-updated', handleOrdersUpdated)
-  }, [activePlatform?.id, statusFilter, batchFilter, designerFilter])
+  }, [user?.id, activePlatform?.id, statusFilter, batchFilter, designerFilter, isAdmin ? adminQuery : ''])
 
   async function flagMissingTemplate(order: OrderSummary) {
     if (!order.assignment_id) {
@@ -1268,17 +1439,28 @@ export function OrdersListPage() {
     })
   }, [orders])
 
-  const autoSyncOrderIds = useMemo(
-    () => (adminTab === 'done' ? doneOrders : reviewOrders).map((order) => order.id),
-    [adminTab, doneOrders, reviewOrders],
-  )
 
   // Review and Done tab 5-minute auto-sync: the countdown lives in <AutoSyncCountdown>.
   const fireAutoSync = () => {
-    if (autoSyncOrderIds.length > 0) void handleSyncPlatformStatus(autoSyncOrderIds)
+    if (adminTab === 'review' || adminTab === 'done') void syncAdminTab(adminTab)
   }
 
   // Designer Workflow groups
+  // Admin pages hold one tab at a time: the tab buttons show the server's counters.
+  const adminCounts = isAdmin ? pageMeta?.counts : undefined
+  const tabCounts = {
+    waiting: adminCounts?.waiting ?? waitingOrders.length,
+    doing: adminCounts?.doing ?? doingOrders.length,
+    doingMissing: adminCounts?.doing_missing ?? missingTemplateDoingOrders.length,
+    doingNormal: adminCounts?.doing_normal ?? normalDoingOrders.length,
+    review: adminCounts?.review ?? reviewOrders.length,
+    fix: adminCounts?.fix ?? fixOrders.length,
+    fixPending: adminCounts?.fix_pending ?? pendingFixOrders.length,
+    fixApproved: adminCounts?.fix_approved ?? approvedFixOrders.length,
+    fixRejected: adminCounts?.fix_rejected ?? rejectedFixOrders.length,
+    done: adminCounts?.done ?? doneOrders.length,
+  }
+
   const designerDoingOrders = orders.filter(
     (o) =>
       !o.template_missing &&
@@ -1307,49 +1489,21 @@ export function OrdersListPage() {
     !o.is_paid && ['DONE', 'CLAIMED_IMPORTED', 'COMPLETED', 'SKIPPED'].includes(o.state.toUpperCase())
   )
 
-  // Auto-switch admin tab when user types a search query if matching order exists in another tab
+  // Auto-switch admin tab when the search has no match in the current tab but has one elsewhere.
   useEffect(() => {
-    const q = searchQuery.trim().toLowerCase()
+    const q = debouncedSearch.trim().toLowerCase()
     if (!isAdmin || !q) {
       lastAutoSwitchedQueryRef.current = ''
       return
     }
+    const counts = pageMeta?.search_counts
+    if (!counts || pageMeta.search.toLowerCase() !== q) return
     if (lastAutoSwitchedQueryRef.current === q) return
     lastAutoSwitchedQueryRef.current = q
-
-    const matchesOrder = (o: OrderSummary) =>
-      (o.external_order_id && o.external_order_id.toLowerCase().includes(q)) ||
-      (o.product_name && o.product_name.toLowerCase().includes(q)) ||
-      (o.assigned_designer_name && o.assigned_designer_name.toLowerCase().includes(q)) ||
-      (o.platform_designer && o.platform_designer.toLowerCase().includes(q))
-
-    const currentTabOrders =
-      adminTab === 'waiting'
-        ? waitingOrders
-        : adminTab === 'doing'
-          ? filteredDoingOrders
-          : adminTab === 'review'
-            ? reviewOrders
-            : adminTab === 'fix'
-              ? filteredFixOrders
-              : doneOrders
-
-    if (currentTabOrders.some(matchesOrder)) {
-      return
-    }
-
-    if (reviewOrders.some(matchesOrder)) {
-      setAdminTab('review')
-    } else if (filteredFixOrders.some(matchesOrder)) {
-      setAdminTab('fix')
-    } else if (filteredDoingOrders.some(matchesOrder)) {
-      setAdminTab('doing')
-    } else if (waitingOrders.some(matchesOrder)) {
-      setAdminTab('waiting')
-    } else if (doneOrders.some(matchesOrder)) {
-      setAdminTab('done')
-    }
-  }, [searchQuery, isAdmin, adminTab, waitingOrders, filteredDoingOrders, reviewOrders, filteredFixOrders, doneOrders])
+    if (counts[adminTab] > 0) return
+    const target = (['review', 'fix', 'doing', 'waiting', 'done'] as AdminTabKey[]).find((tab) => counts[tab] > 0)
+    if (target) setAdminTab(target)
+  }, [debouncedSearch, isAdmin, adminTab, pageMeta])
 
   // Base list of orders depending on role and active tab
   let baseOrders: OrderSummary[] = orders
@@ -1407,15 +1561,17 @@ export function OrdersListPage() {
   )
 
   const syncedOrdersCount = useMemo(() => {
+    if (isAdmin) return pageMeta?.aux.synced_images ?? 0
     return baseOrders.filter(isOrderGallerySynced).length
-  }, [baseOrders, isOrderGallerySynced])
+  }, [isAdmin, pageMeta, baseOrders, isOrderGallerySynced])
 
   const fixReturnedOrdersCount = useMemo(() => {
+    if (isAdmin) return pageMeta?.aux.fix_returned ?? 0
     return baseOrders.filter((order) => (order.fix_return_count || 0) > 0).length
-  }, [baseOrders])
+  }, [isAdmin, pageMeta, baseOrders])
 
   // Filter client-side order list & sort newest first
-  const filteredOrders = baseOrders
+  const clientFilteredOrders = (isAdmin ? [] : baseOrders)
     .filter((o) => {
       if (isManager && syncedImagesFilter && !isOrderGallerySynced(o)) {
         return false
@@ -1698,20 +1854,28 @@ export function OrdersListPage() {
 
   function handlePageChange(page: number) {
     setCurrentPage(page)
+    if (isAdmin) setSelectedOrderIds([])
     const next = new URLSearchParams(searchParams)
     if (page > 1) next.set('page', String(page))
     else next.delete('page')
     setSearchParams(next, { replace: true })
   }
 
-  const paginatedOrders = paginate(filteredOrders, currentPage)
+  // Admin: the server already filtered, sorted and paginated; others page the local list.
+  const filteredOrders = isAdmin ? orders : clientFilteredOrders
+  const totalFiltered = isAdmin ? (pageMeta?.total ?? orders.length) : clientFilteredOrders.length
+  const paginatedOrders = isAdmin ? orders : paginate(clientFilteredOrders, currentPage)
 
   // Listen for Topbar sync button click
   useEffect(() => {
     function handleRequestSync() {
       window.dispatchEvent(new CustomEvent('sync-tab-handled'))
-      const targetOrders: OrderSummary[] = !isAdmin
-        ? activeDesignerTab === 'doing'
+      if (isAdmin) {
+        void syncAdminTab(adminTab, adminTab === 'fix' ? adminFixSubFilter : 'all')
+        return
+      }
+      const targetOrders: OrderSummary[] =
+        activeDesignerTab === 'doing'
           ? designerDoingOrders
           : activeDesignerTab === 'fix'
             ? designerFixOrders
@@ -1722,22 +1886,13 @@ export function OrdersListPage() {
                 : activeDesignerTab === 'paid'
                   ? designerPaidOrders
                   : designerDoneOrders
-        : adminTab === 'waiting'
-          ? waitingOrders
-          : adminTab === 'doing'
-            ? doingOrders
-            : adminTab === 'review'
-              ? reviewOrders
-              : adminTab === 'fix'
-                ? filteredFixOrders
-                : doneOrders
 
       const targetIds = targetOrders.map((o) => o.id)
       void handleSyncPlatformStatus(targetIds)
     }
     window.addEventListener('request-sync-current-tab', handleRequestSync)
     return () => window.removeEventListener('request-sync-current-tab', handleRequestSync)
-  }, [isAdmin, activeDesignerTab, designerDoingOrders, designerFixOrders, designerReviewOrders, waitingUpdateOrders, designerPaidOrders, designerDoneOrders, adminTab, waitingOrders, doingOrders, reviewOrders, fixOrders, doneOrders, orders])
+  }, [isAdmin, activeDesignerTab, designerDoingOrders, designerFixOrders, designerReviewOrders, waitingUpdateOrders, designerPaidOrders, designerDoneOrders, adminTab, adminFixSubFilter, orders])
 
   return (
     <DashboardLayout>
@@ -1775,7 +1930,7 @@ export function OrdersListPage() {
                   className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${adminTab === 'waiting' ? 'bg-white/25 text-white' : 'bg-amber-200/80 text-amber-900'
                     }`}
                 >
-                  {waitingOrders.length}
+                  {tabCounts.waiting}
                 </span>
               </button>
 
@@ -1794,7 +1949,7 @@ export function OrdersListPage() {
                   className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${adminTab === 'doing' ? 'bg-white/25 text-white' : 'bg-blue-200/80 text-blue-900'
                     }`}
                 >
-                  {doingOrders.length}
+                  {tabCounts.doing}
                 </span>
               </button>
 
@@ -1813,7 +1968,7 @@ export function OrdersListPage() {
                   className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${adminTab === 'review' ? 'bg-white/25 text-white' : 'bg-purple-200/80 text-purple-900'
                     }`}
                 >
-                  {reviewOrders.length}
+                  {tabCounts.review}
                 </span>
               </button>
 
@@ -1832,7 +1987,7 @@ export function OrdersListPage() {
                   className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${adminTab === 'fix' ? 'bg-white/25 text-white' : 'bg-rose-200/80 text-rose-900'
                     }`}
                 >
-                  {fixOrders.length}
+                  {tabCounts.fix}
                 </span>
               </button>
 
@@ -1851,7 +2006,7 @@ export function OrdersListPage() {
                   className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${adminTab === 'done' ? 'bg-white/25 text-white' : 'bg-emerald-200/80 text-emerald-900'
                     }`}
                 >
-                  {doneOrders.length}
+                  {tabCounts.done}
                 </span>
               </button>
             </div>
@@ -1873,7 +2028,7 @@ export function OrdersListPage() {
                       <span>Tất cả</span>
                       <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${adminDoingSubFilter === 'all' ? 'bg-slate-200 text-slate-800' : 'bg-slate-200/80 text-slate-600'
                         }`}>
-                        {doingOrders.length}
+                        {tabCounts.doing}
                       </span>
                     </button>
                     <button
@@ -1887,7 +2042,7 @@ export function OrdersListPage() {
                       <span>Thiếu Form / Term</span>
                       <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${adminDoingSubFilter === 'missing' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-900'
                         }`}>
-                        {missingTemplateDoingOrders.length}
+                        {tabCounts.doingMissing}
                       </span>
                     </button>
                     <button
@@ -1901,7 +2056,7 @@ export function OrdersListPage() {
                       <span>Đang làm bình thường</span>
                       <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${adminDoingSubFilter === 'normal' ? 'bg-white/20 text-white' : 'bg-blue-100 text-blue-900'
                         }`}>
-                        {normalDoingOrders.length}
+                        {tabCounts.doingNormal}
                       </span>
                     </button>
                   </div>
@@ -1909,13 +2064,13 @@ export function OrdersListPage() {
                   {isAdmin && (
                     <button
                       type="button"
-                      onClick={() => handleSyncPlatformStatus(doingOrders.map((o) => o.id))}
-                      disabled={isTriggering || !!syncStatus?.is_running || doingOrders.length === 0}
+                      onClick={() => void syncAdminTab('doing')}
+                      disabled={isTriggering || !!syncStatus?.is_running || tabCounts.doing === 0}
                       className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-bold text-white bg-[#0052CC] hover:bg-[#0041A3] rounded-xl shadow-2xs transition-all cursor-pointer disabled:opacity-50"
                       title="Đồng bộ trạng thái các đơn đang làm trong tab Doing"
                     >
                       <RefreshCw className={`h-3.5 w-3.5 ${isTriggering || syncStatus?.is_running ? 'animate-spin' : ''}`} />
-                      <span>Đồng bộ tab Doing ({doingOrders.length})</span>
+                      <span>Đồng bộ tab Doing ({tabCounts.doing})</span>
                     </button>
                   )}
                 </div>
@@ -1931,14 +2086,14 @@ export function OrdersListPage() {
                     type="button"
                     onClick={() => {
                       setAutoSyncResetKey((k) => k + 1)
-                      handleSyncPlatformStatus(reviewOrders.map((o) => o.id))
+                      void syncAdminTab('review')
                     }}
-                    disabled={isTriggering || !!syncStatus?.is_running || reviewOrders.length === 0}
+                    disabled={isTriggering || !!syncStatus?.is_running || tabCounts.review === 0}
                     className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 rounded-xl shadow-2xs transition-all cursor-pointer disabled:opacity-50"
                     title="Đồng bộ ngay trạng thái các đơn chờ duyệt trong tab Review"
                   >
                     <RefreshCw className={`h-3.5 w-3.5 ${isTriggering || syncStatus?.is_running ? 'animate-spin' : ''}`} />
-                    <span>Đồng bộ tab Review ({reviewOrders.length})</span>
+                    <span>Đồng bộ tab Review ({tabCounts.review})</span>
                   </button>
                 </div>
               )}
@@ -1958,7 +2113,7 @@ export function OrdersListPage() {
                       <span>Tất cả</span>
                       <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${adminFixSubFilter === 'all' ? 'bg-slate-200 text-slate-800' : 'bg-slate-200/80 text-slate-600'
                         }`}>
-                        {fixOrders.length}
+                        {tabCounts.fix}
                       </span>
                     </button>
                     <button
@@ -1972,7 +2127,7 @@ export function OrdersListPage() {
                       <span>Chưa lựa chọn</span>
                       <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${adminFixSubFilter === 'pending' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-900'
                         }`}>
-                        {pendingFixOrders.length}
+                        {tabCounts.fixPending}
                       </span>
                     </button>
                     <button
@@ -1986,7 +2141,7 @@ export function OrdersListPage() {
                       <span>Đã chấp nhận Fix</span>
                       <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${adminFixSubFilter === 'approved' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-900'
                         }`}>
-                        {approvedFixOrders.length}
+                        {tabCounts.fixApproved}
                       </span>
                     </button>
                     <button
@@ -2000,20 +2155,20 @@ export function OrdersListPage() {
                       <span>Đã từ chối Fix</span>
                       <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${adminFixSubFilter === 'rejected' ? 'bg-white/20 text-white' : 'bg-purple-100 text-purple-900'
                         }`}>
-                        {rejectedFixOrders.length}
+                        {tabCounts.fixRejected}
                       </span>
                     </button>
                   </div>
 
                   <button
                     type="button"
-                    onClick={() => handleSyncPlatformStatus(fixOrders.map((o) => o.id))}
-                    disabled={isTriggering || !!syncStatus?.is_running || fixOrders.length === 0}
+                    onClick={() => void syncAdminTab('fix')}
+                    disabled={isTriggering || !!syncStatus?.is_running || tabCounts.fix === 0}
                     className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-2xs transition-all cursor-pointer disabled:opacity-50"
                     title="Đồng bộ trạng thái các đơn cần sửa trong tab Fix"
                   >
                     <RefreshCw className={`h-3.5 w-3.5 ${isTriggering || syncStatus?.is_running ? 'animate-spin' : ''}`} />
-                    <span>Đồng bộ tab Fix ({fixOrders.length})</span>
+                    <span>Đồng bộ tab Fix ({tabCounts.fix})</span>
                   </button>
                 </div>
               )}
@@ -2028,14 +2183,14 @@ export function OrdersListPage() {
                     type="button"
                     onClick={() => {
                       setAutoSyncResetKey((k) => k + 1)
-                      handleSyncPlatformStatus(doneOrders.map((o) => o.id))
+                      void syncAdminTab('done')
                     }}
-                    disabled={isTriggering || !!syncStatus?.is_running || doneOrders.length === 0}
+                    disabled={isTriggering || !!syncStatus?.is_running || tabCounts.done === 0}
                     className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-2xs transition-all cursor-pointer disabled:opacity-50"
                     title="Đồng bộ ngay trạng thái các đơn hoàn thành trong tab Done"
                   >
                     <RefreshCw className={`h-3.5 w-3.5 ${isTriggering || syncStatus?.is_running ? 'animate-spin' : ''}`} />
-                    <span>Đồng bộ tab Done ({doneOrders.length})</span>
+                    <span>Đồng bộ tab Done ({tabCounts.done})</span>
                   </button>
                 </div>
               )}
@@ -2659,7 +2814,7 @@ export function OrdersListPage() {
           <div className="inline-flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-slate-200/80 shadow-2xs">
             <span className="text-xs font-semibold text-slate-600">Tổng số task:</span>
             <span className="inline-flex items-center justify-center font-mono text-sm font-extrabold text-[#0052CC] bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200/70 shadow-2xs min-w-[28px]">
-              {filteredOrders.length}
+              {totalFiltered}
             </span>
             <span className="text-xs text-slate-500 font-medium">task</span>
           </div>
@@ -2702,7 +2857,7 @@ export function OrdersListPage() {
           )}
 
           {/* Quick Distribute Button for Admin in Waiting tab */}
-          {isAdmin && adminTab === 'waiting' && waitingOrders.length > 0 && (
+          {isAdmin && adminTab === 'waiting' && tabCounts.waiting > 0 && (
             <button
               type="button"
               onClick={() => setQuickDistributeOpen(true)}
@@ -2717,7 +2872,7 @@ export function OrdersListPage() {
           {(searchQuery || statusFilter || platformStatusFilter || designerFilter || batchFilter || dateFrom || dateTo || syncedImagesFilter || fixReturnedFilter) && (
             <div className="inline-flex items-center gap-1.5 text-xs text-slate-500 bg-slate-100/80 px-2.5 py-1 rounded-md border border-slate-200/60">
               <span className="text-slate-400">Đang lọc từ:</span>
-              <span className="font-mono font-bold text-slate-700">{baseOrders.length}</span>
+              <span className="font-mono font-bold text-slate-700">{isAdmin ? tabCounts[adminTab] : baseOrders.length}</span>
               <span>task trong tab</span>
               {syncedImagesFilter && (
                 <span className="inline-flex items-center gap-1 ml-1 px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">
@@ -2735,14 +2890,14 @@ export function OrdersListPage() {
           )}
         </div>
 
-        {filteredOrders.length > 0 && (
+        {totalFiltered > 0 && (
           <div className="text-xs text-slate-500 font-medium flex items-center gap-1">
             <span>Hiển thị:</span>
             <span className="font-mono font-bold text-slate-700">
-              {Math.min((currentPage - 1) * 100 + 1, filteredOrders.length)}–{Math.min(currentPage * 100, filteredOrders.length)}
+              {Math.min((currentPage - 1) * 100 + 1, totalFiltered)}–{Math.min(currentPage * 100, totalFiltered)}
             </span>
             <span className="text-slate-400">/</span>
-            <span className="font-mono font-bold text-slate-700">{filteredOrders.length}</span>
+            <span className="font-mono font-bold text-slate-700">{totalFiltered}</span>
           </div>
         )}
       </div>
@@ -3741,7 +3896,7 @@ export function OrdersListPage() {
 
         {/* Pagination */}
         <Pagination
-          totalItems={filteredOrders.length}
+          totalItems={totalFiltered}
           currentPage={currentPage}
           onPageChange={handlePageChange}
         />

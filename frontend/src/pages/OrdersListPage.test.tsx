@@ -14,11 +14,67 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+
+// The admin list is served page-by-page by GET /orders/page. The tests keep describing the data as a
+// flat `{ orders }` list on /api/orders; this adapter answers /orders/page the way the server would.
+const TAB_STATES: Record<string, string[]> = {
+  waiting: ['WAITING', 'OPEN_FOR_ALLOCATION', 'DISCOVERED', 'PENDING', 'OPEN'],
+  doing: ['IN_PROGRESS', 'DOING', 'ASSIGNED'],
+  review: ['QC_PENDING', 'RESULT_SUBMITTED', 'SUBMITTING_TO_SITE', 'REVIEW'],
+  fix: ['REVISION', 'REVISION_REQUESTED', 'FIX'],
+  done: ['DONE', 'CLAIMED_IMPORTED', 'COMPLETED', 'SKIPPED'],
+}
+
+function adminPageAdapter(handler: (url: string, ...rest: any[]) => any) {
+  return (url: string, ...rest: any[]) => {
+    if (!url.includes('/api/orders/page')) return handler(url, ...rest)
+    const params = new URL(url, 'http://localhost').searchParams
+    return Promise.resolve(handler('/api/orders', ...rest)).then(async (res: any) => {
+      const all: any[] = ((await res.json()).orders ?? [])
+      const tabOf = (o: any) => Object.keys(TAB_STATES).find((t) => TAB_STATES[t].includes((o.state || '').toUpperCase()))
+      const tab = params.get('tab') || 'waiting'
+      let items = all.filter((o) => tabOf(o) === tab)
+      const doingSub = params.get('doing_sub')
+      if (tab === 'doing' && doingSub === 'missing') items = items.filter((o) => o.template_missing)
+      if (tab === 'doing' && doingSub === 'normal') items = items.filter((o) => !o.template_missing)
+      const fixSub = params.get('fix_sub')
+      if (tab === 'fix' && fixSub === 'pending') items = items.filter((o) => !o.fix_approved_by_admin && !o.fix_rejected_by_admin)
+      if (tab === 'fix' && fixSub === 'approved') items = items.filter((o) => o.fix_approved_by_admin)
+      if (tab === 'fix' && fixSub === 'rejected') items = items.filter((o) => o.fix_rejected_by_admin)
+      const q = (params.get('q') || '').toLowerCase()
+      if (q) items = items.filter((o) => `${o.external_order_id} ${o.product_name ?? ''}`.toLowerCase().includes(q))
+      const psf = (params.get('platform_status') || '').toLowerCase()
+      if (psf) items = items.filter((o) => ((o.platform_status || '').toLowerCase().trim() === psf) || (psf === 'unspecified' && !o.platform_status))
+      const tabAll = all.filter((o) => tabOf(o) === tab)
+      const synced = (o: any) => (o.product_image_urls?.length ?? 0) > 1
+      if (params.get('fix_returned') === 'true') items = items.filter((o) => (o.fix_return_count || 0) > 0)
+      if (params.get('synced_images') === 'true') items = items.filter(synced)
+      const count = (t: string) => all.filter((o) => tabOf(o) === t).length
+      const body = {
+        items,
+        total: items.length,
+        page: 1,
+        page_size: 100,
+        counts: {
+          waiting: count('waiting'), doing: count('doing'), review: count('review'), fix: count('fix'), done: count('done'),
+          doing_missing: all.filter((o) => tabOf(o) === 'doing' && o.template_missing).length,
+          doing_normal: all.filter((o) => tabOf(o) === 'doing' && !o.template_missing).length,
+          fix_pending: all.filter((o) => tabOf(o) === 'fix' && !o.fix_approved_by_admin && !o.fix_rejected_by_admin).length,
+          fix_approved: all.filter((o) => tabOf(o) === 'fix' && o.fix_approved_by_admin).length,
+          fix_rejected: all.filter((o) => tabOf(o) === 'fix' && o.fix_rejected_by_admin).length,
+        },
+        aux: { synced_images: tabAll.filter(synced).length, fix_returned: tabAll.filter((o) => (o.fix_return_count || 0) > 0).length },
+      }
+      return { ok: true, status: 200, json: async () => body }
+    })
+  }
+}
+
 describe('OrdersListPage', () => {
   it('renders orders and Print status filter for admin', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn((url: string) => {
+      vi.fn(adminPageAdapter((url: string) => {
         if (url.includes('/api/me')) {
           return Promise.resolve({
             ok: true,
@@ -53,7 +109,7 @@ describe('OrdersListPage', () => {
           })
         }
         return Promise.reject(new Error(`unexpected fetch: ${url}`))
-      })
+      }))
     )
 
     render(
@@ -93,7 +149,7 @@ describe('OrdersListPage', () => {
     )
     vi.stubGlobal(
       'fetch',
-      vi.fn((url: string) => {
+      vi.fn(adminPageAdapter((url: string) => {
         if (url.includes('/api/me')) {
           return Promise.resolve({ ok: true, status: 200, json: async () => ({ id: 'admin-stale-filter', role: 'admin', full_name: 'Admin' }) })
         }
@@ -133,7 +189,7 @@ describe('OrdersListPage', () => {
           })
         }
         return Promise.reject(new Error(`unexpected fetch: ${url}`))
-      }),
+      })),
     )
 
     window.history.pushState({}, '', '/orders?tab=doing')
@@ -157,7 +213,7 @@ describe('OrdersListPage', () => {
   it('lets an admin filter the current tab to orders that have entered Fix', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn((url: string) => {
+      vi.fn(adminPageAdapter((url: string) => {
         if (url.includes('/api/me')) {
           return Promise.resolve({ ok: true, status: 200, json: async () => ({ id: 'admin-fix-filter', role: 'admin', full_name: 'Admin' }) })
         }
@@ -183,7 +239,7 @@ describe('OrdersListPage', () => {
           })
         }
         return Promise.reject(new Error(`unexpected fetch: ${url}`))
-      }),
+      })),
     )
 
     const view = render(
@@ -197,14 +253,15 @@ describe('OrdersListPage', () => {
     fireEvent.click(fixReturnedButton)
 
     expect(fixReturnedButton).toHaveAttribute('aria-pressed', 'true')
+    // The server applies the filter, so the list changes after the next response.
+    await waitFor(() => expect(within(view.container).queryByText('DJ-NO-FIX')).not.toBeInTheDocument())
     expect(within(view.container).getByText('DJ-FIX-X1')).toBeInTheDocument()
-    expect(within(view.container).queryByText('DJ-NO-FIX')).not.toBeInTheDocument()
   })
 
   it('hides order code DJ1 and renders 4 tabs for designer', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn((url: string) => {
+      vi.fn(adminPageAdapter((url: string) => {
         if (url.includes('/api/me')) {
           return Promise.resolve({
             ok: true,
@@ -239,7 +296,7 @@ describe('OrdersListPage', () => {
           })
         }
         return Promise.reject(new Error(`unexpected fetch: ${url}`))
-      })
+      }))
     )
 
     render(
@@ -269,8 +326,8 @@ describe('OrdersListPage', () => {
     expect(screen.queryByText(/Tất Cả Nhiệm Vụ/i)).not.toBeInTheDocument()
 
     // Verify order code is HIDDEN, but product name is visible
+    expect(await screen.findByText('Super Cool T-Shirt')).toBeInTheDocument()
     expect(screen.queryByText('DJ1_SECRET_CODE')).not.toBeInTheDocument()
-    expect(screen.getByText('Super Cool T-Shirt')).toBeInTheDocument()
 
     // Verify action buttons
     expect(screen.getByText('Nộp bài')).toBeInTheDocument()
@@ -280,7 +337,7 @@ describe('OrdersListPage', () => {
   it('only shows Admin-approved Fix orders in the designer Fix tab', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn((url: string) => {
+      vi.fn(adminPageAdapter((url: string) => {
         if (url.includes('/api/me')) {
           return Promise.resolve({
             ok: true,
@@ -317,7 +374,7 @@ describe('OrdersListPage', () => {
           })
         }
         return Promise.reject(new Error(`unexpected fetch: ${url}`))
-      }),
+      })),
     )
 
     render(
@@ -336,7 +393,7 @@ describe('OrdersListPage', () => {
   it('renders Thời Gian column and Fix tab action buttons for Admin', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn((url: string) => {
+      vi.fn(adminPageAdapter((url: string) => {
         if (url.includes('/api/me')) {
           return Promise.resolve({
             ok: true,
@@ -384,7 +441,7 @@ describe('OrdersListPage', () => {
           })
         }
         return Promise.reject(new Error(`unexpected fetch: ${url}`))
-      })
+      }))
     )
 
     // Simulate opening with tab=fix
@@ -421,7 +478,7 @@ describe('OrdersListPage', () => {
   it('renders and filters by synced images button', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn((url: string) => {
+      vi.fn(adminPageAdapter((url: string) => {
         if (url.includes('/api/me')) {
           return Promise.resolve({
             ok: true,
@@ -471,7 +528,7 @@ describe('OrdersListPage', () => {
           })
         }
         return Promise.reject(new Error(`unexpected fetch: ${url}`))
-      })
+      }))
     )
 
     window.history.pushState({}, '', '/orders?tab=waiting')
@@ -511,7 +568,7 @@ describe('OrdersListPage', () => {
   it('renders Fix sub-filters and proper status badges for approved/rejected fix orders', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn((url: string) => {
+      vi.fn(adminPageAdapter((url: string) => {
         if (url.includes('/api/me')) {
           return Promise.resolve({
             ok: true,
@@ -575,7 +632,7 @@ describe('OrdersListPage', () => {
           })
         }
         return Promise.reject(new Error())
-      })
+      }))
     )
 
     window.history.pushState({}, '', '/orders?tab=fix')
@@ -613,7 +670,7 @@ describe('OrdersListPage', () => {
   it('renders 3 tabs and duplicate check actions for support role', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn((url: string) => {
+      vi.fn(adminPageAdapter((url: string) => {
         if (url.includes('/api/me')) {
           return Promise.resolve({
             ok: true,
@@ -652,7 +709,7 @@ describe('OrdersListPage', () => {
           })
         }
         return Promise.reject(new Error(`unexpected fetch: ${url}`))
-      })
+      }))
     )
 
     window.history.pushState({}, '', '/orders')
@@ -689,7 +746,7 @@ describe('OrdersListPage', () => {
   it('puts every Support order in exactly one tab: an untagged assigned order is read-only in Đang làm', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn((url: string) => {
+      vi.fn(adminPageAdapter((url: string) => {
         if (url.includes('/api/me')) {
           return Promise.resolve({
             ok: true,
@@ -758,7 +815,7 @@ describe('OrdersListPage', () => {
           })
         }
         return Promise.reject(new Error(`unexpected fetch: ${url}`))
-      })
+      }))
     )
 
     window.history.pushState({}, '', '/orders')
@@ -848,7 +905,7 @@ describe('OrdersListPage', () => {
     ]
     vi.stubGlobal(
       'fetch',
-      vi.fn((url: string, init?: RequestInit) => {
+      vi.fn(adminPageAdapter((url: string, init?: RequestInit) => {
         const ok = (body: unknown) => Promise.resolve({ ok: true, status: 200, json: async () => body })
         if (url.includes('/api/me')) return ok({ id: 'supp1', role: 'support', full_name: 'Support User' })
         if (url.includes('/api/platforms')) return ok({ platforms: [] })
@@ -856,7 +913,7 @@ describe('OrdersListPage', () => {
         if (url.includes('/api/orders/return-to-unchecked') && init?.method === 'POST') return ok({ changed_count: 1 })
         if (url.includes('/api/orders')) return ok({ orders })
         return Promise.reject(new Error(`unexpected fetch: ${url}`))
-      }),
+      })),
     )
     window.history.pushState({}, '', '/orders?support_tab=non_duplicate')
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
@@ -899,7 +956,7 @@ describe('OrdersListPage', () => {
   it('renders orange exclamation badge on Admin across all tabs when uncheck, and supports Hủy chia', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn((url: string) => {
+      vi.fn(adminPageAdapter((url: string) => {
         if (url.includes('/api/me')) {
           return Promise.resolve({
             ok: true,
@@ -937,7 +994,7 @@ describe('OrdersListPage', () => {
           })
         }
         return Promise.reject(new Error(`unexpected fetch: ${url}`))
-      })
+      }))
     )
 
     window.history.pushState({}, '', '/orders?tab=doing')
@@ -970,7 +1027,7 @@ describe('OrdersListPage', () => {
     let revokeCalledWith: any = null
     vi.stubGlobal(
       'fetch',
-      vi.fn((url: string, opts?: any) => {
+      vi.fn(adminPageAdapter((url: string, opts?: any) => {
         if (url.includes('/api/me')) {
           return Promise.resolve({
             ok: true,
@@ -1021,7 +1078,7 @@ describe('OrdersListPage', () => {
           })
         }
         return Promise.reject(new Error(`unexpected fetch: ${url}`))
-      })
+      }))
     )
 
     window.history.pushState({}, '', '/orders?tab=waiting')
@@ -1070,7 +1127,7 @@ describe('OrdersListPage', () => {
 
     vi.stubGlobal(
       'fetch',
-      vi.fn((url: string, init?: RequestInit) => {
+      vi.fn(adminPageAdapter((url: string, init?: RequestInit) => {
         if (url.includes('/api/me')) {
           return Promise.resolve({
             ok: true,
@@ -1115,7 +1172,7 @@ describe('OrdersListPage', () => {
           })
         }
         return Promise.reject(new Error(`unexpected fetch: ${url}`))
-      })
+      }))
     )
 
     render(
@@ -1162,7 +1219,7 @@ describe('OrdersListPage', () => {
   it('renders Chia đơn nhanh button for admin on waiting tab and opens quick distribute modal', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn((url: string) => {
+      vi.fn(adminPageAdapter((url: string) => {
         if (url.includes('/api/me')) {
           return Promise.resolve({
             ok: true,
@@ -1206,7 +1263,7 @@ describe('OrdersListPage', () => {
           })
         }
         return Promise.reject(new Error(`unexpected fetch: ${url}`))
-      })
+      }))
     )
 
     render(
@@ -1234,5 +1291,46 @@ describe('OrdersListPage', () => {
 
     expect(screen.getByText('Chia Đơn Nhanh Cho Designer')).toBeInTheDocument()
     expect(screen.getByText('Designer A')).toBeInTheDocument()
+  })
+  it('shows a recently loaded admin page from the cache instead of loading it again', async () => {
+    const fetchMock = vi.fn(adminPageAdapter((url: string) => {
+      if (url.includes('/api/me')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ id: 'admin-cache', role: 'admin', full_name: 'Admin' }) })
+      }
+      if (url.includes('/api/platforms')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({ platforms: [] }) })
+      }
+      if (url.includes('/api/users')) {
+        return Promise.resolve({ ok: true, status: 200, json: async () => [] })
+      }
+      if (url.includes('/api/orders')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            orders: [{ id: 'c1', external_order_id: 'DJ-CACHED', product_name: 'Cached order', state: 'IN_PROGRESS', created_at: '2026-09-22T00:00:00Z' }],
+          }),
+        })
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`))
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const pageCalls = () => fetchMock.mock.calls.filter(([url]) => String(url).includes('/api/orders/page')).length
+    const tree = (
+      <BrowserRouter>
+        <AuthProvider><PlatformProvider><ToastProvider><GallerySyncProvider><OrdersListPage /></GallerySyncProvider></ToastProvider></PlatformProvider></AuthProvider>
+      </BrowserRouter>
+    )
+
+    window.history.pushState({}, '', '/orders?tab=doing')
+    const first = render(tree)
+    expect(await screen.findByText('DJ-CACHED')).toBeInTheDocument()
+    expect(pageCalls()).toBe(1)
+    first.unmount()
+
+    // Coming back from an order's detail: same page, straight from the cache, no new request.
+    render(tree)
+    expect(await screen.findByText('DJ-CACHED')).toBeInTheDocument()
+    expect(pageCalls()).toBe(1)
   })
 })

@@ -3,7 +3,7 @@ import logging
 import math
 import re
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -60,6 +60,7 @@ from app.api.deps import (
     require_any_role,
     require_role,
 )
+from app.application import order_chat, order_pages
 from app.application.assignment_commands import (
     AssignmentCommandError,
     revoke_assignment_command,
@@ -882,27 +883,8 @@ def api_order_states(user: User = Depends(get_current_user)):
     return OrderStatesResponse(states=[s.value for s in OrderState])
 
 
-@router.get("/orders", response_model=OrdersListResponse)
-def api_orders_list(
-    status_filter: str | None = Query(default=None, alias="status"),
-    batch_id: str | None = None,
-    designer_id: str | None = None,
-    work_domain: str | None = None,
-    duplicate_check_status: str | None = None,
-    user: User = Depends(get_current_user),
-    platform_id: uuid.UUID = Depends(get_current_platform_id),
-    db: Session = Depends(get_db),
-):
-    orders = list_orders_for_user(
-        db,
-        user,
-        status=status_filter,
-        batch_id=batch_id,
-        designer_id=designer_id,
-        platform_id=platform_id,
-        work_domain=work_domain,
-        duplicate_check_status=duplicate_check_status,
-    )
+def _summarize_orders(db: Session, user: User, orders: list[Order]) -> list[OrderSummaryOut]:
+    """List rows for ``orders``: designer names, assignment ids and the latest Printerval request."""
     order_ids = [o.id for o in orders]
     assignments = (
         db.query(Assignment, User)
@@ -954,6 +936,31 @@ def api_orders_list(
         if not is_admin:
             item = sanitize_order_summary_for_designer(item)
         out_list.append(item)
+    return out_list
+
+
+@router.get("/orders", response_model=OrdersListResponse)
+def api_orders_list(
+    status_filter: str | None = Query(default=None, alias="status"),
+    batch_id: str | None = None,
+    designer_id: str | None = None,
+    work_domain: str | None = None,
+    duplicate_check_status: str | None = None,
+    user: User = Depends(get_current_user),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    orders = list_orders_for_user(
+        db,
+        user,
+        status=status_filter,
+        batch_id=batch_id,
+        designer_id=designer_id,
+        platform_id=platform_id,
+        work_domain=work_domain,
+        duplicate_check_status=duplicate_check_status,
+    )
+    out_list = _summarize_orders(db, user, orders)
 
     submitted_count = (
         count_support_submitted_orders(db, user.platform_id)
@@ -961,6 +968,97 @@ def api_orders_list(
         else None
     )
     return OrdersListResponse(orders=out_list, submitted_count=submitted_count)
+
+
+@router.get("/orders/platform-designers")
+def api_orders_platform_designers(
+    user: User = Depends(require_role(ROLE_ADMIN)),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    """Distinct Printerval designer names seen on this platform's orders (crawl filter options)."""
+    rows = (
+        db.query(Order.printerval_designer)
+        .filter(Order.platform_id == platform_id, Order.printerval_designer.is_not(None))
+        .distinct()
+        .order_by(Order.printerval_designer)
+        .all()
+    )
+    return {"designers": [name for (name,) in rows if name]}
+
+
+@router.get("/orders/page")
+def api_orders_page(
+    tab: str = Query(default="waiting"),
+    doing_sub: str = "all",
+    fix_sub: str = "all",
+    q: str = "",
+    status_filter: str | None = Query(default=None, alias="status"),
+    designer_id: str | None = None,
+    platform_status: str | None = None,
+    batch: str | None = None,
+    date_field: str = "status_changed_at",
+    date_from: date | None = None,
+    date_to: date | None = None,
+    fix_returned: bool = False,
+    synced_images: bool = False,
+    chat_unread: bool = False,
+    sort_field: str = "status_changed_at",
+    sort_dir: str = "desc",
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=100, ge=1, le=order_pages.MAX_PAGE_SIZE),
+    ids_only: bool = False,
+    user: User = Depends(require_role(ROLE_ADMIN)),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    """One page of the Admin order list: tab, filters, sort and pagination run in SQL."""
+    if tab not in order_pages.TAB_STATES:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "tab không hợp lệ")
+    if date_field not in order_pages.DATE_FIELDS or sort_field not in order_pages.DATE_FIELDS:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "trường ngày không hợp lệ")
+    only_ids = None
+    if chat_unread:
+        only_ids = [uuid.UUID(item["order_id"]) for item in order_chat.unread_for_user(db, user, platform_id)]
+    params = order_pages.PageParams(
+        tab=tab,
+        doing_sub=doing_sub,
+        fix_sub=fix_sub,
+        q=q,
+        status=status_filter,
+        designer_id=designer_id,
+        platform_status=platform_status,
+        batch=batch,
+        date_field=date_field,
+        date_from=date_from,
+        date_to=date_to,
+        fix_returned=fix_returned,
+        synced_images=synced_images,
+        only_ids=only_ids,
+        sort_field=sort_field,
+        sort_desc=sort_dir != "asc",
+        page=page,
+        page_size=page_size,
+    )
+    loaded = order_pages.load_admin_page(db, user, platform_id, params)
+    empty_counts = {key: 0 for key in order_pages.TAB_STATES}
+    if loaded is None:
+        return {"items": [], "ids": [], "total": 0, "page": page, "page_size": page_size,
+                "counts": empty_counts, "aux": {"synced_images": 0, "fix_returned": 0}}
+    meta, tab_query = loaded
+    ordered = order_pages.order_page_query(tab_query, params)
+    if ids_only:
+        ids = [row[0] for row in ordered.with_entities(Order.id).limit(order_pages.MAX_IDS).all()]
+        return {"ids": [str(i) for i in ids], "total": tab_query.count()}
+    total = tab_query.count()
+    rows = ordered.offset((page - 1) * page_size).limit(page_size).all()
+    return {
+        "items": _summarize_orders(db, user, rows),
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        **meta,
+    }
 
 
 # Declared before /orders/{order_id} — a literal path segment after a path-param

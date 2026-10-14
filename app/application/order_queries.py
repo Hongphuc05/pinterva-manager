@@ -65,6 +65,32 @@ def list_orders_for_user(
     Support sees every Waiting and Doing order of its platform and nothing past Doing:
     an order whose designer has handed in a result leaves the workspace.
     """
+    query = visible_orders_query(
+        session,
+        user,
+        status=status,
+        batch_id=batch_id,
+        designer_id=designer_id,
+        platform_id=platform_id,
+        work_domain=work_domain,
+        duplicate_check_status=duplicate_check_status,
+    )
+    if query is None:
+        return []
+    return query.order_by(Order.created_at.desc()).all()
+
+
+def visible_orders_query(
+    session: Session,
+    user: User,
+    status: str | None = None,
+    batch_id: str | None = None,
+    designer_id: str | None = None,
+    platform_id: uuid.UUID | None = None,
+    work_domain: str | None = None,
+    duplicate_check_status: str | None = None,
+):
+    """The role-scoped, filtered Order query (unordered); ``None`` when nothing can match."""
     if user.role in (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO):
         designer_id = str(user.id)
 
@@ -72,7 +98,7 @@ def list_orders_for_user(
 
     if user.role == ROLE_SUPPORT:
         if user.platform_id is None:
-            return []
+            return None
         query = query.filter(Order.platform_id == user.platform_id)
         query = query.filter(Order.state.in_(SUPPORT_VISIBLE_STATES))
     elif platform_id:
@@ -108,7 +134,7 @@ def list_orders_for_user(
             try:
                 designer_uuid = uuid.UUID(designer_id)
             except ValueError:
-                return []
+                return None
             target_user = session.get(User, designer_uuid)
             printerval_opt = target_user.printerval_designer_option if target_user else None
             full_name = target_user.full_name if target_user else None
@@ -185,10 +211,10 @@ def list_orders_for_user(
         try:
             batch_uuid = uuid.UUID(batch_id)
         except ValueError:
-            return []
+            return None
         query = query.filter(Order.batch_id == batch_uuid)
 
-    return query.order_by(Order.created_at.desc()).all()
+    return query
 
 
 def get_order_detail_for_user(
