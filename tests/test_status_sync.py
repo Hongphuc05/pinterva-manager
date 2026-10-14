@@ -837,3 +837,18 @@ def test_full_database_sync_checks_every_tracked_platform_order(db_session):
     # A paid Done card still returns to Fix when Printerval explicitly requests it.
     assert paid_done.state == "REVISION"
     assert paid_done.is_paid is True
+
+
+def test_heartbeat_loop_persists_without_progress_argument(monkeypatch):
+    import uuid
+
+    from app.application import status_sync
+
+    reporter = status_sync._PlatformSyncProgressReporter(uuid.uuid4(), uuid.uuid4())
+    calls = []
+    monkeypatch.setattr(reporter, "_persist_heartbeat", lambda: calls.append(1) or False)
+    monkeypatch.setattr(
+        status_sync, "get_settings", lambda: type("S", (), {"status_sync_heartbeat_interval_seconds": 0})()
+    )
+    reporter._heartbeat_loop()
+    assert calls == [1]

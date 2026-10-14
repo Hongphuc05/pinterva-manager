@@ -109,7 +109,7 @@ class _SyncJobProgressReporter:
     def _heartbeat_loop(self) -> None:
         interval = get_settings().status_sync_heartbeat_interval_seconds
         while not self._stop_event.wait(interval):
-            if not self.report(force=True):
+            if not self._persist(force=True):
                 return
 
     def __call__(self, progress: dict) -> bool:

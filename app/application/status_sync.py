@@ -97,7 +97,7 @@ class _PlatformSyncProgressReporter:
     def _heartbeat_loop(self) -> None:
         interval = get_settings().status_sync_heartbeat_interval_seconds
         while not self._stop_event.wait(interval):
-            if not self.report(force=True):
+            if not self._persist_heartbeat():
                 return
 
     def __call__(self, progress: dict[str, Any]) -> bool:
@@ -311,8 +311,9 @@ def reconcile_active_platform_orders(
                     platform_id=str(platform.id),
                 )
                 if not discovered.success:
+                    error_class = getattr(discovered.error_class, "value", discovered.error_class)
                     raise RuntimeError(
-                        discovered.error_class or f"Không thể đọc queue {source_status} từ Printerval."
+                        f"Không thể đọc queue {source_status} từ Printerval ({error_class or 'lỗi không rõ'})."
                     )
                 yield from discovered.orders
                 page += 1
