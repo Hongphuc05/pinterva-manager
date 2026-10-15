@@ -2,7 +2,7 @@ import httpx
 
 from app.adapters.printerval.api_adapter import PrintervalApiAdapter
 from app.adapters.printerval.api_client import (
-    DESIGNER_OPTIONS_URL,
+    DESIGNER_OPTIONS_PATH,
     FIND_PATH,
     LOGIN_PATH,
     PrintervalApiClient,
@@ -54,16 +54,17 @@ def test_list_designer_options_reads_the_platform_scoped_http_endpoint():
             return httpx.Response(200, text='<input type="hidden" name="_token" value="csrf-123">')
         if request.method == "POST" and request.url.path == LOGIN_PATH:
             return httpx.Response(302, headers={"location": "/admin"})
-        if str(request.url).startswith(DESIGNER_OPTIONS_URL):
-            assert request.url.params["filters"] == "team=team-a"
+        if request.url.path == DESIGNER_OPTIONS_PATH:
+            assert request.url.host == "printerval.test"  # the site endpoint, not central.api
             return httpx.Response(
                 200,
                 json={
                     "status": "successful",
                     "result": [
-                        {"full_name": "Custom A"},
-                        {"full_name": "Custom B"},
-                        {"full_name": "Custom A"},
+                        {"full_name": "Custom A", "team": "team-a"},
+                        {"full_name": "Custom B", "team": "team-a"},
+                        {"full_name": "Custom A", "team": "team-a"},
+                        {"full_name": "Other team", "team": "team-b"},
                     ],
                 },
             )
@@ -306,3 +307,26 @@ def test_download_asset_uses_the_fast_http_path_for_a_plain_product_order():
 
     assert result.success is True
     assert result.local_path is None  # plain product order — nothing to download
+
+
+def test_designer_map_is_asked_once_per_client_even_when_printerval_refuses():
+    calls = []
+
+    def handler(request):
+        if request.url.path == DESIGNER_OPTIONS_PATH:
+            calls.append(request.url.path)
+            return httpx.Response(500, json={"error": "down"})
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    api_client = PrintervalApiClient(
+        base_url="https://printerval.test",
+        username="operator@example.test",
+        password="password123",
+        team_outsource="team-a",
+        client=httpx.Client(base_url="https://printerval.test", transport=httpx.MockTransport(handler)),
+    )
+
+    assert api_client.get_designer_map() == {}
+    assert api_client.get_designer_map() == {}
+    assert calls == [DESIGNER_OPTIONS_PATH]  # a failure is not retried for every page
+

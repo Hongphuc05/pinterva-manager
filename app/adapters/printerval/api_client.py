@@ -9,6 +9,7 @@ silently producing orders without their required images.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import Any
@@ -18,10 +19,15 @@ import httpx
 
 from app.adapters.errors import ErrorClass
 
+logger = logging.getLogger(__name__)
+
 LOGIN_PATH = "/outsource/pod/login"
 FIND_PATH = "/outsource/pod/design-job/find"
 ADMIN_PATH = "/central/outsource/pod/design-job/admin"
-DESIGNER_OPTIONS_URL = "https://central.api.printerval.com/designer_outsource"
+# Team designers, read with the outsource session. Printerval moved its own web to this endpoint on
+# 15/10/2026 (their #84f0959d) and locked the old token-less central.api.printerval.com/designer_outsource
+# ("token required!"); calls to the old URL were being reported as a misbehaving client.
+DESIGNER_OPTIONS_PATH = "/outsource/pod/member/options"
 
 
 class PrintervalApiConfigurationError(ValueError):
@@ -321,49 +327,42 @@ class PrintervalApiClient:
         return None
 
     def get_designer_options_raw(self) -> list[dict[str, Any]]:
-        """Fetch raw designer rows for this client's team outsource."""
+        """Fetch this team's designer rows (email, full_name, status, team) with the outsource session."""
         self._validate_configuration()
-        try:
-            response = self._client.get(
-                DESIGNER_OPTIONS_URL,
-                params={"page_size": "-1", "filters": f"team={self.team_outsource}"},
-            )
-        except httpx.HTTPError as exc:
-            raise PrintervalApiError(
-                ErrorClass.TRANSIENT_NETWORK,
-                "Designer options request failed",
-                retryable=True,
-            ) from exc
-        if response.status_code in (401, 403):
+
+        def once() -> httpx.Response:
             try:
-                self.login()
-                response = self._client.get(
-                    DESIGNER_OPTIONS_URL,
-                    params={"page_size": "-1", "filters": f"team={self.team_outsource}"},
+                return self._client.get(
+                    DESIGNER_OPTIONS_PATH,
+                    headers={"Accept": "application/json", "X-Requested-With": "XMLHttpRequest"},
                 )
-            except Exception:
-                pass
+            except httpx.HTTPError as exc:
+                raise PrintervalApiError(
+                    ErrorClass.TRANSIENT_NETWORK, "Designer options request failed", retryable=True
+                ) from exc
+
+        response = once()
+        redirected_to_login = (
+            response.status_code in (301, 302, 303, 307, 308)
+            and LOGIN_PATH in urlparse(response.headers.get("location", "")).path
+        )
+        if response.status_code in (401, 403) or redirected_to_login:
+            self._authenticated = False
+            self.login()
+            response = once()
         if response.status_code >= 400:
             error_class, retryable = _classify_http_status(response.status_code)
-            raise PrintervalApiError(
-                error_class,
-                "Designer options request was rejected",
-                retryable=retryable,
-            )
+            raise PrintervalApiError(error_class, "Designer options request was rejected", retryable=retryable)
         try:
             payload = response.json()
         except ValueError as exc:
-            raise PrintervalApiError(
-                ErrorClass.EXTERNAL_CHANGED,
-                "Designer options response was not JSON",
-            ) from exc
+            raise PrintervalApiError(ErrorClass.EXTERNAL_CHANGED, "Designer options response was not JSON") from exc
         rows = payload.get("result") if isinstance(payload, dict) else None
-        if payload.get("status") != "successful" or not isinstance(rows, list):
-            raise PrintervalApiError(
-                ErrorClass.EXTERNAL_CHANGED,
-                "Designer options response changed or was rejected",
-            )
-        return [r for r in rows if isinstance(r, dict)]
+        if not isinstance(payload, dict) or payload.get("status") != "successful" or not isinstance(rows, list):
+            raise PrintervalApiError(ErrorClass.EXTERNAL_CHANGED, "Designer options response changed or was rejected")
+        team = (self.team_outsource or "").strip()
+        # An admin session may list every team: keep this client's own team only.
+        return [r for r in rows if isinstance(r, dict) and (not team or not r.get("team") or r.get("team") == team)]
 
     def get_designer_map(self) -> dict[str, str]:
         """Return a mapping of email (lowercased) -> full_name for team designers."""
@@ -380,6 +379,9 @@ class PrintervalApiClient:
             self._designer_map_cache = mapping
             return mapping
         except Exception:
+            # Remember the failure for this client: a sync must not call again for every page.
+            logger.warning("Printerval designer options unavailable, designer emails stay unmapped", exc_info=True)
+            self._designer_map_cache = {}
             return {}
 
     def list_designer_options(self) -> list[str]:

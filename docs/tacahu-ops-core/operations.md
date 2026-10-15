@@ -130,6 +130,11 @@ Admin qua Telegram khi thất bại hẳn, kèm việc cần làm tay trên Prin
 - Chỉ tra locale (`local_code`) một lần ở đúng queue hiện tại của đơn; tra lỗi thì vẫn ghi với
   locale mặc định thay vì bỏ cả lượt.
 - Các request **đọc** (crawl, đồng bộ status) không báo Telegram: lượt sau tự chạy lại.
+- Danh sách designer của đội đọc từ `GET /outsource/pod/member/options` trên printerval.com bằng phiên
+  outsource (email, full_name, status, team). Từ 15/10/2026 Printerval khoá API cũ
+  `central.api.printerval.com/designer_outsource` (trả `{"error":"token required!"}`) và báo các lượt
+  gọi kiểu cũ là client lạ; không dùng lại URL đó. Lỗi đọc danh sách được nhớ trong một lượt sync,
+  không gọi lại cho mỗi trang.
 
 ## Monitoring cần xem
 
