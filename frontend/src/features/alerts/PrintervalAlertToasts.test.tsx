@@ -49,6 +49,20 @@ describe('Printerval write failure toasts', () => {
     expect(toast.showToast.mock.calls[5][0]).toContain('Còn 2 lỗi')
   })
 
+  it('a hidden tab takes no alert; it shows them as soon as it is looked at again', async () => {
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+    api.apiFetch.mockReset().mockResolvedValue({ items: [alert(1)], now: 'n' })
+    render(<PrintervalAlertToasts />)
+    await vi.advanceTimersByTimeAsync(61_000)
+    expect(api.apiFetch).not.toHaveBeenCalled()
+    expect(toast.showToast).not.toHaveBeenCalled()
+
+    visibility.mockReturnValue('visible')
+    document.dispatchEvent(new Event('visibilitychange'))
+    await waitFor(() => expect(toast.showToast).toHaveBeenCalledTimes(1))
+    visibility.mockRestore()
+  })
+
   it('does nothing for non-Admin accounts', async () => {
     auth.user = { id: 'd1', role: 'designer' }
     api.apiFetch.mockReset()

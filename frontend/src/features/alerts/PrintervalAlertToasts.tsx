@@ -45,6 +45,9 @@ export function PrintervalAlertToasts() {
     const key = sinceKey(userId)
     let alive = true
     const poll = async () => {
+      // A toast raised in a hidden tab disappears unseen and the alert counts as shown: only the
+      // tab someone is looking at may take alerts. A hidden tab catches up once it is shown again.
+      if (document.visibilityState !== 'visible') return
       const since = readSince(key) // shared by every tab, so one alert is not shown twice
       try {
         const query = since ? `?since=${encodeURIComponent(since)}` : ''
@@ -69,9 +72,12 @@ export function PrintervalAlertToasts() {
     }
     void poll()
     const timer = setInterval(() => void poll(), POLL_MS)
+    const onVisible = () => void poll()
+    document.addEventListener('visibilitychange', onVisible)
     return () => {
       alive = false
       clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
     }
   }, [isAdmin, userId, showToast])
 

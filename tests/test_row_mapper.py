@@ -438,3 +438,33 @@ def test_normalize_order_custom_config_and_sources_repairs_legacy_db_row():
         assert clean_sources[i]["url"] == f"https://cdn.customily.com/product-images/img-{i}.jpg"
 
 
+
+
+def test_custom_configuration_is_read_when_product_skus_is_a_list():
+    """DJ4145255 (15/10/2026): Printerval sent ``product_skus`` as a list, and the configuration
+    (Your Name Here / Team Name / Design Color) was silently dropped."""
+    import json
+
+    from app.adapters.printerval.row_mapper import extract_custom_config, extract_product_skus
+
+    configurations = json.dumps(
+        {"Your Name Here": "D-ROB", "Team Name": "NOT TODAY!", "Design Color": "Blue",
+         "applied_discount_type": "bulk_order"}
+    )
+    row = {
+        "id": 4145255,
+        "meta_data": json.dumps(
+            {"product_name": "Bowling Polo", "product_skus": [
+                {"configurations": configurations, "product_sku": "SKU-1", "image_url": "https://img.test/a.png"}
+            ]}
+        ),
+    }
+
+    config = extract_custom_config(row)
+    assert config is not None
+    entries = {e["key"]: e["value"] for e in config["original"]}
+    assert entries["Your Name Here"] == "D-ROB"
+    assert entries["Team Name"] == "NOT TODAY!"
+    assert entries["Design Color"] == "Blue"
+    [sku] = extract_product_skus(row)
+    assert sku.sku == "SKU-1" and sku.custom_config is not None

@@ -33,15 +33,32 @@ DESIGN_TOOL_URL_FORMAT = "https://design-tool.printerval.com/?tab=design-job&cod
 
 
 def _meta_data(row: dict[str, Any]) -> dict[str, Any]:
-    """`meta_data` is a JSON-encoded string on the wire, not a nested object."""
+    """`meta_data` is a JSON-encoded string on the wire, not a nested object.
+
+    ``product_skus`` is normally a map ``{sku_id: {...}}`` but some orders (e.g. DJ4145255, a bulk
+    order) send a list ``[{...}]``; it is turned into a map here so every reader sees one shape.
+    """
     raw = row.get("meta_data")
     if isinstance(raw, str):
         try:
             parsed = json.loads(raw)
         except (ValueError, TypeError):
             return {}
-        return parsed if isinstance(parsed, dict) else {}
-    return raw if isinstance(raw, dict) else {}
+    else:
+        parsed = raw
+    if not isinstance(parsed, dict):
+        return {}
+    skus = parsed.get("product_skus")
+    if isinstance(skus, list):
+        parsed = {
+            **parsed,
+            "product_skus": {
+                str(item.get("product_sku_id") or item.get("id") or item.get("product_sku") or index): item
+                for index, item in enumerate(skus)
+                if isinstance(item, dict)
+            },
+        }
+    return parsed
 
 
 def _first_sku_data(meta: dict[str, Any]) -> dict[str, Any] | None:
