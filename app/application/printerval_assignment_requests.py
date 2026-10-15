@@ -120,6 +120,7 @@ def execute_request(
     ).hexdigest()
 
     def _do() -> dict:
+        designer_failure: str | None = None
         platform = session.get(Platform, request.platform_id)
         if request.designer_option:
             available_designers = platform.printerval_designer_options if platform else None
@@ -149,6 +150,9 @@ def execute_request(
             designer_result = with_retry(
                 lambda: adapter.set_designer(order.external_order_id, target_designer_opt)
             )
+            if not designer_result.success:
+                # Never hide it: the status is still written below, but the request ends failed.
+                designer_failure = designer_result.error_class or "UNKNOWN_OUTCOME"
             if designer_result.success:
                 request.observed_designer = (
                     str(designer_result.observed_state.get("designer") or "") or None
@@ -167,14 +171,16 @@ def execute_request(
             lambda: adapter.set_status(order.external_order_id, request.target_status)
         )
         if not status_result.success:
-            return _fail(
-                request,
-                status_result.error_class or "UNKNOWN_OUTCOME",
-                "Designer changed but Printerval Status update was not verified"
-                if request.observed_designer
-                else "Printerval Status update was not verified",
-                status_result.evidence,
-            )
+            if designer_failure:
+                message = (
+                    f"Không gán được Designer {request.designer_option} và chưa xác nhận được trạng thái "
+                    f"{request.target_status} trên Printerval"
+                )
+            elif request.observed_designer:
+                message = "Designer changed but Printerval Status update was not verified"
+            else:
+                message = "Printerval Status update was not verified"
+            return _fail(request, status_result.error_class or "UNKNOWN_OUTCOME", message, status_result.evidence)
         request.observed_status = str(status_result.observed_state.get("status") or "") or None
         request.lifecycle = "succeeded"
         request.error_class = None
@@ -196,6 +202,16 @@ def execute_request(
                 evidence=request.evidence,
             )
         )
+        if designer_failure:
+            # The status went through (mirrored above), the Designer did not: report the request failed.
+            return _fail(
+                request,
+                designer_failure,
+                f"Không gán được Designer {request.designer_option} trên Printerval "
+                f"(trạng thái {request.target_status} đã cập nhật)",
+                {"request": {"designer": request.designer_option, "status": request.target_status},
+                 "designer_evidence": designer_result.evidence},
+            )
         return {
             "lifecycle": request.lifecycle,
             "designer": request.observed_designer,

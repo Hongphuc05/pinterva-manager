@@ -118,18 +118,23 @@ deadlock/che lỗi concurrency.
 ### Ghi lên Printerval thất bại: thử lại và báo Admin
 
 Mọi thao tác **ghi** lên Printerval (đẩy Review/trạng thái và note khi designer nộp bài hay Admin
-duyệt/từ chối Fix, đổi Designer/trạng thái qua `PrintervalAssignmentRequest`, giao designer) đều báo
-Admin qua Telegram khi thất bại hẳn, kèm việc cần làm tay trên Printerval (mẫu `admin_system_alert`).
+duyệt/từ chối Fix, đổi Designer/trạng thái qua `PrintervalAssignmentRequest`, giao designer) **không
+được che giấu lỗi ở bất kỳ bước nào**: khi thất bại hẳn sẽ ghi một `dead_letters`
+(`source=printerval.write_failed`, payload có mã đơn, thao tác, lỗi, platform; `recovery_action` là việc
+cần làm tay) và web của Admin hiện **toast** cho từng lỗi mới (`GET /api/printerval-alerts`, hỏi mỗi 30
+giây, theo platform). Không gửi Telegram cho các lỗi này.
 
+- Request đổi Designer/trạng thái: bước gán Designer hỏng thì request kết thúc `failed` (trước đây vẫn
+  báo `succeeded`, che giấu sự cố 43 đơn mất designer ngày 15/10); trạng thái vẫn được ghi nếu được.
 - Đẩy Review (`sync_order_review_to_printerval_task`): lỗi tạm thời (Printerval chậm, mạng, 5xx/429)
   được thử lại sau 1, 3 rồi 7 phút; cookie bị từ chối (`AUTH`) thì báo ngay. Hết lượt thử thì ghi
-  `dead_letters` (`source=printerval.review_sync`, có `recovery_action`) rồi báo Admin. Không còn
+  cảnh báo `printerval.write_failed` cho Admin. Không còn
   fallback Playwright cho job này (không chạy được trong container production).
 - `login()` bằng cookie: hết thời gian chờ được báo là `TRANSIENT_NETWORK`, không còn bị báo nhầm là
   "cookie hết hạn" (sự cố DJ4141056 ngày 14/10).
 - Chỉ tra locale (`local_code`) một lần ở đúng queue hiện tại của đơn; tra lỗi thì vẫn ghi với
   locale mặc định thay vì bỏ cả lượt.
-- Các request **đọc** (crawl, đồng bộ status) không báo Telegram: lượt sau tự chạy lại.
+- Các request **đọc** (crawl, đồng bộ status) không tạo cảnh báo: lượt sau tự chạy lại.
 - Danh sách designer của đội đọc từ `GET /outsource/pod/member/options` trên printerval.com bằng phiên
   outsource (email, full_name, status, team). Từ 15/10/2026 Printerval khoá API cũ
   `central.api.printerval.com/designer_outsource` (trả `{"error":"token required!"}`) và báo các lượt

@@ -16,13 +16,15 @@ from app.workers.celery_app import celery_app
 logger = logging.getLogger(__name__)
 
 
-def _alert_admins(session, order: Order | None, *, action: str, error: str, manual: str) -> None:
-    """A write to Printerval failed for good: ask the Admins to do it by hand (never raises)."""
+def _alert_admins(
+    session, order: Order | None, *, action: str, error: str, manual: str, error_class: str = "UNKNOWN_OUTCOME"
+) -> None:
+    """A write to Printerval failed: record it so the Admin web shows a toast (never raises)."""
     if order is None:
         return
-    from app.application.telegram_service import notify_admin_printerval_write_failed
+    from app.application.printerval_alerts import record_write_failure
 
-    notify_admin_printerval_write_failed(session, order, action=action, error=error, manual_fix=manual)
+    record_write_failure(session, order, action=action, error=error, manual=manual, error_class=error_class)
 
 
 def _request_wording(request: PrintervalAssignmentRequest, code: str) -> tuple[str, str]:
@@ -52,7 +54,7 @@ def sync_printerval_assignment_request(request_id: str) -> None:
             request.error_class = "AUTH"
             request.error_message = "Platform credentials are unavailable"
             session.commit()
-            _alert_admins(session, order, action=action, error=request.error_message, manual=manual)
+            _alert_admins(session, order, action=action, error=request.error_message, manual=manual, error_class="AUTH")
             return
         # A real browser fallback matters here specifically when a password is
         # available. Cookie-only platforms stay HTTP-only, avoiding a pointless
@@ -98,8 +100,8 @@ def sync_printerval_assignment_request(request_id: str) -> None:
                 session_cm.__exit__(None, None, None)
         if request.lifecycle in ("failed", "unknown_outcome"):
             _alert_admins(
-                session, order, action=action,
-                error=f"{request.error_class}: {request.error_message or 'không rõ'}", manual=manual,
+                session, order, action=action, error=request.error_message or "không rõ", manual=manual,
+                error_class=request.error_class or "UNKNOWN_OUTCOME",
             )
     except Exception as exc:
         logger.exception("Printerval assignment request %s crashed", request_id)
@@ -368,28 +370,11 @@ def _as_review_failure(exc: Exception) -> ReviewSyncFailed:
 
 def _review_sync_gave_up(session, order: Order, action: str, target_status: str | None,
                          failure: ReviewSyncFailed) -> None:
-    """Record the failure and ask the Admins to do the change on Printerval by hand."""
-    from app.adapters.db.models import DeadLetter
-    from app.application.telegram_service import notify_admin_printerval_write_failed
-
+    """Record the failure so the Admin web asks for the change to be done on Printerval by hand."""
     manual = (
         f"vào Printerval chuyển đơn {order.external_order_id} sang {target_status}"
         if target_status
         else f"vào Printerval ghi lại note outsource cho đơn {order.external_order_id}"
     )
     logger.error("Review sync for %s gave up: %s (%s)", order.external_order_id, failure, failure.error_class)
-    try:
-        session.add(
-            DeadLetter(
-                source="printerval.review_sync",
-                payload={"order_id": str(order.id), "order_code": order.external_order_id,
-                         "target_status": target_status, "error": str(failure)[:500]},
-                error_class=failure.error_class,
-                recovery_action=manual[:512],
-            )
-        )
-        session.commit()
-    except Exception:
-        session.rollback()
-        logger.exception("could not record the Review sync failure of %s", order.external_order_id)
-    notify_admin_printerval_write_failed(session, order, action=action, error=str(failure), manual_fix=manual)
+    _alert_admins(session, order, action=action, error=str(failure), manual=manual, error_class=failure.error_class)

@@ -1,5 +1,5 @@
 """A write to Printerval that fails must be retried when it may succeed later, and otherwise end in
-a DeadLetter plus a Telegram alert asking Admin to do it by hand (incident 2026-10-14: a slow
+a DeadLetter shown to Admin as a web toast with what to do by hand (no Telegram) (incident 2026-10-14: a slow
 Printerval made the Review push of DJ4141056 fail silently)."""
 
 from __future__ import annotations
@@ -128,6 +128,13 @@ def test_a_failed_locale_lookup_does_not_block_the_review_push(world, monkeypatc
     assert fake.status_calls == [(4141056, "review", "en")]
 
 
+ALERT = "printerval.write_failed"
+
+
+def _alerts(session):
+    return session.query(DeadLetter).filter_by(source=ALERT).all()
+
+
 def test_a_transient_failure_is_retried_later_without_alerting_admin(world, monkeypatch):
     slow = PrintervalApiError(ErrorClass.TRANSIENT_NETWORK, "Printerval phản hồi quá chậm", retryable=True)
     monkeypatch.setattr(tasks, "PrintervalApiClient", FakeClient(login_error=slow))
@@ -141,37 +148,35 @@ def test_a_transient_failure_is_retried_later_without_alerting_admin(world, monk
         return Retry()
 
     monkeypatch.setattr(REVIEW, "retry", fake_retry)
-    with patch("app.application.telegram_service.send_message") as send, pytest.raises(Retry):
+    with pytest.raises(Retry):
         _run(world.order)
 
     assert retried["countdown"] == tasks.REVIEW_SYNC_RETRY_DELAYS[0]
-    send.assert_not_called()
-    assert world.session.query(DeadLetter).filter_by(source="printerval.review_sync").count() == 0
+    assert _alerts(world.session) == []
 
 
 def test_when_retries_run_out_admin_is_asked_to_change_the_status_by_hand(world, monkeypatch):
     slow = PrintervalApiError(ErrorClass.TRANSIENT_NETWORK, "Printerval phản hồi quá chậm", retryable=True)
     monkeypatch.setattr(tasks, "PrintervalApiClient", FakeClient(login_error=slow))
 
-    with patch("app.application.telegram_service.send_message", return_value={"message_id": 1}) as send:
+    with patch("app.application.telegram_service.send_message") as telegram:
         _run(world.order, retries=len(tasks.REVIEW_SYNC_RETRY_DELAYS))
 
-    letter = world.session.query(DeadLetter).filter_by(source="printerval.review_sync").one()
-    assert letter.error_class == "TRANSIENT_NETWORK" and "DJ4141056" in letter.recovery_action
-    chat, text = send.call_args.args
-    assert chat == "5550001"
-    assert "DJ4141056" in text and "Review" in text and "Cần làm tay" in text
+    telegram.assert_not_called()  # web toast only
+    [alert] = _alerts(world.session)
+    assert alert.error_class == "TRANSIENT_NETWORK"
+    assert alert.payload["order_code"] == "DJ4141056" and alert.payload["platform_id"] == str(world.platform.id)
+    assert "Review" in alert.payload["action"] and "DJ4141056" in alert.recovery_action
 
 
 def test_a_rejected_status_change_is_not_silently_marked_done(world, monkeypatch):
     monkeypatch.setattr(tasks, "PrintervalApiClient", FakeClient(status_ok=False))
 
-    with patch("app.application.telegram_service.send_message", return_value={"message_id": 1}):
-        _run(world.order, retries=len(tasks.REVIEW_SYNC_RETRY_DELAYS))
+    _run(world.order, retries=len(tasks.REVIEW_SYNC_RETRY_DELAYS))
 
     world.session.refresh(world.order)
     assert world.order.printerval_status == "doing"
-    assert world.session.query(DeadLetter).filter_by(source="printerval.review_sync").count() == 1
+    assert len(_alerts(world.session)) == 1
 
 
 def test_an_expired_session_is_not_retried_and_alerts_at_once(world, monkeypatch):
@@ -179,11 +184,9 @@ def test_an_expired_session_is_not_retried_and_alerts_at_once(world, monkeypatch
     monkeypatch.setattr(tasks, "PrintervalApiClient", FakeClient(login_error=expired))
     monkeypatch.setattr(REVIEW, "retry", lambda **_k: pytest.fail("an expired session must not be retried"))
 
-    with patch("app.application.telegram_service.send_message", return_value={"message_id": 1}) as send:
-        _run(world.order)
+    _run(world.order)
 
-    assert send.called
-    assert world.session.query(DeadLetter).filter_by(source="printerval.review_sync").one().error_class == "AUTH"
+    assert [a.error_class for a in _alerts(world.session)] == ["AUTH"]
 
 
 def test_a_failed_designer_or_status_request_alerts_admin(world, monkeypatch):
@@ -201,13 +204,48 @@ def test_a_failed_designer_or_status_request_alerts_admin(world, monkeypatch):
     def failing_execute(session, adapter, req):
         req.lifecycle = "failed"
         req.error_class = "TRANSIENT_NETWORK"
-        req.error_message = "Printerval phản hồi quá chậm"
+        req.error_message = "Không gán được Designer Linh - 2D Prin trên Printerval"
         session.commit()
 
     monkeypatch.setattr(tasks, "execute_request", failing_execute)
     monkeypatch.setattr(tasks, "PrintervalApiClient", FakeClient())
-    with patch("app.application.telegram_service.send_message", return_value={"message_id": 1}) as send:
-        tasks.sync_printerval_assignment_request(str(request.id))
+    tasks.sync_printerval_assignment_request(str(request.id))
 
-    text = send.call_args.args[1]
-    assert "DJ4141056" in text and "Linh - 2D Prin" in text and "Doing" in text and "Cần làm tay" in text
+    [alert] = _alerts(world.session)
+    assert "Linh - 2D Prin" in alert.payload["action"] and "Doing" in alert.payload["action"]
+    assert "Không gán được Designer" in alert.payload["error"] and "DJ4141056" in alert.recovery_action
+
+
+def test_admin_web_reads_only_its_platforms_new_alerts(client, world):
+    from datetime import UTC, datetime, timedelta
+
+    from app.application.auth import create_session_token
+    from app.application.printerval_alerts import record_write_failure
+
+    other = Platform(name="Other", account_username="o@print.com", is_active=True)
+    world.session.add(other)
+    world.session.flush()
+    stranger = Order(external_order_id="DJ-OTHER", platform_id=other.id, state=OrderState.QC_PENDING.value,
+                     duplicate_check_status="uncheck", work_domain="standard")
+    world.session.add(stranger)
+    world.session.commit()
+    record_write_failure(world.session, world.order, action="đổi trạng thái sang Review", error="chậm",
+                         manual="vào Printerval chuyển đơn DJ4141056 sang Review")
+    record_write_failure(world.session, stranger, action="x", error="y", manual="z")
+    admin = world.session.query(User).filter_by(role="admin", platform_id=world.platform.id).first()
+    headers = {"Authorization": f"Bearer {create_session_token(str(admin.id), admin.role)}"}
+
+    items = client.get("/api/printerval-alerts", headers=headers).json()["items"]
+    assert [i["order_code"] for i in items] == ["DJ4141056"]
+    assert items[0]["manual"] == "vào Printerval chuyển đơn DJ4141056 sang Review"
+
+    later = (datetime.now(UTC) + timedelta(seconds=5)).isoformat()
+    assert client.get("/api/printerval-alerts", params={"since": later}, headers=headers).json()["items"] == []
+
+    designer = User(username=f"d-{uuid.uuid4().hex[:5]}", full_name="D", role="designer", password_hash="x", active=True,
+                    platform_id=world.platform.id)
+    world.session.add(designer)
+    world.session.commit()
+    denied = client.get("/api/printerval-alerts",
+                        headers={"Authorization": f"Bearer {create_session_token(str(designer.id), designer.role)}"})
+    assert denied.status_code == 403

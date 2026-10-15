@@ -213,3 +213,34 @@ def test_request_auto_loads_designer_options_if_missing_on_platform(db_session):
     assert result["status"] == "Doing"
     assert platform.printerval_designer_options == ["Nguyễn Thị Thuý Hường - 2D Prin"]
 
+
+def test_a_failed_designer_step_is_reported_not_hidden(db_session):
+    from app.adapters.printerval.models import WriteResult
+
+    platform = _platform()
+    designer = _designer()
+    db_session.add_all([platform, designer])
+    db_session.flush()
+    order = Order(external_order_id="DJ0000099", platform_id=platform.id, state=OrderState.ASSIGNED.value)
+    db_session.add(order)
+    db_session.commit()
+    request = create_request(
+        db_session, order=order, internal_designer=designer, platform_id=platform.id,
+        designer_option="Nguyễn Thị Thuý Hường - 2D Prin", target_status="Doing",
+    )
+    adapter = FakePrintervalAdapter()
+    adapter.add_order(external_order_id="DJ0000099", product_name="x", designer=None, status="waiting")
+    adapter.set_designer = lambda *_a, **_k: WriteResult(
+        success=False, external_order_id="DJ0000099", error_class="AUTH"
+    )
+
+    execute_request(db_session, adapter, request)
+
+    db_session.refresh(request)
+    assert request.lifecycle == "failed"  # used to be "succeeded" with no Designer on Printerval
+    assert request.error_class == "AUTH"
+    assert "Không gán được Designer" in request.error_message
+    assert request.observed_status  # the status still went through and is mirrored
+    db_session.refresh(order)
+    assert (order.printerval_status or "").lower() == "doing"
+

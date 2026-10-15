@@ -7,6 +7,7 @@ import { ToastProvider } from './context/ToastContext'
 import { ProtectedRoute } from './auth/ProtectedRoute'
 import { LoginPage } from './pages/LoginPage'
 import { RootRedirect } from './auth/RootRedirect'
+import { PrintervalAlertToasts } from './features/alerts/PrintervalAlertToasts'
 import { WorkerProvider } from './features/worker/WorkerProvider'
 import { ConsentDialog } from './features/worker/ConsentDialog'
 
@@ -31,6 +32,7 @@ function App() {
         <PlatformProvider>
           <ToastProvider>
             <GallerySyncProvider>
+              <PrintervalAlertToasts />
               <WorkerProvider ConsentDialog={ConsentDialog}>
               <Suspense fallback={<div className="p-8 text-sm text-slate-500">Đang tải…</div>}>
               <Routes>
