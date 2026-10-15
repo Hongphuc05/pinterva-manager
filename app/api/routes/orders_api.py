@@ -1475,15 +1475,33 @@ def format_event_description(
     actor_role: str | None,
     designer_name: str | None,
     raw_desc: str | None = None,
+    evidence: dict | None = None,
 ) -> str:
     from_st = (from_state or "").upper()
     to_st = (to_state or "").upper()
     act = (action or "").upper()
-    actor_display = f"{'Admin ' if actor_role == 'admin' else ('Designer ' if actor_role == 'designer' else '')}{actor_name}" if actor_name else ""
+    role_prefix = {"admin": "Admin ", "designer": "Designer ", "support": "Support "}.get(actor_role or "", "")
+    actor_display = f"{role_prefix}{actor_name}" if actor_name else ""
 
     # If raw_desc is already custom and good (not the default 'Chuyển trạng thái từ...')
     if raw_desc and not raw_desc.startswith("Chuyển trạng thái từ ") and "chuyển trạng thái từ " not in raw_desc.lower():
         return raw_desc
+
+    # Duplicate classification: who decided matters in a dispute over Support pay, so say it plainly
+    # (these used to fall into the generic "phân công đơn" wording below).
+    ev = evidence or {}
+    who = actor_display or "Hệ thống"
+    if act == "DUPLICATE_STATUS_CHANGED":
+        label = {
+            "duplicate": "Trùng lặp",
+            "non_duplicate": "Không trùng lặp",
+            "uncheck": "Chưa kiểm tra",
+        }.get(str(ev.get("to_check_status") or ""), str(ev.get("to_check_status") or "?"))
+        return f"{who} phân loại đơn: {label}"
+    if act == "WORK_DOMAIN_CHANGED":
+        if ev.get("to_domain") == "duplicate":
+            return f"{who} chuyển đơn sang Trùng lặp (Duplicate Board)"
+        return f"{who} chuyển đơn về Không trùng lặp"
 
     # Assignment
     if act in ("ASSIGN", "REASSIGN") or (from_st in ("OPEN", "DISCOVERED", "OPEN_FOR_ALLOCATION") and to_st in ("WAITING", "IN_PROGRESS", "DOING")):
@@ -1809,6 +1827,7 @@ def api_order_detail(
                 actor_role=actor_role,
                 designer_name=designer_name,
                 raw_desc=ev_dict.get("description"),
+                evidence=ev_dict,
             )
 
             history_out.append(
@@ -3178,6 +3197,7 @@ def api_get_orders_history(
             actor_role=actor_role,
             designer_name=designer_name,
             raw_desc=(event.evidence or {}).get("description"),
+            evidence=event.evidence or {},
         )
 
         items.append(
@@ -3269,6 +3289,7 @@ def api_get_single_order_history(
             actor_role=actor_role,
             designer_name=designer_name,
             raw_desc=(e.evidence or {}).get("description"),
+            evidence=e.evidence or {},
         )
 
         history_out.append(
