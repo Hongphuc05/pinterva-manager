@@ -65,6 +65,11 @@ def reclaim_stale_sync_jobs_task() -> None:
     try:
         reclaimed_jobs = reclaim_stale_sync_job_records(session)
         reclaimed_leases = reclaim_stale_platform_sync_leases(session)
+        from app.application.printerval_assignment_requests import fail_stuck_requests
+
+        stuck_requests = fail_stuck_requests(session)
+        if stuck_requests:
+            logger.warning("Ended %s stuck Printerval assignment request(s) as failed", stuck_requests)
         if reclaimed_jobs or reclaimed_leases:
             logger.warning(
                 "Reclaimed %s stale sync job(s) and %s stale platform lease(s)",

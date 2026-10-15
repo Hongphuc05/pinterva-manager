@@ -93,6 +93,10 @@ def run_idempotent(
     try:
         result = fn()
     except Exception:
+        if not session.is_active:
+            # A failed flush (e.g. StaleDataError) leaves the session unusable: roll back first, or
+            # this commit raises and hides the original error while the Operation stays "pending".
+            session.rollback()
         existing.status = "failed"
         session.commit()
         raise

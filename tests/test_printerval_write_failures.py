@@ -249,3 +249,50 @@ def test_admin_web_reads_only_its_platforms_new_alerts(client, world):
     denied = client.get("/api/printerval-alerts",
                         headers={"Authorization": f"Bearer {create_session_token(str(designer.id), designer.role)}"})
     assert denied.status_code == 403
+
+
+def test_a_status_sync_saving_the_order_meanwhile_does_not_break_the_review_push(world, monkeypatch):
+    from sqlalchemy import text
+
+    fake = FakeClient()
+    real_update = fake.update_order_status
+
+    def update_then_sync_saves(row_id, status, locale):
+        ok = real_update(row_id, status, locale)
+        with world.session.get_bind().begin() as conn:  # the status sync saved the order meanwhile
+            conn.execute(text("UPDATE orders SET version = version + 1 WHERE id = :id"), {"id": world.order.id})
+        return ok
+
+    fake.update_order_status = update_then_sync_saves
+    monkeypatch.setattr(tasks, "PrintervalApiClient", fake)
+
+    _run(world.order)
+
+    world.session.refresh(world.order)
+    assert world.order.printerval_status == "review"
+    assert _alerts(world.session) == []
+
+
+def test_a_crashing_request_is_ended_failed_not_left_pending(world, monkeypatch):
+    designer = User(username=f"des-{uuid.uuid4().hex[:5]}", full_name="Linh", role="designer", password_hash="x",
+                    active=True, platform_id=world.platform.id)
+    world.session.add(designer)
+    world.session.flush()
+    request = PrintervalAssignmentRequest(
+        order_id=world.order.id, platform_id=world.platform.id, internal_designer_id=designer.id,
+        designer_option="Linh - 2D Prin", target_status="Doing", lifecycle="pending",
+    )
+    world.session.add(request)
+    world.session.commit()
+
+    def crash(*_args, **_kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(tasks, "execute_request", crash)
+    monkeypatch.setattr(tasks, "PrintervalApiClient", FakeClient())
+    tasks.sync_printerval_assignment_request(str(request.id))
+
+    world.session.refresh(request)
+    assert request.lifecycle == "failed" and "boom" in request.error_message
+    assert len(_alerts(world.session)) == 1
+

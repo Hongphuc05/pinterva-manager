@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 import uuid
 
+from sqlalchemy.orm import object_session
+
 from app.adapters.db.models import Order, Platform, PrintervalAssignmentRequest, User
 from app.adapters.db.session import SessionLocal
 from app.adapters.playwright_support import playwright_session
@@ -109,6 +111,11 @@ def sync_printerval_assignment_request(request_id: str) -> None:
         try:
             request = session.get(PrintervalAssignmentRequest, uuid.UUID(request_id))
             order = session.get(Order, request.order_id) if request else None
+            if request is not None and request.lifecycle == "pending":
+                request.lifecycle = "failed"
+                request.error_class = "BUG"
+                request.error_message = f"{type(exc).__name__}: {exc}"[:1024]
+                session.commit()
             if request is not None:
                 action, manual = _request_wording(request, order.external_order_id if order else "")
                 _alert_admins(session, order, action=action, error=f"{type(exc).__name__}: {exc}", manual=manual)
@@ -253,6 +260,9 @@ def _push_review(client: PrintervalApiClient, order: Order, note_outsource: str 
                 f"Printerval không nhận đổi trạng thái sang {target_status}", error_class="UNKNOWN_OUTCOME"
             )
         logger.info("HTTP update_order_status (%s) for %s: True", target_status, code)
+        # Save on the latest version under a row lock: a status sync may have saved the order
+        # while Printerval was answering (StaleDataError otherwise).
+        object_session(order).refresh(order, with_for_update=True)
         order.printerval_status = target_status.lower()
         order.printerval_status_synced_at = datetime.now(UTC)
     return True

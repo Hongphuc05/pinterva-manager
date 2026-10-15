@@ -124,6 +124,11 @@ duyệt/từ chối Fix, đổi Designer/trạng thái qua `PrintervalAssignment
 cần làm tay) và web của Admin hiện **toast** cho từng lỗi mới (`GET /api/printerval-alerts`, hỏi mỗi 30
 giây, theo platform). Không gửi Telegram cho các lỗi này.
 
+- Ghi kết quả vào đơn sau khi gọi Printerval: đơn được đọc lại dưới khoá dòng (`SELECT … FOR UPDATE`)
+  ngay trước khi lưu, vì job đồng bộ trạng thái có thể đã lưu đơn trong lúc chờ Printerval (trước đây
+  gây `StaleDataError` và để request kẹt `pending`, 72 request từ 19/09 được đối chiếu lại ngày 15/10).
+- Request còn `pending` quá 30 phút (worker dừng giữa chừng) được job `reclaim_stale_sync_jobs` (mỗi
+  phút) chuyển `failed` và hiện toast cho Admin.
 - Request đổi Designer/trạng thái: bước gán Designer hỏng thì request kết thúc `failed` (trước đây vẫn
   báo `succeeded`, che giấu sự cố 43 đơn mất designer ngày 15/10); trạng thái vẫn được ghi nếu được.
 - Đẩy Review (`sync_order_review_to_printerval_task`): lỗi tạm thời (Printerval chậm, mạng, 5xx/429)

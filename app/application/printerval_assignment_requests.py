@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -182,6 +182,10 @@ def execute_request(
                 message = "Printerval Status update was not verified"
             return _fail(request, status_result.error_class or "UNKNOWN_OUTCOME", message, status_result.evidence)
         request.observed_status = str(status_result.observed_state.get("status") or "") or None
+        # The Printerval calls above take seconds; a status sync may have saved this order meanwhile.
+        # Re-read it under a row lock so the mirror below is written on its latest version (the stale
+        # copy loaded at the start raised StaleDataError and left the request stuck "pending").
+        session.refresh(order, with_for_update=True)
         request.lifecycle = "succeeded"
         request.error_class = None
         request.error_message = None
@@ -238,3 +242,42 @@ def _fail(
     request.error_message = message
     request.evidence = evidence
     return {"lifecycle": request.lifecycle, "error_class": error_class}
+
+
+STUCK_AFTER = timedelta(minutes=30)
+
+
+def fail_stuck_requests(session: Session, *, older_than: timedelta = STUCK_AFTER) -> int:
+    """A request still "pending" long after it was queued never finished (worker stopped, crash):
+    end it as failed and raise an Admin toast instead of leaving a spinner forever."""
+    from app.application.printerval_alerts import record_write_failure
+
+    cutoff = datetime.now(UTC) - older_than
+    stuck = (
+        session.query(PrintervalAssignmentRequest)
+        .filter(PrintervalAssignmentRequest.lifecycle == "pending", PrintervalAssignmentRequest.created_at < cutoff)
+        .with_for_update(skip_locked=True)
+        .all()
+    )
+    for request in stuck:
+        request.lifecycle = "failed"
+        request.error_class = "UNKNOWN_OUTCOME"
+        request.error_message = "Yêu cầu không chạy xong (worker dừng hoặc lỗi giữa chừng); kết quả chưa được xác nhận"
+    session.commit()
+    for request in stuck:
+        order = session.get(Order, request.order_id)
+        if order is None:
+            continue
+        change = " và ".join(
+            part for part in (
+                f"Designer thành {request.designer_option}" if request.designer_option else "",
+                f"trạng thái sang {request.target_status}" if request.target_status else "",
+            ) if part
+        ) or "cập nhật đơn"
+        record_write_failure(
+            session, order, action=f"đổi {change}", error=request.error_message,
+            manual=f"kiểm tra trên Printerval và đổi {change} cho đơn {order.external_order_id} nếu chưa đúng",
+            error_class="UNKNOWN_OUTCOME",
+        )
+    return len(stuck)
+

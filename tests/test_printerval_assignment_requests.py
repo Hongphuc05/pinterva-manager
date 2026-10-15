@@ -244,3 +244,75 @@ def test_a_failed_designer_step_is_reported_not_hidden(db_session):
     db_session.refresh(order)
     assert (order.printerval_status or "").lower() == "doing"
 
+
+
+def _bump_version_elsewhere(db_session, order_id):
+    """What a concurrent status sync does: save the same order from another connection."""
+    from sqlalchemy import text
+
+    with db_session.get_bind().begin() as conn:
+        conn.execute(text("UPDATE orders SET version = version + 1, product_name = 'changed by sync' WHERE id = :id"),
+                     {"id": order_id})
+
+
+def test_a_status_sync_saving_the_order_meanwhile_no_longer_breaks_the_request(db_session):
+    platform = _platform()
+    designer = _designer()
+    db_session.add_all([platform, designer])
+    db_session.flush()
+    order = Order(external_order_id="DJ0000077", platform_id=platform.id, state=OrderState.ASSIGNED.value)
+    db_session.add(order)
+    db_session.commit()
+    request = create_request(
+        db_session, order=order, internal_designer=designer, platform_id=platform.id,
+        designer_option="Nguyễn Thị Thuý Hường - 2D Prin", target_status="Doing",
+    )
+    adapter = FakePrintervalAdapter()
+    adapter.add_order(external_order_id="DJ0000077", product_name="x", designer=None, status="waiting")
+    real_set_status = adapter.set_status
+
+    def slow_set_status(code, status):
+        result = real_set_status(code, status)
+        _bump_version_elsewhere(db_session, order.id)  # the sync saved the order while Printerval answered
+        return result
+
+    adapter.set_status = slow_set_status
+
+    execute_request(db_session, adapter, request)  # used to raise StaleDataError
+
+    db_session.refresh(request)
+    db_session.refresh(order)
+    assert request.lifecycle == "succeeded"
+    assert (order.printerval_status or "").lower() == "doing"
+    assert order.product_name == "changed by sync"  # the sync's own change is kept, not overwritten
+
+
+def test_requests_stuck_pending_are_ended_as_failed_and_shown_to_admin(db_session):
+    from datetime import UTC, datetime, timedelta
+
+    from app.adapters.db.models import DeadLetter
+    from app.application.printerval_assignment_requests import fail_stuck_requests
+
+    platform = _platform()
+    designer = _designer()
+    db_session.add_all([platform, designer])
+    db_session.flush()
+    old_order = Order(external_order_id="DJ0000066", platform_id=platform.id, state=OrderState.ASSIGNED.value)
+    new_order = Order(external_order_id="DJ0000067", platform_id=platform.id, state=OrderState.ASSIGNED.value)
+    db_session.add_all([old_order, new_order])
+    db_session.commit()
+    stuck = create_request(db_session, order=old_order, internal_designer=designer, platform_id=platform.id,
+                           designer_option="Nguyễn Thị Thuý Hường - 2D Prin", target_status="Doing")
+    fresh = create_request(db_session, order=new_order, internal_designer=designer, platform_id=platform.id,
+                           designer_option="Nguyễn Thị Thuý Hường - 2D Prin", target_status="Doing")
+    stuck.created_at = datetime.now(UTC) - timedelta(hours=2)
+    db_session.commit()
+
+    assert fail_stuck_requests(db_session) == 1
+
+    db_session.refresh(stuck)
+    db_session.refresh(fresh)
+    assert stuck.lifecycle == "failed" and stuck.error_class == "UNKNOWN_OUTCOME"
+    assert fresh.lifecycle == "pending"  # still within its normal run time
+    alert = db_session.query(DeadLetter).filter_by(source="printerval.write_failed").one()
+    assert alert.payload["order_code"] == "DJ0000066"
