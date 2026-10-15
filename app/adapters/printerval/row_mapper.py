@@ -124,6 +124,8 @@ def _is_internal_or_price_key(key: str, val: Any) -> bool:
         return True
     if k.startswith("price_") or k.startswith("giá_thêm_") or "addtocart" in k:
         return True
+    if "discount" in k:  # applied_discount_type, extra_discount_*: pricing, not part of the design
+        return True
     if isinstance(val, dict) and ("price" in val or "prx_discount" in val):
         return True
     if isinstance(val, str):

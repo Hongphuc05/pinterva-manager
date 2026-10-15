@@ -466,5 +466,6 @@ def test_custom_configuration_is_read_when_product_skus_is_a_list():
     assert entries["Your Name Here"] == "D-ROB"
     assert entries["Team Name"] == "NOT TODAY!"
     assert entries["Design Color"] == "Blue"
+    assert "applied_discount_type" not in entries  # pricing, hidden on Printerval too
     [sku] = extract_product_skus(row)
     assert sku.sku == "SKU-1" and sku.custom_config is not None
