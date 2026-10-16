@@ -182,7 +182,7 @@ def api_asset_proxy(u: str = Query(...)):
     from urllib.parse import urlparse
 
     host = (urlparse(raw_url).hostname or "").lower()
-    if host not in {"printerval.com", "www.printerval.com", "assets.printerval.com", "cdn.printerval.com", "printervalcdn.com", "gdn.printerval.com"}:
+    if host not in {"printerval.com", "www.printerval.com", "assets.printerval.com", "cdn.printerval.com", "printervalcdn.com", "gdn.printerval.com", "asset.prtvstatic.com"}:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unsupported asset host")
     try:
         import httpx

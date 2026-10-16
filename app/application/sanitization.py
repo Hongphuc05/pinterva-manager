@@ -15,7 +15,7 @@ def encode_proxy_url(raw_url: str | None) -> str | None:
         return url
     if url.startswith(("/crawled_assets/", "/order_assets/", "/assets/")):
         return url
-    if "printerval" in url.lower():
+    if "printerval" in url.lower() or "prtvstatic" in url.lower():
         encoded = base64.urlsafe_b64encode(url.encode("utf-8")).decode("ascii")
         return f"/api/assets/proxy?u={encoded}"
     return url

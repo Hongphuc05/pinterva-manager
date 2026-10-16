@@ -447,7 +447,10 @@
             relPath = relPath.split('?')[0].split('#')[0];
 
             let standardUrl = `https://assets.printerval.com/${relPath}`;
-            if (relPath.startsWith('asset/')) {
+            if (/^[a-z0-9-]+(\.[a-z0-9-]+)+\//i.test(relPath)) {
+                // CDN now wraps a real source host: cdn.../unsafe/WxH/asset.prtvstatic.com/<path>
+                standardUrl = `https://${relPath}`;
+            } else if (relPath.startsWith('asset/')) {
                 standardUrl = `https://cdn.printerval.com/unsafe/960x960/${relPath}`;
             } else if (relPath.startsWith('image/') || relPath.startsWith('sticker/')) {
                 standardUrl = `https://cdn.printerval.com/${relPath}`;

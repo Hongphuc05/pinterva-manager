@@ -34,6 +34,15 @@ def test_encode_and_decode_proxy_url():
     assert encode_proxy_url("https://drive.google.com/file/d/123") == "https://drive.google.com/file/d/123"
 
 
+def test_prtvstatic_asset_is_proxied_so_designers_never_see_the_host():
+    raw = "https://asset.prtvstatic.com/2025/10/17/862a76d4fa183a4e13f534412fb519ee_3142.jpg"
+    proxied = encode_proxy_url(raw)
+    assert proxied is not None
+    assert proxied.startswith("/api/assets/proxy?u=")
+    assert "prtvstatic" not in proxied.lower()
+    assert decode_proxy_url(proxied.split("?u=")[1]) == raw
+
+
 def test_sanitize_text_and_source_files():
     text = "Order synced from Printerval with note https://printerval.com/admin/orders?id=123"
     cleaned = sanitize_text(text, "Hệ thống mẹ")
