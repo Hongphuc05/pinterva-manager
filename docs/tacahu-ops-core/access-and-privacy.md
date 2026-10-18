@@ -54,6 +54,10 @@ cùng platform, trong phạm vi tab Support), ngay trong popup "Xem nhanh sản 
 của đơn thấy các note đó như note khác (nhãn tác giả "Support"). Đơn ngoài phạm vi hoặc platform khác
 trả 404.
 
+Designer Trello đọc/thêm Note làm việc trên **mọi** đơn domain trùng lặp của platform (cùng phạm vi
+với trang chi tiết đơn, vì Duplicate Board là không gian chung) — kể cả đơn chưa giao cho ai, để thấy
+link "Link đơn trùng" Support gắn ở trang ẩn. Đơn domain standard vẫn trả 404.
+
 ## Attachment ảnh Note làm việc
 
 - Client gửi multipart để browser tự thiết lập boundary.

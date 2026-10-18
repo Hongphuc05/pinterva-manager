@@ -229,3 +229,23 @@ def test_support_reads_and_adds_work_notes_on_orders_it_can_see(client, db_sessi
     db_session.add(foreign)
     db_session.commit()
     assert client.get(f"/api/orders/{foreign.id}/work-notes").status_code == 404  # not its platform
+
+
+def test_trello_designer_reads_support_link_on_any_duplicate_order_of_the_shared_board(client, db_session):
+    platform = Platform(name="Trello notes", account_username="tn@print.com", is_active=True)
+    db_session.add(platform)
+    db_session.commit()
+    unassigned = Order(platform_id=platform.id, external_order_id=f"DUP-NOTE-{uuid.uuid4()}",
+                       state=OrderState.WAITING.value, work_domain="duplicate", duplicate_check_status="duplicate")
+    standard = _seed_order(db_session, platform.id)
+    db_session.add(unassigned)
+    db_session.commit()
+    _login(client, db_session, f"support-{uuid.uuid4().hex[:5]}", "support", platform.id)
+    link = "https://drive.google.com/file/d/dup/view"
+    assert client.post(f"/api/orders/{unassigned.id}/work-notes",
+                       data={"body": f"Link đơn trùng: {link}", "request_id": "dup-link-1"}).status_code == 201
+
+    _login(client, db_session, f"trello-{uuid.uuid4().hex[:5]}", "designer-trello", platform.id)
+    notes = client.get(f"/api/orders/{unassigned.id}/work-notes").json()["notes"]
+    assert [n["body"] for n in notes] == [f"Link đơn trùng: {link}"]
+    assert client.get(f"/api/orders/{standard.id}/work-notes").status_code == 404  # standard domain stays closed

@@ -782,7 +782,11 @@ def _work_note_accessible_order(
     order_id: str,
     platform_id: uuid.UUID,
 ) -> Order:
-    order = get_order_detail_for_user(db, user, order_id)
+    # Same reach as the order detail page: the Duplicate Board is shared, so a Trello Designer
+    # reads the notes (e.g. Support's duplicate link) of every duplicate order, not only their own.
+    order = get_order_detail_for_user(
+        db, user, order_id, allow_shared_trello=user.role == ROLE_DESIGNER_TRELLO, platform_id=platform_id
+    )
     if order is None or (order.platform_id is not None and order.platform_id != platform_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
     return order
