@@ -1509,6 +1509,9 @@ def format_event_description(
             return f"{who} chuyển đơn sang Trùng lặp (Duplicate Board)"
         return f"{who} chuyển đơn về Không trùng lặp"
 
+    if act == "UPDATE_RESULT_LINK":
+        return f"{who} cập nhật link bài thiết kế (bản v{ev.get('version_marker', '?')})"
+
     # Assignment
     if act in ("ASSIGN", "REASSIGN") or (from_st in ("OPEN", "DISCOVERED", "OPEN_FOR_ALLOCATION") and to_st in ("WAITING", "IN_PROGRESS", "DOING")):
         target_des = designer_name or "Designer"

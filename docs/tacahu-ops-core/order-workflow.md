@@ -62,6 +62,13 @@ transition nhưng application layer không được tự động recover.
 4. **Nộp bài**: Designer tạo `ResultVersion`, state sang `QC_PENDING`. Với flow hiện
    hành, worker đẩy Review/link/note sang Printerval và chỉ thực hiện khi order vẫn ở
    revision/state mong đợi.
+   **Nộp lại / đổi link** (Designer standard, không áp dụng cho Trello): đơn ở
+   `QC_PENDING` hoặc `DONE` nội bộ vẫn nộp lại được cho tới khi `printerval_status` là
+   `confirm`/`done` (sau đó trả 404). Link mới tạo `ResultVersion` kế tiếp (bản cũ giữ làm
+   lịch sử), `ApprovalRequest` QC `pending` cũ chuyển `superseded`, đơn về `QC_PENDING`
+   chờ QC lại, link mới được đẩy sang Printerval. Đơn Fix cũng dùng link Designer gửi;
+   để trống thì giữ link bản nộp đầu. Lý do: Printerval đã có khung chat riêng nên link
+   không còn là kênh ghi chú yêu cầu sửa.
 5. **Đồng bộ status**: Celery Beat đọc status platform. `Done` đưa nội bộ sang `DONE`;
    `Fix` đưa sang `REVISION`, lưu note/source context và tăng `fix_return_count`.
 6. **Fix**: Fix trước hết nằm ở Admin. Admin duyệt sẽ release hướng dẫn riêng cho

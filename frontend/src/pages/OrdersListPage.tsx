@@ -1268,6 +1268,8 @@ export function OrdersListPage() {
           })
           submittedByAssignment = true
         } catch (assignErr) {
+          // An already-submitted order must not fall back to a raw state PATCH.
+          if (['QC_PENDING', 'DONE'].includes((order.state || '').toUpperCase())) throw assignErr
           console.warn('Ghi nhận assignment result:', assignErr)
         }
       }
@@ -2664,7 +2666,7 @@ export function OrdersListPage() {
                     </button>
                   </th>
                   <th className="py-3 px-4 w-36 whitespace-nowrap">Deadline Tacahu</th>
-                  {activeDesignerTab === 'doing' && (
+                  {(activeDesignerTab === 'doing' || activeDesignerTab === 'review') && (
                     <th className="py-3 px-4 min-w-[320px]">Nộp Link Bài Thiết Kế</th>
                   )}
                 </tr>
@@ -2673,7 +2675,7 @@ export function OrdersListPage() {
             <tbody className="divide-y divide-slate-100 text-xs">
               {paginatedOrders.length === 0 ? (
                 <tr>
-                  <td colSpan={isSupport ? 4 : isAdmin ? 9 : activeDesignerTab === 'doing' ? 6 : 5} className="py-12 text-center text-slate-400">
+                  <td colSpan={isSupport ? 4 : isAdmin ? 9 : activeDesignerTab === 'doing' || activeDesignerTab === 'review' ? 6 : 5} className="py-12 text-center text-slate-400">
                     {ordersLoading ? (
                       <>
                         <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin opacity-50 text-[#0052CC]" />
@@ -3461,8 +3463,8 @@ export function OrdersListPage() {
                             })()}
                           </td>
 
-                          {/* 5. Nộp Link Bài Thiết Kế — chỉ hiển thị ở tab Đang làm */}
-                          {activeDesignerTab === 'doing' && (
+                          {/* 5. Nộp Link Bài Thiết Kế — tab Đang làm; tab Review để Designer sửa link đã nộp */}
+                          {(activeDesignerTab === 'doing' || activeDesignerTab === 'review') && (
                             <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
                               {(() => {
                                 const stateUpper = (o.state || '').toUpperCase()
@@ -3480,9 +3482,9 @@ export function OrdersListPage() {
 
                                 return (
                                   <div className="space-y-2">
-                                    {/* Fix reuses the first submission; Designer cannot replace its link. */}
+                                    {/* Link stays editable after submitting; blank on a Fix keeps the old link. */}
                                     <div className="flex items-center gap-1.5">
-                                      {!isFixOrder && <input
+                                      <input
                                         type="url"
                                         value={currentLink}
                                         onChange={(e) => setInlineSubmissionLinks((prev) => ({ ...prev, [o.id]: e.target.value }))}
@@ -3495,8 +3497,8 @@ export function OrdersListPage() {
                                         placeholder={isFixOrder ? 'Link thiết kế (Tùy chọn với đơn Fix)...' : 'Dán link thiết kế (Drive, Canva, DropBox...)'}
                                         disabled={isSubmitting || Boolean(o.template_missing)}
                                         className="flex-1 min-w-[200px] rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-900 placeholder:text-slate-400 focus:border-[#0052CC] focus:ring-1 focus:ring-[#0052CC] shadow-2xs disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed"
-                                      />}
-                                      {!isFixOrder && <OpenExternalLinkButton url={currentLink} label="Mở" />}
+                                      />
+                                      <OpenExternalLinkButton url={currentLink} label="Mở" />
                                       <button
                                         type="button"
                                         onClick={() => handleInlineSubmit(o, currentLink)}
@@ -3514,7 +3516,7 @@ export function OrdersListPage() {
                                         ) : (
                                           <>
                                             <Send className="h-3.5 w-3.5" />
-                                            <span>{isFixOrder ? 'Cập nhật đơn' : 'Nộp bài'}</span>
+                                            <span>{isReview ? 'Cập nhật link' : isFixOrder ? 'Cập nhật đơn' : 'Nộp bài'}</span>
                                           </>
                                         )}
                                       </button>

@@ -4,8 +4,17 @@ import uuid
 
 import pytest
 
-from app.adapters.db.models import ApprovalRequest, Assignment, Batch, Order, ResultVersion, User
+from app.adapters.db.models import (
+    ApprovalRequest,
+    Assignment,
+    Batch,
+    Order,
+    ResultVersion,
+    User,
+    WorkflowEvent,
+)
 from app.adapters.google.fake_drive_adapter import FakeDriveAdapter
+from app.api.routes.orders_api import format_event_description
 from app.application.auth import hash_password
 from app.application.designer_tasks import (
     DriveValidationError,
@@ -145,6 +154,86 @@ def test_paid_fix_resubmission_returns_to_done_without_a_new_qc_request(db_sessi
     assert result["sync_printerval_expected_state"] == OrderState.DONE.value
     assert result["expected_fix_approved"] is True
     assert db_session.query(ApprovalRequest).filter_by(target_id=order.id).count() == 0
+
+
+def _submit(db_session, assignment, designer, file_id, key):
+    url = f"https://drive.google.com/file/d/{file_id}/view"
+    result = submit_result(
+        db_session, FakeDriveAdapter({"old", "new"}), assignment.id, designer.id, url,
+        key, f"{assignment.id}:{url}", enforce_processing_lease=False,
+    )
+    return url, result
+
+
+@pytest.mark.parametrize("state", [OrderState.QC_PENDING.value, OrderState.DONE.value])
+def test_designer_can_replace_submitted_link_until_printerval_confirms(db_session, state):
+    designer, assignment, order = _seed_task(db_session, state=OrderState.IN_PROGRESS.value)
+    _submit(db_session, assignment, designer, "old", "first")
+    order.state = state
+    order.printerval_status = "review"
+    db_session.commit()
+
+    new_url, result = _submit(db_session, assignment, designer, "new", "second")
+
+    db_session.refresh(order)
+    assert order.state == OrderState.QC_PENDING.value
+    assert result["version_marker"] == 2
+    assert result["sync_printerval_note"] == new_url
+    pending = db_session.query(ApprovalRequest).filter_by(target_id=order.id, status="pending").all()
+    assert [a.target_version_id for a in pending] == [uuid.UUID(result["result_version_id"])]
+    assert db_session.query(ApprovalRequest).filter_by(target_id=order.id, status="superseded").count() == 1
+    event = (
+        db_session.query(WorkflowEvent)
+        .filter_by(order_id=order.id)
+        .order_by(WorkflowEvent.created_at.desc())
+        .first()
+    )
+    assert event.actor_id == designer.id
+    assert event.evidence["action"] == "UPDATE_RESULT_LINK"
+    assert format_event_description(
+        event.from_state, event.to_state, "UPDATE_RESULT_LINK", "Designer", "designer", None,
+        evidence=event.evidence,
+    ) == "Designer Designer cập nhật link bài thiết kế (bản v2)"
+
+
+@pytest.mark.parametrize("printerval_status", ["confirm", "done"])
+def test_designer_cannot_replace_link_once_printerval_confirmed(db_session, printerval_status):
+    designer, assignment, order = _seed_task(db_session, state=OrderState.IN_PROGRESS.value)
+    _submit(db_session, assignment, designer, "old", "first")
+    order.printerval_status = printerval_status
+    db_session.commit()
+
+    with pytest.raises(TaskNotFoundError):
+        _submit(db_session, assignment, designer, "new", "second")
+
+    assert db_session.query(ResultVersion).filter_by(assignment_id=assignment.id).count() == 1
+
+
+def test_resubmit_is_not_available_with_processing_lease_flow(db_session):
+    designer, assignment, order = _seed_task(db_session, state=OrderState.QC_PENDING.value)
+
+    with pytest.raises(TaskNotFoundError):
+        submit_result(
+            db_session, FakeDriveAdapter({"new"}), assignment.id, designer.id,
+            "https://drive.google.com/file/d/new/view", "trello", "trello",
+        )
+
+
+def test_fix_resubmission_uses_and_pushes_the_new_link(db_session):
+    designer, assignment, order = _seed_task(db_session, state=OrderState.IN_PROGRESS.value)
+    _submit(db_session, assignment, designer, "old", "first")
+    order.state = OrderState.REVISION.value
+    order.fix_approved_by_admin = True
+    order.fix_return_count = 1
+    db_session.commit()
+
+    new_url, result = _submit(db_session, assignment, designer, "new", "fix")
+
+    assert result["sync_printerval_note"] == new_url
+    latest = db_session.query(ResultVersion).filter_by(assignment_id=assignment.id).order_by(
+        ResultVersion.version_marker.desc()
+    ).first()
+    assert latest.drive_url == new_url
 
 
 def test_submit_result_rejects_unverified_drive_without_state_change(db_session):

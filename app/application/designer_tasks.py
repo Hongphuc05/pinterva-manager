@@ -54,8 +54,26 @@ def _is_active_task_for_designer(order: Order) -> bool:
     )
 
 
+# A submitted order stays editable for its Designer until Printerval confirms it:
+# Printerval now raises change requests in its own chat, not in the result link.
+RESUBMIT_STATES = {OrderState.QC_PENDING.value, OrderState.DONE.value}
+PRINTERVAL_CLOSED_STATUSES = {"confirm", "done"}
+
+
+def _can_resubmit(order: Order) -> bool:
+    return (
+        order.state in RESUBMIT_STATES
+        and (order.printerval_status or "").lower() not in PRINTERVAL_CLOSED_STATUSES
+    )
+
+
 def _owned_task(
-    session: Session, assignment_id: uuid.UUID, designer_id: uuid.UUID, *, lock: bool
+    session: Session,
+    assignment_id: uuid.UUID,
+    designer_id: uuid.UUID,
+    *,
+    lock: bool,
+    allow_resubmit: bool = False,
 ) -> tuple[Assignment, Order]:
     assignment_query = session.query(Assignment).filter(
         Assignment.id == assignment_id,
@@ -72,7 +90,9 @@ def _owned_task(
     if lock:
         order_query = order_query.with_for_update()
     order = order_query.one_or_none()
-    if order is None or not _is_active_task_for_designer(order):
+    if order is None or not (
+        _is_active_task_for_designer(order) or (allow_resubmit and _can_resubmit(order))
+    ):
         raise TaskNotFoundError()
     return assignment, order
 
@@ -336,26 +356,35 @@ def submit_result(
     enforce_processing_lease: bool = True,
 ) -> dict:
     def _do() -> dict:
-        assignment, order = _owned_task(session, assignment_id, designer_id, lock=True)
+        # ponytail: resubmitting an already-submitted order is Designer-standard only
+        # (lease-free); Trello keeps its lease/start flow.
+        assignment, order = _owned_task(
+            session, assignment_id, designer_id, lock=True,
+            allow_resubmit=not enforce_processing_lease,
+        )
         require_expected_order_version(order, expected_version)
         if enforce_processing_lease:
             ensure_processing_lease(session, order, actor_id=designer_id)
+        is_resubmission = order.state in RESUBMIT_STATES
         is_fix_resubmission = bool(
             (order.fix_return_count and order.fix_return_count > 0)
             or order.state == OrderState.REVISION.value
             or order.fix_approved_by_admin
         )
         is_paid_fix_resubmission = is_fix_resubmission and bool(order.is_paid)
-        if order.state not in (OrderState.IN_PROGRESS.value, OrderState.WAITING.value, OrderState.REVISION.value):
+        if order.state not in (OrderState.IN_PROGRESS.value, OrderState.WAITING.value, OrderState.REVISION.value) and not is_resubmission:
             raise ValueError(f"Task must be in progress, waiting, or revision to submit (current state: {order.state})")
         effective_drive_url = (drive_url or "").strip()
-        if is_fix_resubmission or not effective_drive_url or effective_drive_url == "Đã hoàn thành":
-            first_rv = (
-                session.query(ResultVersion)
-                .filter(ResultVersion.assignment_id == assignment.id)
-                .order_by(ResultVersion.version_marker.asc())
-                .first()
-            )
+        first_rv = (
+            session.query(ResultVersion)
+            .filter(ResultVersion.assignment_id == assignment.id)
+            .order_by(ResultVersion.version_marker.asc())
+            .first()
+        )
+        first_url = first_rv.drive_url if first_rv else None
+        # A link the Designer typed replaces the old one; blank (or the legacy
+        # "Đã hoàn thành" placeholder) keeps the first submitted link.
+        if not effective_drive_url or effective_drive_url == "Đã hoàn thành":
             if first_rv and first_rv.drive_url:
                 effective_drive_url = first_rv.drive_url
             # Newer orders keep result links by ResultVersion rather than on
@@ -384,6 +413,13 @@ def submit_result(
         session.add(result_version)
         session.flush()
         target_state = OrderState.DONE if is_paid_fix_resubmission else OrderState.QC_PENDING
+        if is_resubmission:
+            # The new link must be QC'd again; the old request no longer applies.
+            session.query(ApprovalRequest).filter(
+                ApprovalRequest.kind == "qc",
+                ApprovalRequest.target_id == order.id,
+                ApprovalRequest.status == "pending",
+            ).update({"status": "superseded"}, synchronize_session=False)
         if not is_paid_fix_resubmission:
             session.add(
                 ApprovalRequest(
@@ -400,6 +436,12 @@ def submit_result(
                 ),
                 "result_version_id": str(result_version.id),
                 "is_paid_fix_resubmission": is_paid_fix_resubmission,
+                # Shown on the order timeline as "<Designer> cập nhật link bài thiết kế".
+                **(
+                    {"action": "UPDATE_RESULT_LINK", "version_marker": result_version.version_marker}
+                    if is_resubmission or (first_url and effective_drive_url != first_url)
+                    else {}
+                ),
             },
             commit=False,
         )
@@ -422,7 +464,12 @@ def submit_result(
             # Printerval result link must not be overwritten.  An initial
             # submission additionally attaches the newly supplied design link.
             "sync_printerval_review": True,
-            "sync_printerval_note": None if is_fix_resubmission else effective_drive_url,
+            # Push the link unless a Fix resubmission kept the one Printerval already has.
+            "sync_printerval_note": (
+                None
+                if is_fix_resubmission and first_url in (None, effective_drive_url)
+                else effective_drive_url
+            ),
             "sync_printerval_expected_state": target_state.value,
             "expected_fix_approved": is_fix_resubmission,
         }
