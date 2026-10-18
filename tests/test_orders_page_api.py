@@ -182,3 +182,22 @@ def test_designer_page_date_range_can_filter_by_tacahu_deadline(client, db_sessi
 
     assert [o["external_order_id"] for o in body["items"]] == ["DES-DL-IN"]
     assert body["items"][0]["deadline_tacahu"] == "2026-10-20T03:00:00Z"
+
+
+def test_admin_filters_by_duplicate_check_tag(client, db_session):  # noqa: F811
+    _seed_platform(db_session)
+    _order(db_session, "WU1", "WAITING", duplicate_check_status="uncheck")
+    _order(db_session, "WU2", "WAITING", duplicate_check_status="uncheck")
+    _order(db_session, "WN1", "WAITING", duplicate_check_status="non_duplicate")
+    db_session.commit()
+    _login(client, db_session, "admin", "admin_check_filter")
+
+    def codes(query):
+        return {i["external_order_id"] for i in client.get(f"/api/orders/page?tab=waiting{query}").json()["items"]}
+
+    assert codes("") == {"WU1", "WU2", "WN1"}
+    assert codes("&check_status=unchecked") == {"WU1", "WU2"}
+    assert codes("&check_status=checked") == {"WN1"}  # in Waiting, checked = Không trùng lặp
+    ids = client.get("/api/orders/page?tab=waiting&check_status=checked&ids_only=true").json()["ids"]
+    assert len(ids) == 1
+    assert client.get("/api/orders/page?tab=waiting&check_status=bogus").status_code == 422

@@ -77,6 +77,9 @@ vì callback duplicate chỉ xác thực chat riêng.
   danh sách id của tab (tối đa 5000) cho nút đồng bộ cả tab. `GET /orders/platform-designers` trả tên
   designer Printerval cho bộ lọc quét đơn. Danh sách đơn trên web không còn tải toàn bộ `GET /orders`. Designer chỉ tìm theo tên sản phẩm; `batch` chỉ
   Admin/Support dùng.
+  Admin lọc thêm theo tag kiểm tra trùng bằng `check_status=unchecked|checked` (ở tab Waiting,
+  `checked` = Không trùng lặp vì đơn Trùng lặp đã sang board); popup "Chia đơn nhanh" có cùng 3 nhóm.
+- `GET/POST /orders/{id}/work-notes`: Admin, Designer, Designer-Trello và Support (đơn Support được xem).
 - Response API được nén gzip; `/assets` có `Cache-Control: immutable` (tên file có hash).
 - `GET /orders` với role Support chỉ trả order `Waiting`/`Doing` và thêm `submitted_count`: số order
   đã qua Doing (Review/Fix/Done) của platform, không trả nội dung. `GET /orders/{id}` trả 404 cho

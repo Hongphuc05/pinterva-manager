@@ -24,6 +24,8 @@ type WorkNote = {
 
 type PendingImage = { file: File; preview: string }
 
+const ROLE_LABELS: Record<string, string> = { admin: 'Admin', support: 'Support', designer: 'Designer', 'designer-trello': 'Designer' }
+
 export function OrderWorkNotesCard({ orderId }: { orderId: string }) {
   const { user } = useAuth()
   const [notes, setNotes] = useState<WorkNote[]>([])
@@ -160,7 +162,7 @@ export function OrderWorkNotesCard({ orderId }: { orderId: string }) {
             return (
               <article key={note.id} className={`rounded-lg border p-3 ${mine ? 'border-blue-200 bg-white' : 'border-slate-200 bg-slate-50'}`}>
                 <div className="mb-1 flex items-center justify-between gap-3 text-[10px] text-slate-500">
-                  <strong className="text-slate-700">{note.author_name} · {note.author_role === 'admin' ? 'Admin' : 'Designer'}</strong>
+                  <strong className="text-slate-700">{note.author_name} · {ROLE_LABELS[note.author_role] ?? 'Designer'}</strong>
                   <span>{new Date(note.created_at).toLocaleString('vi-VN')}</span>
                 </div>
                 {note.body && <p className="whitespace-pre-wrap break-words text-slate-700"><LinkifiedText text={note.body} /></p>}

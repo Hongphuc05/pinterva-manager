@@ -199,3 +199,33 @@ def test_work_note_rejects_non_raster_upload(client, db_session):
         headers={"X-Platform-Id": str(platform.id)},
     )
     assert response.status_code == 422
+
+
+def test_support_reads_and_adds_work_notes_on_orders_it_can_see(client, db_session):
+    platform = Platform(name="Support notes", account_username="sn@print.com", is_active=True)
+    db_session.add(platform)
+    db_session.commit()
+    visible = Order(platform_id=platform.id, external_order_id=f"SUP-NOTE-{uuid.uuid4()}",
+                    state=OrderState.WAITING.value, work_domain="standard")
+    db_session.add(visible)
+    db_session.commit()
+    _login(client, db_session, f"support-{uuid.uuid4().hex[:5]}", "support", platform.id)
+
+    link = "https://drive.google.com/file/d/abc/view"
+    created = client.post(
+        f"/api/orders/{visible.id}/work-notes",
+        data={"body": f"Link đơn trùng: {link}", "request_id": "support-note-1"},
+    )
+    assert created.status_code == 201
+    assert created.json()["author_role"] == "support"
+    notes = client.get(f"/api/orders/{visible.id}/work-notes").json()["notes"]
+    assert [n["body"] for n in notes] == [f"Link đơn trùng: {link}"]
+
+    other = Platform(name="Other notes", account_username="on@print.com", is_active=True)
+    db_session.add(other)
+    db_session.commit()
+    foreign = Order(platform_id=other.id, external_order_id=f"SUP-FOREIGN-{uuid.uuid4()}",
+                    state=OrderState.WAITING.value, work_domain="standard")
+    db_session.add(foreign)
+    db_session.commit()
+    assert client.get(f"/api/orders/{foreign.id}/work-notes").status_code == 404  # not its platform

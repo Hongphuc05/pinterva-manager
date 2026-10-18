@@ -47,6 +47,13 @@ phải enforce role + platform + assignment ở backend.
   có hạn dùng, khóa theo chat/platform và không mở quyền cho tài khoản khác. Bấm **Không** chỉ
   hủy yêu cầu, không đổi trạng thái order.
 
+## Note làm việc: Support
+
+Support đọc, thêm Note làm việc (kể cả ảnh) cho các đơn mà Support được xem (`get_order_detail_for_user`:
+cùng platform, trong phạm vi tab Support), ngay trong popup "Xem nhanh sản phẩm". Admin và designer
+của đơn thấy các note đó như note khác (nhãn tác giả "Support"). Đơn ngoài phạm vi hoặc platform khác
+trả 404.
+
 ## Attachment ảnh Note làm việc
 
 - Client gửi multipart để browser tự thiết lập boundary.

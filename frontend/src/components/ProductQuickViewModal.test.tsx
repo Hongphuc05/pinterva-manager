@@ -2,6 +2,8 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ProductQuickViewModal } from './ProductQuickViewModal'
 
+vi.mock('../auth/AuthContext', () => ({ useAuth: () => ({ user: { id: 's1', role: 'support', username: 'sp', full_name: 'Support' } }) }))
+
 describe('ProductQuickViewModal', () => {
   beforeEach(() => {
     vi.stubGlobal(
@@ -36,5 +38,15 @@ describe('ProductQuickViewModal', () => {
 
     await waitFor(() => expect(screen.getByText('Style')).toBeInTheDocument())
     expect(screen.getByText('Rundhalsausschnitt Shirt')).toBeInTheDocument()
+  })
+
+  it('shows the order work notes only when asked (Support)', async () => {
+    const { unmount } = render(<ProductQuickViewModal orderId="order-1" onClose={vi.fn()} />)
+    await waitFor(() => expect(screen.getByText('Style')).toBeInTheDocument())
+    expect(screen.queryByText('Note làm việc')).not.toBeInTheDocument()
+    unmount()
+
+    render(<ProductQuickViewModal orderId="order-1" onClose={vi.fn()} showWorkNotes />)
+    await waitFor(() => expect(screen.getByText('Note làm việc')).toBeInTheDocument())
   })
 })

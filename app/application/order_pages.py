@@ -58,6 +58,9 @@ class PageParams:
     date_to: date | None = None
     fix_returned: bool = False
     synced_images: bool = False
+    # Duplicate check: "unchecked" = still tagged Chưa kiểm tra, "checked" = the tag is gone (in
+    # Waiting that means Không trùng lặp: duplicates have moved to the board).
+    check_status: str | None = None
     sort_field: str = "status_changed_at"
     sort_desc: bool = True
     page: int = 1
@@ -197,6 +200,10 @@ def _apply_filters(query: Query, p: PageParams) -> Query:
         query = query.filter(Order.fix_return_count > 0)
     if p.synced_images:
         query = query.filter(func.coalesce(func.jsonb_array_length(Order.product_image_urls), 0) > 1)
+    if p.check_status == "unchecked":
+        query = query.filter(or_(Order.duplicate_check_status.is_(None), Order.duplicate_check_status == "uncheck"))
+    elif p.check_status == "checked":
+        query = query.filter(Order.duplicate_check_status.in_(("duplicate", "non_duplicate")))
     return query
 
 

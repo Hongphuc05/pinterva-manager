@@ -3,6 +3,7 @@ import { X, Eye, Loader2, Images, FileText, Package, ChevronLeft, ChevronRight }
 import { apiFetch, resolveAssetUrl } from '../api/client'
 import { CustomConfigurationSection } from './CustomConfigurationSection'
 import { deduplicateGalleryUrls } from '../utils/galleryHelper'
+import { OrderWorkNotesCard } from './OrderWorkNotesCard'
 
 type Variant = { name: string; value: string }
 type ConfigEntry = { key: string; value: string }
@@ -22,13 +23,16 @@ type QuickViewOrder = {
   thumbnail_url: string | null
 }
 
-type Props = { orderId: string; onClose: () => void }
+type Props = { orderId: string; onClose: () => void
+  /** Support adds work notes from here (Admin and designers see them). */
+  showWorkNotes?: boolean
+}
 
 function cleanVariantName(name: string) {
   return name.trim().replace(/^[|•·\s]+|[|•·\s]+$/g, '').trim()
 }
 
-export function ProductQuickViewModal({ orderId, onClose }: Props) {
+export function ProductQuickViewModal({ orderId, onClose, showWorkNotes = false }: Props) {
   const [order, setOrder] = useState<QuickViewOrder | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -174,6 +178,9 @@ export function ProductQuickViewModal({ orderId, onClose }: Props) {
                   </div>
                 ) : <div className="flex items-center gap-2 py-5 text-xs text-slate-400"><Package className="h-4 w-4" /> Không có ảnh gallery.</div>}
               </section>
+
+              {/* Support reads and adds to the order's work notes here (Admin and designers see them). */}
+              {showWorkNotes && <OrderWorkNotesCard orderId={orderId} />}
             </div>
           )}
         </div>

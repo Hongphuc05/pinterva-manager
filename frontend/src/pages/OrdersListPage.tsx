@@ -49,6 +49,8 @@ import {
   Zap,
 } from 'lucide-react'
 
+export type CheckFilter = '' | 'unchecked' | 'checked'
+
 export type OrderSummary = {
   id: string
   version: number
@@ -275,6 +277,7 @@ export function OrdersListPage() {
     searchQuery: '',
     syncedImagesFilter: false,
     fixReturnedFilter: false,
+    checkFilter: '',
     dateFilterType: 'status_changed_at',
     dateFrom: '',
     dateTo: '',
@@ -352,6 +355,12 @@ export function OrdersListPage() {
   const lastAutoSwitchedQueryRef = useRef<string>('')
   const [syncedImagesFilter, setSyncedImagesFilter] = useState(restoreAdminFilters && restoredViewState.syncedImagesFilter === true)
   const [fixReturnedFilter, setFixReturnedFilter] = useState(restoreAdminFilters && restoredViewState.fixReturnedFilter === true)
+  // Duplicate check: '' = all, 'unchecked' = still tagged Chưa kiểm tra, 'checked' = tag gone.
+  const [checkFilter, setCheckFilter] = useState<CheckFilter>(
+    restoreAdminFilters && (restoredViewState.checkFilter === 'unchecked' || restoredViewState.checkFilter === 'checked')
+      ? restoredViewState.checkFilter
+      : '',
+  )
   const [noticeClock, setNoticeClock] = useState(() => Date.now())
 
   useEffect(() => {
@@ -497,6 +506,7 @@ export function OrdersListPage() {
       searchQuery,
       syncedImagesFilter,
       fixReturnedFilter,
+      checkFilter,
       dateFilterType,
       dateFrom,
       dateTo,
@@ -505,7 +515,7 @@ export function OrdersListPage() {
       dateSortDirection: dateSort.direction,
       currentPage,
     })
-  }, [user?.role, adminTab, supportTab, activeDesignerTab, adminDoingSubFilter, adminFixSubFilter, statusFilter, platformStatusFilter, designerFilter, batchFilter, searchQuery, syncedImagesFilter, fixReturnedFilter, dateFilterType, dateFrom, dateTo, datePreset, dateSort, currentPage])
+  }, [user?.role, adminTab, supportTab, activeDesignerTab, adminDoingSubFilter, adminFixSubFilter, statusFilter, platformStatusFilter, designerFilter, batchFilter, searchQuery, syncedImagesFilter, fixReturnedFilter, checkFilter, dateFilterType, dateFrom, dateTo, datePreset, dateSort, currentPage])
 
   const regularDesigners = useMemo(() => {
     const candidates = usersList.filter(
@@ -1043,12 +1053,13 @@ export function OrdersListPage() {
       if (dateTo) params.set('date_to', dateTo)
     }
     if (fixReturnedFilter) params.set('fix_returned', 'true')
+    if (isAdmin && checkFilter) params.set('check_status', checkFilter)
     if (syncedImagesFilter) params.set('synced_images', 'true')
     params.set('sort_field', dateSort.field)
     params.set('sort_dir', dateSort.direction)
     if (currentPage > 1) params.set('page', String(currentPage))
     return params.toString()
-  }, [isAdmin, isSupport, supportTab, activeDesignerTab, adminTab, adminDoingSubFilter, adminFixSubFilter, debouncedSearch, statusFilter, designerFilter, platformStatusFilter, batchFilter, dateFrom, dateTo, dateFilterType, fixReturnedFilter, syncedImagesFilter, dateSort, currentPage])
+  }, [isAdmin, isSupport, supportTab, activeDesignerTab, adminTab, adminDoingSubFilter, adminFixSubFilter, debouncedSearch, statusFilter, designerFilter, platformStatusFilter, batchFilter, dateFrom, dateTo, dateFilterType, fixReturnedFilter, syncedImagesFilter, checkFilter, dateSort, currentPage])
 
   async function fetchTabOrderIds(tab: string, fixSub: string = 'all'): Promise<string[]> {
     const params = new URLSearchParams({ tab, ids_only: 'true' })
@@ -1338,7 +1349,7 @@ export function OrdersListPage() {
     const next = new URLSearchParams(searchParams)
     next.delete('page')
     setSearchParams(next, { replace: true })
-  }, [statusFilter, platformStatusFilter, designerFilter, batchFilter, searchQuery, dateFilterType, dateFrom, dateTo, activeDesignerTab, adminTab, dateSort, syncedImagesFilter, fixReturnedFilter])
+  }, [statusFilter, platformStatusFilter, designerFilter, batchFilter, searchQuery, dateFilterType, dateFrom, dateTo, activeDesignerTab, adminTab, dateSort, syncedImagesFilter, fixReturnedFilter, checkFilter])
 
   // Designers see Order At as their primary time column; managers keep the
   // operational status-change time as their default sort.
@@ -1437,6 +1448,7 @@ export function OrdersListPage() {
     setDatePreset('')
     setSyncedImagesFilter(false)
     setFixReturnedFilter(false)
+    setCheckFilter('')
   }
 
   function openAcceptFixModal(order: OrderSummary) {
@@ -1532,6 +1544,7 @@ export function OrdersListPage() {
         <ProductQuickViewModal
           orderId={quickViewOrderId}
           onClose={() => setQuickViewOrderId(null)}
+          showWorkNotes={isSupport}
         />
       )}
       {/* Image Zoom Modal */}
@@ -2163,6 +2176,26 @@ export function OrdersListPage() {
                 )}
               </button>
             )}
+
+            {isAdmin && (
+              <select
+                aria-label="Lọc kiểm tra trùng"
+                value={checkFilter}
+                onChange={(e) => {
+                  setCheckFilter(e.target.value as CheckFilter)
+                  setCurrentPage(1)
+                }}
+                className={`text-xs font-semibold px-3 py-2 rounded-lg border cursor-pointer ${checkFilter
+                    ? 'bg-amber-50 text-amber-800 border-amber-300'
+                    : 'bg-slate-50 text-slate-700 border-slate-200'
+                  }`}
+                title="Lọc theo tag kiểm tra trùng (ở tab Waiting, Đã kiểm tra = Không trùng lặp)"
+              >
+                <option value="">Kiểm tra trùng: Tất cả</option>
+                <option value="unchecked">Chỉ đơn chưa kiểm tra</option>
+                <option value="checked">Chỉ đơn đã kiểm tra</option>
+              </select>
+            )}
           </div>
         </div>
 
@@ -2249,7 +2282,7 @@ export function OrdersListPage() {
           </div>
 
           {/* Reset All Filters Button */}
-          {(statusFilter || platformStatusFilter || designerFilter || batchFilter || searchQuery || dateFrom || dateTo || syncedImagesFilter || fixReturnedFilter) && (
+          {(statusFilter || platformStatusFilter || designerFilter || batchFilter || searchQuery || dateFrom || dateTo || syncedImagesFilter || fixReturnedFilter || checkFilter) && (
             <button
               type="button"
               onClick={handleResetFilters}
@@ -2491,7 +2524,7 @@ export function OrdersListPage() {
             </button>
           )}
 
-          {(searchQuery || statusFilter || platformStatusFilter || designerFilter || batchFilter || dateFrom || dateTo || syncedImagesFilter || fixReturnedFilter) && (
+          {(searchQuery || statusFilter || platformStatusFilter || designerFilter || batchFilter || dateFrom || dateTo || syncedImagesFilter || fixReturnedFilter || checkFilter) && (
             <div className="inline-flex items-center gap-1.5 text-xs text-slate-500 bg-slate-100/80 px-2.5 py-1 rounded-md border border-slate-200/60">
               <span className="text-slate-400">Đang lọc từ:</span>
               <span className="font-mono font-bold text-slate-700">{tabCount(isAdmin ? adminTab : isSupport ? supportTab : activeDesignerTab)}</span>
@@ -2506,6 +2539,11 @@ export function OrdersListPage() {
                 <span className="inline-flex items-center gap-1 ml-1 px-1.5 py-0.2 rounded bg-rose-100 text-rose-800 text-[10px] font-bold">
                   <AlertTriangle className="h-2.5 w-2.5" />
                   Đã vào Fix
+                </span>
+              )}
+              {checkFilter && (
+                <span className="inline-flex items-center gap-1 ml-1 px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 text-[10px] font-bold">
+                  {checkFilter === 'checked' ? 'Đơn đã kiểm tra' : 'Đơn chưa kiểm tra'}
                 </span>
               )}
             </div>
@@ -4002,6 +4040,7 @@ export function OrdersListPage() {
         isOpen={quickDistributeOpen}
         onClose={() => setQuickDistributeOpen(false)}
         waitingOrders={quickDistributeOrders}
+        initialCheckFilter={checkFilter}
         designers={regularDesigners}
         onSuccess={async () => { await loadOrders() }}
         setFlash={setFlash}

@@ -1007,6 +1007,7 @@ def api_orders_page(
     date_to: date | None = None,
     fix_returned: bool = False,
     synced_images: bool = False,
+    check_status: str | None = Query(default=None, pattern="^(unchecked|checked)$"),
     sort_field: str = "status_changed_at",
     sort_dir: str = "desc",
     page: int = Query(default=1, ge=1),
@@ -1040,6 +1041,7 @@ def api_orders_page(
         date_to=date_to,
         fix_returned=fix_returned,
         synced_images=synced_images,
+        check_status=check_status,
         sort_field=sort_field,
         sort_desc=sort_dir != "asc",
         page=page,
@@ -1569,7 +1571,7 @@ def format_event_description(
 @router.get("/orders/{order_id}/work-notes")
 def api_list_order_work_notes(
     order_id: str,
-    user: User = Depends(require_any_role(ROLE_ADMIN, ROLE_DESIGNER, ROLE_DESIGNER_TRELLO)),
+    user: User = Depends(require_any_role(ROLE_ADMIN, ROLE_DESIGNER, ROLE_DESIGNER_TRELLO, ROLE_SUPPORT)),
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
@@ -1630,7 +1632,7 @@ async def api_create_order_work_note(
     body: str = Form(default=""),
     request_id: str = Form(min_length=1, max_length=128),
     images: list[UploadFile] = File(default=[]),
-    user: User = Depends(require_any_role(ROLE_ADMIN, ROLE_DESIGNER, ROLE_DESIGNER_TRELLO)),
+    user: User = Depends(require_any_role(ROLE_ADMIN, ROLE_DESIGNER, ROLE_DESIGNER_TRELLO, ROLE_SUPPORT)),
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
@@ -1657,7 +1659,7 @@ def api_download_order_work_note_attachment(
     order_id: str,
     note_id: uuid.UUID,
     attachment_id: uuid.UUID,
-    user: User = Depends(require_any_role(ROLE_ADMIN, ROLE_DESIGNER, ROLE_DESIGNER_TRELLO)),
+    user: User = Depends(require_any_role(ROLE_ADMIN, ROLE_DESIGNER, ROLE_DESIGNER_TRELLO, ROLE_SUPPORT)),
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):

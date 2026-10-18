@@ -189,4 +189,60 @@ describe('QuickDistributeModal', () => {
       expect(mockOnSuccess).toHaveBeenCalled()
     })
   })
+
+  it('distributes only the checked (Không trùng lặp) orders when that group is chosen', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ queued_count: 3 }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+    render(
+      <QuickDistributeModal
+        isOpen={true}
+        onClose={mockOnClose}
+        waitingOrders={mockWaitingOrders}
+        initialCheckFilter="checked"
+        designers={mockDesigners}
+        onSuccess={mockOnSuccess}
+        setFlash={mockSetFlash}
+      />
+    )
+
+    expect(screen.getByRole('radio', { name: /Đã kiểm tra/ })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByText('Tổng Đơn Chờ').parentElement).toHaveTextContent('3') // o-2, o-4, o-5
+
+    fireEvent.change(screen.getAllByRole('spinbutton')[0], { target: { value: '3' } })
+    fireEvent.click(screen.getByText(/Xác nhận chia \(3 đơn\)/i))
+
+    expect(screen.queryByText('Cảnh báo đơn chưa check trùng')).not.toBeInTheDocument() // nothing unchecked
+    await waitFor(() =>
+      expect(fetchSpy).toHaveBeenCalledWith(
+        '/api/assignments',
+        expect.objectContaining({
+          body: JSON.stringify({
+            order_ids: ['o-2', 'o-4', 'o-5'],
+            designer_id: 'des-1',
+            printerval_designer: 'quan print',
+            printerval_status: 'Doing',
+          }),
+        }),
+      ),
+    )
+  })
+
+  it('switches between all, unchecked and checked groups and counts each', () => {
+    render(
+      <QuickDistributeModal
+        isOpen={true}
+        onClose={mockOnClose}
+        waitingOrders={mockWaitingOrders}
+        designers={mockDesigners}
+        onSuccess={mockOnSuccess}
+        setFlash={mockSetFlash}
+      />
+    )
+    expect(screen.getByText('Tổng Đơn Chờ').parentElement).toHaveTextContent('5')
+    fireEvent.click(screen.getByRole('radio', { name: /Chưa kiểm tra \(2\)/ }))
+    expect(screen.getByText('Tổng Đơn Chờ').parentElement).toHaveTextContent('2')
+    fireEvent.click(screen.getByRole('radio', { name: /Đã kiểm tra/ }))
+    expect(screen.getByText('Tổng Đơn Chờ').parentElement).toHaveTextContent('3')
+  })
 })

@@ -11,7 +11,7 @@ import {
   Search,
 } from 'lucide-react'
 import { apiFetch, ApiError } from '../api/client'
-import type { OrderSummary, UserOption } from '../pages/OrdersListPage'
+import type { CheckFilter, OrderSummary, UserOption } from '../pages/OrdersListPage'
 
 const DEFAULT_PLATFORM_DES = 'nguyễn thị thúy hường 2d'
 
@@ -19,6 +19,8 @@ export type QuickDistributeModalProps = {
   isOpen: boolean
   onClose: () => void
   waitingOrders: OrderSummary[]
+  /** Which orders to distribute at first: all, still unchecked, or checked (= Không trùng lặp). */
+  initialCheckFilter?: CheckFilter
   designers: UserOption[]
   onSuccess: () => Promise<void>
   setFlash: (msg: string) => void
@@ -27,11 +29,29 @@ export type QuickDistributeModalProps = {
 export function QuickDistributeModal({
   isOpen,
   onClose,
-  waitingOrders,
+  waitingOrders: allWaitingOrders,
+  initialCheckFilter = '',
   designers,
   onSuccess,
   setFlash,
 }: QuickDistributeModalProps) {
+  const [checkFilter, setCheckFilter] = useState<CheckFilter>(initialCheckFilter)
+  useEffect(() => {
+    if (isOpen) setCheckFilter(initialCheckFilter)
+  }, [isOpen, initialCheckFilter])
+  // In Waiting a checked order is a Không trùng lặp one: duplicates have moved to the board.
+  const waitingOrders = useMemo(
+    () =>
+      allWaitingOrders.filter((o) => {
+        const unchecked = !o.duplicate_check_status || o.duplicate_check_status === 'uncheck'
+        return checkFilter === '' || (checkFilter === 'unchecked' ? unchecked : !unchecked)
+      }),
+    [allWaitingOrders, checkFilter],
+  )
+  const uncheckedTotal = useMemo(
+    () => allWaitingOrders.filter((o) => !o.duplicate_check_status || o.duplicate_check_status === 'uncheck').length,
+    [allWaitingOrders],
+  )
   const [allocations, setAllocations] = useState<Record<string, number>>({})
   const [submitting, setSubmitting] = useState(false)
   const [showWarning, setShowWarning] = useState(false)
@@ -176,6 +196,35 @@ export function QuickDistributeModal({
           >
             <X className="h-5 w-5" />
           </button>
+        </div>
+
+        {/* Which orders to distribute */}
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-4 py-3" role="radiogroup" aria-label="Nhóm đơn để chia">
+          <span className="text-xs font-semibold text-slate-500">Chia đơn:</span>
+          {([
+            ['', `Tất cả (${allWaitingOrders.length})`],
+            ['unchecked', `Chưa kiểm tra (${uncheckedTotal})`],
+            ['checked', `Đã kiểm tra · không trùng (${allWaitingOrders.length - uncheckedTotal})`],
+          ] as [CheckFilter, string][]).map(([value, label]) => (
+            <button
+              key={value || 'all'}
+              type="button"
+              role="radio"
+              aria-checked={checkFilter === value}
+              disabled={submitting}
+              onClick={() => {
+                setCheckFilter(value)
+                setAllocations({})
+              }}
+              className={`rounded-lg border px-2.5 py-1 text-xs font-semibold transition-colors ${
+                checkFilter === value
+                  ? 'border-[#0052CC] bg-[#0052CC] text-white'
+                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
 
         {/* Real-time Counter Stats */}
