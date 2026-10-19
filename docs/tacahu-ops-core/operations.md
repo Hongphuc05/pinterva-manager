@@ -124,6 +124,11 @@ duyệt/từ chối Fix, đổi Designer/trạng thái qua `PrintervalAssignment
 cần làm tay) và web của Admin hiện **toast** cho từng lỗi mới (`GET /api/printerval-alerts`, hỏi mỗi 30
 giây, theo platform). Không gửi Telegram cho các lỗi này.
 
+Mọi toast trên web (lỗi ghi Printerval, tin chat mới, thao tác của người dùng...) cũng được ghi vào nút
+chuông ở góc phải thanh trên để xem lại: lưu **ở trình duyệt** (localStorage, theo từng user), giữ tối đa
+3 ngày và 200 mục, có nút "Xóa tất cả"; máy/trình duyệt khác không thấy lịch sử này. Khi Printerval từ
+chối đổi trạng thái, thông báo kèm lý do Printerval trả về (HTTP code + message) nếu có.
+
 Chat Printerval (chỉ đọc, Admin): xem `order-workflow.md` → "Chat Printerval". Biến `ORDER_CHAT_ENABLED`
 (mặc định `true`) là công tắc tắt việc Tacahu tự đọc chat (toast unread và đọc khi đơn sang Fix/Confirm/Done).
 

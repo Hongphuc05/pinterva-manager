@@ -1,6 +1,6 @@
-import { Suspense, lazy } from 'react'
+import { Suspense, lazy, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { AuthProvider } from './auth/AuthContext'
+import { AuthProvider, useAuth } from './auth/AuthContext'
 import { PlatformProvider } from './auth/PlatformContext'
 import { GallerySyncProvider } from './context/GallerySyncContext'
 import { ToastProvider } from './context/ToastContext'
@@ -26,12 +26,18 @@ const DuplicateReviewPage = lazy(() => import('./pages/DuplicateReviewPage').the
 const SupportQueuePage = lazy(() => import('./pages/SupportQueuePage').then((m) => ({ default: m.SupportQueuePage })))
 const AccountantPaymentsPage = lazy(() => import('./pages/AccountantPaymentsPage').then((m) => ({ default: m.AccountantPaymentsPage })))
 
+/** The toast provider, keyed by the signed-in user so the bell's history is theirs alone. */
+function ScopedToastProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth()
+  return <ToastProvider scope={user?.id ?? null}>{children}</ToastProvider>
+}
+
 function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
         <PlatformProvider>
-          <ToastProvider>
+          <ScopedToastProvider>
             <GallerySyncProvider>
               <PrintervalAlertToasts />
               <PrintervalChatToasts />
@@ -160,7 +166,7 @@ function App() {
               </Suspense>
               </WorkerProvider>
             </GallerySyncProvider>
-          </ToastProvider>
+          </ScopedToastProvider>
         </PlatformProvider>
       </AuthProvider>
     </BrowserRouter>

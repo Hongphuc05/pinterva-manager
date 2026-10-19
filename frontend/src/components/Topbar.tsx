@@ -3,11 +3,12 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { usePlatform } from '../auth/PlatformContext'
 import { apiFetch } from '../api/client'
-import { Bell, LogOut, RefreshCw, AlertCircle, KeyRound, Images, Loader2, Pause, Play, Menu, MoreHorizontal, Send } from 'lucide-react'
+import { LogOut, RefreshCw, AlertCircle, KeyRound, Images, Loader2, Pause, Play, Menu, MoreHorizontal, Send } from 'lucide-react'
 import { PlatformSettingsModal } from './PlatformSettingsModal'
 import { CrawlFilterModal } from './CrawlFilterModal'
 import { SyncGalleryModal } from './SyncGalleryModal'
 import { TelegramModal } from './TelegramModal'
+import { NotificationBell } from './NotificationBell'
 import { useSyncStatus } from '../hooks/useSyncStatus'
 import { useGallerySync } from '../context/GallerySyncContext'
 import { useToast } from '../context/ToastContext'
@@ -384,13 +385,7 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
           <span className="hidden md:inline">Telegram</span>
         </button>
 
-        {/* Bell Notifications */}
-        <div className="relative">
-          <button className="p-2 rounded-lg text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors">
-            <Bell className="h-5 w-5" />
-            <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-amber-500 ring-2 ring-white"></span>
-          </button>
-        </div>
+        <NotificationBell />
 
         <div className="hidden h-6 w-px bg-slate-200 sm:block"></div>
 

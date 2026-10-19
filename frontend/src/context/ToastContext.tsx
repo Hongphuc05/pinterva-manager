@@ -1,4 +1,12 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react'
+import {
+  pruneNotifications,
+  readNotifications,
+  readSeenAt,
+  writeNotifications,
+  writeSeenAt,
+  type LoggedNotification,
+} from './notificationLog'
 import { CheckCircle2, AlertCircle, AlertTriangle, Info, X } from 'lucide-react'
 
 export type ToastType = 'success' | 'error' | 'warning' | 'info'
@@ -14,6 +22,11 @@ export interface Toast {
 interface ToastContextType {
   showToast: (message: string, type?: ToastType, duration?: number) => void
   removeToast: (id: string) => void
+  /** Every toast of the last three days (per user and browser), newest first, for the bell. */
+  notifications: LoggedNotification[]
+  unreadCount: number
+  markNotificationsRead: () => void
+  clearNotifications: () => void
 }
 
 const ToastContext = createContext<ToastContextType | undefined>(undefined)
@@ -29,8 +42,48 @@ export function showAppToast(message: string, type: ToastType = 'success', durat
   }
 }
 
-export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+/** `scope` (the signed-in user's id) keeps the bell's history; without it the history lasts only for this page. */
+export const ToastProvider: React.FC<{ children: React.ReactNode; scope?: string | null }> = ({ children, scope }) => {
   const [toasts, setToasts] = useState<Toast[]>([])
+  const [notifications, setNotifications] = useState<LoggedNotification[]>([])
+  const [seenAt, setSeenAt] = useState(0)
+
+  useEffect(() => {
+    setNotifications(scope ? readNotifications(scope) : [])
+    setSeenAt(scope ? readSeenAt(scope) : 0)
+    if (!scope) return
+    // Another tab of the same user logged a toast or cleared the bell.
+    const onStorage = (event: StorageEvent) => {
+      if (event.key && event.key.endsWith(scope)) {
+        setNotifications(readNotifications(scope))
+        setSeenAt(readSeenAt(scope))
+      }
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [scope])
+
+  const logNotification = useCallback(
+    (entry: LoggedNotification) => {
+      setNotifications((prev) => {
+        const next = pruneNotifications([entry, ...prev], entry.at)
+        if (scope) writeNotifications(scope, next)
+        return next
+      })
+    },
+    [scope],
+  )
+
+  const markNotificationsRead = useCallback(() => {
+    const now = Date.now()
+    setSeenAt(now)
+    if (scope) writeSeenAt(scope, now)
+  }, [scope])
+
+  const clearNotifications = useCallback(() => {
+    setNotifications([])
+    if (scope) writeNotifications(scope, [])
+  }, [scope])
 
   const removeToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id))
@@ -48,8 +101,9 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         createdAt: Date.now(),
       }
       setToasts((prev) => [...prev.slice(-4), newToast]) // Keep at most 5 toasts visible
+      logNotification({ id, message: newToast.message, type, at: newToast.createdAt })
     },
-    []
+    [logNotification]
   )
 
   // Listen for window 'app-toast' events
@@ -70,7 +124,16 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [showToast])
 
   return (
-    <ToastContext.Provider value={{ showToast, removeToast }}>
+    <ToastContext.Provider
+      value={{
+        showToast,
+        removeToast,
+        notifications,
+        unreadCount: notifications.filter((item) => item.at > seenAt).length,
+        markNotificationsRead,
+        clearNotifications,
+      }}
+    >
       {children}
       {/* Toast Popup Container - Bottom Right 5s */}
       <div
@@ -91,6 +154,10 @@ export function useToast() {
     return {
       showToast: showAppToast,
       removeToast: () => {},
+      notifications: [],
+      unreadCount: 0,
+      markNotificationsRead: () => {},
+      clearNotifications: () => {},
     }
   }
   return context

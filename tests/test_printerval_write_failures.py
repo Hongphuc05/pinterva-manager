@@ -33,7 +33,8 @@ class _KeepOpen:
 
 
 class FakeClient:
-    def __init__(self, *, login_error=None, status_ok=True, row=None):
+    def __init__(self, *, login_error=None, status_ok=True, row=None, refusal=""):
+        self.last_status_error = refusal
         self.login_error = login_error
         self.status_ok = status_ok
         self.row = row
@@ -177,6 +178,31 @@ def test_a_rejected_status_change_is_not_silently_marked_done(world, monkeypatch
     world.session.refresh(world.order)
     assert world.order.printerval_status == "doing"
     assert len(_alerts(world.session)) == 1
+
+
+def test_the_alert_carries_printervals_own_reason_for_refusing_a_status(world, monkeypatch):
+    refusal = "HTTP 422: Không thể chuyển từ Done sang Review"
+    monkeypatch.setattr(tasks, "PrintervalApiClient", FakeClient(status_ok=False, refusal=refusal))
+
+    _run(world.order, retries=len(tasks.REVIEW_SYNC_RETRY_DELAYS))
+
+    [alert] = _alerts(world.session)
+    assert refusal in alert.payload["error"]
+
+
+def test_the_client_keeps_what_printerval_said_when_it_refuses_a_status():
+    def refuse(request):
+        if request.method == "PATCH":
+            return httpx.Response(422, json={"status": "failed", "message": "Không thể chuyển từ Done sang Review"})
+        return httpx.Response(200, json={"status": "successful"})
+
+    client = PrintervalApiClient(
+        base_url="https://printerval.test", username=None, password=None, team_outsource="team",
+        session_cookie="laravel_session=abc",
+        client=httpx.Client(transport=httpx.MockTransport(refuse), base_url="https://printerval.test"),
+    )
+    assert client.update_order_status(4141056, "review", "uk") is False
+    assert client.last_status_error == "HTTP 422: Không thể chuyển từ Done sang Review"
 
 
 def test_an_expired_session_is_not_retried_and_alerts_at_once(world, monkeypatch):

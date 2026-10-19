@@ -75,6 +75,20 @@ def _classify_http_status(status_code: int) -> tuple[ErrorClass, bool]:
     return ErrorClass.PERMANENT_EXTERNAL, False
 
 
+def _refusal_reason(status_code: int, body: object, text: str) -> str:
+    """Printerval's own words for a refused write: its message when the JSON has one, else the raw body."""
+    message = ""
+    if isinstance(body, dict):
+        for key in ("message", "error", "msg"):
+            value = body.get(key)
+            if isinstance(value, str) and value.strip():
+                message = value.strip()
+                break
+        if not message and body.get("errors"):
+            message = str(body["errors"])
+    return f"HTTP {status_code}: {(message or text.strip() or 'không có nội dung')[:300]}"
+
+
 class PrintervalApiClient:
     """Authenticates with a CSRF form and reads only `status=waiting` jobs."""
 
@@ -537,8 +551,12 @@ class PrintervalApiClient:
             return False
 
     def update_order_status(self, design_job_id: int | str, status: str, locale: str = "en") -> bool:
-        """Update order status (doing, review, fix, done) on Printerval via direct HTTP API."""
+        """Update order status (doing, review, fix, done) on Printerval via direct HTTP API.
+
+        When Printerval refuses, ``last_status_error`` holds its reason (HTTP code and message).
+        """
         self._validate_configuration()
+        self.last_status_error = ""
         payload = {
             "status": status.lower(),
             "locale": locale,
@@ -548,7 +566,15 @@ class PrintervalApiClient:
             if resp.status_code in (401, 403):
                 self.login()
                 resp = self._client.patch(f"/outsource/pod/design-job/update?id={int(design_job_id)}", json=payload)
-            return resp.status_code == 200 and resp.json().get("status") == "successful"
-        except Exception:
+            try:
+                body = resp.json()
+            except ValueError:
+                body = None
+            if resp.status_code == 200 and isinstance(body, dict) and body.get("status") == "successful":
+                return True
+            self.last_status_error = _refusal_reason(resp.status_code, body, resp.text)
+            return False
+        except Exception as exc:
+            self.last_status_error = f"{type(exc).__name__}: {exc}"[:300]
             return False
 

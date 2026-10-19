@@ -256,8 +256,11 @@ def _push_review(client: PrintervalApiClient, order: Order, note_outsource: str 
             logger.info("Skipping stale Printerval status sync (%s) for %s", target_status, code)
             return False
         if not client.update_order_status(row_id, target_status.lower(), locale):
+            reason = getattr(client, "last_status_error", "")
+            logger.warning("Printerval refused status %s for %s: %s", target_status, code, reason)
             raise ReviewSyncFailed(
-                f"Printerval không nhận đổi trạng thái sang {target_status}", error_class="UNKNOWN_OUTCOME"
+                f"Printerval không nhận đổi trạng thái sang {target_status}" + (f" ({reason})" if reason else ""),
+                error_class="UNKNOWN_OUTCOME",
             )
         logger.info("HTTP update_order_status (%s) for %s: True", target_status, code)
         # Save on the latest version under a row lock: a status sync may have saved the order
