@@ -12,6 +12,7 @@ from app.adapters.db.models import (
     Assignment,
     Order,
     ResultVersion,
+    User,
     WorkflowEvent,
 )
 from app.adapters.google.drive_interface import DriveAdapter
@@ -24,6 +25,7 @@ from app.application.processing_leases import (
     heartbeat_processing_lease,
     release_processing_lease,
 )
+from app.application.result_images import attach_images
 from app.application.sanitization import sanitize_order_detail_for_designer
 from app.domain.models import OrderState
 
@@ -354,6 +356,7 @@ def submit_result(
     request_fingerprint: str,
     expected_version: int | None = None,
     enforce_processing_lease: bool = True,
+    image_ids: list[str] | None = None,
 ) -> dict:
     def _do() -> dict:
         # ponytail: resubmitting an already-submitted order is Designer-standard only
@@ -449,6 +452,9 @@ def submit_result(
         order.deadline_overdue_notified_at = None
         assignment.sub_status = "done"
         session.add(assignment)
+        # Printerval only takes a job to Review with a mockup in its Design column (19/10): every
+        # submission carries 1-3 images, pushed with the Review status. Last check, nothing fails after it.
+        attach_images(session, order, session.get(User, designer_id), image_ids)
         if enforce_processing_lease:
             release_processing_lease(session, order, actor_id=designer_id, reason="result_submitted")
         session.flush()

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import object_session
 
-from app.adapters.db.models import Order, Platform, PrintervalAssignmentRequest, User
+from app.adapters.db.models import DeadLetter, Order, Platform, PrintervalAssignmentRequest, User
 from app.adapters.db.session import SessionLocal
 from app.adapters.playwright_support import playwright_session
 from app.adapters.printerval.api_adapter import PrintervalApiAdapter
@@ -216,22 +217,27 @@ REVIEW_SYNC_TIMEOUT_SECONDS = 60.0
 class ReviewSyncFailed(Exception):
     """The Review/note write did not go through. ``retryable`` is False when retrying cannot help."""
 
-    def __init__(self, message: str, *, error_class: str, retryable: bool = True):
+    def __init__(self, message: str, *, error_class: str, retryable: bool = True, fix_template: dict | None = None):
         super().__init__(message)
         self.error_class = error_class
         self.retryable = retryable
+        # Set when Printerval asks to confirm a Fix raised for "Đổi template" (see update_order_status).
+        self.fix_template = fix_template
+
+
+TEMPLATE_CONFIRM = "TEMPLATE_CONFIRM"
 
 
 def _push_review(client: PrintervalApiClient, order: Order, note_outsource: str | None, target_status: str,
-                 is_still_expected) -> bool:
+                 is_still_expected, template_confirm: dict | None = None) -> bool:
     """One attempt over the HTTP API. Returns False when the order moved on (stale job, nothing done)."""
-    from datetime import UTC, datetime
 
     client.login()
     code = order.external_order_id
     numeric_id = code[2:] if code.upper().startswith("DJ") else code
     row_id = int(numeric_id)
     locale = "en"
+    row = None
     try:
         # One lookup in the order's current queue only (not every status): the id is already in
         # the code, the row is needed just for its locale (us, uk, fr...). A slow or missing
@@ -251,13 +257,35 @@ def _push_review(client: PrintervalApiClient, order: Order, note_outsource: str 
             raise ReviewSyncFailed("Printerval không nhận ghi chú (note outsource)", error_class="UNKNOWN_OUTCOME")
         logger.info("HTTP update_order_note_outsource for %s: True", code)
 
+    if target_status and target_status.lower() == "review":
+        if not _push_design_images(client, order, row, is_still_expected):
+            return False
+        if (order.printerval_status or "").lower() == "fix":
+            # Printerval keeps a Fix job in Fix while QC's chat messages are unread (19/10 rule);
+            # reading the chat marks them read for the team. A failure here is left to Printerval's answer.
+            try:
+                client.fetch_chat_messages(row_id)
+            except Exception:
+                logger.warning("Could not read the chat of %s before leaving Fix", code, exc_info=True)
+
     if target_status:
         if not is_still_expected():
             logger.info("Skipping stale Printerval status sync (%s) for %s", target_status, code)
             return False
-        if not client.update_order_status(row_id, target_status.lower(), locale):
+        if not client.update_order_status(row_id, target_status.lower(), locale, extra=template_confirm):
             reason = getattr(client, "last_status_error", "")
+            refusal = getattr(client, "last_status_refusal", None) or {}
             logger.warning("Printerval refused status %s for %s: %s", target_status, code, reason)
+            if refusal.get("code") == "template_confirm":
+                # A person must say whether the Fix really was about the template: never retried.
+                raise ReviewSyncFailed(
+                    "Printerval cần xác nhận Fix do đổi template trước khi chuyển sang "
+                    f"{target_status}",
+                    error_class=TEMPLATE_CONFIRM,
+                    retryable=False,
+                    fix_template=refusal.get("outsource_fix_template")
+                    if isinstance(refusal.get("outsource_fix_template"), dict) else {},
+                )
             raise ReviewSyncFailed(
                 f"Printerval không nhận đổi trạng thái sang {target_status}" + (f" ({reason})" if reason else ""),
                 error_class="UNKNOWN_OUTCOME",
@@ -268,6 +296,48 @@ def _push_review(client: PrintervalApiClient, order: Order, note_outsource: str 
         object_session(order).refresh(order, with_for_update=True)
         order.printerval_status = target_status.lower()
         order.printerval_status_synced_at = datetime.now(UTC)
+    return True
+
+
+def _push_design_images(client: PrintervalApiClient, order: Order, row: dict | None, is_still_expected) -> bool:
+    """Put the submitted mockups not yet on Printerval into the job's Design column (required for
+    Review since 19/10). Each image is recorded as soon as Printerval has it, so a retry never uploads
+    it twice. Returns False when the order moved on."""
+    from app.application.result_images import image_path, images_to_push
+
+    session = object_session(order)
+    images = images_to_push(session, order)
+    if not images:
+        return True
+    if not is_still_expected():
+        logger.info("Skipping stale mockup upload for %s", order.external_order_id)
+        return False
+    if row is None:
+        row = client.find_order(order.external_order_id)
+    if not row:
+        raise ReviewSyncFailed(
+            "Không đọc được đơn trên Printerval để tải ảnh mockup", error_class="TRANSIENT_NETWORK"
+        )
+    has_designs = bool(row.get("designs"))
+    for image in images:
+        path = image_path(image)
+        if not path.is_file():
+            raise ReviewSyncFailed(
+                f"Mất file ảnh mockup {image.original_filename} trên máy chủ Tacahu, designer cần gắn lại",
+                error_class="BUG", retryable=False,
+            )
+        url = client.upload_design_file(image.original_filename, path.read_bytes(), image.content_type)
+        stored = client.store_design_images(
+            row, [url],
+            resolution=f"{image.width}x{image.height}" if image.width and image.height else None,
+            is_primary=not has_designs,
+        )
+        has_designs = True
+        image.printerval_image_url = url[:1024]
+        image.printerval_design_id = int(stored[-1]["id"]) if stored and str(stored[-1].get("id", "")).isdigit() else None
+        image.pushed_at = datetime.now(UTC)
+        session.commit()
+        logger.info("Mockup %s uploaded to the Design column of %s", image.id, order.external_order_id)
     return True
 
 
@@ -284,8 +354,16 @@ def sync_order_review_to_printerval_task(
     *,
     expected_state: str | None = None,
     expected_fix_approved: bool | None = None,
+    template_confirm: dict | None = None,
+    alert_id: str | None = None,
+    last_error: str | None = None,
 ) -> None:
     """Sync a note and/or status to Printerval only when its workflow is still current.
+
+    ``template_confirm`` is the Admin's answer when Printerval asked to confirm a Fix raised for
+    "Đổi template"; ``alert_id`` is that request's DeadLetter, resolved once the push goes through.
+    ``last_error`` is carried across retries so a job that gives up because the order moved on
+    still says what had failed.
 
     A Designer's Review submission is asynchronous.  Without the expectation
     guard, a delayed Review job could run after an Admin has accepted a newer
@@ -317,17 +395,27 @@ def sync_order_review_to_printerval_task(
                 return False
             return True
 
-        if not is_still_expected():
+        action = f"đổi trạng thái sang {target_status}" if target_status else "ghi note outsource"
+
+        def moved_on() -> None:
+            """The order changed meanwhile. Fine for a first attempt; after a failed one it is not."""
             logger.info(
                 "Skipping stale Printerval %s sync for %s (expected_state=%s, expected_fix_approved=%s)",
-                target_status,
-                order.external_order_id,
-                expected_state,
-                expected_fix_approved,
+                target_status, order.external_order_id, expected_state, expected_fix_approved,
             )
+            if self.request.retries:
+                _review_sync_gave_up(
+                    session, order, action, target_status,
+                    ReviewSyncFailed(
+                        f"{last_error or 'Lần đẩy trước thất bại'}; đơn đã đổi trạng thái trên Tacahu nên không thử lại",
+                        error_class="UNKNOWN_OUTCOME", retryable=False,
+                    ),
+                )
+
+        if not is_still_expected():
+            moved_on()
             return
 
-        action = f"đổi trạng thái sang {target_status}" if target_status else "ghi note outsource"
         platform = session.get(Platform, order.platform_id) if order.platform_id else None
         if platform is None or not (platform.account_password or platform.session_cookie):
             _review_sync_gave_up(
@@ -346,12 +434,19 @@ def sync_order_review_to_printerval_task(
                 session_cookie=platform.session_cookie,
                 timeout=REVIEW_SYNC_TIMEOUT_SECONDS,
             ) as client:
-                if _push_review(client, order, note_outsource, target_status, is_still_expected):
+                if _push_review(client, order, note_outsource, target_status, is_still_expected,
+                                template_confirm=template_confirm):
+                    if alert_id:
+                        alert = session.get(DeadLetter, uuid.UUID(alert_id))
+                        if alert is not None and alert.resolved_at is None:
+                            alert.resolved_at = datetime.now(UTC)
                     session.commit()
                     logger.info(
                         "sync_order_review_to_printerval_task succeeded via HTTP API for %s",
                         order.external_order_id,
                     )
+                else:
+                    moved_on()
                 return
         except Exception as exc:
             session.rollback()
@@ -363,7 +458,10 @@ def sync_order_review_to_printerval_task(
                     order.external_order_id, failure.error_class, failure,
                     attempt + 1, len(REVIEW_SYNC_RETRY_DELAYS),
                 )
-                raise self.retry(countdown=REVIEW_SYNC_RETRY_DELAYS[attempt], exc=exc) from exc
+                raise self.retry(
+                    countdown=REVIEW_SYNC_RETRY_DELAYS[attempt], exc=exc,
+                    kwargs={**(self.request.kwargs or {}), "last_error": str(failure)},
+                ) from exc
             _review_sync_gave_up(session, order, action, target_status, failure)
     finally:
         session.close()
@@ -384,6 +482,16 @@ def _as_review_failure(exc: Exception) -> ReviewSyncFailed:
 def _review_sync_gave_up(session, order: Order, action: str, target_status: str | None,
                          failure: ReviewSyncFailed) -> None:
     """Record the failure so the Admin web asks for the change to be done on Printerval by hand."""
+    if failure.error_class == TEMPLATE_CONFIRM:
+        logger.warning("Review sync for %s waits for the Admin's template confirmation", order.external_order_id)
+        from app.application.printerval_alerts import record_write_failure
+
+        record_write_failure(
+            session, order, action=action, error=str(failure), error_class=TEMPLATE_CONFIRM,
+            manual=f"mở đơn {order.external_order_id} trên Tacahu và xác nhận Fix có phải do đổi template không",
+            extra={"kind": "template_confirm", "target_status": target_status, "fix_template": failure.fix_template or {}},
+        )
+        return
     manual = (
         f"vào Printerval chuyển đơn {order.external_order_id} sang {target_status}"
         if target_status

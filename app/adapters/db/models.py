@@ -536,6 +536,35 @@ class ResultVersion(Base):
     )
 
 
+class ResultImage(Base):
+    """Mockup/design image a Designer attaches when submitting (Printerval requires one to leave
+    Doing/Fix since 19/10). Bytes live in the private asset volume; the Review push uploads each
+    image to the job's Design column once and records what Printerval returned."""
+
+    __tablename__ = "result_images"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    order_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("orders.id", ondelete="CASCADE"), nullable=False, index=True)
+    uploaded_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    storage_key: Mapped[str] = mapped_column(String(512), nullable=False, unique=True)
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    byte_size: Mapped[int] = mapped_column(nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    width: Mapped[int | None] = mapped_column(nullable=True)
+    height: Mapped[int | None] = mapped_column(nullable=True)
+    # Set when a submission uses the image; staged (unattached) images are not pushed.
+    attached_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    printerval_image_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    printerval_design_id: Mapped[int | None] = mapped_column(nullable=True)
+    pushed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class ApprovalRequest(Base):
     __tablename__ = "approval_requests"
     __table_args__ = (

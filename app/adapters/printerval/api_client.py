@@ -550,16 +550,23 @@ class PrintervalApiClient:
         except Exception:
             return False
 
-    def update_order_status(self, design_job_id: int | str, status: str, locale: str = "en") -> bool:
+    def update_order_status(
+        self, design_job_id: int | str, status: str, locale: str = "en", extra: dict[str, str] | None = None
+    ) -> bool:
         """Update order status (doing, review, fix, done) on Printerval via direct HTTP API.
 
-        When Printerval refuses, ``last_status_error`` holds its reason (HTTP code and message).
+        ``extra`` carries fields some moves require, e.g. ``template_confirm`` (agree/disagree) and
+        ``template_confirm_note`` to leave a Fix raised for "Đổi template", as Printerval's own page sends.
+        When Printerval refuses, ``last_status_error`` holds its reason (HTTP code and message) and
+        ``last_status_refusal`` its JSON body (``code: template_confirm`` plus ``outsource_fix_template``).
         """
         self._validate_configuration()
         self.last_status_error = ""
+        self.last_status_refusal: dict[str, Any] = {}
         payload = {
             "status": status.lower(),
             "locale": locale,
+            **(extra or {}),
         }
         try:
             resp = self._client.patch(f"/outsource/pod/design-job/update?id={int(design_job_id)}", json=payload)
@@ -573,8 +580,80 @@ class PrintervalApiClient:
             if resp.status_code == 200 and isinstance(body, dict) and body.get("status") == "successful":
                 return True
             self.last_status_error = _refusal_reason(resp.status_code, body, resp.text)
+            self.last_status_refusal = body if isinstance(body, dict) else {}
             return False
         except Exception as exc:
             self.last_status_error = f"{type(exc).__name__}: {exc}"[:300]
             return False
+
+    DESIGN_UPLOAD_PATH = "/printerval-central/upload"
+    DESIGN_STORE_PATH = "/service/pod/design-job/store-image"
+
+    def _post_once_relogin(self, path: str, **kwargs: Any) -> httpx.Response:
+        try:
+            resp = self._client.post(path, **kwargs)
+            if resp.status_code in (401, 403):
+                self.login()
+                resp = self._client.post(path, **kwargs)
+        except httpx.HTTPError as exc:
+            raise PrintervalApiError(ErrorClass.TRANSIENT_NETWORK, f"Printerval không phản hồi ({exc})", retryable=True) from exc
+        return resp
+
+    @staticmethod
+    def _successful_json(resp: httpx.Response, what: str) -> dict[str, Any]:
+        try:
+            body = resp.json()
+        except ValueError:
+            body = None
+        if resp.status_code == 200 and isinstance(body, dict) and body.get("status") == "successful":
+            return body
+        error_class, retryable = _classify_http_status(resp.status_code) if resp.status_code >= 400 else (
+            ErrorClass.EXTERNAL_CHANGED, False)
+        errors = body.get("errors") if isinstance(body, dict) else None
+        if isinstance(errors, list) and errors:
+            reason = f"HTTP {resp.status_code}: {'; '.join(str(e) for e in errors)[:300]}"
+        else:
+            reason = _refusal_reason(resp.status_code, body, resp.text)
+        raise PrintervalApiError(error_class, f"Printerval không nhận {what} ({reason})", retryable=retryable)
+
+    def upload_design_file(self, filename: str, content: bytes, content_type: str) -> str:
+        """Step 1 of the Design column's "+" button: put the image on Printerval's storage, get its URL."""
+        self._validate_configuration()
+        resp = self._post_once_relogin(
+            self.DESIGN_UPLOAD_PATH,
+            data={"type": "design", "validate_file": "0"},
+            files={"upload[]": (filename, content, content_type)},
+            headers={"Accept": "application/json", "X-Requested-With": "XMLHttpRequest"},
+        )
+        body = self._successful_json(resp, "ảnh mockup")
+        urls = body.get("upload")
+        url = urls[0] if isinstance(urls, list) and urls else urls
+        if not isinstance(url, str) or not url.startswith(("http://", "https://", "/")):
+            raise PrintervalApiError(ErrorClass.EXTERNAL_CHANGED, "Printerval không trả link ảnh mockup")
+        return url
+
+    def store_design_images(
+        self, job: dict[str, Any], image_urls: list[str], *, resolution: str | None, is_primary: bool
+    ) -> list[dict[str, Any]]:
+        """Step 2: attach uploaded images to the job's Design column, as Printerval's own page does."""
+        self._validate_configuration()
+        product = job.get("product") if isinstance(job.get("product"), dict) else {}
+        payload = {
+            "job_id": int(job["id"]),
+            "image_urls": image_urls,
+            "name": product.get("name") or "",
+            "product_id": job.get("product_id"),
+            "local_code": job.get("local_code") or "en",
+            "is_primary": is_primary,
+            "ignore_categories": None,
+            "resolution": resolution,
+            "is_custom": 1 if job.get("is_custom_design") else 0,
+            "is_on_demand": 1 if job.get("is_on_demand") else 0,
+        }
+        resp = self._post_once_relogin(
+            self.DESIGN_STORE_PATH, json=payload, headers={"Accept": "application/json"}
+        )
+        body = self._successful_json(resp, "ảnh vào cột Design")
+        result = body.get("result")
+        return [r for r in result if isinstance(r, dict)] if isinstance(result, list) else []
 

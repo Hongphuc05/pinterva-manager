@@ -47,6 +47,12 @@ phải enforce role + platform + assignment ở backend.
   có hạn dùng, khóa theo chat/platform và không mở quyền cho tài khoản khác. Bấm **Không** chỉ
   hủy yêu cầu, không đổi trạng thái order.
 
+## Ảnh mockup nộp bài và xác nhận "Đổi template"
+
+Designer (standard và Trello) tải/xoá ảnh mockup trên đơn mình được xem; ảnh **chưa nộp** chỉ người
+tải thấy, ảnh **đã nộp** thì Admin và designer xem được đơn đó thấy. Support và Accountant không truy
+cập. Chỉ Admin trả lời câu hỏi "Fix có phải do đổi template không" của Printerval (role khác 403).
+
 ## Chat Printerval
 
 Chỉ Admin (đúng platform) đọc chat Printerval của đơn; mọi role khác nhận 403. Designer, Designer Trello và

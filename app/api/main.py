@@ -24,6 +24,7 @@ from app.api.routes import platforms_api as platforms_api_routes
 from app.api.routes import printerval_alerts_api as printerval_alerts_api_routes
 from app.api.routes import printerval_chat_api as printerval_chat_api_routes
 from app.api.routes import protected_example
+from app.api.routes import result_images_api as result_images_api_routes
 from app.api.routes import submissions_api as submissions_api_routes
 from app.api.routes import support_compare_api as support_compare_api_routes
 from app.api.routes import support_review_api as support_review_api_routes
@@ -187,6 +188,7 @@ def create_app() -> FastAPI:
     app.include_router(platforms_api_routes.router, prefix="/api")
     app.include_router(printerval_alerts_api_routes.router, prefix="/api")
     app.include_router(printerval_chat_api_routes.router, prefix="/api")
+    app.include_router(result_images_api_routes.router, prefix="/api")
     app.include_router(sync_jobs_api_routes.router, prefix="/api")
     app.include_router(submissions_api_routes.router, prefix="/api")
     app.include_router(orders_api_routes.router, prefix="/api")

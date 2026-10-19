@@ -33,8 +33,10 @@ class _KeepOpen:
 
 
 class FakeClient:
-    def __init__(self, *, login_error=None, status_ok=True, row=None, refusal=""):
+    def __init__(self, *, login_error=None, status_ok=True, row=None, refusal="", refusal_body=None):
         self.last_status_error = refusal
+        self.last_status_refusal = refusal_body or {}
+        self.extras: list = []
         self.login_error = login_error
         self.status_ok = status_ok
         self.row = row
@@ -62,8 +64,12 @@ class FakeClient:
     def update_order_note_outsource(self, row_id, note):
         return True
 
-    def update_order_status(self, row_id, status, locale):
+    def fetch_chat_messages(self, job_id, after_id=0):
+        return {"messages": [], "chat": {}}
+
+    def update_order_status(self, row_id, status, locale, extra=None):
         self.status_calls.append((row_id, status, locale))
+        self.extras.append(extra)
         return self.status_ok
 
 
@@ -144,8 +150,9 @@ def test_a_transient_failure_is_retried_later_without_alerting_admin(world, monk
     class Retry(Exception):
         pass
 
-    def fake_retry(*, countdown, exc):
+    def fake_retry(*, countdown, exc, kwargs=None):
         retried["countdown"] = countdown
+        retried["kwargs"] = kwargs
         return Retry()
 
     monkeypatch.setattr(REVIEW, "retry", fake_retry)
@@ -283,7 +290,7 @@ def test_a_status_sync_saving_the_order_meanwhile_does_not_break_the_review_push
     fake = FakeClient()
     real_update = fake.update_order_status
 
-    def update_then_sync_saves(row_id, status, locale):
+    def update_then_sync_saves(row_id, status, locale, extra=None):
         ok = real_update(row_id, status, locale)
         with world.session.get_bind().begin() as conn:  # the status sync saved the order meanwhile
             conn.execute(text("UPDATE orders SET version = version + 1 WHERE id = :id"), {"id": world.order.id})

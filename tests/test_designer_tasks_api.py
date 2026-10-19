@@ -98,7 +98,7 @@ def test_unapproved_fix_is_hidden_and_cannot_be_submitted_by_designer(client, db
     assert response.status_code == 404
 
 
-def test_trello_designer_can_submit_result_for_owned_duplicate_order(client, db_session, monkeypatch):
+def test_trello_designer_can_submit_result_for_owned_duplicate_order(client, db_session, monkeypatch, stage_mockup):
     trello_designer = _login(client, db_session, "designer-trello", "trello-submitter")
     assignment, order = _seed_owned_task(db_session, trello_designer, OrderState.IN_PROGRESS.value)
     order.work_domain = "duplicate"
@@ -112,6 +112,7 @@ def test_trello_designer_can_submit_result_for_owned_duplicate_order(client, db_
         json={
             "drive_url": "https://drive.google.com/file/d/known-file/view",
             "request_id": "trello-submit-1",
+            "image_ids": stage_mockup(order.id, trello_designer.id),
         },
     )
 
@@ -119,7 +120,7 @@ def test_trello_designer_can_submit_result_for_owned_duplicate_order(client, db_
     assert response.json()["state"] == OrderState.QC_PENDING.value
 
 
-def test_regular_designer_submission_ignores_stale_parent_order_version(client, db_session, monkeypatch):
+def test_regular_designer_submission_ignores_stale_parent_order_version(client, db_session, monkeypatch, stage_mockup):
     """A background/Admin order update must not block the normal Designer's work."""
     designer = _login(client, db_session, "designer", "regular-stale-version")
     assignment, order = _seed_owned_task(db_session, designer)
@@ -136,6 +137,7 @@ def test_regular_designer_submission_ignores_stale_parent_order_version(client, 
         json={
             "drive_url": "https://drive.google.com/file/d/known-file/view",
             "request_id": "regular-stale-submit",
+            "image_ids": stage_mockup(order.id, designer.id),
             "expected_version": stale_version,
         },
     )
@@ -163,7 +165,7 @@ def test_trello_designer_submission_keeps_optimistic_version_check(client, db_se
     assert response.json()["detail"]["code"] == "ORDER_VERSION_CONFLICT"
 
 
-def test_result_api_verifies_drive_enters_qc_queue_and_queues_printerval_review(client, db_session, monkeypatch):
+def test_result_api_verifies_drive_enters_qc_queue_and_queues_printerval_review(client, db_session, monkeypatch, stage_mockup):
     designer = _login(client, db_session, "designer", "submitter")
     assignment, order = _seed_owned_task(db_session, designer, OrderState.IN_PROGRESS.value)
     queued: list[tuple] = []
@@ -177,6 +179,7 @@ def test_result_api_verifies_drive_enters_qc_queue_and_queues_printerval_review(
     payload = {
         "drive_url": "https://drive.google.com/file/d/known-file/view",
         "request_id": "submit-1",
+            "image_ids": stage_mockup(order.id, designer.id),
     }
 
     first = client.post(f"/api/assignments/{assignment.id}/results", json=payload)
@@ -200,7 +203,7 @@ def test_result_api_verifies_drive_enters_qc_queue_and_queues_printerval_review(
     ]
 
 
-def test_fix_resubmission_queues_printerval_review_sync(client, db_session, monkeypatch):
+def test_fix_resubmission_queues_printerval_review_sync(client, db_session, monkeypatch, stage_mockup):
     designer = _login(client, db_session, "designer", "fix-resubmitter")
     assignment, order = _seed_owned_task(db_session, designer, OrderState.REVISION.value)
     order.fix_approved_by_admin = True
@@ -219,6 +222,7 @@ def test_fix_resubmission_queues_printerval_review_sync(client, db_session, monk
         json={
             "drive_url": "https://drive.google.com/file/d/known-file/view",
             "request_id": "fix-resubmit-1",
+            "image_ids": stage_mockup(order.id, designer.id),
         },
     )
 
@@ -232,7 +236,7 @@ def test_fix_resubmission_queues_printerval_review_sync(client, db_session, monk
     ]
 
 
-def test_paid_fix_resubmission_returns_done_and_syncs_printerval_review(client, db_session, monkeypatch):
+def test_paid_fix_resubmission_returns_done_and_syncs_printerval_review(client, db_session, monkeypatch, stage_mockup):
     designer = _login(client, db_session, "designer", "paid-fix-resubmitter")
     assignment, order = _seed_owned_task(db_session, designer, OrderState.REVISION.value)
     order.is_paid = True
@@ -253,6 +257,7 @@ def test_paid_fix_resubmission_returns_done_and_syncs_printerval_review(client, 
         json={
             "drive_url": "https://drive.google.com/file/d/known-file/view",
             "request_id": "paid-fix-resubmit-1",
+            "image_ids": stage_mockup(order.id, designer.id),
         },
     )
 

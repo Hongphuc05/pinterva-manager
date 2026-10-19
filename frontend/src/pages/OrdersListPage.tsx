@@ -13,6 +13,7 @@ import { CopyableProductName } from '../components/CopyableProductName'
 import { ProductQuickViewModal } from '../components/ProductQuickViewModal'
 import { QuickDistributeModal } from '../components/QuickDistributeModal'
 import { LinkifiedText, OpenExternalLinkButton } from '../components/LinkifiedText'
+import { MockupPicker } from '../components/MockupImages'
 import { useToast } from '../context/ToastContext'
 import { useGallerySync } from '../context/GallerySyncContext'
 import { useSyncStatus } from '../hooks/useSyncStatus'
@@ -467,6 +468,8 @@ export function OrdersListPage() {
   // Inline submission state for Designer
   const [inlineSubmissionLinks, setInlineSubmissionLinks] = useState<Record<string, string>>({})
   const [isSubmittingInline, setIsSubmittingInline] = useState<Record<string, boolean>>({})
+  // Mockup images staged per order (Printerval requires 1-3 in its Design column before Review).
+  const [inlineMockupIds, setInlineMockupIds] = useState<Record<string, string[]>>({})
   const didInitializeTabSort = useRef(false)
 
   // ESC key handler for OrdersListPage inline modals
@@ -1253,6 +1256,12 @@ export function OrdersListPage() {
       return
     }
 
+    const imageIds = inlineMockupIds[order.id] ?? []
+    if (imageIds.length === 0) {
+      showToast('Cần gắn ít nhất 1 ảnh mockup trước khi nộp bài (Printerval bắt buộc).', 'error')
+      return
+    }
+
     const finalDriveUrl = trimmed || order.drive_url || ''
     setIsSubmittingInline((prev) => ({ ...prev, [order.id]: true }))
     try {
@@ -1265,6 +1274,7 @@ export function OrdersListPage() {
               drive_url: finalDriveUrl,
               request_id: crypto.randomUUID(),
               expected_version: order.version,
+              image_ids: imageIds,
             }),
           })
           submittedByAssignment = true
@@ -1283,10 +1293,12 @@ export function OrdersListPage() {
             drive_url: finalDriveUrl || undefined,
             note_outsource: finalDriveUrl || undefined,
             expected_version: order.version,
+            image_ids: imageIds,
           }),
         })
       }
 
+      setInlineMockupIds((prev) => ({ ...prev, [order.id]: [] }))
       showToast(`Đã nộp bài thiết kế thành công cho đơn: ${order.product_name || order.external_order_id}`, 'success')
       markTabMoved(order.id)
       window.dispatchEvent(new CustomEvent('orders-updated'))
@@ -3503,7 +3515,7 @@ export function OrdersListPage() {
                                       <button
                                         type="button"
                                         onClick={() => handleInlineSubmit(o, currentLink)}
-                                        disabled={isSubmitting || Boolean(o.template_missing) || (!isFixOrder && !currentLink.trim())}
+                                        disabled={isSubmitting || Boolean(o.template_missing) || (!isFixOrder && !currentLink.trim()) || !(inlineMockupIds[o.id]?.length)}
                                         className={`inline-flex items-center gap-1 text-xs font-bold text-white disabled:bg-slate-300 disabled:cursor-not-allowed px-3 py-1.5 rounded-lg transition-colors cursor-pointer shadow-2xs shrink-0 ${
                                           isFixOrder ? 'bg-amber-600 hover:bg-amber-700' : 'bg-[#0052CC] hover:bg-[#0043A6]'
                                         }`}
@@ -3522,6 +3534,14 @@ export function OrdersListPage() {
                                         )}
                                       </button>
                                     </div>
+
+                                    {!o.template_missing && (
+                                      <MockupPicker
+                                        orderId={o.id}
+                                        disabled={isSubmitting}
+                                        onChange={(ids) => setInlineMockupIds((prev) => ({ ...prev, [o.id]: ids }))}
+                                      />
+                                    )}
 
                                     {/* Action row underneath: Báo thiếu temp / link preview / review status */}
                                     <div className="flex items-center justify-between gap-2 pt-0.5">

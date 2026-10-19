@@ -129,6 +129,10 @@ chuông ở góc phải thanh trên để xem lại: lưu **ở trình duyệt**
 3 ngày và 200 mục, có nút "Xóa tất cả"; máy/trình duyệt khác không thấy lịch sử này. Khi Printerval từ
 chối đổi trạng thái, thông báo kèm lý do Printerval trả về (HTTP code + message) nếu có.
 
+Đẩy Review lên Printerval cần ảnh mockup (luật Printerval 19/10, xem `order-workflow.md` → "Chuyển đơn
+sang Review trên Printerval"): worker `celery-assignment` đọc file ảnh từ volume
+`private_work_note_assets/result_images/` — volume này phải được backup cùng các ảnh private khác.
+
 Chat Printerval (chỉ đọc, Admin): xem `order-workflow.md` → "Chat Printerval". Biến `ORDER_CHAT_ENABLED`
 (mặc định `true`) là công tắc tắt việc Tacahu tự đọc chat (toast unread và đọc khi đơn sang Fix/Confirm/Done).
 

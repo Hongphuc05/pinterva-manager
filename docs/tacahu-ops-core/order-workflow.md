@@ -59,9 +59,10 @@ transition nhưng application layer không được tự động recover.
 3. **Làm việc**: assignment approved hoặc Designer Trello nhận thẻ đưa order vào
    `IN_PROGRESS`. Assignment/status Printerval là write async, serialized trên queue
    `assignment`.
-4. **Nộp bài**: Designer tạo `ResultVersion`, state sang `QC_PENDING`. Với flow hiện
-   hành, worker đẩy Review/link/note sang Printerval và chỉ thực hiện khi order vẫn ở
-   revision/state mong đợi.
+4. **Nộp bài**: Designer gửi link **và 1–3 ảnh mockup (bắt buộc)**, tạo `ResultVersion`, state
+   sang `QC_PENDING`. Worker đẩy sang Printerval theo thứ tự link → ảnh vào cột Design → trạng
+   thái Review, và chỉ thực hiện khi order vẫn ở state mong đợi. Chi tiết ở "Chuyển đơn sang
+   Review trên Printerval" bên dưới.
    **Nộp lại / đổi link** (Designer standard, không áp dụng cho Trello): đơn ở
    `QC_PENDING` hoặc `DONE` nội bộ vẫn nộp lại được cho tới khi `printerval_status` là
    `confirm`/`done` (sau đó trả 404). Link mới tạo `ResultVersion` kế tiếp (bản cũ giữ làm
@@ -74,9 +75,44 @@ transition nhưng application layer không được tự động recover.
    từ Printerval về nữa (nó chỉ giữ link bài Tacahu đã đẩy lên); QC ghi yêu cầu sửa vào khung
    chat của đơn trên Printerval — xem "Chat Printerval" bên dưới.
 6. **Fix**: Fix trước hết nằm ở Admin. Admin duyệt sẽ release hướng dẫn riêng cho
-   Designer, Designer sửa và nộp lại Review. Admin từ chối Fix thì trả về `QC_PENDING`
-   cùng ghi chú phản hồi cho platform. Không expose trực tiếp upstream `note_outsource`
-   cho Designer.
+   Designer, Designer sửa và nộp lại Review (lại kèm 1–3 ảnh mockup mới). Admin từ chối Fix
+   thì trả về `QC_PENDING` cùng ghi chú phản hồi cho platform. Không expose trực tiếp upstream
+   `note_outsource` cho Designer.
+
+## Chuyển đơn sang Review trên Printerval (luật Printerval từ 19/10/2026)
+
+Printerval chỉ cho một job sang **Review** (kể cả job Fix nộp lại) khi có đủ:
+
+1. link design trong `Note outsource`;
+2. ít nhất một ảnh mockup/design trong **cột Design** của job trên tool Printerval.
+
+Riêng job đang **Fix** còn phải: đọc hết tin của Printerval trong chat (còn tin chưa đọc thì
+Printerval giữ job ở Fix), và nếu lý do Fix là **"Đổi template"** thì gửi kèm xác nhận
+`template_confirm` = `agree`, hoặc `disagree` + `template_confirm_note` (giải thích, ≤ 500 ký tự).
+Thiếu điều kiện nào Printerval từ chối PATCH `design-job/update` (thiếu xác nhận template thì trả
+`code: template_confirm` kèm `outsource_fix_template`).
+
+Tacahu đáp ứng như sau:
+
+| Điều kiện | Tacahu làm |
+|---|---|
+| Link trong Note outsource | Designer dán link khi nộp; worker ghi lên Printerval (một chiều, không đọc ngược). |
+| Ảnh trong cột Design | Designer **bắt buộc** gắn 1–3 ảnh PNG/JPEG (≤ 10 MB/ảnh) ở ô nộp bài; ảnh được tải trước (staged), lần nộp gắn chúng vào (`result_images`). Worker tải từng ảnh chưa có trên Printerval: `POST /printerval-central/upload` (lấy URL) rồi `POST /service/pod/design-job/store-image` (gắn vào job, ảnh đầu là primary khi job chưa có ảnh). Mỗi ảnh ghi `pushed_at` ngay khi Printerval nhận, nên thử lại không tải trùng; Review chỉ gửi khi mọi ảnh đã lên. |
+| Đọc hết chat (job Fix) | Ngay trước khi đổi trạng thái của một job đang Fix, worker đọc chat của job (Printerval tính là đã đọc cho cả team). |
+| Xác nhận "Đổi template" | Không tự quyết. Printerval đòi xác nhận → không thử lại, ghi `dead_letters` (`kind=template_confirm`) và toast Admin; trang chi tiết đơn của Admin hiện khung **Xác nhận / Không đúng + lý do**. Admin trả lời (`POST /orders/{id}/printerval-template-confirm`, idempotent, ghi `WorkflowEvent` `CONFIRM_FIX_TEMPLATE`) → đơn về `QC_PENDING` và worker gửi lại Review kèm xác nhận; thành công thì yêu cầu được đánh dấu đã xử lý. |
+
+**Không coi lệnh đẩy chưa tới là Fix mới.** Tacahu chuyển đơn sang Review nội bộ ngay rồi mới đẩy
+lên Printerval; trong lúc đó Printerval vẫn báo Fix. Trong **30 phút** sau khi đơn sang Review
+(hoặc khi đơn đang chờ Admin xác nhận template), trạng thái `fix` từ Printerval chỉ được tính là
+Fix mới nếu chat có tin **"Mở Fix"** (`fix_open`) gửi sau thời điểm đó; quá 30 phút thì lấy Fix của
+Printerval như cũ. Trước đây việc này đưa bài nộp lại về Fix giả (20/52 lần nộp lại ngày 19/10).
+
+**Không im lặng khi thất bại.** Lệnh đẩy Review thử lại sau 1, 3, 7 phút; Printerval từ chối thì
+toast kèm đúng lý do Printerval trả (HTTP code + message). Lệnh đã từng lỗi mà lần thử sau thấy đơn
+đã đổi trạng thái cũng phải toast (trước đây nó tự bỏ qua).
+
+Ngoài phạm vi: Admin đổi trạng thái tay sang Review không bắt buộc ảnh (Printerval vẫn có thể từ
+chối nếu job chưa có ảnh — toast sẽ báo).
 
 ## Duplicate Board
 

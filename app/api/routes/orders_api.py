@@ -67,6 +67,7 @@ from app.application.assignment_commands import (
 )
 from app.application.concurrency import lock_order_for_command
 from app.application.crawl import DiscoverFailedError, refresh_order_detail, scan_orders_fast
+from app.application.fix_template_confirm import TemplateConfirmError, confirm_fix_template
 from app.application.order_queries import (
     FIX_STATES,
     count_support_submitted_orders,
@@ -81,6 +82,7 @@ from app.application.order_work_notes import (
     create_text_work_note,
     create_work_note,
 )
+from app.application.printerval_alerts import pending_template_confirm
 from app.application.printerval_assignment_requests import (
     PRINTERVAL_STATUSES,
     PrintervalAssignmentValidationError,
@@ -88,6 +90,7 @@ from app.application.printerval_assignment_requests import (
 )
 from app.application.printerval_chat import fix_reasons, latest_fix_reason
 from app.application.processing_leases import acquire_processing_lease
+from app.application.result_images import ResultImageError, attach_images
 from app.application.sanitization import (
     decode_proxy_url,
     sanitize_order_detail_for_designer,
@@ -681,6 +684,8 @@ class ResultVersionOut(BaseModel):
 class OrderDetailOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     fix_reason: str | None = None  # Admin only, see OrderSummaryOut
+    # Admin only: Printerval waits for a confirmation that this Fix was about the template.
+    fix_template_confirm: dict | None = None
     id: uuid.UUID
     version: int
     external_order_id: str
@@ -1868,6 +1873,16 @@ def api_order_detail(
     is_admin = user.role == ROLE_ADMIN
     if is_admin and order.state == OrderState.REVISION.value:
         order_out.fix_reason = latest_fix_reason(db, order)
+    if is_admin:
+        pending = pending_template_confirm(db, order)
+        if pending is not None:
+            template = (pending.payload or {}).get("fix_template") or {}
+            order_out.fix_template_confirm = {
+                "round": template.get("round"),
+                "url": template.get("url"),
+                "note": template.get("note"),
+                "requested_at": pending.created_at,
+            }
     if not is_admin:
         order_out = sanitize_order_detail_for_designer(order_out)
         history_out = []
@@ -2272,6 +2287,8 @@ class UpdateOrderStateRequest(OrderCommandPayload):
     state: str
     drive_url: str | None = None
     note_outsource: str | None = None
+    # A Designer sending the order to Review attaches 1-3 staged mockup images (see result_images).
+    image_ids: list[str] = Field(default_factory=list, max_length=3)
 
 
 class DesignerNoteRequest(OrderCommandPayload):
@@ -2576,6 +2593,12 @@ def api_update_order_state(
             action_type = "START_DOING"
             desc = f"{actor_disp} nhận đơn vào Doing"
     elif target_state == OrderState.QC_PENDING:
+        if user.role in (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO):
+            try:
+                attach_images(db, order, user, payload.image_ids)
+            except ResultImageError as exc:
+                db.rollback()
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
         order.fix_approved_by_admin = False
         order.fix_rejected_by_admin = False
         order.designer_note_released_for_fix = False
@@ -2645,8 +2668,9 @@ def api_update_order_state(
                 str(order.id),
                 None if is_fix_order else order.note_outsource,
                 "Review",
+                # Only the state: this route has just cleared fix_approved_by_admin, so expecting it set
+                # made every Fix resubmission through here skip its own push silently.
                 expected_state=OrderState.QC_PENDING.value,
-                expected_fix_approved=is_fix_order,
             )
         except Exception:
             pass
@@ -2795,6 +2819,50 @@ def api_approve_fix(
 
 class RejectFixRequest(OrderCommandPayload):
     note_outsource: str | None = None
+
+
+class FixTemplateConfirmRequest(BaseModel):
+    decision: str = Field(pattern="^(agree|disagree)$")
+    note: str | None = Field(default=None, max_length=500)
+    request_id: str = Field(min_length=1, max_length=100)
+
+
+@router.post("/orders/{order_id}/printerval-template-confirm")
+def api_confirm_fix_template(
+    order_id: uuid.UUID,
+    payload: FixTemplateConfirmRequest,
+    user: User = Depends(require_role(ROLE_ADMIN)),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    """Answer Printerval's "was this Fix about the template?" and send the order to Review again."""
+    try:
+        result = confirm_fix_template(
+            db, order_id=order_id, platform_id=platform_id, admin=user,
+            decision=payload.decision, note=payload.note, request_id=payload.request_id,
+        )
+    except LookupError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except TemplateConfirmError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    try:
+        from app.workers.assignment_sync_tasks import sync_order_review_to_printerval_task
+
+        sync_order_review_to_printerval_task.delay(
+            result["order_id"],
+            None,
+            result["target_status"],
+            expected_state=OrderState.QC_PENDING.value,
+            template_confirm=result["template_confirm"],
+            alert_id=result["alert_id"],
+        )
+    except Exception as exc:
+        logger.exception("Failed to enqueue the template-confirmed Review push for %s", result["order_code"])
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Đã ghi xác nhận nhưng chưa gửi được lên Printerval, thử lại sau",
+        ) from exc
+    return {"ok": True, "order_id": result["order_id"]}
 
 
 @router.post("/orders/{order_id}/reject-fix-to-review")

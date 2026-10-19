@@ -89,7 +89,7 @@ def test_assignment_command_rejects_a_stale_order_revision(client, db_session):
     assert order.state == OrderState.WAITING.value
 
 
-def test_regular_designer_state_command_ignores_stale_order_revision(client, db_session):
+def test_regular_designer_state_command_ignores_stale_order_revision(client, db_session, stage_mockup):
     platform = _platform(db_session)
     designer = _login(client, db_session, "state-regular-designer", "designer", platform.id)
     order = Order(
@@ -105,7 +105,8 @@ def test_regular_designer_state_command_ignores_stale_order_revision(client, db_
 
     response = client.patch(
         f"/api/orders/{order.id}/state",
-        json={"state": "Review", "expected_version": order.version + 1},
+        json={"state": "Review", "expected_version": order.version + 1,
+              "image_ids": stage_mockup(order.id, designer.id)},
         headers={"X-Platform-Id": str(platform.id)},
     )
 

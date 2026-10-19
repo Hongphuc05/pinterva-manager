@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.models import ExternalObservation, Order, Platform
 from app.adapters.printerval.api_client import PrintervalApiClient
+from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +106,23 @@ def fetch_messages(
         payload = client.fetch_chat_messages(job_id, after_id)
     parsed = [m for m in (parse_message(raw) for raw in payload["messages"]) if m]
     return sorted(parsed, key=lambda m: m["id"])
+
+
+def chat_opened_fix_since(
+    platform: Platform, order: Order, since: datetime, *, client_factory: ClientFactory = printerval_client_for
+) -> bool:
+    """Whether QC opened a Fix round in the order's chat after ``since``; False when it cannot be read."""
+    job_id = numeric_job_id(order)
+    if job_id is None or not get_settings().order_chat_enabled:
+        return False
+    try:
+        messages = fetch_messages(platform, job_id, client_factory=client_factory)
+    except Exception:
+        logger.warning("Chat of %s unreadable while checking for a new Fix", order.external_order_id, exc_info=True)
+        return False
+    return any(
+        m["type"] == "fix_open" and m["sent_at"] and datetime.fromisoformat(m["sent_at"]) > since for m in messages
+    )
 
 
 # ----------------------------------------------------------------------------- snapshots

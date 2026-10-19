@@ -27,6 +27,7 @@ def record_write_failure(
     error: str,
     manual: str,
     error_class: str = "UNKNOWN_OUTCOME",
+    extra: dict | None = None,
 ) -> None:
     """Record one failed Printerval write for the Admin toasts. Never raises."""
     try:
@@ -39,6 +40,7 @@ def record_write_failure(
                     "platform_id": str(order.platform_id) if order.platform_id else None,
                     "action": action,
                     "error": error[:500],
+                    **(extra or {}),
                 },
                 error_class=error_class[:64],
                 recovery_action=manual[:512],
@@ -77,3 +79,18 @@ def recent_alerts(session: Session, *, platform_id: uuid.UUID, since: datetime, 
             }
         )
     return out
+
+
+def pending_template_confirm(session: Session, order: Order) -> DeadLetter | None:
+    """The open request to confirm a Fix raised for "Đổi template" before the order can leave Fix."""
+    return (
+        session.query(DeadLetter)
+        .filter(
+            DeadLetter.source == ALERT_SOURCE,
+            DeadLetter.resolved_at.is_(None),
+            DeadLetter.payload["order_id"].astext == str(order.id),
+            DeadLetter.payload["kind"].astext == "template_confirm",
+        )
+        .order_by(DeadLetter.created_at.desc())
+        .first()
+    )

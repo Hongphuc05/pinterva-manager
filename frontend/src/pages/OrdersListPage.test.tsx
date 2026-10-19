@@ -1386,6 +1386,7 @@ describe('OrdersListPage', () => {
   it('renders CopyableProductName and handles inline design submission for designer', async () => {
     let patchedStateBody: any = null
     let assignmentResultBody: any = null
+    let staged: any[] = []
 
     vi.stubGlobal(
       'fetch',
@@ -1407,6 +1408,16 @@ describe('OrdersListPage', () => {
         if (url.includes('/api/orders/order-99/state')) {
           patchedStateBody = JSON.parse(init?.body as string)
           return Promise.resolve({ ok: true, status: 200, json: async () => ({ success: true }) })
+        }
+        if (url.includes('/api/orders/order-99/result-images/')) {
+          return Promise.resolve({ ok: true, status: 200, blob: async () => new Blob(['x']) })
+        }
+        if (url.includes('/api/orders/order-99/result-images')) {
+          if (init?.method === 'POST') {
+            staged = [{ id: 'img-1', filename: 'mockup.png', width: 10, height: 10, submitted_at: null,
+              on_printerval: false, url: '/api/orders/order-99/result-images/img-1/file' }]
+          }
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ staged, submitted: [], max_images: 3 }) })
         }
         if (url.includes('/api/orders')) {
           return Promise.resolve({
@@ -1466,14 +1477,18 @@ describe('OrdersListPage', () => {
     fireEvent.change(input, { target: { value: 'https://drive.google.com/file/d/123/view' } })
     expect(input.value).toBe('https://drive.google.com/file/d/123/view')
 
-    // Click "Nộp bài"
+    // "Nộp bài" stays locked until a mockup is attached (Printerval requires one in its Design column)
     const submitBtn = screen.getByRole('button', { name: /Nộp bài/i })
-    expect(submitBtn).toBeInTheDocument()
+    expect(submitBtn).toBeDisabled()
+    const picker = screen.getByLabelText('Chọn ảnh mockup')
+    fireEvent.change(picker, { target: { files: [new File(['png'], 'mockup.png', { type: 'image/png' })] } })
+    await waitFor(() => expect(submitBtn).not.toBeDisabled())
     fireEvent.click(submitBtn)
 
     await waitFor(() => {
       expect(assignmentResultBody).toBeTruthy()
       expect(assignmentResultBody.drive_url).toBe('https://drive.google.com/file/d/123/view')
+      expect(assignmentResultBody.image_ids).toEqual(['img-1'])
       expect(patchedStateBody).toBeNull()
     })
   })

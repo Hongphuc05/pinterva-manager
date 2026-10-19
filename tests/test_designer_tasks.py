@@ -107,16 +107,17 @@ def test_start_task_transitions_state_and_keeps_sub_status_display_separate(db_s
     assert assignment.sub_status == "fixing"
 
 
-def test_submit_result_verifies_drive_creates_version_and_qc_request_idempotently(db_session):
+def test_submit_result_verifies_drive_creates_version_and_qc_request_idempotently(db_session, stage_mockup):
     designer, assignment, order = _seed_task(db_session, state=OrderState.IN_PROGRESS.value)
     drive = FakeDriveAdapter({"known-file"})
     url = "https://drive.google.com/file/d/known-file/view"
+    images = stage_mockup(order.id, designer.id)
 
     first = submit_result(
-        db_session, drive, assignment.id, designer.id, url, "submit:1", f"{assignment.id}:{url}"
+        db_session, drive, assignment.id, designer.id, url, "submit:1", f"{assignment.id}:{url}", image_ids=images
     )
     replay = submit_result(
-        db_session, drive, assignment.id, designer.id, url, "submit:1", f"{assignment.id}:{url}"
+        db_session, drive, assignment.id, designer.id, url, "submit:1", f"{assignment.id}:{url}", image_ids=images
     )
 
     assert replay == first
@@ -132,7 +133,7 @@ def test_submit_result_verifies_drive_creates_version_and_qc_request_idempotentl
     assert qc_request.target_id == order.id
 
 
-def test_paid_fix_resubmission_returns_to_done_without_a_new_qc_request(db_session):
+def test_paid_fix_resubmission_returns_to_done_without_a_new_qc_request(db_session, stage_mockup):
     designer, assignment, order = _seed_task(db_session, state=OrderState.REVISION.value)
     order.is_paid = True
     order.fix_approved_by_admin = True
@@ -142,7 +143,7 @@ def test_paid_fix_resubmission_returns_to_done_without_a_new_qc_request(db_sessi
 
     result = submit_result(
         db_session, FakeDriveAdapter({"known-file"}), assignment.id, designer.id, url,
-        "paid-fix:1", f"{assignment.id}:{url}",
+        "paid-fix:1", f"{assignment.id}:{url}", image_ids=stage_mockup(order.id, designer.id),
     )
 
     db_session.refresh(order)
@@ -156,24 +157,25 @@ def test_paid_fix_resubmission_returns_to_done_without_a_new_qc_request(db_sessi
     assert db_session.query(ApprovalRequest).filter_by(target_id=order.id).count() == 0
 
 
-def _submit(db_session, assignment, designer, file_id, key):
+def _submit(db_session, assignment, designer, file_id, key, stage_mockup):
     url = f"https://drive.google.com/file/d/{file_id}/view"
     result = submit_result(
         db_session, FakeDriveAdapter({"old", "new"}), assignment.id, designer.id, url,
         key, f"{assignment.id}:{url}", enforce_processing_lease=False,
+        image_ids=stage_mockup(assignment.order_id, designer.id),
     )
     return url, result
 
 
 @pytest.mark.parametrize("state", [OrderState.QC_PENDING.value, OrderState.DONE.value])
-def test_designer_can_replace_submitted_link_until_printerval_confirms(db_session, state):
+def test_designer_can_replace_submitted_link_until_printerval_confirms(db_session, state, stage_mockup):
     designer, assignment, order = _seed_task(db_session, state=OrderState.IN_PROGRESS.value)
-    _submit(db_session, assignment, designer, "old", "first")
+    _submit(db_session, assignment, designer, "old", "first", stage_mockup)
     order.state = state
     order.printerval_status = "review"
     db_session.commit()
 
-    new_url, result = _submit(db_session, assignment, designer, "new", "second")
+    new_url, result = _submit(db_session, assignment, designer, "new", "second", stage_mockup)
 
     db_session.refresh(order)
     assert order.state == OrderState.QC_PENDING.value
@@ -197,14 +199,14 @@ def test_designer_can_replace_submitted_link_until_printerval_confirms(db_sessio
 
 
 @pytest.mark.parametrize("printerval_status", ["confirm", "done"])
-def test_designer_cannot_replace_link_once_printerval_confirmed(db_session, printerval_status):
+def test_designer_cannot_replace_link_once_printerval_confirmed(db_session, printerval_status, stage_mockup):
     designer, assignment, order = _seed_task(db_session, state=OrderState.IN_PROGRESS.value)
-    _submit(db_session, assignment, designer, "old", "first")
+    _submit(db_session, assignment, designer, "old", "first", stage_mockup)
     order.printerval_status = printerval_status
     db_session.commit()
 
     with pytest.raises(TaskNotFoundError):
-        _submit(db_session, assignment, designer, "new", "second")
+        _submit(db_session, assignment, designer, "new", "second", stage_mockup)
 
     assert db_session.query(ResultVersion).filter_by(assignment_id=assignment.id).count() == 1
 
@@ -219,15 +221,15 @@ def test_resubmit_is_not_available_with_processing_lease_flow(db_session):
         )
 
 
-def test_fix_resubmission_uses_and_pushes_the_new_link(db_session):
+def test_fix_resubmission_uses_and_pushes_the_new_link(db_session, stage_mockup):
     designer, assignment, order = _seed_task(db_session, state=OrderState.IN_PROGRESS.value)
-    _submit(db_session, assignment, designer, "old", "first")
+    _submit(db_session, assignment, designer, "old", "first", stage_mockup)
     order.state = OrderState.REVISION.value
     order.fix_approved_by_admin = True
     order.fix_return_count = 1
     db_session.commit()
 
-    new_url, result = _submit(db_session, assignment, designer, "new", "fix")
+    new_url, result = _submit(db_session, assignment, designer, "new", "fix", stage_mockup)
 
     assert result["sync_printerval_note"] == new_url
     latest = db_session.query(ResultVersion).filter_by(assignment_id=assignment.id).order_by(

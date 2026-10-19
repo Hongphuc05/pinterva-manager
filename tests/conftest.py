@@ -88,3 +88,23 @@ def _truncate_tables(engine):
         if support_tables:
             qualified = ", ".join(f"support_compare_image.{table}" for table in support_tables)
             conn.execute(text(f"TRUNCATE TABLE {qualified} RESTART IDENTITY CASCADE"))
+
+
+@pytest.fixture()
+def stage_mockup(db_session):
+    """Stage one mockup image as a Designer would before submitting; returns the ``image_ids``."""
+    import uuid as _uuid
+
+    from app.adapters.db.models import ResultImage
+
+    def stage(order_id, user_id) -> list[str]:
+        image = ResultImage(
+            order_id=order_id, uploaded_by_id=user_id, storage_key=f"result_images/test/{_uuid.uuid4()}.png",
+            original_filename="mockup.png", content_type="image/png", byte_size=10, sha256="0" * 64,
+            width=1200, height=1200,
+        )
+        db_session.add(image)
+        db_session.commit()
+        return [str(image.id)]
+
+    return stage

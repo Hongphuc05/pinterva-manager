@@ -39,6 +39,8 @@ import { AdminFixActionModal } from '../components/AdminFixActionModal'
 import { LinkifiedText, OpenExternalLinkButton } from '../components/LinkifiedText'
 import { OrderWorkNotesCard } from '../components/OrderWorkNotesCard'
 import { PrintervalChatCard } from '../components/PrintervalChatCard'
+import { MockupPicker, SubmittedMockups } from '../components/MockupImages'
+import { FixTemplateConfirmCard, type FixTemplateConfirm } from '../components/FixTemplateConfirmCard'
 
 type ResultVersion = {
   id: string
@@ -68,6 +70,7 @@ type OrderDetail = {
   note_outsource: string
   previous_note_outsource?: string | null
   fix_reason?: string | null
+  fix_template_confirm?: FixTemplateConfirm | null
   fix_approved_by_admin?: boolean
   fix_rejected_by_admin?: boolean
   fix_return_count?: number
@@ -130,6 +133,7 @@ export function OrderDetailPage() {
 
   // Task execution states
   const [driveUrl, setDriveUrl] = useState('')
+  const [mockupIds, setMockupIds] = useState<string[]>([])
   const [busyAssignment, setBusyAssignment] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [actionSuccess, setActionSuccess] = useState<string | null>(null)
@@ -229,6 +233,10 @@ export function OrderDetailPage() {
     if (!order) return
     const norm = (order.state || '').toUpperCase()
     if (norm === 'QC_PENDING' || norm === 'REVIEW') return
+    if (!isAdmin && mockupIds.length === 0) {
+      setActionError('Cần gắn ít nhất 1 ảnh mockup trước khi nộp bài (Printerval bắt buộc).')
+      return
+    }
     const hasFix = (order.fix_return_count || 0) > 0 || norm === 'REVISION' || norm === 'FIX' || Boolean(order.fix_approved_by_admin)
     if (hasFix) {
       void handleConfirmSubmit()
@@ -240,6 +248,10 @@ export function OrderDetailPage() {
 
   async function handleConfirmSubmit() {
     if (!order) return
+    if (!isAdmin && mockupIds.length === 0) {
+      setActionError('Cần gắn ít nhất 1 ảnh mockup trước khi nộp bài (Printerval bắt buộc).')
+      return
+    }
     setBusyAssignment(true)
     setActionError(null)
     setActionSuccess(null)
@@ -254,6 +266,7 @@ export function OrderDetailPage() {
             body: JSON.stringify({
               drive_url: submittedText || 'Đã hoàn thành',
               request_id: crypto.randomUUID(),
+              image_ids: mockupIds,
               ...(usesOrderConcurrency ? { expected_version: order.version } : {}),
             }),
           })
@@ -269,10 +282,12 @@ export function OrderDetailPage() {
             state: 'QC_PENDING',
             drive_url: hasFixTag ? undefined : (submittedText || undefined),
             note_outsource: hasFixTag ? undefined : (submittedText || undefined),
+            image_ids: mockupIds,
             ...(usesOrderConcurrency ? { expected_version: order.version } : {}),
           }),
         })
       }
+      setMockupIds([])
       setActionSuccess('Nộp bài QC và chuyển sang Review (Chờ duyệt) thành công!')
       window.dispatchEvent(new CustomEvent('orders-updated'))
       await loadOrderDetail()
@@ -1052,6 +1067,10 @@ export function OrderDetailPage() {
                   </button>
                 </div>
 
+                {!isReview && !isAdmin && (
+                  <MockupPicker orderId={order.id} onChange={setMockupIds} disabled={busyAssignment} />
+                )}
+
                 {isReview && (
                   <p className="text-[11px] text-slate-500 italic flex items-center gap-1 pt-1">
                     <span>Đơn đang chờ Admin review. Nếu cần nộp lại, bạn chỉ cần bấm nút</span>
@@ -1202,7 +1221,13 @@ export function OrderDetailPage() {
           </div>
         )}
 
+        {isAdmin && order.fix_template_confirm && (
+          <FixTemplateConfirmCard orderId={order.id} request={order.fix_template_confirm} onDone={() => void loadOrderDetail()} />
+        )}
+
         {isAdmin && <PrintervalChatCard orderId={order.id} />}
+
+        <SubmittedMockups orderId={order.id} />
 
         <OrderWorkNotesCard orderId={order.id} />
 

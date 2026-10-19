@@ -108,6 +108,8 @@ class SubStatusPayload(RequestIdPayload):
 
 class SubmitResultPayload(RequestIdPayload):
     drive_url: str = Field(default="")
+    # 1-3 mockup images staged with POST /orders/{id}/result-images (required, see result_images).
+    image_ids: list[str] = Field(default_factory=list, max_length=3)
 
 
 class TaskMutationResponse(BaseModel):
@@ -254,9 +256,10 @@ def api_submit_result(
         result = submit_result(
             db, drive_adapter, assignment_id, user.id, str(payload.drive_url),
             f"submit-result:{user.id}:{payload.request_id}",
-            request_fingerprint=f"{assignment_id}:{payload.drive_url}",
+            request_fingerprint=f"{assignment_id}:{payload.drive_url}:{','.join(sorted(payload.image_ids))}",
             expected_version=payload.expected_version if _uses_order_concurrency(user) else None,
             enforce_processing_lease=_uses_order_concurrency(user),
+            image_ids=payload.image_ids,
         )
     except Exception as exc:  # routed through stable HTTP errors above
         _raise_task_error(exc)

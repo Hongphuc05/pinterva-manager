@@ -19,7 +19,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 from sqlalchemy.orm.exc import StaleDataError
 
 from app.adapters.db.models import Order, Platform, PlatformSyncState, WorkflowEvent
@@ -245,6 +245,31 @@ def _row_designer(row: dict, designer_map: dict[str, str] | None = None) -> str 
 logger = logging.getLogger(__name__)
 
 
+# Tacahu moves an order to Review at once and pushes that to Printerval right after; until the push
+# lands (seconds, minutes when Printerval is slow or refuses) Printerval still says Fix. Taking that
+# for a new Fix sent Designers' resubmissions back to Fix and made the push skip itself silently
+# (20 of 52 resubmissions on 19/10). Within this window "fix" is a new Fix only when QC opened a new
+# Fix round in the chat after the order went to Review; past it, Printerval's Fix is taken as is
+# (a push that failed has alerted Admin by then).
+REVIEW_PUSH_GRACE = timedelta(minutes=30)
+
+
+def _is_new_fix(order: Order, platform: Platform) -> bool:
+    """Whether Printerval's "fix" for this order is a new Fix rather than our Review push not landed yet."""
+    from app.application.printerval_alerts import pending_template_confirm
+    from app.application.printerval_chat import chat_opened_fix_since
+
+    sent_to_review = order.status_changed_at
+    if order.state != OrderState.QC_PENDING.value or sent_to_review is None:
+        return True
+    waiting = datetime.now(UTC) - sent_to_review < REVIEW_PUSH_GRACE
+    # Printerval holds the order in Fix until Admin confirms the template question: not a new Fix.
+    waiting = waiting or pending_template_confirm(object_session(order), order) is not None
+    if not waiting:
+        return True
+    return chat_opened_fix_since(platform, order, sent_to_review)
+
+
 def _transition_to_fix_from_observation(
     session: Session,
     order: Order,
@@ -399,8 +424,9 @@ def reconcile_active_platform_orders(
                 order.printerval_status = incoming_status
                 changed = True
 
-            entered_fix = incoming_status == "fix" and order.state != OrderState.REVISION.value
-            if incoming_status == "fix":
+            is_fix = incoming_status == "fix" and _is_new_fix(order, platform)
+            entered_fix = is_fix and order.state != OrderState.REVISION.value
+            if is_fix:
                 changed = _transition_to_fix_from_observation(session, order, actor_id=actor_id) or changed
 
             if changed:
@@ -628,7 +654,7 @@ def sync_selected_order_statuses(
                             # decision. A Review card remains in Review until Admin marks
                             # its designer payment, which is the only automatic path to
                             # our internal Done tab.
-                            if norm_status == "FIX" and order.state != "REVISION":
+                            if norm_status == "FIX" and order.state != "REVISION" and _is_new_fix(order, platform):
                                 order.state = "REVISION"
                                 order.status_changed_at = now_utc
                                 order.fix_return_count += 1
@@ -808,7 +834,7 @@ def sync_platform_order_statuses(
 
                 norm_st = (found_status or "").upper()
                 old_state = order.state
-                if norm_st == "FIX" and order.state in (
+                if norm_st == "FIX" and _is_new_fix(order, platform) and order.state in (
                     "QC_PENDING", "REVIEW", "RESULT_SUBMITTED", "SUBMITTING_TO_SITE",
                     "IN_PROGRESS", "DOING", "ASSIGNED", "DONE", "CLAIMED_IMPORTED", "COMPLETED",
                 ):

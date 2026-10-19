@@ -721,7 +721,7 @@ def test_api_sync_status_is_read_only_until_watchdog_reclaims_stale_state(client
     assert state.last_error is None
 
 
-def test_api_update_order_state_flow(client, db_session):
+def test_api_update_order_state_flow(client, db_session, stage_mockup):
     from app.adapters.db.models import Assignment, Order, Platform
     from app.api.deps import get_current_platform_id
 
@@ -747,7 +747,10 @@ def test_api_update_order_state_flow(client, db_session):
     db_session.add(Assignment(order_id=order.id, designer_id=des.id, status="approved"))
     db_session.commit()
 
-    resp = client.patch(f"/api/orders/{order.id}/state", json={"state": "Review"})
+    no_mockup = client.patch(f"/api/orders/{order.id}/state", json={"state": "Review"})
+    assert no_mockup.status_code == 422  # Printerval needs a mockup in its Design column
+    resp = client.patch(f"/api/orders/{order.id}/state",
+                        json={"state": "Review", "image_ids": stage_mockup(order.id, des.id)})
     assert resp.status_code == 200
     assert resp.json()["state"] == "QC_PENDING"
 
@@ -771,7 +774,8 @@ def test_api_update_order_state_flow(client, db_session):
 
     # 6. Designer re-submits to REVIEW
     client.post("/api/login", json={"username": "des_flow", "password": "s3cret!"})
-    resp = client.patch(f"/api/orders/{order.id}/state", json={"state": "Review"})
+    resp = client.patch(f"/api/orders/{order.id}/state",
+                        json={"state": "Review", "image_ids": stage_mockup(order.id, des.id)})
     assert resp.status_code == 200
     assert resp.json()["state"] == "QC_PENDING"
 
@@ -897,7 +901,7 @@ def test_resolve_missing_template_returns_assigned_order_to_doing(client, db_ses
     assert admin_detail_res.json()["order"]["designer_note"] == "Temp: https://example.com/template"
 
 
-def test_api_approve_and_reject_fix_flow(client, db_session, monkeypatch):
+def test_api_approve_and_reject_fix_flow(client, db_session, monkeypatch, stage_mockup):
     import uuid
 
     from app.adapters.db.models import Assignment, Order, Platform
@@ -952,7 +956,8 @@ def test_api_approve_and_reject_fix_flow(client, db_session, monkeypatch):
     client.post("/api/login", json={"username": "des_fix_test", "password": "s3cret!"})
     resp = client.patch(
         f"/api/orders/{order.id}/state",
-        json={"state": "Review", "drive_url": "https://drive.google.com/test_fix_v1"},
+        json={"state": "Review", "drive_url": "https://drive.google.com/test_fix_v1",
+              "image_ids": stage_mockup(order.id, des.id)},
     )
     assert resp.status_code == 200
     data = resp.json()
@@ -1096,7 +1101,7 @@ def test_designer_cannot_list_view_or_update_an_unreleased_fix(client, db_sessio
     assert [item["id"] for item in client.get("/api/orders").json()["orders"]] == [str(order.id)]
 
 
-def test_designer_submit_review_does_not_notify_admin_telegram(client, db_session, monkeypatch):
+def test_designer_submit_review_does_not_notify_admin_telegram(client, db_session, monkeypatch, stage_mockup):
     _seed_platform(db_session)
     designer = _login(client, db_session, "designer", "submit_review_no_telegram_admin")
     order = Order(
@@ -1121,7 +1126,8 @@ def test_designer_submit_review_does_not_notify_admin_telegram(client, db_sessio
 
     response = client.patch(
         f"/api/orders/{order.id}/state",
-        json={"state": "QC_PENDING", "drive_url": "https://drive.google.com/file/d/submitted/view"},
+        json={"state": "QC_PENDING", "drive_url": "https://drive.google.com/file/d/submitted/view",
+              "image_ids": stage_mockup(order.id, designer.id)},
     )
     assert response.status_code == 200
     db_session.refresh(order)

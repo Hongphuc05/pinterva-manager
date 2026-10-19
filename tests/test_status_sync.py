@@ -1027,3 +1027,71 @@ def test_status_sync_reads_the_chat_on_a_status_change_but_never_the_note(db_ses
 
     sync_selected_order_statuses(db_session, platform, [order], api_client=_mock_client(rows))
     assert queued == ["done"]  # same status again: not read again
+
+
+def _review_order(db_session, platform, code, *, minutes_ago):
+    order = Order(
+        external_order_id=code, platform_id=platform.id, work_domain="standard", state="QC_PENDING",
+        printerval_status="fix", status_changed_at=datetime.now(UTC) - timedelta(minutes=minutes_ago),
+    )
+    db_session.add(order)
+    db_session.commit()
+    return order
+
+
+def test_a_fix_seen_right_after_sending_to_review_is_our_push_not_landed_not_a_new_fix(db_session, monkeypatch):
+    monkeypatch.setattr(status_sync_module, "_dispatch_admin_fix_notifications", lambda *_a: None)
+    platform = Platform(name="P race", account_username="race@printerval.com", team_outsource="team-a")
+    db_session.add(platform)
+    db_session.flush()
+    just_sent = _review_order(db_session, platform, "DJ2001", minutes_ago=1)
+    long_ago = _review_order(db_session, platform, "DJ2002", minutes_ago=31)
+    rows = {"DJ2001": {"id": 2001, "status": "fix"}, "DJ2002": {"id": 2002, "status": "fix"}}
+
+    sync_selected_order_statuses(db_session, platform, [just_sent, long_ago], api_client=_mock_client(rows))
+
+    db_session.refresh(just_sent)
+    db_session.refresh(long_ago)
+    assert just_sent.state == "QC_PENDING"  # the Review push may still be on its way
+    assert long_ago.state == "REVISION"  # past the window, Printerval's Fix is taken as is
+    assert db_session.query(WorkflowEvent).filter_by(order_id=just_sent.id).count() == 0
+
+
+def test_a_new_fix_round_in_the_chat_is_a_new_fix_even_right_after_review(db_session, monkeypatch):
+    from app.application import printerval_chat
+
+    monkeypatch.setattr(status_sync_module, "_dispatch_admin_fix_notifications", lambda *_a: None)
+    seen = []
+    monkeypatch.setattr(printerval_chat, "chat_opened_fix_since",
+                        lambda _p, order, since: seen.append((order.external_order_id, since)) or True)
+    platform = Platform(name="P race2", account_username="race2@printerval.com", team_outsource="team-a")
+    db_session.add(platform)
+    db_session.flush()
+    order = _review_order(db_session, platform, "DJ2003", minutes_ago=2)
+    sent_at = order.status_changed_at
+
+    sync_selected_order_statuses(db_session, platform, [order],
+                                 api_client=_mock_client({"DJ2003": {"id": 2003, "status": "fix"}}))
+
+    db_session.refresh(order)
+    assert order.state == "REVISION"
+    assert seen == [("DJ2003", sent_at)]  # asked for a Fix round opened after the order went to Review
+
+
+def test_an_order_waiting_for_the_template_confirmation_never_turns_into_a_new_fix(db_session, monkeypatch):
+    from app.application.printerval_alerts import record_write_failure
+
+    monkeypatch.setattr(status_sync_module, "_dispatch_admin_fix_notifications", lambda *_a: None)
+    platform = Platform(name="P tpl", account_username="tpl@printerval.com", team_outsource="team-a")
+    db_session.add(platform)
+    db_session.flush()
+    order = _review_order(db_session, platform, "DJ2004", minutes_ago=90)
+    record_write_failure(db_session, order, action="đổi trạng thái sang Review", error="cần xác nhận",
+                         manual="xác nhận", error_class="TEMPLATE_CONFIRM",
+                         extra={"kind": "template_confirm", "target_status": "Review", "fix_template": {}})
+
+    sync_selected_order_statuses(db_session, platform, [order],
+                                 api_client=_mock_client({"DJ2004": {"id": 2004, "status": "fix"}}))
+
+    db_session.refresh(order)
+    assert order.state == "QC_PENDING"
