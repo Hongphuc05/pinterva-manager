@@ -7,6 +7,7 @@ os.environ.setdefault(
 )
 os.environ.setdefault("SECRET_KEY", "test-secret-key")
 os.environ.setdefault("COOKIE_SECURE", "false")
+os.environ.setdefault("ORDER_CHAT_ENABLED", "false")  # no Printerval chat reads or Celery dispatch in tests
 
 import pytest
 from alembic import command

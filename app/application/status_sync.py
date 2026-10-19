@@ -34,6 +34,7 @@ from app.application.crawl import (
     apply_crawled_product_gallery,
     export_platform_orders_csv,
 )
+from app.application.printerval_chat import WATCHED_STATUSES
 from app.config import get_settings
 from app.domain.models import OrderState
 
@@ -248,29 +249,20 @@ def _transition_to_fix_from_observation(
     session: Session,
     order: Order,
     *,
-    note: str,
     actor_id: object | None,
 ) -> bool:
-    """Apply the existing external-Fix policy while preserving payment state."""
+    """Apply the existing external-Fix policy while preserving payment state.
+
+    The Fix reason lives in Printerval's per-order chat, not in note_outsource (which holds the link
+    Tacahu pushed), so nothing is read back into the order here.
+    """
     if order.state == OrderState.REVISION.value:
-        if note and note != order.note_outsource:
-            order.previous_note_outsource = order.note_outsource
-            order.note_outsource = note
-            order.fix_approved_by_admin = False
-            order.fix_rejected_by_admin = False
-            order.designer_note = ""
-            order.designer_note_released_for_fix = False
-            order.suppress_note_outsource_for_designer = True
-            return True
         return False
 
     old_state = order.state
     order.state = OrderState.REVISION.value
     order.status_changed_at = datetime.now(UTC)
     order.fix_return_count += 1
-    order.previous_note_outsource = order.note_outsource
-    if note:
-        order.note_outsource = note
     order.fix_approved_by_admin = False
     order.fix_rejected_by_admin = False
     order.fix_deadline_at = None
@@ -286,8 +278,7 @@ def _transition_to_fix_from_observation(
             evidence={
                 "action": "REQUEST_FIX",
                 "actor_name": "Printerval",
-                "description": f"Printerval trả về Fix với note: {note or 'Không có note'}",
-                "note_outsource": note,
+                "description": "Printerval trả về Fix",
             },
         )
     )
@@ -403,19 +394,14 @@ def reconcile_active_platform_orders(
                 order.printerval_designer = summary.designer
                 order.printerval_designer_synced_at = now_utc
                 changed = True
+            previous_status = order.printerval_status
             if incoming_status != (order.printerval_status or "").lower():
                 order.printerval_status = incoming_status
                 changed = True
 
             entered_fix = incoming_status == "fix" and order.state != OrderState.REVISION.value
             if incoming_status == "fix":
-                # ApiAdapter resolves this from its active-feed cache, so a
-                # changed Fix does not add a per-order source lookup.
-                detail = adapter.get_order_detail(external_order_id, platform_id=str(platform.id))
-                note = detail.note_outsource.strip() if detail.success else ""
-                changed = _transition_to_fix_from_observation(
-                    session, order, note=note, actor_id=actor_id
-                ) or changed
+                changed = _transition_to_fix_from_observation(session, order, actor_id=actor_id) or changed
 
             if changed:
                 order.printerval_status_synced_at = now_utc
@@ -423,6 +409,8 @@ def reconcile_active_platform_orders(
                 updated += 1
                 if entered_fix:
                     _dispatch_admin_fix_notifications(session, order)
+                else:
+                    _dispatch_chat_read(order, previous_status)
             else:
                 session.rollback()
             _emit_progress(
@@ -465,17 +453,35 @@ def reconcile_active_platform_orders(
     return result
 
 
+def _dispatch_chat_read(order: Order, previous_status: str | None) -> None:
+    """Read the order's Printerval chat when its status has just moved to Fix, Confirm or Done.
+
+    QC writes there, and a message somebody already read on Printerval no longer shows in the unread
+    list, so a status change is the second signal that something may have been said.
+    """
+    new_status = (order.printerval_status or "").lower()
+    if new_status in WATCHED_STATUSES and new_status != (previous_status or "").lower():
+        from app.workers.printerval_chat_tasks import dispatch_chat_capture
+
+        dispatch_chat_capture(order.id, new_status)
+
+
 def _dispatch_admin_fix_notifications(session: Session, order: Order) -> None:
     """Dispatch Fix notifications after the order transition is committed."""
     try:
         from app.application.telegram_service import resolve_tacahu_designer_name
+        from app.workers.printerval_chat_tasks import dispatch_chat_capture
         from app.workers.telegram_tasks import (
             async_notify_admin_excessive_fix,
             async_notify_admin_new_fix,
             safe_dispatch_telegram_task,
         )
 
-        safe_dispatch_telegram_task(async_notify_admin_new_fix, str(order.id))
+        if get_settings().order_chat_enabled:
+            # Reads the Fix reason from Printerval's chat, then sends the Admin's Telegram card.
+            dispatch_chat_capture(order.id, "fix", notify=True)
+        else:
+            safe_dispatch_telegram_task(async_notify_admin_new_fix, str(order.id))
         if order.fix_return_count >= 3:
             designer_label = resolve_tacahu_designer_name(session, order)
             safe_dispatch_telegram_task(
@@ -603,6 +609,7 @@ def sync_selected_order_statuses(
                     order = session.get(Order, order_id)
                     if order is None:
                         break
+                    previous_status = order.printerval_status
                     changed = False
                     now_utc = datetime.now(UTC)
 
@@ -614,8 +621,6 @@ def sync_selected_order_statuses(
                     else:
                         found_status = str(row.get("status") or "").strip()
                         norm_status = found_status.upper()
-                        attributes = row.get("attributes") or {}
-                        note = str(attributes.get("outsource_note") or row.get("note") or "").strip()
                         old_state = order.state
 
                         if order.state not in ("WAITING", "OPEN_FOR_ALLOCATION", "DISCOVERED", "PENDING"):
@@ -627,9 +632,6 @@ def sync_selected_order_statuses(
                                 order.state = "REVISION"
                                 order.status_changed_at = now_utc
                                 order.fix_return_count += 1
-                                order.previous_note_outsource = order.note_outsource
-                                if note:
-                                    order.note_outsource = note
                                 order.fix_approved_by_admin = False
                                 order.fix_rejected_by_admin = False
                                 order.designer_note = ""
@@ -644,8 +646,7 @@ def sync_selected_order_statuses(
                                         evidence={
                                             "action": "REQUEST_FIX",
                                             "actor_name": "Printerval",
-                                            "description": f"Printerval trả về Fix với note: {note or 'Không có note'}",
-                                            "note_outsource": note,
+                                            "description": "Printerval trả về Fix",
                                         },
                                     )
                                 )
@@ -675,18 +676,6 @@ def sync_selected_order_statuses(
                                     )
                                 )
                                 changed = True
-                            elif note and norm_status == "FIX" and note != order.note_outsource:
-                                # A changed upstream Fix note invalidates any
-                                # previously approved local release. Admin must
-                                # review it and explicitly write a new note.
-                                order.previous_note_outsource = order.note_outsource
-                                order.note_outsource = note
-                                order.fix_approved_by_admin = False
-                                order.fix_rejected_by_admin = False
-                                order.designer_note = ""
-                                order.designer_note_released_for_fix = False
-                                order.suppress_note_outsource_for_designer = True
-                                changed = True
 
                         if found_status and found_status.lower() != (order.printerval_status or "").lower():
                             order.printerval_status = found_status.lower()
@@ -710,6 +699,8 @@ def sync_selected_order_statuses(
                     session.commit()
                     if notify_admin_fix:
                         _dispatch_admin_fix_notifications(session, order)
+                    else:
+                        _dispatch_chat_read(order, previous_status)
                     if changed:
                         updated += 1
                     _emit_progress(
@@ -794,6 +785,7 @@ def sync_platform_order_statuses(
         for order in orders:
             try:
                 notify_admin_fix = False
+                previous_status = order.printerval_status
                 row = client.find_order(
                     order.external_order_id, statuses=_status_guess_order(order.printerval_status)
                 )
@@ -823,11 +815,6 @@ def sync_platform_order_statuses(
                     order.state = "REVISION"
                     order.status_changed_at = datetime.now(UTC)
                     order.fix_return_count += 1
-                    order.previous_note_outsource = order.note_outsource
-                    attrs = row.get("attributes") or {}
-                    found_note = str(attrs.get("outsource_note") or row.get("note") or "").strip()
-                    if found_note:
-                        order.note_outsource = found_note
                     order.fix_approved_by_admin = False
                     order.fix_rejected_by_admin = False
                     order.designer_note = ""
@@ -842,7 +829,6 @@ def sync_platform_order_statuses(
                                 "action": "REQUEST_FIX",
                                 "actor_name": "Printerval",
                                 "description": "Printerval trả về Fix khi đồng bộ trạng thái",
-                                "note_outsource": found_note,
                             },
                         )
                     )
@@ -882,6 +868,8 @@ def sync_platform_order_statuses(
                 session.commit()
                 if notify_admin_fix:
                     _dispatch_admin_fix_notifications(session, order)
+                else:
+                    _dispatch_chat_read(order, previous_status)
             except StaleDataError:
                 # Concurrent transaction modified this order; rollback this order and continue
                 session.rollback()

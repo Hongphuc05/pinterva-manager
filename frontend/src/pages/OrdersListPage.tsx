@@ -81,6 +81,7 @@ export type OrderSummary = {
   status_changed_at?: string | null
   note_outsource?: string | null
   previous_note_outsource?: string | null
+  fix_reason?: string | null
   fix_approved_by_admin?: boolean
   fix_rejected_by_admin?: boolean
   fix_return_count?: number
@@ -3090,15 +3091,15 @@ export function OrdersListPage() {
                               })()}
                             </div>
 
-                            {/* Note Outsource preview for Fix orders */}
-                            {o.state === 'REVISION' && o.note_outsource && (
+                            {/* Fix reason: QC's message in Printerval's chat (Admin only) */}
+                            {isAdmin && o.state === 'REVISION' && (
                               <div className="mt-1.5 p-2 rounded-lg bg-orange-50 border border-orange-200 text-[11px] text-orange-950 font-normal">
                                 <div className="font-bold flex items-center gap-1 text-orange-900 mb-0.5">
                                   <AlertTriangle className="h-3 w-3 text-orange-600 shrink-0" />
-                                  <span>QC Acc Mẹ:</span>
+                                  <span>QC Acc Mẹ (chat):</span>
                                 </div>
                                 <div className="whitespace-pre-wrap break-all leading-tight text-slate-800 line-clamp-2">
-                                  <LinkifiedText text={o.note_outsource} />
+                                  {o.fix_reason ? <LinkifiedText text={o.fix_reason} /> : 'Mở đơn để xem chat Printerval.'}
                                 </div>
                               </div>
                             )}
@@ -3413,14 +3414,14 @@ export function OrdersListPage() {
                               )}
 
                               {/* QC / Revision note */}
-                              {['REVISION', 'REVISION_REQUESTED', 'FIX'].includes((o.state || '').toUpperCase()) && o.note_outsource && (
+                              {isAdmin && ['REVISION', 'REVISION_REQUESTED', 'FIX'].includes((o.state || '').toUpperCase()) && (
                                 <div className="p-2 rounded-lg bg-amber-50 border border-amber-200 text-[11px] text-amber-950">
                                   <div className="font-bold flex items-center gap-1 text-amber-900 mb-0.5">
                                     <AlertTriangle className="h-3 w-3 text-amber-600 shrink-0" />
-                                    <span>Ghi chú QC sửa lại:</span>
+                                    <span>Ghi chú QC sửa lại (chat):</span>
                                   </div>
                                   <div className="whitespace-pre-wrap break-all leading-tight text-slate-800 line-clamp-3">
-                                    <LinkifiedText text={o.note_outsource} />
+                                    {o.fix_reason ? <LinkifiedText text={o.fix_reason} /> : 'Mở đơn để xem chat Printerval.'}
                                   </div>
                                 </div>
                               )}

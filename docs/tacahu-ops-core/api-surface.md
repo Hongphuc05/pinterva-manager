@@ -10,6 +10,7 @@ origin hoặc origin kèm `/api` nhưng không được tạo `/api/api`.
 | Auth | `POST /login`, `POST /logout`, `GET /me` |
 | Orders | `GET /orders`, `GET /orders/{id}`, `PATCH /orders/{id}/state`, refresh/sync/history |
 | Work note | `GET/POST /orders/{id}/work-notes`, `GET .../attachments/{attachment_id}` |
+| Chat Printerval (Admin) | `GET /orders/{id}/printerval-chat` (đọc ngay, 502 khi Printerval lỗi), `GET /printerval-chat/unread` (đơn còn tin chưa đọc trên Printerval; `stale: true` khi Printerval không trả lời) |
 | Assignment | tạo/revoke assignment; task start/sub-status/result/flag missing template |
 | Fix | `POST /orders/{id}/approve-fix`, `POST /orders/{id}/reject-fix-to-review` |
 | Duplicate | `GET /duplicate-board`, move card, duplicate domain/check status/settings; Support web chỉ check order còn Waiting, callback compare có scope Doing riêng |

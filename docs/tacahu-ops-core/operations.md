@@ -124,6 +124,9 @@ duyệt/từ chối Fix, đổi Designer/trạng thái qua `PrintervalAssignment
 cần làm tay) và web của Admin hiện **toast** cho từng lỗi mới (`GET /api/printerval-alerts`, hỏi mỗi 30
 giây, theo platform). Không gửi Telegram cho các lỗi này.
 
+Chat Printerval (chỉ đọc, Admin): xem `order-workflow.md` → "Chat Printerval". Biến `ORDER_CHAT_ENABLED`
+(mặc định `true`) là công tắc tắt việc Tacahu tự đọc chat (toast unread và đọc khi đơn sang Fix/Confirm/Done).
+
 - Ghi kết quả vào đơn sau khi gọi Printerval: đơn được đọc lại dưới khoá dòng (`SELECT … FOR UPDATE`)
   ngay trước khi lưu, vì job đồng bộ trạng thái có thể đã lưu đơn trong lúc chờ Printerval (trước đây
   gây `StaleDataError` và để request kẹt `pending`, 72 request từ 19/09 được đối chiếu lại ngày 15/10).

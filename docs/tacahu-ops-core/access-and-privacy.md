@@ -47,6 +47,12 @@ phải enforce role + platform + assignment ở backend.
   có hạn dùng, khóa theo chat/platform và không mở quyền cho tài khoản khác. Bấm **Không** chỉ
   hủy yêu cầu, không đổi trạng thái order.
 
+## Chat Printerval
+
+Chỉ Admin (đúng platform) đọc chat Printerval của đơn; mọi role khác nhận 403. Designer, Designer Trello và
+Support không thấy chat, lý do Fix (`fix_reason` chỉ có trong response của Admin) hay các snapshot
+`external_observations`; Admin muốn họ biết thì ghi vào Note làm việc.
+
 ## Note làm việc: Support
 
 Support đọc, thêm Note làm việc (kể cả ảnh) cho các đơn mà Support được xem (`get_order_detail_for_user`:

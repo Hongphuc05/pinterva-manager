@@ -22,6 +22,7 @@ from app.adapters.db.models import (
     TelegramMessageTemplate,
     User,
 )
+from app.application.printerval_chat import latest_fix_reason
 from app.config import get_settings
 from app.domain.access import ROLE_SUPPORT
 
@@ -787,7 +788,9 @@ def notify_admin_new_fix(session: Session, order_id: uuid.UUID) -> bool:
     fix_cnt = order.fix_return_count or 1
     order_id_code = order.external_order_id
     p_name = order.product_name or "Sản phẩm"
-    qc_note = order.note_outsource or "Không có ghi chú"
+    # The Fix reason is QC's message in Printerval's chat (captured when the order went to Fix);
+    # note_outsource only holds the link Tacahu pushed.
+    qc_note = (latest_fix_reason(session, order) or "Xem lý do trong khung chat của đơn trên Tacahu")[:600]
     des_name = resolve_tacahu_designer_name(session, order)
 
     # Generate callback tokens for Approve / Reject buttons

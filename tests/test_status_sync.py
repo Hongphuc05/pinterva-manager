@@ -407,8 +407,9 @@ def test_selected_sync_turns_printerval_fix_into_the_existing_admin_fix_flow(db_
     assert result == {"checked": 1, "updated": 1, "not_found": 0, "failed": 0}
     assert order.state == "REVISION"
     assert order.printerval_status == "fix"
-    assert order.previous_note_outsource == "Ghi chú cũ"
-    assert order.note_outsource == "Sửa lại phần tay áo"
+    # The Fix reason lives in Printerval's chat; the note (our pushed link) is never overwritten.
+    assert order.previous_note_outsource is None
+    assert order.note_outsource == "Ghi chú cũ"
     assert order.fix_approved_by_admin is False
     assert order.fix_return_count == 1
     assert event.evidence["action"] == "REQUEST_FIX"
@@ -998,3 +999,31 @@ def test_heartbeat_loop_persists_without_progress_argument(monkeypatch):
     )
     reporter._heartbeat_loop()
     assert calls == [1]
+
+
+def test_status_sync_reads_the_chat_on_a_status_change_but_never_the_note(db_session, monkeypatch):
+    from app.workers import printerval_chat_tasks
+
+    queued = []
+    monkeypatch.setattr(
+        printerval_chat_tasks, "dispatch_chat_capture", lambda order_id, status, notify=False: queued.append(status)
+    )
+    platform = Platform(name="P chat sync", account_username="acc9@printerval.com", team_outsource="team-a")
+    db_session.add(platform)
+    db_session.flush()
+    order = Order(
+        external_order_id="DJ1009", platform_id=platform.id, work_domain="standard", state="QC_PENDING",
+        printerval_status="review", note_outsource="https://drive.google.com/file/d/ours",
+    )
+    db_session.add(order)
+    db_session.commit()
+    rows = {"DJ1009": {"id": 1009, "status": "done", "note": "QC viết vào note", "attributes": {"outsource_note": "QC viết vào note"}}}
+
+    sync_selected_order_statuses(db_session, platform, [order], api_client=_mock_client(rows))
+    db_session.refresh(order)
+    assert order.printerval_status == "done"
+    assert order.note_outsource == "https://drive.google.com/file/d/ours"  # never overwritten from Printerval
+    assert queued == ["done"]
+
+    sync_selected_order_statuses(db_session, platform, [order], api_client=_mock_client(rows))
+    assert queued == ["done"]  # same status again: not read again

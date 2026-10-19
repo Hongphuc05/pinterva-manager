@@ -61,6 +61,10 @@ class Settings(BaseSettings):
     # thresholds and Telegram recipient have been verified in production. The
     # embedding runtime itself belongs to the separately managed Support machine.
     support_compare_enabled: bool = False
+    # Kill switch for what Tacahu reads from Printerval's per-order chat on its own (the unread poll and
+    # the read when an order goes to Fix/Confirm/Done). Reading makes Printerval mark messages read for
+    # its team. Opening an order's chat as an Admin always works.
+    order_chat_enabled: bool = True
     # Notification batch size for server-side Telegram delivery. The local
     # comparison worker has its own model/scan settings.
     support_compare_batch_limit: int = 100

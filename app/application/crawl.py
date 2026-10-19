@@ -295,7 +295,6 @@ def scan_orders_fast(
                 order.created_at_ext = detail.created_at
                 order.order_created_at_ext = detail.order_created_at
                 order.deadline_at_ext = detail.deadline_at
-                order.note_outsource = detail.note_outsource
                 order.custom_config = detail.custom_config.model_dump() if detail.custom_config else None
                 order.design_tool_url = detail.design_tool_url
                 if detail.sku_image_url:
@@ -528,9 +527,8 @@ def _apply_order_detail_result(order: Order, detail_result) -> None:
     order.created_at_ext = detail_result.created_at
     order.order_created_at_ext = detail_result.order_created_at
     order.deadline_at_ext = detail_result.deadline_at
-    order.note_outsource = detail_result.note_outsource
-    # Upstream notes are private to Admin. A Designer can only receive a note
-    # that Admin explicitly releases while approving a Fix.
+    # note_outsource holds only the link Tacahu pushed; Printerval's remarks arrive in its chat.
+    # Whatever the old note held stays hidden from Designers unless Admin releases a note.
     order.suppress_note_outsource_for_designer = True
     order.custom_config = (
         detail_result.custom_config.model_dump() if detail_result.custom_config else None

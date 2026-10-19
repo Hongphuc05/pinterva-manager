@@ -38,6 +38,7 @@ import {
 import { AdminFixActionModal } from '../components/AdminFixActionModal'
 import { LinkifiedText, OpenExternalLinkButton } from '../components/LinkifiedText'
 import { OrderWorkNotesCard } from '../components/OrderWorkNotesCard'
+import { PrintervalChatCard } from '../components/PrintervalChatCard'
 
 type ResultVersion = {
   id: string
@@ -66,6 +67,7 @@ type OrderDetail = {
   created_at_ext?: string | null
   note_outsource: string
   previous_note_outsource?: string | null
+  fix_reason?: string | null
   fix_approved_by_admin?: boolean
   fix_rejected_by_admin?: boolean
   fix_return_count?: number
@@ -892,7 +894,7 @@ export function OrderDetailPage() {
 
                 <div className="whitespace-pre-wrap break-all leading-relaxed font-sans text-slate-800 bg-white/90 p-3 rounded-lg border border-orange-200/80">
                   {isAdmin
-                    ? (order.note_outsource ? <LinkifiedText text={order.note_outsource} /> : 'Chưa có ghi chú cụ thể từ QC.')
+                    ? (order.fix_reason ? <LinkifiedText text={order.fix_reason} /> : 'Xem lý do Fix trong khung Chat Printerval bên dưới.')
                     : (order.designer_note || 'Admin chưa gửi hướng dẫn Fix.')}
                 </div>
               </div>
@@ -1187,18 +1189,20 @@ export function OrderDetailPage() {
           </div>
         )}
 
-        {/* Printerval's source note is read-only; team discussion lives in Note làm việc. */}
+        {/* note_outsource is the link Tacahu pushed; Printerval's remarks arrive in its chat (Admin only). */}
         {isAdmin && (
           <div className="p-4 rounded-xl bg-blue-50/50 border border-blue-100 text-xs space-y-2">
             <h3 className="font-bold text-slate-800 flex items-center gap-1.5">
               <FileText className="h-4 w-4 text-[#0052CC]" />
-              <span>Note Outsource từ Printerval</span>
+              <span>Link bài đã nộp (gửi lên Printerval)</span>
             </h3>
             <p className="text-slate-700 font-mono text-[11px] whitespace-pre-wrap">
-              {order.note_outsource ? <LinkifiedText text={order.note_outsource} /> : 'Chưa có note từ Printerval.'}
+              {order.note_outsource ? <LinkifiedText text={order.note_outsource} /> : 'Chưa có link bài nộp.'}
             </p>
           </div>
         )}
+
+        {isAdmin && <PrintervalChatCard orderId={order.id} />}
 
         <OrderWorkNotesCard orderId={order.id} />
 

@@ -86,6 +86,7 @@ from app.application.printerval_assignment_requests import (
     PrintervalAssignmentValidationError,
     create_request,
 )
+from app.application.printerval_chat import fix_reasons, latest_fix_reason
 from app.application.processing_leases import acquire_processing_lease
 from app.application.sanitization import (
     decode_proxy_url,
@@ -113,6 +114,8 @@ router = APIRouter()
 
 class OrderSummaryOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
+    # Admin only: QC's latest message in Printerval's chat, for orders in Fix (see printerval_chat).
+    fix_reason: str | None = None
     id: uuid.UUID
     version: int
     external_order_id: str
@@ -677,6 +680,7 @@ class ResultVersionOut(BaseModel):
 
 class OrderDetailOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
+    fix_reason: str | None = None  # Admin only, see OrderSummaryOut
     id: uuid.UUID
     version: int
     external_order_id: str
@@ -923,9 +927,13 @@ def _summarize_orders(db: Session, user: User, orders: list[Order]) -> list[Orde
     request_map = {request.order_id: request for request in requests}
 
     is_admin = user.role == ROLE_ADMIN
+    fix_reason_map = (
+        fix_reasons(db, [o.id for o in orders if o.state == OrderState.REVISION.value]) if is_admin else {}
+    )
     out_list = []
     for o in orders:
         item = OrderSummaryOut.model_validate(o)
+        item.fix_reason = fix_reason_map.get(o.id)
         item.assigned_designer_name = designer_map.get(o.id)
         if not item.assigned_designer_name and (
             (user.printerval_designer_option and o.printerval_designer == user.printerval_designer_option)
@@ -1858,6 +1866,8 @@ def api_order_detail(
             logger.warning("History event parsing exception for event %s: %s", getattr(e, 'id', None), exc)
 
     is_admin = user.role == ROLE_ADMIN
+    if is_admin and order.state == OrderState.REVISION.value:
+        order_out.fix_reason = latest_fix_reason(db, order)
     if not is_admin:
         order_out = sanitize_order_detail_for_designer(order_out)
         history_out = []

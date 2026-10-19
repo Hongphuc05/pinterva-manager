@@ -70,7 +70,9 @@ transition nhưng application layer không được tự động recover.
    để trống thì giữ link bản nộp đầu. Lý do: Printerval đã có khung chat riêng nên link
    không còn là kênh ghi chú yêu cầu sửa.
 5. **Đồng bộ status**: Celery Beat đọc status platform. `Done` đưa nội bộ sang `DONE`;
-   `Fix` đưa sang `REVISION`, lưu note/source context và tăng `fix_return_count`.
+   `Fix` đưa sang `REVISION` và tăng `fix_return_count`. Tacahu **không đọc** `note_outsource`
+   từ Printerval về nữa (nó chỉ giữ link bài Tacahu đã đẩy lên); QC ghi yêu cầu sửa vào khung
+   chat của đơn trên Printerval — xem "Chat Printerval" bên dưới.
 6. **Fix**: Fix trước hết nằm ở Admin. Admin duyệt sẽ release hướng dẫn riêng cho
    Designer, Designer sửa và nộp lại Review. Admin từ chối Fix thì trả về `QC_PENDING`
    cùng ghi chú phản hồi cho platform. Không expose trực tiếp upstream `note_outsource`
@@ -90,7 +92,27 @@ mở quyền tương tự cho Support, Designer standard hay toàn bộ order de
   Có thể dán ảnh raster; file được lưu private và download qua endpoint có auth.
 - Khi người còn lại thêm note, lần mở note tiếp theo trả cờ unread để UI hiện chấm xanh.
   Việc đọc ghi cursor theo từng `(order, user)`.
-- `Note Outsource` là record upstream read-only; không dùng nó làm chat nội bộ.
+- `note_outsource` trên Tacahu chỉ là link bài đã nộp: Tacahu ghi lên Printerval một chiều (nộp lần đầu
+  và mỗi lần Designer cập nhật link), không đọc ngược về; không dùng nó làm chat nội bộ.
+
+## Chat Printerval (chỉ Admin, chỉ đọc)
+
+QC của Printerval ghi yêu cầu Fix và nhận xét vào khung chat từng đơn. Tacahu đọc chat theo 3 cách,
+đều chỉ cho Admin và không bao giờ đổi state đơn:
+
+1. **Mở đơn**: `GET /orders/{id}/printerval-chat` lấy cả hội thoại ngay lúc đó (không lưu DB).
+2. **Toast tin mới**: web Admin hỏi `GET /printerval-chat/unread` mỗi 30 giây khi tab đang xem; server
+   hỏi Printerval 1 lần/phút/platform (danh sách unread của chính Printerval, không đánh dấu đã đọc) và
+   cache. Mỗi đơn có tin mới hiện một toast.
+3. **Đơn đổi status sang Fix/Confirm/Done**: job đồng bộ trạng thái đẩy task `capture_order_chat`, lưu
+   tin mới của đơn vào `external_observations` (`source=printerval.chat`, tăng dần theo
+   `last_message_id`). Đây là lưới an toàn cho tin đã được ai đó đọc trên Printerval nên không còn trong
+   danh sách unread. Với Fix, task đọc chat **rồi** gửi thẻ Telegram cho Admin (lý do Fix lấy từ chat; đọc
+   chat lỗi thì thẻ ghi "xem trong khung chat" và việc đọc được thử lại sau 2 và 5 phút).
+
+Đọc tin nhắn làm Printerval đánh dấu **đã đọc cho cả team**. Designer không thấy chat; muốn designer biết,
+Admin tự ghi vào Note làm việc. `ORDER_CHAT_ENABLED=false` tắt cách 2 và 3 (thẻ Fix Telegram vẫn gửi như cũ,
+chỉ không kèm lý do); mở chat của một đơn luôn dùng được.
 
 ## Điều không được giả định
 

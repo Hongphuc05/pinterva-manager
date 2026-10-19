@@ -496,7 +496,7 @@ def test_import_claimed_orders_persists_order_detail_fields(db_session):
     assert order.priority_label == "label label-default label-danger"
     assert order.created_at_ext == datetime(2026, 9, 7, 3, 46)
     assert order.deadline_at_ext == datetime(2026, 9, 8, 3, 38, 52)
-    assert order.note_outsource == "some note"
+    assert not order.note_outsource  # Printerval's note is no longer read; QC writes in the chat instead
     assert order.custom_config == {
         "original": [{"key": "Your Name Here", "value": "Machado"}],
         "translated_vn": [{"key": "Tên của Bạn", "value": "Machado"}],
