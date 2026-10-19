@@ -61,7 +61,7 @@ export function Topbar({ onOpenNavigation }: TopbarProps) {
     if (path === '/designer-board') return 'Tiến Độ Designer'
     if (path === '/order-history') return user?.role === 'designer' ? 'Lịch Sử Của Tôi' : 'Lịch Sử Hoạt Động & Tiến Độ'
     if (path === '/allocation') return 'Phân Bổ Kéo-Thả'
-    if (path === '/kanban') return 'Board Đơn trùng lặp'
+    if (path === '/kanban') return 'Đơn dễ cần xử lí'
     if (path === '/my-tasks') return 'My Tasks'
     if (path === '/platform-hub' || path === '/platform-login') return 'Mở Hệ Thống Mẹ & Đồng Bộ Ảnh'
     if (path === '/order-status') return 'Trạng Thái Đơn'

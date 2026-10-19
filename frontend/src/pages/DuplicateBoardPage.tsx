@@ -696,7 +696,7 @@ export function DuplicateBoardPage() {
             <div>
               <h1 className="flex items-center gap-2 text-lg font-bold text-slate-800">
                 <Layers3 className="h-5 w-5 text-violet-600" />
-                Board Đơn trùng lặp
+                Đơn dễ cần xử lí
               </h1>
               <p className="mt-1 text-xs text-slate-500">
                 Không gian làm việc kéo thả dành cho Đơn trùng lặp — đồng bộ trực quan cho Admin và Designer Trello.
