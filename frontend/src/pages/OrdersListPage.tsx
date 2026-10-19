@@ -1258,7 +1258,7 @@ export function OrdersListPage() {
 
     const imageIds = inlineMockupIds[order.id] ?? []
     if (imageIds.length === 0) {
-      showToast('Cần gắn ít nhất 1 ảnh mockup trước khi nộp bài (Printerval bắt buộc).', 'error')
+      showToast('Cần gắn ít nhất 1 ảnh mockup trước khi nộp bài.', 'error')
       return
     }
 

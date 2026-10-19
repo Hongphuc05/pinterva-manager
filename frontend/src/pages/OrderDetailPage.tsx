@@ -234,7 +234,7 @@ export function OrderDetailPage() {
     const norm = (order.state || '').toUpperCase()
     if (norm === 'QC_PENDING' || norm === 'REVIEW') return
     if (!isAdmin && mockupIds.length === 0) {
-      setActionError('Cần gắn ít nhất 1 ảnh mockup trước khi nộp bài (Printerval bắt buộc).')
+      setActionError('Cần gắn ít nhất 1 ảnh mockup trước khi nộp bài.')
       return
     }
     const hasFix = (order.fix_return_count || 0) > 0 || norm === 'REVISION' || norm === 'FIX' || Boolean(order.fix_approved_by_admin)
@@ -249,7 +249,7 @@ export function OrderDetailPage() {
   async function handleConfirmSubmit() {
     if (!order) return
     if (!isAdmin && mockupIds.length === 0) {
-      setActionError('Cần gắn ít nhất 1 ảnh mockup trước khi nộp bài (Printerval bắt buộc).')
+      setActionError('Cần gắn ít nhất 1 ảnh mockup trước khi nộp bài.')
       return
     }
     setBusyAssignment(true)

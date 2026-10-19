@@ -137,7 +137,7 @@ def attach_images(session: Session, order: Order, user: User, image_ids: list[st
     """Use 1 to 3 staged images of this user for the submission being recorded. The caller commits."""
     ids = list(dict.fromkeys(image_ids or []))
     if not ids:
-        raise ResultImageError("Cần gắn ít nhất 1 ảnh mockup trước khi nộp bài (Printerval bắt buộc)")
+        raise ResultImageError("Cần gắn ít nhất 1 ảnh mockup trước khi nộp bài")
     if len(ids) > MAX_RESULT_IMAGES:
         raise ResultImageError(f"Tối đa {MAX_RESULT_IMAGES} ảnh mockup cho một lần nộp")
     try:

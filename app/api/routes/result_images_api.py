@@ -38,14 +38,15 @@ def _order(db: Session, user: User, order_id: uuid.UUID, platform_id: uuid.UUID)
     return order
 
 
-def _out(order: Order, image: ResultImage) -> dict[str, Any]:
+def _out(order: Order, image: ResultImage, user: User) -> dict[str, Any]:
+    # Designers never see that a "web mẹ" exists: whether the image reached it is for Admin only.
     return {
         "id": str(image.id),
         "filename": image.original_filename,
         "width": image.width,
         "height": image.height,
         "submitted_at": image.attached_at,
-        "on_printerval": image.pushed_at is not None,
+        "pushed": (image.pushed_at is not None) if user.role == ROLE_ADMIN else None,
         "url": f"/api/orders/{order.id}/result-images/{image.id}/file",
     }
 
@@ -60,8 +61,8 @@ def list_result_images(
     """The caller's staged images (not submitted yet) and every submitted image of the order."""
     order = _order(db, user, order_id, platform_id)
     return {
-        "staged": [_out(order, i) for i in staged_images(db, order, user)],
-        "submitted": [_out(order, i) for i in submitted_images(db, order)],
+        "staged": [_out(order, i, user) for i in staged_images(db, order, user)],
+        "submitted": [_out(order, i, user) for i in submitted_images(db, order)],
         "max_images": MAX_RESULT_IMAGES,
     }
 
@@ -85,7 +86,7 @@ async def upload_result_images(
         db.rollback()
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
     db.commit()
-    return {"staged": [_out(order, i) for i in staged_images(db, order, user)]}
+    return {"staged": [_out(order, i, user) for i in staged_images(db, order, user)]}
 
 
 @router.delete("/orders/{order_id}/result-images/{image_id}")
@@ -104,7 +105,7 @@ def delete_result_image(
     except ResultImageError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     db.commit()
-    return {"staged": [_out(order, i) for i in staged_images(db, order, user)]}
+    return {"staged": [_out(order, i, user) for i in staged_images(db, order, user)]}
 
 
 @router.get("/orders/{order_id}/result-images/{image_id}/file")

@@ -6,7 +6,7 @@ vi.mock('../api/client', () => api)
 
 import { MockupPicker } from './MockupImages'
 
-const img = (id: string) => ({ id, filename: `${id}.png`, width: 10, height: 10, submitted_at: null, on_printerval: false,
+const img = (id: string) => ({ id, filename: `${id}.png`, width: 10, height: 10, submitted_at: null, pushed: null,
   url: `/api/orders/o1/result-images/${id}/file` })
 const png = (name: string) => new File(['png'], name, { type: 'image/png' })
 

@@ -1415,7 +1415,7 @@ describe('OrdersListPage', () => {
         if (url.includes('/api/orders/order-99/result-images')) {
           if (init?.method === 'POST') {
             staged = [{ id: 'img-1', filename: 'mockup.png', width: 10, height: 10, submitted_at: null,
-              on_printerval: false, url: '/api/orders/order-99/result-images/img-1/file' }]
+              pushed: null, url: '/api/orders/order-99/result-images/img-1/file' }]
           }
           return Promise.resolve({ ok: true, status: 200, json: async () => ({ staged, submitted: [], max_images: 3 }) })
         }

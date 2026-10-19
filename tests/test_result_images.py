@@ -123,6 +123,11 @@ def test_submitting_without_a_mockup_is_refused_and_with_one_it_is_attached(clie
     listed = client.get(f"/api/orders/{world.order.id}/result-images", headers=_h(world.admin)).json()
     assert [i["id"] for i in listed["submitted"]] == [image["id"]] and listed["staged"] == []
     assert client.get(image["url"], headers=_h(world.admin)).status_code == 200  # submitted: Admin sees it
+    assert listed["submitted"][0]["pushed"] is False
+    mine = client.get(f"/api/orders/{world.order.id}/result-images", headers=_h(world.designer)).json()
+    assert mine["submitted"][0]["pushed"] is None  # Designers are never told about the web mẹ
+    assert "printerval" not in str(mine).lower()
+    assert "printerval" not in refused.json()["detail"].lower()
 
 
 def test_another_users_staged_image_cannot_be_submitted(client, world, monkeypatch):

@@ -8,7 +8,7 @@ export type ResultImage = {
   width: number | null
   height: number | null
   submitted_at: string | null
-  on_printerval: boolean
+  pushed: boolean | null // Admin only
   url: string
 }
 
@@ -159,7 +159,7 @@ export function MockupPicker({
           }}
         />
       </div>
-      <p className="text-[10px] text-slate-500">Bắt buộc 1–{MAX_MOCKUPS} ảnh (PNG/JPEG). Có thể dán ảnh bằng Ctrl/Cmd + V. Ảnh được đưa lên cột Design trên Printerval khi nộp.</p>
+      <p className="text-[10px] text-slate-500">Bắt buộc 1–{MAX_MOCKUPS} ảnh (PNG/JPEG). Có thể dán ảnh bằng Ctrl/Cmd + V.</p>
       {error && <p className="rounded bg-red-50 px-2 py-1 text-[11px] text-red-700">{error}</p>}
     </div>
   )
@@ -181,9 +181,11 @@ export function SubmittedMockups({ orderId }: { orderId: string }) {
         {images.map((image) => (
           <figure key={image.id} className="w-20 space-y-0.5">
             <AuthedThumb image={image} className="h-20 w-20 rounded-md border border-slate-200" />
-            <figcaption className={`text-[10px] ${image.on_printerval ? 'text-emerald-700' : 'text-amber-700'}`}>
-              {image.on_printerval ? 'Đã lên Printerval' : 'Chưa lên Printerval'}
-            </figcaption>
+            {image.pushed !== null && (
+              <figcaption className={`text-[10px] ${image.pushed ? 'text-emerald-700' : 'text-amber-700'}`}>
+                {image.pushed ? 'Đã lên Printerval' : 'Chưa lên Printerval'}
+              </figcaption>
+            )}
           </figure>
         ))}
       </div>
