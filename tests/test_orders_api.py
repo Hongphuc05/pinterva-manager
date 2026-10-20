@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.adapters.db.models import (
     Assignment,
+    ExternalObservation,
     Order,
     Platform,
     PrintervalAssignmentRequest,
@@ -984,7 +985,7 @@ def test_api_approve_and_reject_fix_flow(client, db_session, monkeypatch, stage_
     assert resp.status_code == 200
     data = resp.json()
     assert data["fix_approved_by_admin"] is True
-    assert "admin verified" in data["note_outsource"]
+    assert data["note_outsource"] == "fix https://prnt.sc/test1234 lech mau áo"  # never overwritten by approval
     # Printerval has already set Fix. Admin approval only releases the local
     # assignment; it must not overwrite the source status again.
     assert len(sync_calls) == sync_count_before_approval
@@ -1017,7 +1018,7 @@ def test_api_approve_and_reject_fix_flow(client, db_session, monkeypatch, stage_
     assert all(item["id"] != str(order.id) for item in fix_orders)
 
 
-def test_approve_fix_uses_admin_approved_outsource_note_when_admin_note_is_empty(client, db_session):
+def test_approve_fix_sends_the_chat_fix_text_when_admin_note_is_empty(client, db_session):
     platform = _seed_platform(db_session)
     _login(client, db_session, "admin", "fallback-fix-admin")
     designer = _login(client, db_session, "designer", "fallback-fix-designer", platform.id)
@@ -1025,7 +1026,7 @@ def test_approve_fix_uses_admin_approved_outsource_note_when_admin_note_is_empty
         external_order_id="DJ-FIX-FALLBACK",
         platform_id=platform.id,
         state=OrderState.REVISION.value,
-        note_outsource="QC source note must remain private",
+        note_outsource="https://drive.google.com/file/d/ours",
     )
     db_session.add(order)
     db_session.flush()
@@ -1033,15 +1034,27 @@ def test_approve_fix_uses_admin_approved_outsource_note_when_admin_note_is_empty
     db_session.commit()
 
     _login(client, db_session, "admin", "fallback-fix-admin")
-    response = client.post(
-        f"/api/orders/{order.id}/approve-fix",
-        json={"note_outsource": "Admin approved instruction copied for Designer"},
+    url = f"/api/orders/{order.id}/approve-fix"
+    assert client.post(url, json={"note_outsource": "ignored"}).status_code == 422  # no chat text yet
+
+    db_session.add(ExternalObservation(
+        order_id=order.id, source="printerval.chat", external_id="1", observed_state="fix",
+        evidence={"last_message_id": 1, "messages": [
+            {"id": 1, "fix_round": 1, "mine": False, "fix_reason_label": "Đổi template", "content": "Dùng temp adult",
+             "image_urls": ["https://cdn.printerval.com/qc.png"]},
+        ]},
+    ))
+    db_session.commit()
+    assert client.get(f"/api/orders/{order.id}/fix-chat").json()["text"] == (
+        "Đổi template — Dùng temp adult\nhttps://cdn.printerval.com/qc.png"
     )
+
+    response = client.post(url, json={"note_outsource": "ignored"})
 
     assert response.status_code == 200
     db_session.refresh(order)
-    assert order.designer_note == "Admin approved instruction copied for Designer"
-    assert order.note_outsource == "Admin approved instruction copied for Designer"
+    assert order.designer_note == "Đổi template — Dùng temp adult"  # no Printerval image link for the Designer
+    assert order.note_outsource == "https://drive.google.com/file/d/ours"
     assert order.designer_note_released_for_fix is True
 
 

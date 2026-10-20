@@ -11,7 +11,12 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.models import Order, Platform, User
 from app.api.deps import get_current_platform_id, get_db, require_role
-from app.application.printerval_chat import fetch_messages, numeric_job_id, unread_orders
+from app.application.printerval_chat import (
+    fetch_messages,
+    numeric_job_id,
+    read_fix_chat_text,
+    unread_orders,
+)
 from app.config import get_settings
 from app.domain.access import ROLE_ADMIN
 
@@ -45,6 +50,20 @@ def order_printerval_chat(
     except Exception as exc:
         logger.warning("Printerval chat of %s could not be read: %s", order.external_order_id, exc)
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Không tải được chat từ Printerval, thử lại sau") from exc
+
+
+@router.get("/orders/{order_id}/fix-chat")
+def order_fix_chat(
+    order_id: uuid.UUID,
+    _user: User = Depends(require_role(ROLE_ADMIN)),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """QC's messages of the order's latest Fix round, for the Accept Fix dialogs (null when none)."""
+    order = db.get(Order, order_id)
+    if order is None or order.platform_id != platform_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
+    return {"text": read_fix_chat_text(db, order)}
 
 
 @router.get("/printerval-chat/unread")

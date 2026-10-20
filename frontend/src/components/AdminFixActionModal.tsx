@@ -1,6 +1,45 @@
 import { useState, useEffect } from 'react'
 import { X, CheckCircle2, RotateCcw, AlertTriangle, Loader2 } from 'lucide-react'
 import { apiFetch } from '../api/client'
+import { LinkifiedText } from './LinkifiedText'
+
+/** QC's messages of the order's latest Fix round, read from its chat (Admin only); null when there are none. */
+export function useFixChat(orderId: string | null) {
+  const [state, setState] = useState<{ text: string | null; loading: boolean }>({ text: null, loading: false })
+  useEffect(() => {
+    if (!orderId) return
+    let alive = true
+    setState({ text: null, loading: true })
+    apiFetch<{ text: string | null }>(`/orders/${orderId}/fix-chat`)
+      .then((data) => alive && setState({ text: data?.text ?? null, loading: false }))
+      .catch(() => alive && setState({ text: null, loading: false }))
+    return () => {
+      alive = false
+    }
+  }, [orderId])
+  return state
+}
+
+/** Read-only box showing that Fix text where the old "Note Outsource (QC)" field used to be. */
+export function FixChatBox({ text, loading }: { text: string | null; loading: boolean }) {
+  return (
+    <div className="space-y-1.5">
+      <label className="font-semibold text-slate-800 block text-xs flex items-center justify-between">
+        <span>Nội dung Fix (khung chat)</span>
+        <span className="text-[11px] font-normal text-slate-500">Chỉ Admin xem</span>
+      </label>
+      <div className="max-h-48 overflow-y-auto whitespace-pre-wrap break-all rounded-xl border border-amber-200 bg-amber-50/40 p-3 text-xs leading-relaxed text-slate-800">
+        {loading ? (
+          <span className="inline-flex items-center gap-1.5 text-slate-500"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Đang tải nội dung chat…</span>
+        ) : text ? (
+          <LinkifiedText text={text} />
+        ) : (
+          <span className="text-slate-500">Chưa có nội dung Fix trong khung chat — hãy nhập Ghi chú cho Designer.</span>
+        )}
+      </div>
+    </div>
+  )
+}
 
 interface AdminFixActionModalProps {
   isOpen: boolean
@@ -32,6 +71,7 @@ export function AdminFixActionModal({
   const [outsourceNote, setOutsourceNote] = useState(currentNote || previousNote || '')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const fixChat = useFixChat(isOpen && isApprove ? orderId : null)
 
   useEffect(() => {
     if (isOpen) {
@@ -53,8 +93,8 @@ export function AdminFixActionModal({
   if (!isOpen) return null
 
   async function handleConfirm() {
-    if (isApprove && !adminNote.trim() && !outsourceNote.trim()) {
-      setError('Cần có Ghi chú Admin hoặc Note Outsource trước khi duyệt Fix.')
+    if (isApprove && !adminNote.trim() && !fixChat.text) {
+      setError('Chưa có nội dung Fix từ khung chat, hãy nhập Ghi chú cho Designer.')
       return
     }
     setLoading(true)
@@ -67,12 +107,11 @@ export function AdminFixActionModal({
             method: 'POST',
             body: JSON.stringify({
               designer_note: adminNote.trim(),
-              note_outsource: outsourceNote.trim(),
               ...(typeof orderVersion === 'number' ? { expected_version: orderVersion } : {}),
             }),
           }
         )
-        onSuccess(res.note_outsource || outsourceNote.trim())
+        onSuccess(res.note_outsource || '')
       } else {
         const res = await apiFetch<{ ok: boolean; note_outsource: string; message: string }>(
           `/orders/${orderId}/reject-fix-to-review`,
@@ -149,7 +188,7 @@ export function AdminFixActionModal({
               </div>
               <p className="text-[11px] text-emerald-800 leading-relaxed">
                 • Nếu có <strong>Ghi chú Admin</strong>, Designer chỉ nhận nội dung này.<br />
-                • Nếu để trống Ghi chú Admin, Designer nhận bản sao Note Outsource đã được Admin duyệt; trường nguồn vẫn không hiển thị cho Designer.
+                • Nếu để trống Ghi chú Admin, Designer nhận nguyên văn nội dung Fix trong khung chat (không kèm link ảnh).
               </p>
             </div>
           ) : (
@@ -180,19 +219,18 @@ export function AdminFixActionModal({
             </div>
           )}
 
-          <div className="space-y-1.5">
+          {isApprove ? <FixChatBox {...fixChat} /> : <div className="space-y-1.5">
             <label className="font-semibold text-slate-800 block text-xs flex items-center justify-between">
-              <span>{isApprove ? 'Nội dung Note Outsource (QC từ Print):' : 'Nội dung Note outsource gửi lên Print:'}</span>
-              {isApprove && <span className="text-[11px] font-normal text-slate-500">Chỉ Admin xem</span>}
+              <span>Nội dung Note outsource gửi lên Print:</span>
             </label>
             <textarea
-              rows={isApprove ? 4 : 6}
+              rows={6}
               value={outsourceNote}
               onChange={(e) => setOutsourceNote(e.target.value)}
               placeholder="Nhập nội dung note outsource, link drive, link ảnh mockup..."
               className="w-full p-3 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0052CC] font-mono leading-relaxed bg-white"
             />
-          </div>
+          </div>}
         </div>
 
         {/* Footer */}

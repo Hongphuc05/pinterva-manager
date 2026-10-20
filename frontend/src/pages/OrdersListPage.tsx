@@ -4,6 +4,7 @@ import { apiFetch, ApiError, memoryCache, resolveAssetUrl } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { usePlatform } from '../auth/PlatformContext'
 import { DashboardLayout } from '../components/DashboardLayout'
+import { FixChatBox, useFixChat } from '../components/AdminFixActionModal'
 import { ImageModal } from '../components/ImageModal'
 import { StatusDropdown } from '../components/StatusDropdown'
 import { Pagination } from '../components/Pagination'
@@ -436,7 +437,7 @@ export function OrdersListPage() {
   const [acceptFixOrder, setAcceptFixOrder] = useState<OrderSummary | null>(null)
   const [acceptFixDesignerId, setAcceptFixDesignerId] = useState('')
   const [acceptFixDesignerNote, setAcceptFixDesignerNote] = useState('')
-  const [acceptFixOutsourceNote, setAcceptFixOutsourceNote] = useState('')
+  const acceptFixChat = useFixChat(acceptFixOrder?.id ?? null)
   const [acceptFixSubmitting, setAcceptFixSubmitting] = useState(false)
 
   // Reject Fix Modal state
@@ -1471,7 +1472,6 @@ export function OrdersListPage() {
     const currentDes = usersList.find((u) => (u.full_name || u.username) === order.assigned_designer_name)
     setAcceptFixDesignerId(currentDes ? currentDes.id : '')
     setAcceptFixDesignerNote(order.designer_note || '')
-    setAcceptFixOutsourceNote(order.note_outsource || '')
   }
 
   async function handleAcceptFix(e: React.FormEvent) {
@@ -1484,7 +1484,6 @@ export function OrdersListPage() {
         body: JSON.stringify({
           designer_id: acceptFixDesignerId || undefined,
           designer_note: acceptFixDesignerNote,
-          note_outsource: acceptFixOutsourceNote,
           expected_version: acceptFixOrder.version,
         }),
       })
@@ -3876,20 +3875,8 @@ export function OrdersListPage() {
                 />
               </div>
 
-              {/* Outsource Note from Web mẹ */}
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700 block flex items-center justify-between">
-                  <span>Ghi chú Outsource (QC)</span>
-                  <span className="text-[10px] text-amber-700 font-normal">Từ Print</span>
-                </label>
-                <textarea
-                  rows={3}
-                  value={acceptFixOutsourceNote}
-                  onChange={(e) => setAcceptFixOutsourceNote(e.target.value)}
-                  placeholder="Ghi chú lỗi từ phía Print..."
-                  className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 bg-amber-50/40 focus:outline-none focus:ring-2 focus:ring-[#0052CC]/20 focus:border-[#0052CC] resize-none font-mono"
-                />
-              </div>
+              {/* Fix content from the order's chat (replaces the old Note Outsource field) */}
+              <FixChatBox {...acceptFixChat} />
 
               <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">
                 <button

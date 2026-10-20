@@ -22,7 +22,7 @@ from app.adapters.db.models import (
     TelegramMessageTemplate,
     User,
 )
-from app.application.printerval_chat import latest_fix_reason
+from app.application.printerval_chat import fix_chat_text
 from app.config import get_settings
 from app.domain.access import ROLE_SUPPORT
 
@@ -33,6 +33,7 @@ VIETNAM_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 TELEGRAM_DELIVERY_PRIVATE = "private"
 TELEGRAM_DELIVERY_GROUP = "group"
 TELEGRAM_TEMPLATE_MAX_LENGTH = 4096
+TELEGRAM_CAPTION_LIMIT = 1024
 _TEMPLATE_PATTERN = re.compile(r"{{\s*([a-zA-Z0-9_]+)\s*}}")
 
 
@@ -788,9 +789,9 @@ def notify_admin_new_fix(session: Session, order_id: uuid.UUID) -> bool:
     fix_cnt = order.fix_return_count or 1
     order_id_code = order.external_order_id
     p_name = order.product_name or "Sản phẩm"
-    # The Fix reason is QC's message in Printerval's chat (captured when the order went to Fix);
-    # note_outsource only holds the link Tacahu pushed.
-    qc_note = (latest_fix_reason(session, order) or "Xem lý do trong khung chat của đơn trên Tacahu")[:600]
+    # The Fix reason is QC's messages in Printerval's chat (captured when the order went to Fix), quoted
+    # in full; note_outsource only holds the link Tacahu pushed.
+    qc_note = (fix_chat_text(session, order) or "Chưa đọc được khung chat, xem trong chi tiết đơn trên Tacahu")[:3000]
     des_name = resolve_tacahu_designer_name(session, order)
 
     # Generate callback tokens for Approve / Reject buttons
@@ -844,7 +845,8 @@ def notify_admin_new_fix(session: Session, order_id: uuid.UUID) -> bool:
     thumb = order.thumbnail_url or (order.product_image_urls[0] if order.product_image_urls else None)
     deliveries = []
     for cid in chat_ids:
-        if thumb:
+        # A photo caption holds 1024 characters; a long chat goes out as a text message instead.
+        if thumb and len(text) <= TELEGRAM_CAPTION_LIMIT:
             result = send_photo(cid, thumb, caption=text, reply_markup=reply_markup)
         else:
             result = send_message(cid, text, reply_markup=reply_markup)

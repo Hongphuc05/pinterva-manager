@@ -91,7 +91,7 @@ from app.application.printerval_assignment_requests import (
     PrintervalAssignmentValidationError,
     create_request,
 )
-from app.application.printerval_chat import fix_reasons, latest_fix_reason
+from app.application.printerval_chat import fix_chat_text, fix_reasons, read_fix_chat_text
 from app.application.processing_leases import acquire_processing_lease
 from app.application.result_images import ResultImageError, attach_images
 from app.application.sanitization import (
@@ -1921,7 +1921,7 @@ def api_order_detail(
 
     is_admin = user.role == ROLE_ADMIN
     if is_admin and order.state == OrderState.REVISION.value:
-        order_out.fix_reason = latest_fix_reason(db, order)
+        order_out.fix_reason = fix_chat_text(db, order)
     if is_admin:
         pending = pending_template_confirm(db, order)
         if pending is not None:
@@ -2738,7 +2738,7 @@ def api_update_order_state(
 class ApproveFixRequest(OrderCommandPayload):
     designer_id: uuid.UUID | None = None
     designer_note: str | None = None
-    note_outsource: str | None = None
+    note_outsource: str | None = None  # ignored: sent by older clients
 
 
 @router.post("/orders/{order_id}/approve-fix")
@@ -2754,20 +2754,17 @@ def api_approve_fix(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
 
     admin_designer_note = (payload.designer_note or "").strip()
-    outbound_designer_note = admin_designer_note or (payload.note_outsource or "").strip()
+    # QC writes the Fix in Printerval's chat; note_outsource only holds the link Tacahu pushed, so it is
+    # neither the Fix reason nor overwritten here. An explicit Admin note wins; otherwise the chat's Fix
+    # text (without Printerval image links) is copied into designer_note.
+    outbound_designer_note = admin_designer_note or read_fix_chat_text(db, order, with_images=False) or ""
     if not outbound_designer_note:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "Cần có Ghi chú Admin hoặc Note Outsource trước khi duyệt Fix.",
+            "Chưa có nội dung Fix từ khung chat, hãy nhập Ghi chú cho Designer trước khi duyệt Fix.",
         )
-    # Designer only receives one safe, Tacahu-owned instruction. An explicit
-    # Admin note wins; otherwise the Admin-approved outsource note is copied
-    # into designer_note and the original source field remains private.
     order.designer_note = outbound_designer_note
     order.designer_note_released_for_fix = True
-
-    if payload.note_outsource is not None:
-        order.note_outsource = payload.note_outsource.strip()
 
     # Ẩn note_outsource gốc khỏi Designer; Des chỉ thấy designer_note (Ghi chú từ Admin)
     order.suppress_note_outsource_for_designer = True

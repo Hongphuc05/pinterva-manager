@@ -19,6 +19,7 @@ from app.adapters.db.models import (
     WorkflowEvent,
 )
 from app.api.deps import get_current_user, get_db
+from app.application.printerval_chat import read_fix_chat_text
 from app.application.support_compare import (
     ACTION_CHECK_NO as SUPPORT_COMPARE_ACTION_CHECK_NO,
 )
@@ -323,8 +324,7 @@ def _complete_telegram_fix_approval(
     order.fix_approved_by_admin = True
     order.fix_rejected_by_admin = False
     order.designer_note = note
-    # Even when Admin chooses the verbatim QC text, it is copied into this
-    # Admin-release field. Designer APIs never expose note_outsource itself.
+    # Even when Admin chooses the verbatim chat text, it is copied into this Admin-release field.
     order.designer_note_released_for_fix = True
     order.suppress_note_outsource_for_designer = True
     order.fix_deadline_at = datetime.now(UTC) + timedelta(hours=1)
@@ -903,13 +903,14 @@ async def api_telegram_webhook(
                 db.commit()
                 choice_message = send_message(
                     user_chat_id,
-                    "📝 <b>Bạn có muốn gửi đè Note Outsource bằng Ghi chú Admin cho Designer không?</b>\n\n"
+                    "📝 <b>Bạn có muốn soạn Ghi chú Admin riêng cho Designer không?</b>\n\n"
                     "Nếu chọn <b>Có</b>, bot sẽ yêu cầu bạn soạn Ghi chú Admin. Nếu chọn <b>Không</b>, "
-                    "bot sẽ copy nguyên văn Note Outsource vào Ghi chú Admin để gửi Des.",
+                    "bot sẽ copy nguyên văn nội dung khung chat của lượt Fix này (không kèm link ảnh) "
+                    "vào Ghi chú Admin để gửi Des.",
                     reply_markup={
                         "inline_keyboard": [
                             [{"text": "✍️ Có, soạn Ghi chú Admin", "callback_data": f"appfixnote:{write_note_token}"}],
-                            [{"text": "➡️ Không, dùng nguyên văn Note Outsource", "callback_data": f"appfixsource:{use_source_token}"}],
+                            [{"text": "➡️ Không, dùng nguyên văn nội dung chat", "callback_data": f"appfixsource:{use_source_token}"}],
                         ]
                     },
                 )
@@ -919,13 +920,16 @@ async def api_telegram_webhook(
                 )
 
             elif prefix == "appfixsource":
-                upstream_note = (order.note_outsource or "").strip()
+                # QC writes the Fix in Printerval's chat; note_outsource only holds the link Tacahu
+                # pushed, so it is never the Fix reason. Read the chat now if no snapshot exists yet.
+                upstream_note = read_fix_chat_text(db, order, with_images=False)
                 if not upstream_note:
-                    action_log.status = "failed"
-                    action_log.executed_at = datetime.now(UTC)
-                    action_log.actor_id = admin_user.id
-                    db.commit()
-                    send_message(user_chat_id, "⚠️ Đơn này không có Note Outsource để gửi. Hãy chọn soạn Ghi chú Admin.")
+                    # Left pending: Admin can still pick "Có, soạn Ghi chú Admin" or try again.
+                    send_message(
+                        user_chat_id,
+                        "⚠️ Chưa đọc được nội dung khung chat của đơn này. Hãy bấm lại sau ít phút "
+                        "hoặc chọn soạn Ghi chú Admin.",
+                    )
                     return {"ok": True}
                 designer_id = _complete_telegram_fix_approval(
                     db,
@@ -933,7 +937,7 @@ async def api_telegram_webhook(
                     action_log=action_log,
                     admin_user=admin_user,
                     designer_note=upstream_note,
-                    note_mode="verbatim_upstream_approved_by_admin",
+                    note_mode="verbatim_chat_approved_by_admin",
                 )
                 _notify_telegram_fix_designer(order, designer_id)
                 _clean_completed_fix_conversations(db, order.id)

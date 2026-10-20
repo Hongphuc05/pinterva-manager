@@ -96,10 +96,10 @@ def test_capture_stores_only_the_messages_new_since_the_last_snapshot(world):
 
 
 def test_the_fix_reason_is_qcs_message_not_ours(world):
-    assert chat.latest_fix_reason(world.session, world.order) is None
+    assert chat.fix_chat_text(world.session, world.order) is None
     chat.capture_chat(world.session, world.order, "fix", client_factory=FakeChat([FIX_OPEN, REPLY]))
     world.session.commit()
-    assert chat.latest_fix_reason(world.session, world.order) == "Sai màu — Sửa lại phần tay áo"
+    assert chat.fix_reasons(world.session, [world.order.id]) == {world.order.id: "Sai màu — Sửa lại phần tay áo"}
 
 
 def _card(world):
@@ -116,6 +116,33 @@ def test_the_telegram_fix_card_quotes_the_chat_and_never_the_pushed_link(world):
     world.session.commit()
     card = _card(world)
     assert "Sửa lại phần tay áo" in card and "drive.google.com" not in card
+
+
+def test_the_fix_card_quotes_every_qc_message_of_the_latest_round(world):
+    old_round = {**FIX_OPEN, "id": 5, "fix_round": 0, "content": "Lượt cũ"}
+    follow_up = {**FIX_OPEN, "id": 13, "type": "message", "fix_reason_label": "", "content": "Dùng temp adult",
+                 "image_urls": []}
+    chat.capture_chat(world.session, world.order, "fix", client_factory=FakeChat([old_round, FIX_OPEN, REPLY, follow_up]))
+    world.session.commit()
+
+    assert chat.fix_chat_text(world.session, world.order) == (
+        "Sai màu — Sửa lại phần tay áo\nhttps://img.test/a.png\nDùng temp adult"
+    )
+    assert chat.fix_chat_text(world.session, world.order, with_images=False) == (
+        "Sai màu — Sửa lại phần tay áo\nDùng temp adult"
+    )
+
+
+def test_a_chat_too_long_for_a_photo_caption_goes_out_as_a_text_message(world):
+    world.order.thumbnail_url = "https://img.test/thumb.png"
+    long_message = {**FIX_OPEN, "content": "x" * 1400}
+    chat.capture_chat(world.session, world.order, "fix", client_factory=FakeChat([long_message]))
+    world.session.commit()
+    with patch("app.application.telegram_service.send_telegram_request") as send:
+        send.return_value = {"ok": True}
+        notify_admin_new_fix(world.session, world.order.id)
+    method, payload = send.call_args.args[:2]
+    assert method == "sendMessage" and "x" * 1400 in payload["text"]
 
 
 def test_unread_orders_lists_this_platforms_active_orders_and_is_cached(world):
@@ -302,7 +329,7 @@ def test_admin_sees_the_fix_reason_on_list_rows_and_the_detail_but_nobody_else_d
     [row] = _summarize_orders(world.session, world.admin, [world.order])
     assert row.fix_reason == "Sai màu — Sửa lại phần tay áo"
     detail = client.get(f"/api/orders/{world.order.id}", headers=_headers(world.admin)).json()["order"]
-    assert detail["fix_reason"] == "Sai màu — Sửa lại phần tay áo"
+    assert detail["fix_reason"] == "Sai màu — Sửa lại phần tay áo\nhttps://img.test/a.png"  # the whole Fix round
 
     support = User(username=f"s-{uuid.uuid4().hex[:5]}", full_name="S", role="support", password_hash="x",
                    active=True, platform_id=world.platform.id)

@@ -179,8 +179,12 @@ def _reason_from(evidence: dict | None) -> str | None:
     return None
 
 
-def latest_fix_reason(session: Session, order: Order) -> str | None:
-    """The newest Printerval-side message captured for the order, as one line of text."""
+def fix_chat_text(session: Session, order: Order, *, with_images: bool = True) -> str | None:
+    """Every QC message of the latest Fix round captured for the order, oldest first, one per line.
+
+    The Telegram card quotes it in full and "use it verbatim" hands it to the Designer, who gets it
+    without image links (they point at Printerval hosts).
+    """
     rows = (
         session.query(ExternalObservation)
         .filter(ExternalObservation.order_id == order.id, ExternalObservation.source == SOURCE)
@@ -188,11 +192,43 @@ def latest_fix_reason(session: Session, order: Order) -> str | None:
         .limit(5)
         .all()
     )
-    return next((reason for reason in (_reason_from(row.evidence) for row in rows) if reason), None)
+    by_id = {m["id"]: m for row in rows for m in (row.evidence or {}).get("messages") or [] if not m.get("mine")}
+    messages = sorted(by_id.values(), key=lambda m: m["id"])
+    if not messages:
+        return None
+    last_round = messages[-1].get("fix_round") or 0
+    lines = []
+    for message in messages:
+        if (message.get("fix_round") or 0) != last_round:
+            continue
+        text = " — ".join(part for part in (message.get("fix_reason_label"), message.get("content")) if part)
+        images = (message.get("image_urls") or []) if with_images else []
+        lines.extend(line for line in (text, *images) if line)
+    return "\n".join(lines) or None
+
+
+def read_fix_chat_text(
+    session: Session, order: Order, *, with_images: bool = True, client_factory: ClientFactory = printerval_client_for
+) -> str | None:
+    """``fix_chat_text``, reading the chat once first when nothing was captured (the capture at Fix failed).
+
+    Commits a new snapshot it stores; never raises on a Printerval failure.
+    """
+    text = fix_chat_text(session, order, with_images=with_images)
+    if text is not None or not get_settings().order_chat_enabled:
+        return text
+    try:
+        if capture_chat(session, order, "fix", client_factory=client_factory):
+            session.commit()
+    except Exception:
+        session.rollback()
+        logger.warning("Chat of %s unreadable for its Fix text", order.external_order_id, exc_info=True)
+        return None
+    return fix_chat_text(session, order, with_images=with_images)
 
 
 def fix_reasons(session: Session, order_ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
-    """``latest_fix_reason`` for many orders at once (the newest snapshot of each), for list rows."""
+    """The newest QC message of each order (from its newest snapshot), as one line for list rows."""
     if not order_ids:
         return {}
     rows = (

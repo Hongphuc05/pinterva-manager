@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.adapters.db.models import (
     Assignment,
+    ExternalObservation,
     Order,
     Platform,
     SupportCompareJob,
@@ -162,7 +163,16 @@ def test_telegram_admin_fix_callbacks(client: TestClient, db_session):
         .filter(TelegramActionLog.action_type == "APPROVE_FIX_USE_OUTSOURCE")
         .one()
     )
-    order.note_outsource = "Sửa lại màu áo theo QC"
+    # QC's Fix lives in the chat snapshot; note_outsource only holds the link Tacahu pushed.
+    order.note_outsource = "https://drive.google.com/file/d/ours"
+    db_session.add(ExternalObservation(
+        order_id=order.id, source="printerval.chat", external_id="991", observed_state="fix",
+        evidence={"last_message_id": 2, "messages": [
+            {"id": 1, "fix_round": 1, "mine": False, "fix_reason_label": "Sai màu", "content": "Sửa lại màu áo theo QC",
+             "image_urls": ["https://img.test/qc.png"]},
+            {"id": 2, "fix_round": 1, "mine": True, "fix_reason_label": "", "content": "Đã nhận", "image_urls": []},
+        ]},
+    ))
     db_session.commit()
 
     with patch("app.application.telegram_service.send_telegram_request") as mock_send:
@@ -181,7 +191,7 @@ def test_telegram_admin_fix_callbacks(client: TestClient, db_session):
 
     db_session.refresh(order)
     assert order.fix_approved_by_admin is True
-    assert order.designer_note == "Sửa lại màu áo theo QC"
+    assert order.designer_note == "Sai màu — Sửa lại màu áo theo QC"  # verbatim chat, no image link
     assert order.designer_note_released_for_fix is True
     sibling_write_choice = db_session.query(TelegramActionLog).filter(
         TelegramActionLog.action_type == "APPROVE_FIX_WRITE_NOTE"

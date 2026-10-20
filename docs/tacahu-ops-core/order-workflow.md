@@ -143,8 +143,21 @@ QC của Printerval ghi yêu cầu Fix và nhận xét vào khung chat từng đ
 3. **Đơn đổi status sang Fix/Confirm/Done**: job đồng bộ trạng thái đẩy task `capture_order_chat`, lưu
    tin mới của đơn vào `external_observations` (`source=printerval.chat`, tăng dần theo
    `last_message_id`). Đây là lưới an toàn cho tin đã được ai đó đọc trên Printerval nên không còn trong
-   danh sách unread. Với Fix, task đọc chat **rồi** gửi thẻ Telegram cho Admin (lý do Fix lấy từ chat; đọc
-   chat lỗi thì thẻ ghi "xem trong khung chat" và việc đọc được thử lại sau 2 và 5 phút).
+   danh sách unread. Với Fix, task đọc chat **rồi** gửi thẻ Telegram cho Admin; đọc chat lỗi thì thẻ ghi
+   "chưa đọc được khung chat" và việc đọc được thử lại sau 2 và 5 phút.
+
+**Nội dung Fix** = toàn bộ tin của QC (không tính tin của mình) thuộc lượt Fix mới nhất trong các
+snapshot, cũ trước mới sau, mỗi tin một dòng, kèm link ảnh (`fix_chat_text`). Dùng ở:
+
+- Thẻ Fix Telegram: trích nguyên văn (tối đa 3000 ký tự); dài quá 1024 ký tự thì gửi tin chữ thay ảnh.
+- Chi tiết đơn (Admin): `fix_reason` là nội dung này; dòng trong danh sách đơn chỉ hiện tin QC mới nhất.
+- Modal duyệt Fix trên web: hiện nội dung này cho Admin (`GET /orders/{id}/fix-chat`; chưa có snapshot
+  thì đọc chat 1 lần ngay lúc đó, `read_fix_chat_text`).
+
+Duyệt Fix (web modal, hoặc Telegram "Có, soạn Ghi chú Admin" / "Không, dùng nguyên văn nội dung chat"):
+Admin nhập Ghi chú cho Designer thì des nhận đúng ghi chú đó; để trống thì copy nội dung Fix **không kèm
+link ảnh** (link trỏ host Printerval) vào `designer_note`. Không có nội dung chat thì web trả 422, Telegram
+báo bấm lại hoặc soạn ghi chú. Duyệt Fix không đọc hay ghi `note_outsource` (đó là link Tacahu đẩy lên).
 
 Đọc tin nhắn làm Printerval đánh dấu **đã đọc cho cả team**. Designer không thấy chat; muốn designer biết,
 Admin tự ghi vào Note làm việc. `ORDER_CHAT_ENABLED=false` tắt cách 2 và 3 (thẻ Fix Telegram vẫn gửi như cũ,
