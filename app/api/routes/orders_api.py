@@ -93,6 +93,7 @@ from app.application.processing_leases import acquire_processing_lease
 from app.application.result_images import ResultImageError, attach_images
 from app.application.sanitization import (
     decode_proxy_url,
+    is_printerval_asset_host,
     sanitize_order_detail_for_designer,
     sanitize_order_summary_for_designer,
     sanitize_workflow_event_for_designer,
@@ -187,8 +188,8 @@ def api_asset_proxy(u: str = Query(...)):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid or expired asset token")
     from urllib.parse import urlparse
 
-    host = (urlparse(raw_url).hostname or "").lower()
-    if host not in {"printerval.com", "www.printerval.com", "assets.printerval.com", "cdn.printerval.com", "printervalcdn.com", "gdn.printerval.com", "asset.prtvstatic.com"}:
+    parsed = urlparse(raw_url)
+    if parsed.scheme not in ("http", "https") or not is_printerval_asset_host(parsed.hostname):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unsupported asset host")
     try:
         import httpx

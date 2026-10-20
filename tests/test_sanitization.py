@@ -313,3 +313,44 @@ def test_support_role_is_also_sanitized(client: TestClient, db_session):
     json_plat_str = json.dumps(resp_plat.json()).lower()
     assert "printerval" not in json_plat_str
     assert "@gmail.com" in resp_plat.json()["account_username"]
+
+
+def test_the_asset_proxy_serves_every_printerval_cdn_host_and_nothing_else(client, monkeypatch):
+    """cdn-printerval.prtvstatic.com was missing from a fixed host list: every gallery image of the new
+    Printerval CDN came back 400 for Designers (DJ4164693, 19/10)."""
+    import base64
+
+    import httpx
+
+    from app.application.sanitization import encode_proxy_url, is_printerval_asset_host
+
+    fetched = []
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+        def get(self, url):
+            fetched.append(url)
+            return httpx.Response(200, content=b"img", headers={"content-type": "image/jpeg"})
+
+    monkeypatch.setattr(httpx, "Client", FakeClient)
+    for url in (
+        "https://cdn-printerval.prtvstatic.com/unsafe/540x540/asset.prtvstatic.com/2026/10/01/a.jpg",
+        "https://asset.prtvstatic.com/2026/10/01/a.jpg",
+        "https://assets.printerval.com/2026/10/01/a.jpg",
+    ):
+        response = client.get(encode_proxy_url(url))
+        assert response.status_code == 200, url
+    assert len(fetched) == 3
+
+    for evil in ("https://prtvstatic.com.evil.test/x.jpg", "https://evilprinterval.com/x.jpg", "file:///etc/passwd"):
+        token = base64.urlsafe_b64encode(evil.encode()).decode()
+        assert client.get(f"/api/assets/proxy?u={token}").status_code == 400, evil
+    assert not is_printerval_asset_host("notprtvstatic.com")

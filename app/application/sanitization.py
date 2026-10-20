@@ -6,6 +6,16 @@ from typing import Any
 
 from pydantic import BaseModel
 
+# Printerval serves images from many hosts (assets.printerval.com, asset.prtvstatic.com,
+# cdn-printerval.prtvstatic.com/unsafe/WxH/..., ...) and adds new ones. A fixed host list broke the
+# Designer gallery each time one appeared (cdn-printerval on 19/10), so trust the two domains instead.
+PRINTERVAL_ASSET_DOMAINS = ("printerval.com", "prtvstatic.com", "printervalcdn.com")
+
+
+def is_printerval_asset_host(host: str | None) -> bool:
+    host = (host or "").lower().rstrip(".")
+    return any(host == domain or host.endswith("." + domain) for domain in PRINTERVAL_ASSET_DOMAINS)
+
 
 def encode_proxy_url(raw_url: str | None) -> str | None:
     if not raw_url or not isinstance(raw_url, str):
