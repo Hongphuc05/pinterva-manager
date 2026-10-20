@@ -322,8 +322,10 @@ def test_the_asset_proxy_serves_every_printerval_cdn_host_and_nothing_else(clien
 
     import httpx
 
+    from app.api.routes import orders_api
     from app.application.sanitization import encode_proxy_url, is_printerval_asset_host
 
+    orders_api._ASSET_CACHE.clear()
     fetched = []
 
     class FakeClient:
@@ -354,3 +356,34 @@ def test_the_asset_proxy_serves_every_printerval_cdn_host_and_nothing_else(clien
         token = base64.urlsafe_b64encode(evil.encode()).decode()
         assert client.get(f"/api/assets/proxy?u={token}").status_code == 400, evil
     assert not is_printerval_asset_host("notprtvstatic.com")
+
+
+def test_the_asset_proxy_keeps_recent_images_instead_of_asking_printerval_again(client, monkeypatch):
+    import httpx
+
+    from app.api.routes import orders_api
+    from app.application.sanitization import encode_proxy_url
+
+    orders_api._ASSET_CACHE.clear()
+    monkeypatch.setattr(orders_api, "_asset_cache_bytes", 0)
+    calls = []
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+        def get(self, url):
+            calls.append(url)
+            return httpx.Response(200, content=b"thumb", headers={"content-type": "image/png"})
+
+    monkeypatch.setattr(httpx, "Client", FakeClient)
+    url = encode_proxy_url("https://assets.printerval.com/2026/10/01/thumb.png")
+    first, second = client.get(url), client.get(url)
+    assert first.content == second.content == b"thumb" and second.headers["content-type"] == "image/png"
+    assert len(calls) == 1

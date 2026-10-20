@@ -288,3 +288,29 @@ def test_accountant_filters_pending_orders_by_week_in_vietnam_time(client, db_se
 
     all_weeks = client.get("/api/accountant/designers", headers=world.acct_hdr).json()
     assert {r["designer_name"] for r in all_weeks} == {"Acct_Dan", "Acct_Tram"}  # no week: everything, as before
+
+
+def test_accountant_filters_pending_orders_by_a_date_range_whole_days_vietnam_time(client, db_session, world):
+    vn = timedelta(hours=7)
+    for key, when in {
+        "dan1": datetime(2026, 10, 14, 0, 1) - vn,
+        "dan2": datetime(2026, 10, 16, 23, 59) - vn,
+        "dan3": datetime(2026, 10, 17, 0, 0) - vn,
+        "tram1": datetime(2026, 10, 1, 9, 0) - vn,
+    }.items():
+        world.orders[key].review_submitted_at = when.replace(tzinfo=UTC)
+    db_session.commit()
+
+    def counts(query):
+        res = client.get(f"/api/accountant/designers?{query}", headers=world.acct_hdr)
+        assert res.status_code == 200, res.text
+        return {r["designer_name"]: r["pending_count"] for r in res.json()}
+
+    assert counts("date_from=2026-10-14&date_to=2026-10-16") == {"Acct_Dan": 2}  # both end days included
+    assert counts("date_from=2026-10-17") == {"Acct_Dan": 1}  # open end
+    assert counts("date_to=2026-10-13") == {"Acct_Tram": 1}  # open start
+    detail = client.get(f"/api/accountant/designers/{world.dan.id}?date_from=2026-10-14&date_to=2026-10-16",
+                        headers=world.acct_hdr).json()
+    assert sorted(o["external_order_id"] for o in detail["orders"]) == ["AC-DAN-1", "AC-DAN-2"]
+    backwards = client.get("/api/accountant/designers?date_from=2026-10-16&date_to=2026-10-14", headers=world.acct_hdr)
+    assert backwards.status_code == 422

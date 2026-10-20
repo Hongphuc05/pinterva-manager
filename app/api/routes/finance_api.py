@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import desc
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from app.adapters.db.models import (
     Assignment,
@@ -46,6 +46,15 @@ router = APIRouter(tags=["finance"])
 logger = logging.getLogger(__name__)
 
 VN_TZ = timezone(timedelta(hours=7))
+
+# What get_finance_stats reads from an order; anything else is loaded on first access only.
+FINANCE_ORDER_COLUMNS = (
+    Order.id, Order.version, Order.platform_id, Order.external_order_id, Order.product_name,
+    Order.thumbnail_url, Order.state, Order.work_domain, Order.duplicate_check_status, Order.custom_rate,
+    Order.is_paid, Order.paid_at, Order.paid_by_id, Order.printerval_status, Order.review_submitted_at,
+    Order.status_changed_at, Order.created_at, Order.updated_at, Order.note_outsource,
+    Order.support_classified_at, Order.support_classified_by_id,
+)
 
 
 def normalize_text(text: str | None) -> str:
@@ -422,8 +431,9 @@ def get_finance_stats(
 
 
 
-    # 2. Gather candidate orders
-    orders_query = db.query(Order)
+    # 2. Gather candidate orders. Only the columns the credit rules read: loading every order with its
+    # gallery/SKU/custom-config JSON made this page (and the Accountant's) take 2-3 s.
+    orders_query = db.query(Order).options(load_only(*FINANCE_ORDER_COLUMNS))
     if p_uuid:
         orders_query = orders_query.filter(Order.platform_id == p_uuid)
     orders = orders_query.all()
@@ -572,6 +582,10 @@ def get_finance_stats(
     # 4. Gather all workflow events related to reviews / submissions / completions
     events = (
         db.query(WorkflowEvent)
+        .options(load_only(
+            WorkflowEvent.id, WorkflowEvent.order_id, WorkflowEvent.from_state, WorkflowEvent.to_state,
+            WorkflowEvent.actor_id, WorkflowEvent.evidence, WorkflowEvent.created_at,
+        ))
         .filter(WorkflowEvent.order_id.in_(list(orders_by_id.keys())))
         .order_by(WorkflowEvent.created_at.asc())
         .all()

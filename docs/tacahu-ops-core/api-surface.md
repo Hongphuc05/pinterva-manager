@@ -18,7 +18,7 @@ origin hoặc origin kèm `/api` nhưng không được tạo `/api/api`.
 | Duplicate | `GET /duplicate-board`, move card, duplicate domain/check status/settings; Support web chỉ check order còn Waiting, callback compare có scope Doing riêng |
 | Platform | CRUD platform và Printerval option/credential scope |
 | Finance | rates, stats, payment mark/unmark, export, finance note |
-| Kế toán (Accountant) | `GET /accountant/designers`, `GET /accountant/designers/{id}` (đơn chờ trả công, chỉ số đơn và tổng tiền; `?week=YYYY-MM-DD` chỉ lấy đơn nộp trong tuần thứ Hai–Chủ nhật chứa ngày đó, giờ Việt Nam, cùng mốc ngày nộp với trang Tài chính), `POST /accountant/designers/{id}/pay` (trả đúng các đơn đã thấy, tất cả hoặc không), `GET /finance/payment-history` |
+| Kế toán (Accountant) | `GET /accountant/designers`, `GET /accountant/designers/{id}` (đơn chờ trả công, chỉ số đơn và tổng tiền; `?week=YYYY-MM-DD` chỉ lấy đơn nộp trong tuần thứ Hai–Chủ nhật chứa ngày đó, hoặc `?date_from=&date_to=` (trọn ngày, gồm cả hai đầu, có thể bỏ trống một đầu; ngược thứ tự trả 422), giờ Việt Nam, cùng mốc ngày nộp với trang Tài chính), `POST /accountant/designers/{id}/pay` (trả đúng các đơn đã thấy, tất cả hoặc không), `GET /finance/payment-history` |
 | External sync | crawl/gallery import, SyncJob, status sync và external assignment request |
 | Telegram | status/link/unlink/webhook; quản trị routing/template dưới `/telegram/admin`; là kênh phụ tùy cấu hình, không thay database authority |
 

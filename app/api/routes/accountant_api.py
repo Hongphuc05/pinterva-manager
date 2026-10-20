@@ -51,19 +51,31 @@ class PayRequest(BaseModel):
     expected_total: int = Field(ge=0)
 
 
-def _week_bounds(week: date | None) -> tuple[float, float] | None:
-    """Monday 00:00 to the next Monday 00:00, Vietnam time, as timestamps (any day picks its week)."""
-    if week is None:
+def _period_bounds(
+    week: date | None = None, date_from: date | None = None, date_to: date | None = None
+) -> tuple[float, float] | None:
+    """Submission window as timestamps, Vietnam time. ``week``: Monday 00:00 to the next Monday (any day
+    picks its week). ``date_from``/``date_to``: whole days, both included, either may be left open."""
+    if week is not None:
+        monday = week - timedelta(days=week.weekday())
+        start = datetime.combine(monday, time.min, tzinfo=VN_TZ)
+        return start.timestamp(), (start + timedelta(days=7)).timestamp()
+    if date_from is None and date_to is None:
         return None
-    monday = week - timedelta(days=week.weekday())
-    start = datetime.combine(monday, time.min, tzinfo=VN_TZ)
-    return start.timestamp(), (start + timedelta(days=7)).timestamp()
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Ngày bắt đầu phải trước ngày kết thúc.")
+    start = datetime.combine(date_from, time.min, tzinfo=VN_TZ).timestamp() if date_from else float("-inf")
+    end = (
+        datetime.combine(date_to + timedelta(days=1), time.min, tzinfo=VN_TZ).timestamp() if date_to else float("inf")
+    )
+    return start, end
 
 
-def _designer_rows(db: Session, platform_id: uuid.UUID, week: date | None = None) -> dict[str, list]:
-    """Pending orders by designer; with ``week``, only those submitted that week (the date the Admin
-    finance page filters on)."""
-    bounds = _week_bounds(week)
+def _designer_rows(
+    db: Session, platform_id: uuid.UUID, bounds: tuple[float, float] | None = None
+) -> dict[str, list]:
+    """Pending orders by designer; with ``bounds``, only those submitted in that window (the date the
+    Admin finance page filters on)."""
     grouped: dict[str, list] = defaultdict(list)
     for task in pending_tasks(db, platform_id):
         if bounds:
@@ -96,12 +108,14 @@ def _qr_owners(db: Session, user_ids: list[str]) -> set[uuid.UUID]:
 @router.get("/designers", response_model=list[PendingDesignerOut])
 def list_pending_designers(
     week: date | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
     _: User = Depends(require_role(ROLE_ACCOUNTANT)),
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
     """Designers with orders waiting for payment, most orders first (optionally one week's orders)."""
-    grouped = _designer_rows(db, platform_id, week)
+    grouped = _designer_rows(db, platform_id, _period_bounds(week, date_from, date_to))
     owners = _qr_owners(db, list(grouped))
     rows = [_summary(db, designer_id, tasks, owners) for designer_id, tasks in grouped.items()]
     return sorted(rows, key=lambda r: (-r.pending_count, r.designer_name))
@@ -111,11 +125,13 @@ def list_pending_designers(
 def get_pending_designer(
     designer_id: uuid.UUID,
     week: date | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
     _: User = Depends(require_role(ROLE_ACCOUNTANT)),
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
-    tasks = _designer_rows(db, platform_id, week).get(str(designer_id), [])
+    tasks = _designer_rows(db, platform_id, _period_bounds(week, date_from, date_to)).get(str(designer_id), [])
     if not tasks:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Designer này không còn đơn chờ thanh toán.")
     summary = _summary(db, str(designer_id), tasks, _qr_owners(db, [str(designer_id)]))

@@ -1,10 +1,16 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ArrowLeft, CheckCircle2, Image as ImageIcon, Loader2, Package, QrCode, X } from 'lucide-react'
-import { apiFetch, apiFetchBlob, ApiError } from '../api/client'
-import { fetchPendingDesignerDetail, payDesigner, type PendingDesignerDetail } from '../features/payments/api'
+import { ApiError } from '../api/client'
+import {
+  fetchPendingDesignerDetail,
+  loadDesignerQr,
+  payDesigner,
+  periodQuery,
+  type PaymentPeriod,
+  type PendingDesignerDetail,
+} from '../features/payments/api'
 import { useToast } from '../context/ToastContext'
-import type { BankQrImage } from './BankQrManager'
 
 const money = (n: number) => `${n.toLocaleString('vi-VN')} đ`
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('vi-VN') : '—')
@@ -19,13 +25,13 @@ type Stage = 'list' | 'qr'
  */
 export function DesignerPayModal({
   designerId,
-  week = null,
+  period = null,
   onClose,
   onPaid,
 }: {
   designerId: string
-  /** Only this week's orders (any day of it, YYYY-MM-DD); null means every week. */
-  week?: string | null
+  /** Only orders submitted in this week/date range; null means every order. */
+  period?: PaymentPeriod | null
   onClose: () => void
   onPaid: () => void
 }) {
@@ -38,24 +44,22 @@ export function DesignerPayModal({
   const [paying, setPaying] = useState(false)
 
   useEffect(() => {
-    fetchPendingDesignerDetail(designerId, week)
+    fetchPendingDesignerDetail(designerId, period)
       .then(setDetail)
       .catch((err) => setError(err instanceof ApiError ? err.message : 'Không tải được danh sách đơn.'))
-  }, [designerId, week])
+    // periodQuery(period): a stable key for the period object
+  }, [designerId, periodQuery(period)])
 
+  // The QR loads alongside the order list (not after "Thanh toán"), from the per-session cache.
   useEffect(() => {
-    if (stage !== 'qr') return
     let cancelled = false
     setQrLoading(true)
-    apiFetch<{ images: BankQrImage[] }>(`/users/${designerId}/bank-qr`)
-      .then((res) => Promise.all(res.images.map((img) => apiFetchBlob(img.url).then((blob) => URL.createObjectURL(blob)))))
+    loadDesignerQr(designerId)
       .then((urls) => { if (!cancelled) setQrUrls(urls) })
       .catch(() => { if (!cancelled) setQrUrls([]) })
       .finally(() => { if (!cancelled) setQrLoading(false) })
     return () => { cancelled = true }
-  }, [stage, designerId])
-
-  useEffect(() => () => qrUrls.forEach((u) => URL.revokeObjectURL(u)), [qrUrls])
+  }, [designerId])
 
   async function confirmPaid() {
     if (!detail) return
@@ -114,7 +118,7 @@ export function DesignerPayModal({
               {detail.orders.map((o) => (
                 <li key={o.order_id} className="flex items-center gap-3 px-5 py-3">
                   <div className="grid h-10 w-10 flex-none place-items-center overflow-hidden rounded-lg bg-slate-100">
-                    {o.thumbnail_url ? <img src={o.thumbnail_url} alt="" className="h-full w-full object-cover" /> : <Package className="h-4 w-4 text-slate-400" />}
+                    {o.thumbnail_url ? <img src={o.thumbnail_url} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" /> : <Package className="h-4 w-4 text-slate-400" />}
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-mono text-xs font-bold text-slate-800">{o.external_order_id}</p>

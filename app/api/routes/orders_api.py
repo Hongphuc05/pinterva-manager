@@ -2,9 +2,12 @@ import base64
 import logging
 import math
 import re
+import threading
 import uuid
+from collections import OrderedDict
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from time import monotonic
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -181,6 +184,47 @@ class OrdersListResponse(BaseModel):
 CRAWLED_ASSETS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "crawled_assets"
 
 
+# Recently proxied images, per API process: a popup listing 140 orders asked Printerval for every
+# thumbnail again on each open, tying up the server. ponytail: in-memory LRU bounded by bytes; move
+# to a shared/disk cache if several processes keep refetching the same images.
+_ASSET_CACHE: "OrderedDict[str, tuple[float, bytes, str]]" = OrderedDict()
+_ASSET_CACHE_MAX_BYTES = 64 * 1024 * 1024
+_ASSET_CACHE_TTL_SECONDS = 6 * 3600
+_asset_cache_bytes = 0
+_asset_cache_lock = threading.Lock()
+
+
+def _asset_cache_get(url: str) -> tuple[bytes, str] | None:
+    with _asset_cache_lock:
+        hit = _ASSET_CACHE.get(url)
+        if hit is None:
+            return None
+        if monotonic() - hit[0] > _ASSET_CACHE_TTL_SECONDS:
+            _asset_cache_drop(url)
+            return None
+        _ASSET_CACHE.move_to_end(url)
+        return hit[1], hit[2]
+
+
+def _asset_cache_drop(url: str) -> None:
+    global _asset_cache_bytes
+    entry = _ASSET_CACHE.pop(url, None)
+    if entry is not None:
+        _asset_cache_bytes -= len(entry[1])
+
+
+def _asset_cache_put(url: str, content: bytes, content_type: str) -> None:
+    global _asset_cache_bytes
+    if len(content) > _ASSET_CACHE_MAX_BYTES // 8:
+        return
+    with _asset_cache_lock:
+        _asset_cache_drop(url)
+        _ASSET_CACHE[url] = (monotonic(), content, content_type)
+        _asset_cache_bytes += len(content)
+        while _asset_cache_bytes > _ASSET_CACHE_MAX_BYTES and _ASSET_CACHE:
+            _asset_cache_drop(next(iter(_ASSET_CACHE)))
+
+
 @router.get("/assets/proxy")
 def api_asset_proxy(u: str = Query(...)):
     raw_url = decode_proxy_url(u)
@@ -191,6 +235,9 @@ def api_asset_proxy(u: str = Query(...)):
     parsed = urlparse(raw_url)
     if parsed.scheme not in ("http", "https") or not is_printerval_asset_host(parsed.hostname):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unsupported asset host")
+    cached = _asset_cache_get(raw_url)
+    if cached is not None:
+        return Response(content=cached[0], media_type=cached[1], headers={"Cache-Control": "public, max-age=86400"})
     try:
         import httpx
 
@@ -213,6 +260,7 @@ def api_asset_proxy(u: str = Query(...)):
             content_type = resp.headers.get("content-type", "image/jpeg")
             if not content_type.lower().startswith("image/"):
                 raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Upstream did not return an image")
+            _asset_cache_put(raw_url, resp.content, content_type)
             return Response(
                 content=resp.content,
                 media_type=content_type,

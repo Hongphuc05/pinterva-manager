@@ -1,4 +1,4 @@
-import { apiFetch } from '../../api/client'
+import { apiFetch, apiFetchBlob } from '../../api/client'
 
 export interface PendingDesigner {
   designer_id: string
@@ -49,14 +49,78 @@ export interface PaymentHistoryResponse {
   total_pages: number
 }
 
-/** `week` is any day of the wanted Monday–Sunday week (YYYY-MM-DD); omitted means every week. */
-const weekQuery = (week?: string | null) => (week ? `?week=${encodeURIComponent(week)}` : '')
+/**
+ * Which submitted orders to show: a Monday–Sunday week (any day of it), or a range of whole days (both
+ * ends included, either may be empty). All dates are YYYY-MM-DD; null means every order.
+ */
+export type PaymentPeriod = { week: string } | { from: string; to: string }
 
-export const fetchPendingDesigners = (week?: string | null) =>
-  apiFetch<PendingDesigner[]>(`/accountant/designers${weekQuery(week)}`)
+export function periodQuery(period?: PaymentPeriod | null): string {
+  if (!period) return ''
+  const params = new URLSearchParams()
+  if ('week' in period) params.set('week', period.week)
+  else {
+    if (period.from) params.set('date_from', period.from)
+    if (period.to) params.set('date_to', period.to)
+  }
+  const query = params.toString()
+  return query ? `?${query}` : ''
+}
 
-export const fetchPendingDesignerDetail = (designerId: string, week?: string | null) =>
-  apiFetch<PendingDesignerDetail>(`/accountant/designers/${designerId}${weekQuery(week)}`)
+export const fetchPendingDesigners = (period?: PaymentPeriod | null) =>
+  apiFetch<PendingDesigner[]>(`/accountant/designers${periodQuery(period)}`)
+
+// A designer's orders are prefetched when the row is hovered and reused once when it is opened
+// (if still fresh), so the popup opens at once instead of waiting ~1-2 s for the server.
+const DETAIL_FRESH_MS = 30_000
+const detailCache = new Map<string, { at: number; promise: Promise<PendingDesignerDetail> }>()
+const detailKey = (designerId: string, period?: PaymentPeriod | null) => `${designerId}|${periodQuery(period)}`
+
+const requestDetail = (designerId: string, period?: PaymentPeriod | null) =>
+  apiFetch<PendingDesignerDetail>(`/accountant/designers/${designerId}${periodQuery(period)}`)
+
+export function prefetchPendingDesignerDetail(designerId: string, period?: PaymentPeriod | null) {
+  const key = detailKey(designerId, period)
+  const cached = detailCache.get(key)
+  if (cached && Date.now() - cached.at < DETAIL_FRESH_MS) return
+  const promise = requestDetail(designerId, period)
+  promise.catch(() => detailCache.delete(key))
+  detailCache.set(key, { at: Date.now(), promise })
+}
+
+export function fetchPendingDesignerDetail(designerId: string, period?: PaymentPeriod | null) {
+  const key = detailKey(designerId, period)
+  const cached = detailCache.get(key)
+  detailCache.delete(key) // use a prefetch once: a reopened popup always asks the server again
+  if (cached && Date.now() - cached.at < DETAIL_FRESH_MS) return cached.promise
+  return requestDetail(designerId, period)
+}
+
+// Bank QR images rarely change: fetched once per designer for the session and kept as object URLs.
+const qrCache = new Map<string, Promise<string[]>>()
+
+export function loadDesignerQr(designerId: string): Promise<string[]> {
+  let promise = qrCache.get(designerId)
+  if (!promise) {
+    promise = apiFetch<{ images: { url: string }[] }>(`/users/${designerId}/bank-qr`).then((res) =>
+      Promise.all(res.images.map((img) => apiFetchBlob(img.url).then((blob) => URL.createObjectURL(blob)))),
+    )
+    promise.catch(() => qrCache.delete(designerId))
+    qrCache.set(designerId, promise)
+  }
+  return promise
+}
+
+/** After a payment or a reload: never reuse an order list fetched before it. */
+export function clearPendingDetailCache() {
+  detailCache.clear()
+}
+
+export function clearPaymentCaches() {
+  detailCache.clear()
+  qrCache.forEach((promise) => promise.then((urls) => urls.forEach((u) => URL.revokeObjectURL(u))).catch(() => {}))
+  qrCache.clear()
+}
 
 const pad = (n: number) => String(n).padStart(2, '0')
 const isoDate = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`

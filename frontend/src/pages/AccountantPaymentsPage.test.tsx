@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AccountantPaymentsPage } from './AccountantPaymentsPage'
@@ -173,7 +173,7 @@ describe('AccountantPaymentsPage', () => {
     render(<AccountantPaymentsPage />)
     await waitFor(() => expect(screen.getByText('Trâm')).toBeInTheDocument())
 
-    const select = screen.getByLabelText('Lọc theo tuần nộp bài') as HTMLSelectElement
+    const select = screen.getByLabelText('Lọc theo thời gian nộp bài') as HTMLSelectElement
     const thisWeek = select.options[1].value
     expect(select.options[1].textContent).toMatch(/^Tuần này \(\d\d\/\d\d – \d\d\/\d\d\)$/)
     await user.selectOptions(select, thisWeek)
@@ -185,5 +185,29 @@ describe('AccountantPaymentsPage', () => {
     await waitFor(() => expect(modal.getByText('DJ-1')).toBeInTheDocument())
     expect(modal.queryByText('DJ-2')).not.toBeInTheDocument()
     expect(api.apiFetch).toHaveBeenCalledWith(`/accountant/designers/dan1?week=${thisWeek}`)
+  })
+
+  it('filters by a date range from day to day, both ends included', async () => {
+    const user = userEvent.setup()
+    api.apiFetch.mockImplementation((path: string) => {
+      if (path === '/accountant/designers') return Promise.resolve([dan, tram])
+      if (path.startsWith('/accountant/designers?date_from=')) return Promise.resolve([tram])
+      if (path.startsWith('/accountant/designers?')) return Promise.resolve([dan, tram])
+      return Promise.reject(new Error(`unexpected path ${path}`))
+    })
+    render(<AccountantPaymentsPage />)
+    await waitFor(() => expect(screen.getByText('Dân')).toBeInTheDocument())
+
+    await user.selectOptions(screen.getByLabelText('Lọc theo thời gian nộp bài'), 'range')
+    const from = screen.getByLabelText('Từ ngày')
+    const to = screen.getByLabelText('Đến ngày')
+    fireEvent.change(to, { target: { value: '2026-10-10' } })
+    fireEvent.change(from, { target: { value: '2026-10-14' } })
+    expect(await screen.findByText('Ngày bắt đầu phải trước ngày kết thúc.')).toBeInTheDocument()
+    expect(api.apiFetch).not.toHaveBeenCalledWith(expect.stringContaining('date_from=2026-10-14&date_to=2026-10-10'))
+
+    fireEvent.change(to, { target: { value: '2026-10-16' } })
+    await waitFor(() => expect(screen.queryByText('Dân')).not.toBeInTheDocument())
+    expect(api.apiFetch).toHaveBeenCalledWith('/accountant/designers?date_from=2026-10-14&date_to=2026-10-16')
   })
 })

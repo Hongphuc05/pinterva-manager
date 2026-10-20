@@ -3,7 +3,15 @@ import { History, LogOut, QrCode, RefreshCw, Wallet } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { ApiError } from '../api/client'
-import { fetchPendingDesigners, recentWeeks, type PendingDesigner } from '../features/payments/api'
+import {
+  clearPendingDetailCache,
+  fetchPendingDesigners,
+  loadDesignerQr,
+  prefetchPendingDesignerDetail,
+  recentWeeks,
+  type PaymentPeriod,
+  type PendingDesigner,
+} from '../features/payments/api'
 import { DesignerPayModal } from '../components/DesignerPayModal'
 import { PaymentHistoryModal } from '../components/PaymentHistoryModal'
 
@@ -21,20 +29,30 @@ export function AccountantPaymentsPage() {
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
-  // '' = every week; otherwise the Monday (YYYY-MM-DD) of the week whose submitted orders are paid.
+  // '' = every order; a Monday (YYYY-MM-DD) = that week; 'range' = the from/to days below.
   const [week, setWeek] = useState('')
+  const [rangeFrom, setRangeFrom] = useState('')
+  const [rangeTo, setRangeTo] = useState('')
   const [weeks] = useState(() => recentWeeks())
+  const rangeInvalid = week === 'range' && Boolean(rangeFrom && rangeTo && rangeFrom > rangeTo)
+  const period: PaymentPeriod | null =
+    week === 'range'
+      ? (rangeFrom || rangeTo) && !rangeInvalid ? { from: rangeFrom, to: rangeTo } : null
+      : week ? { week } : null
+  const periodKey = JSON.stringify(period)
 
   const load = useCallback(async () => {
     setLoading(true)
+    clearPendingDetailCache()
     try {
-      setRows(await fetchPendingDesigners(week || null))
+      setRows(await fetchPendingDesigners(period))
     } catch (err) {
       toast(err instanceof ApiError ? err.message : 'Không tải được danh sách.', 'error')
     } finally {
       setLoading(false)
     }
-  }, [toast, week])
+    // periodKey stands for `period`
+  }, [toast, periodKey])
 
   useEffect(() => {
     void load()
@@ -71,11 +89,14 @@ export function AccountantPaymentsPage() {
       </header>
 
       <main className="mx-auto max-w-3xl p-4 md:p-6">
+        {rangeInvalid && (
+          <p className="mb-2 rounded-lg bg-red-50 px-3 py-1.5 text-xs text-red-700">Ngày bắt đầu phải trước ngày kết thúc.</p>
+        )}
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-bold text-slate-700">Chờ thanh toán ({rows?.length ?? 0} designer)</h2>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
           <select
-            aria-label="Lọc theo tuần nộp bài"
+            aria-label="Lọc theo thời gian nộp bài"
             value={week}
             onChange={(e) => setWeek(e.target.value)}
             className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700 shadow-sm"
@@ -84,7 +105,24 @@ export function AccountantPaymentsPage() {
             {weeks.map((w) => (
               <option key={w.value} value={w.value}>{w.label}</option>
             ))}
+            <option value="range">Chọn khoảng ngày…</option>
           </select>
+          {week === 'range' && (
+            <>
+              <label className="flex items-center gap-1 text-xs text-slate-600">
+                Từ
+                <input type="date" aria-label="Từ ngày" value={rangeFrom} max={rangeTo || undefined}
+                  onChange={(e) => setRangeFrom(e.target.value)}
+                  className="rounded-lg border border-slate-300 bg-white px-1.5 py-1 text-xs shadow-sm" />
+              </label>
+              <label className="flex items-center gap-1 text-xs text-slate-600">
+                đến
+                <input type="date" aria-label="Đến ngày" value={rangeTo} min={rangeFrom || undefined}
+                  onChange={(e) => setRangeTo(e.target.value)}
+                  className="rounded-lg border border-slate-300 bg-white px-1.5 py-1 text-xs shadow-sm" />
+              </label>
+            </>
+          )}
           <button
             type="button"
             onClick={() => void load()}
@@ -100,7 +138,7 @@ export function AccountantPaymentsPage() {
           <div className="rounded-xl border border-slate-200 bg-white py-16 text-center text-sm text-slate-500">Đang tải...</div>
         ) : rows.length === 0 ? (
           <div className="rounded-xl border border-slate-200 bg-white py-16 text-center text-sm text-slate-500">
-            {week ? 'Tuần này không có đơn nào chờ thanh toán.' : 'Không có đơn nào chờ thanh toán.'}
+            {period ? 'Khoảng thời gian này không có đơn nào chờ thanh toán.' : 'Không có đơn nào chờ thanh toán.'}
           </div>
         ) : (
           <ul className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -109,6 +147,11 @@ export function AccountantPaymentsPage() {
                 <button
                   type="button"
                   onClick={() => setSelected(r.designer_id)}
+                  onMouseEnter={() => {
+                    prefetchPendingDesignerDetail(r.designer_id, period)
+                    void loadDesignerQr(r.designer_id).catch(() => {})
+                  }}
+                  onFocus={() => prefetchPendingDesignerDetail(r.designer_id, period)}
                   className="flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left transition hover:bg-slate-50"
                 >
                   <div className="flex items-center gap-2.5">
@@ -133,7 +176,7 @@ export function AccountantPaymentsPage() {
       {selected && (
         <DesignerPayModal
           designerId={selected}
-          week={week || null}
+          period={period}
           onClose={() => setSelected(null)}
           onPaid={() => void load()}
         />
