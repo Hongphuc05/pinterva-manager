@@ -19,6 +19,7 @@ workflow Tacahu.
 | Phân công và QC | assignment, submission/result version, approval, Fix | PostgreSQL | Link bài nộp và feedback thuộc record nghiệp vụ/audit. |
 | Audit và integration | workflow event, operation/idempotency, outbox, dead letter, external observation, sync job | PostgreSQL | Dùng để đối soát retry, external write và lỗi async. |
 | Note làm việc | body, author, read state, metadata attachment | PostgreSQL | Bytes screenshot/ảnh được tách khỏi DB. |
+| Câu hỏi "Đổi template" của Fix | `orders.fix_template_confirm` (JSONB): `round`, `url`, `note` Printerval hỏi, câu trả lời của Admin (`decision` agree/disagree, `decision_note`, `decided_by`) và `sent_at` khi đã gửi kèm Review | PostgreSQL | Chỉ Admin thấy (qua `GET /orders/{id}/fix-template`); Designer không thấy. |
 | Ảnh mockup nộp bài | `result_images`: đơn, người tải, file, kích thước, thời điểm gắn vào lần nộp (`attached_at`), URL/id trên Printerval và `pushed_at` | PostgreSQL metadata + `private_work_note_assets/result_images/{order_id}/` | Ảnh tải trước chưa nộp chỉ người tải xem được; ảnh đã nộp Admin và designer của đơn xem qua endpoint có auth. |
 | Chat Printerval | chỉ snapshot tin mới khi đơn sang Fix/Confirm/Done | PostgreSQL `external_observations` (`source=printerval.chat`) | Không mirror cả hội thoại; Admin mở đơn thì đọc trực tiếp từ Printerval, không lưu. |
 | QR ngân hàng Designer/Support | user, thứ tự, metadata ảnh | PostgreSQL + `private_work_note_assets/bank_qr` | Chỉ endpoint có authorization mới đọc được; tối đa 3 ảnh/tài khoản. |

@@ -5,6 +5,7 @@ import { useAuth } from '../auth/AuthContext'
 import { usePlatform } from '../auth/PlatformContext'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { FixChatBox, useFixChat } from '../components/AdminFixActionModal'
+import { FixTemplateQuestion, useFixTemplate } from '../components/FixTemplateQuestion'
 import { ImageModal } from '../components/ImageModal'
 import { StatusDropdown } from '../components/StatusDropdown'
 import { Pagination } from '../components/Pagination'
@@ -438,6 +439,7 @@ export function OrdersListPage() {
   const [acceptFixDesignerId, setAcceptFixDesignerId] = useState('')
   const [acceptFixDesignerNote, setAcceptFixDesignerNote] = useState('')
   const acceptFixChat = useFixChat(acceptFixOrder?.id ?? null)
+  const acceptFixTemplate = useFixTemplate(acceptFixOrder?.id ?? null)
   const [acceptFixSubmitting, setAcceptFixSubmitting] = useState(false)
 
   // Reject Fix Modal state
@@ -1477,6 +1479,10 @@ export function OrdersListPage() {
   async function handleAcceptFix(e: React.FormEvent) {
     e.preventDefault()
     if (!acceptFixOrder) return
+    if (acceptFixTemplate.problem) {
+      showToast(acceptFixTemplate.problem, 'error')
+      return
+    }
     setAcceptFixSubmitting(true)
     try {
       await apiFetch(`/orders/${acceptFixOrder.id}/approve-fix`, {
@@ -1484,6 +1490,7 @@ export function OrdersListPage() {
         body: JSON.stringify({
           designer_id: acceptFixDesignerId || undefined,
           designer_note: acceptFixDesignerNote,
+          ...acceptFixTemplate.payload(),
           expected_version: acceptFixOrder.version,
         }),
       })
@@ -3874,6 +3881,8 @@ export function OrdersListPage() {
                   className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-[#0052CC]/20 focus:border-[#0052CC] resize-none"
                 />
               </div>
+
+              <FixTemplateQuestion state={acceptFixTemplate} />
 
               {/* Fix content from the order's chat (replaces the old Note Outsource field) */}
               <FixChatBox {...acceptFixChat} />

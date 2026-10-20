@@ -601,3 +601,86 @@ def test_remind_designer_button_notifies_designer_and_deletes_warning(client, db
     delete.assert_called_once_with("888", [55])
     db_session.expire_all()
     assert db_session.query(TelegramActionLog).filter_by(callback_token="rem-tok").one().status == "executed"
+
+
+def _template_fix_world(db_session):
+    platform = Platform(name="Plat TPL", account_username="tpl@print.com", is_active=True)
+    db_session.add(platform)
+    db_session.flush()
+    admin = User(username="admin_tpl", full_name="Admin Tpl", role="admin", password_hash=hash_password("pass"),
+                 telegram_chat_id="444555", active=True, platform_id=platform.id)
+    order = Order(external_order_id="DJ-TPL-1", state=OrderState.REVISION.value, product_name="Jersey",
+                  platform_id=platform.id,
+                  fix_template_confirm={"round": 1, "url": "https://drive.test/tpl", "note": "Vneck", "decision": None})
+    db_session.add_all([admin, order])
+    db_session.flush()
+    db_session.add(TelegramActionLog(order_id=order.id, action_type="APPROVE_FIX", callback_token="tpl_app_token",
+                                     payload={"order_id": str(order.id)}))
+    db_session.commit()
+    return admin, order
+
+
+def _sent_texts(mock_send):
+    return [call.args[1].get("text", "") for call in mock_send.call_args_list if len(call.args) > 1]
+
+
+def test_accepting_a_template_fix_on_telegram_asks_the_template_question_before_the_note(client, db_session):
+    _admin, order = _template_fix_world(db_session)
+
+    with patch("app.application.telegram_service.send_telegram_request") as send:
+        send.return_value = {"ok": True, "message_id": 5}
+        client.post("/api/telegram/webhook", json={"callback_query": {
+            "id": "c1", "data": "appfix:tpl_app_token", "from": {"id": 444555}}})
+    asked = _sent_texts(send)
+    assert len(asked) == 1 and "đổi template" in asked[0] and "Vneck" in asked[0]
+    assert db_session.query(TelegramActionLog).filter_by(action_type="APPROVE_FIX_WRITE_NOTE").count() == 0
+
+    agree = db_session.query(TelegramActionLog).filter_by(action_type="APPROVE_FIX_TEMPLATE_AGREE").one()
+    with patch("app.application.telegram_service.send_telegram_request") as send:
+        send.return_value = {"ok": True, "message_id": 6}
+        client.post("/api/telegram/webhook", json={"callback_query": {
+            "id": "c2", "data": f"tplagree:{agree.callback_token}", "from": {"id": 444555}}})
+    assert "Ghi chú Admin" in _sent_texts(send)[0]  # now the usual note choice
+    db_session.refresh(order)
+    assert order.fix_template_confirm["decision"] == "agree"
+    sibling = db_session.query(TelegramActionLog).filter_by(action_type="APPROVE_FIX_TEMPLATE_DISAGREE").one()
+    assert sibling.status == "superseded"
+
+
+def test_saying_it_is_not_a_template_fix_on_telegram_needs_a_typed_reason(client, db_session):
+    _admin, order = _template_fix_world(db_session)
+    with patch("app.application.telegram_service.send_telegram_request") as send:
+        send.return_value = {"ok": True, "message_id": 5}
+        client.post("/api/telegram/webhook", json={"callback_query": {
+            "id": "c1", "data": "appfix:tpl_app_token", "from": {"id": 444555}}})
+    disagree = db_session.query(TelegramActionLog).filter_by(action_type="APPROVE_FIX_TEMPLATE_DISAGREE").one()
+
+    with patch("app.application.telegram_service.send_telegram_request") as send:
+        send.return_value = {"ok": True, "message_id": 7}
+        client.post("/api/telegram/webhook", json={"callback_query": {
+            "id": "c2", "data": f"tpldisagree:{disagree.callback_token}", "from": {"id": 444555}}})
+    assert "trả lời tin nhắn này" in _sent_texts(send)[0]
+    db_session.refresh(order)
+    assert order.fix_template_confirm["decision"] is None
+
+    with patch("app.application.telegram_service.send_telegram_request") as send:
+        send.return_value = {"ok": True, "message_id": 8}
+        client.post("/api/telegram/webhook", json={"message": {
+            "chat": {"id": 444555}, "from": {"id": 444555}, "text": "Chỉ sửa màu, không đổi temp",
+            "message_id": 99, "reply_to_message": {"message_id": 7}}})
+    db_session.refresh(order)
+    assert order.fix_template_confirm["decision"] == "disagree"
+    assert order.fix_template_confirm["decision_note"] == "Chỉ sửa màu, không đổi temp"
+    assert "Ghi chú Admin" in _sent_texts(send)[0]
+    assert order.fix_approved_by_admin is False  # still not released: the note choice comes next
+
+
+def test_an_ordinary_fix_goes_straight_to_the_note_choice_on_telegram(client, db_session):
+    _admin, order = _template_fix_world(db_session)
+    order.fix_template_confirm = None
+    db_session.commit()
+    with patch("app.application.telegram_service.send_telegram_request") as send:
+        send.return_value = {"ok": True, "message_id": 5}
+        client.post("/api/telegram/webhook", json={"callback_query": {
+            "id": "c1", "data": "appfix:tpl_app_token", "from": {"id": 444555}}})
+    assert "Ghi chú Admin" in _sent_texts(send)[0]

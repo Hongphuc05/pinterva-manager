@@ -13,6 +13,7 @@ from app.adapters.printerval.api_adapter import PrintervalApiAdapter
 from app.adapters.printerval.api_client import PrintervalApiClient
 from app.adapters.printerval.playwright_adapter import PlaywrightPrintervalAdapter
 from app.application.assignment_sync import sync_assignment_to_printerval
+from app.application.fix_template_confirm import mark_template_sent, stored_template_answer
 from app.application.printerval_assignment_requests import execute_request
 from app.workers.celery_app import celery_app
 
@@ -268,6 +269,11 @@ def _push_review(client: PrintervalApiClient, order: Order, note_outsource: str 
             except Exception:
                 logger.warning("Could not read the chat of %s before leaving Fix", code, exc_info=True)
 
+    # The Admin may already have answered Printerval's "was this Fix about the template?" while accepting
+    # the Fix: send that answer along so the order leaves Fix in one go.
+    if template_confirm is None and (target_status or "").lower() == "review" and (order.printerval_status or "").lower() == "fix":
+        template_confirm = stored_template_answer(order, row)
+
     if target_status:
         if not is_still_expected():
             logger.info("Skipping stale Printerval status sync (%s) for %s", target_status, code)
@@ -296,6 +302,8 @@ def _push_review(client: PrintervalApiClient, order: Order, note_outsource: str 
         object_session(order).refresh(order, with_for_update=True)
         order.printerval_status = target_status.lower()
         order.printerval_status_synced_at = datetime.now(UTC)
+        if template_confirm:
+            mark_template_sent(order)
     return True
 
 

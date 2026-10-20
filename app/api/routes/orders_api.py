@@ -70,7 +70,13 @@ from app.application.assignment_commands import (
 )
 from app.application.concurrency import lock_order_for_command
 from app.application.crawl import DiscoverFailedError, refresh_order_detail, scan_orders_fast
-from app.application.fix_template_confirm import TemplateConfirmError, confirm_fix_template
+from app.application.fix_template_confirm import (
+    TemplateConfirmError,
+    confirm_fix_template,
+    open_request,
+    record_template_answer,
+    refresh_fix_template,
+)
 from app.application.order_queries import (
     FIX_STATES,
     count_support_submitted_orders,
@@ -2739,6 +2745,9 @@ class ApproveFixRequest(OrderCommandPayload):
     designer_id: uuid.UUID | None = None
     designer_note: str | None = None
     note_outsource: str | None = None  # ignored: sent by older clients
+    # Answer to Printerval's "was this Fix about the template?", required when the Fix carries that question.
+    template_confirm: str | None = None
+    template_confirm_note: str | None = None
 
 
 @router.post("/orders/{order_id}/approve-fix")
@@ -2752,6 +2761,20 @@ def api_approve_fix(
 
     if order is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
+
+    template_request = open_request(order)
+    if template_request is not None and not payload.template_confirm and not template_request.get("decision"):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Printerval hỏi Fix này có phải do đổi template không, hãy chọn xác nhận hoặc không đúng trước khi duyệt Fix.",
+        )
+    if template_request is not None and payload.template_confirm:
+        try:
+            record_template_answer(
+                db, order, user, payload.template_confirm, payload.template_confirm_note, source="web"
+            )
+        except TemplateConfirmError as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
 
     admin_designer_note = (payload.designer_note or "").strip()
     # QC writes the Fix in Printerval's chat; note_outsource only holds the link Tacahu pushed, so it is
@@ -2871,6 +2894,24 @@ class FixTemplateConfirmRequest(BaseModel):
     decision: str = Field(pattern="^(agree|disagree)$")
     note: str | None = Field(default=None, max_length=500)
     request_id: str = Field(min_length=1, max_length=100)
+
+
+@router.get("/orders/{order_id}/fix-template")
+def api_fix_template(
+    order_id: uuid.UUID,
+    user: User = Depends(require_role(ROLE_ADMIN)),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    """Printerval's template question for the order's Fix (null when it asks none), with any answer so far."""
+    order = db.get(Order, order_id)
+    if order is None or order.platform_id != platform_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
+    request = open_request(order)
+    if order.state == OrderState.REVISION.value:
+        request = refresh_fix_template(db, order)
+        db.commit()
+    return {"request": request}
 
 
 @router.post("/orders/{order_id}/printerval-template-confirm")

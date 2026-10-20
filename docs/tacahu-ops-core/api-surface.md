@@ -11,10 +11,10 @@ origin hoặc origin kèm `/api` nhưng không được tạo `/api/api`.
 | Orders | `GET /orders`, `GET /orders/{id}`, `PATCH /orders/{id}/state`, refresh/sync/history |
 | Work note | `GET/POST /orders/{id}/work-notes`, `GET .../attachments/{attachment_id}` |
 | Ảnh mockup nộp bài | `GET/POST /orders/{id}/result-images` (tải trước, tối đa 3, PNG/JPEG ≤ 10 MB), `DELETE .../result-images/{image_id}` (chỉ ảnh chưa nộp), `GET .../result-images/{image_id}/file`; lần nộp gửi `image_ids` (1–3, bắt buộc với Designer) ở `POST /assignments/{id}/results` và `PATCH /orders/{id}/state` |
-| Xác nhận Fix "Đổi template" (Admin) | `POST /orders/{id}/printerval-template-confirm` `{decision: agree\|disagree, note, request_id}`; yêu cầu đang chờ hiện ở `fix_template_confirm` của `GET /orders/{id}` |
+| Xác nhận Fix "Đổi template" (Admin, đường dự phòng khi Printerval vẫn từ chối Review) | `POST /orders/{id}/printerval-template-confirm` `{decision: agree\|disagree, note, request_id}`; yêu cầu đang chờ hiện ở `fix_template_confirm` của `GET /orders/{id}` |
 | Chat Printerval (Admin) | `GET /orders/{id}/printerval-chat` (đọc ngay, 502 khi Printerval lỗi), `GET /orders/{id}/fix-chat` (`{text}`: nội dung Fix của lượt mới nhất, cho modal duyệt Fix), `GET /printerval-chat/unread` (đơn còn tin chưa đọc trên Printerval; `stale: true` khi Printerval không trả lời) |
 | Assignment | tạo/revoke assignment; task start/sub-status/result/flag missing template |
-| Fix | `POST /orders/{id}/approve-fix` (Ghi chú cho Designer, trống thì lấy nội dung Fix từ chat; `note_outsource` gửi lên bị bỏ qua), `POST /orders/{id}/reject-fix-to-review` |
+| Fix | `GET /orders/{id}/fix-template` (Admin: câu hỏi "Đổi template" của Fix, `{request}` null khi không hỏi), `POST /orders/{id}/approve-fix` (Ghi chú cho Designer, trống thì lấy nội dung Fix từ chat; `template_confirm` agree/disagree + `template_confirm_note` bắt buộc khi Fix đang bị hỏi template, thiếu thì 422; `note_outsource` gửi lên bị bỏ qua), `POST /orders/{id}/reject-fix-to-review` |
 | Duplicate | `GET /duplicate-board`, move card, duplicate domain/check status/settings; Support web chỉ check order còn Waiting, callback compare có scope Doing riêng |
 | Platform | CRUD platform và Printerval option/credential scope |
 | Finance | rates, stats, payment mark/unmark, export, finance note |

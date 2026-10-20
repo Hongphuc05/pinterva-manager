@@ -101,7 +101,36 @@ Tacahu đáp ứng như sau:
 | Link trong Note outsource | Designer dán link khi nộp; worker ghi lên Printerval (một chiều, không đọc ngược). |
 | Ảnh trong cột Design | Designer **bắt buộc** gắn 1–3 ảnh PNG/JPEG (≤ 10 MB/ảnh) ở ô nộp bài; ảnh được tải trước (staged), lần nộp gắn chúng vào (`result_images`). Worker tải từng ảnh chưa có trên Printerval: `POST /printerval-central/upload` (lấy URL) rồi `POST /service/pod/design-job/store-image` (gắn vào job, ảnh đầu là primary khi job chưa có ảnh). Mỗi ảnh ghi `pushed_at` ngay khi Printerval nhận, nên thử lại không tải trùng; Review chỉ gửi khi mọi ảnh đã lên. |
 | Đọc hết chat (job Fix) | Ngay trước khi đổi trạng thái của một job đang Fix, worker đọc chat của job (Printerval tính là đã đọc cho cả team). |
-| Xác nhận "Đổi template" | Không tự quyết. Printerval đòi xác nhận → không thử lại, ghi `dead_letters` (`kind=template_confirm`) và toast Admin; trang chi tiết đơn của Admin hiện khung **Xác nhận / Không đúng + lý do**. Admin trả lời (`POST /orders/{id}/printerval-template-confirm`, idempotent, ghi `WorkflowEvent` `CONFIRM_FIX_TEMPLATE`) → đơn về `QC_PENDING` và worker gửi lại Review kèm xác nhận; thành công thì yêu cầu được đánh dấu đã xử lý. |
+| Xác nhận "Đổi template" | Không tự quyết, luôn là Admin. **Hỏi trước, lúc duyệt Fix** (đường chính, xem dưới). Nếu Printerval vẫn từ chối lúc đẩy Review (đơn duyệt Fix từ trước khi có bước hỏi trước, hoặc QC mở thêm một câu hỏi template mới) thì **đường dự phòng**: không thử lại, ghi `dead_letters` (`kind=template_confirm`) và toast Admin; trang chi tiết đơn của Admin hiện khung **Xác nhận / Không đúng + lý do**. Admin trả lời (`POST /orders/{id}/printerval-template-confirm`, idempotent, ghi `WorkflowEvent` `CONFIRM_FIX_TEMPLATE`) → đơn về `QC_PENDING` và worker gửi lại Review kèm xác nhận. |
+
+### Fix "Đổi template": Admin trả lời lúc duyệt Fix
+
+Printerval có hai nút: **Xác nhận FIX do đổi template** (xong, đơn sang Review) và **Không đúng, không phải
+đổi template** (bắt buộc điền giải thích mới cho sang Review). Tacahu hỏi Admin ngay lúc duyệt Fix để
+Designer nộp lại là đơn lên Review luôn:
+
+1. **Biết đơn nào bị hỏi**: dòng Fix của đơn trên Printerval có `outsource_fix_template`
+   (`{round, url, note, status}`); `status = "pending"` là đang hỏi (đơn Fix thường thì trường này `null`).
+   Tacahu đọc nó khi đơn vào Fix (task `capture_order_chat`), khi Admin mở modal duyệt Fix
+   (`GET /orders/{id}/fix-template`, cache 5 phút/đơn) và khi bấm "Chấp nhận Fix" trên Telegram, rồi lưu vào
+   `orders.fix_template_confirm` (`round`, `url`, `note`). Qua lượt (`round`) mới thì câu hỏi và câu trả lời cũ bị
+   thay; Printerval không còn hỏi (ai đó đã trả lời trên Printerval) thì xoá. Cần `ORDER_CHAT_ENABLED=true`
+   (cùng cờ với đọc chat); tắt thì chỉ còn đường dự phòng.
+2. **Admin trả lời** khi duyệt Fix:
+   - Web (modal "Chấp nhận Fix" ở danh sách đơn và ở trang chi tiết/board): khối đỏ hiện link template + ghi chú,
+     2 nút **Xác nhận Fix do đổi template** / **Không đúng, không phải đổi template**; chọn nút 2 thì hiện ô
+     giải thích bắt buộc. Chưa chọn (hoặc thiếu giải thích) thì không duyệt được; backend cũng trả 422
+     (`approve-fix` nhận `template_confirm` + `template_confirm_note`).
+   - Telegram: bấm "Chấp nhận Fix" → bot hỏi câu hỏi template trước (2 nút tương ứng; "Không đúng" thì bot
+     yêu cầu trả lời tin nhắn bằng lời giải thích), xong mới hỏi bước Ghi chú cho Designer như thường.
+   Câu trả lời ghi vào `fix_template_confirm` (`decision`, `decision_note`, `decided_by`) và
+   `WorkflowEvent` `ANSWER_FIX_TEMPLATE`; Admin sửa được tới khi đã gửi lên Printerval. Designer không thấy gì.
+3. **Designer nộp lại Review**: worker đẩy như thường; ở bước đổi trạng thái, nếu câu trả lời đã lưu thuộc
+   đúng lượt đang được hỏi (so `round` với dòng Printerval vừa đọc) thì gửi kèm `template_confirm`
+   (+ `template_confirm_note`). Printerval nhận thì đánh dấu `sent_at` (đóng câu hỏi). Lượt khác thì **không**
+   gửi câu trả lời cũ, Printerval từ chối và đường dự phòng chạy.
+4. Admin duyệt Fix mà Tacahu không đọc được câu hỏi (Printerval chậm) thì không bị chặn; nếu Printerval hỏi
+   thì đường dự phòng bắt lại.
 
 **Không coi lệnh đẩy chưa tới là Fix mới.** Tacahu chuyển đơn sang Review nội bộ ngay rồi mới đẩy
 lên Printerval; trong lúc đó Printerval vẫn báo Fix. Trong **30 phút** sau khi đơn sang Review

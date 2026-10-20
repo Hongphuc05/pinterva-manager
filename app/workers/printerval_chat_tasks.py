@@ -1,4 +1,5 @@
-"""Read an order's Printerval chat once when its Printerval status moves to Fix/Confirm/Done."""
+"""Read an order's Printerval chat once when its Printerval status moves to Fix/Confirm/Done (and, for Fix,
+the template question Printerval may attach to it)."""
 
 from __future__ import annotations
 
@@ -8,6 +9,7 @@ import uuid
 
 from app.adapters.db.models import Order
 from app.adapters.db.session import SessionLocal
+from app.application.fix_template_confirm import refresh_fix_template
 from app.application.printerval_chat import capture_chat
 from app.application.telegram_service import is_telegram_configured, notify_admin_new_fix
 from app.config import get_settings
@@ -38,6 +40,14 @@ def capture_order_chat(self, order_id: str, status: str, notify: bool = True) ->
             session.rollback()
             failed = True
             logger.warning("Could not read the Printerval chat of %s (%s)", order.external_order_id, status, exc_info=True)
+        if status == "fix":
+            # Printerval's "Đổi template" question for this Fix, so Admin can answer while accepting it.
+            try:
+                refresh_fix_template(session, order, force=True)
+                session.commit()
+            except Exception:
+                session.rollback()
+                logger.warning("Could not read the template question of %s", order.external_order_id, exc_info=True)
         if notify and status == "fix" and is_telegram_configured():
             try:
                 notify_admin_new_fix(session, order.id)

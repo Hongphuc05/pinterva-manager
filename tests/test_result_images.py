@@ -18,6 +18,7 @@ from app.adapters.db.models import (
     User,
     WorkflowEvent,
 )
+from app.application import fix_template_confirm as tpl
 from app.application import result_images
 from app.application.auth import create_session_token
 from app.domain.models import OrderState
@@ -353,3 +354,121 @@ def test_leaving_fix_reads_the_chat_first_so_printerval_counts_it_read(world, mo
 
     kinds = [c[0] for c in fake.calls]
     assert kinds.index("upload") < kinds.index("chat") < kinds.index("status")
+
+
+# ----------------------------------------------------------------------------- up-front template question
+
+PENDING = {"round": 1, "url": "https://drive.test/tpl", "note": "Vneck", "at": "2026-10-20 14:09:52", "status": "pending"}
+
+
+def _fix_row(**asked):
+    return {"id": 4170001, "local_code": "us", "product": {"name": "Jersey"}, "product_id": 77, "designs": [],
+            "is_custom_design": 0, "is_on_demand": 0, "outsource_fix_template": {**PENDING, **asked} if asked is not None else None}
+
+
+def _fix_order(world):
+    world.order.state = OrderState.REVISION.value
+    world.order.printerval_status = "fix"
+    world.session.commit()
+
+
+def test_the_template_question_is_stored_kept_per_round_and_cleared_when_printerval_stops_asking(world):
+    _fix_order(world)
+    ask = lambda row: tpl.refresh_fix_template(world.session, world.order, client_factory=lambda _p: FakePrinterval(row=row), force=True)  # noqa: E731
+
+    stored = ask(_fix_row())
+    assert (stored["round"], stored["url"], stored["note"], stored["decision"]) == (1, "https://drive.test/tpl", "Vneck", None)
+
+    tpl.record_template_answer(world.session, world.order, world.admin, "agree", None, source="web")
+    assert ask(_fix_row())["decision"] == "agree"  # same round: the answer stands
+    assert ask(_fix_row(round=2))["decision"] is None  # a new round is a new question
+
+    assert ask(_fix_row(status="agreed")) is None  # someone answered on Printerval itself
+    assert world.order.fix_template_confirm is None
+    assert ask({**_fix_row(), "outsource_fix_template": None}) is None  # an ordinary Fix asks nothing
+
+
+def test_an_unreadable_printerval_keeps_what_was_stored(world):
+    _fix_order(world)
+    tpl.refresh_fix_template(world.session, world.order, client_factory=lambda _p: FakePrinterval(row=_fix_row()), force=True)
+
+    class Down:
+        def __call__(self, _p):
+            raise RuntimeError("Printerval is slow")
+
+    assert tpl.refresh_fix_template(world.session, world.order, client_factory=Down(), force=True)["round"] == 1
+
+
+def test_the_answer_needs_an_open_question_and_a_reason_when_not_a_template_fix(world):
+    _fix_order(world)
+    with pytest.raises(tpl.TemplateConfirmError):
+        tpl.record_template_answer(world.session, world.order, world.admin, "agree", None, source="web")  # nothing asked
+    tpl.refresh_fix_template(world.session, world.order, client_factory=lambda _p: FakePrinterval(row=_fix_row()), force=True)
+    with pytest.raises(tpl.TemplateConfirmError):
+        tpl.record_template_answer(world.session, world.order, world.admin, "disagree", "  ", source="web")
+    answered = tpl.record_template_answer(world.session, world.order, world.admin, "disagree", "Chỉ sửa màu", source="web")
+    assert answered["decision_note"] == "Chỉ sửa màu" and answered["decided_by"] == "admin"
+    event = world.session.query(WorkflowEvent).filter_by(order_id=world.order.id).one()
+    assert event.evidence["action"] == "ANSWER_FIX_TEMPLATE" and event.evidence["decision"] == "disagree"
+
+
+def _ask_and_answer(world, decision="agree", note=None):
+    _fix_order(world)
+    tpl.refresh_fix_template(world.session, world.order, client_factory=lambda _p: FakePrinterval(row=_fix_row()), force=True)
+    tpl.record_template_answer(world.session, world.order, world.admin, decision, note, source="web")
+    world.session.commit()
+
+
+def test_accepting_a_template_fix_needs_the_answer_and_stores_it(client, world, monkeypatch):
+    _fix_order(world)
+    tpl.refresh_fix_template(world.session, world.order, client_factory=lambda _p: FakePrinterval(row=_fix_row()), force=True)
+    world.session.commit()
+    headers = _h(world.admin)
+    url = f"/api/orders/{world.order.id}/approve-fix"
+
+    assert client.get(f"/api/orders/{world.order.id}/fix-template", headers=headers).json()["request"]["note"] == "Vneck"
+    refused = client.post(url, json={"designer_note": "Sửa lại"}, headers=headers)
+    assert refused.status_code == 422 and "đổi template" in refused.json()["detail"]
+    no_reason = client.post(url, json={"designer_note": "Sửa lại", "template_confirm": "disagree"}, headers=headers)
+    assert no_reason.status_code == 422
+
+    ok = client.post(url, json={"designer_note": "Sửa lại", "template_confirm": "disagree",
+                                "template_confirm_note": "Chỉ đổi màu"}, headers=headers)
+
+    assert ok.status_code == 200
+    world.session.refresh(world.order)
+    stored = world.order.fix_template_confirm
+    assert (stored["decision"], stored["decision_note"]) == ("disagree", "Chỉ đổi màu")
+    assert world.order.designer_note == "Sửa lại"
+
+
+def test_an_ordinary_fix_is_accepted_without_any_template_answer(client, world):
+    _fix_order(world)
+    response = client.post(f"/api/orders/{world.order.id}/approve-fix", json={"designer_note": "Sửa lại"},
+                           headers=_h(world.admin))
+    assert response.status_code == 200
+
+
+def test_the_review_push_carries_the_stored_answer_and_closes_the_question(world, monkeypatch):
+    _ask_and_answer(world, "disagree", "Chỉ đổi màu")
+    _staged_and_attached(world, (10, 10))
+    fake = FakePrinterval(row=_fix_row())
+
+    _run(world, monkeypatch, fake)
+
+    assert [c[3] for c in fake.calls if c[0] == "status"] == [
+        {"template_confirm": "disagree", "template_confirm_note": "Chỉ đổi màu"}
+    ]
+    assert world.order.fix_template_confirm["sent_at"]
+    assert tpl.open_request(world.order) is None
+
+
+def test_an_answer_for_an_older_round_is_not_sent_for_a_newer_question(world, monkeypatch):
+    _ask_and_answer(world, "agree")
+    _staged_and_attached(world, (10, 10))
+    fake = FakePrinterval(row=_fix_row(round=2))  # QC opened a second template question meanwhile
+
+    _run(world, monkeypatch, fake)
+
+    assert [c[3] for c in fake.calls if c[0] == "status"] == [None]
+    assert tpl.open_request(world.order)["decision"] == "agree"  # still open, not marked sent

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import logging
 import secrets
 import uuid
@@ -19,6 +20,11 @@ from app.adapters.db.models import (
     WorkflowEvent,
 )
 from app.api.deps import get_current_user, get_db
+from app.application.fix_template_confirm import (
+    TemplateConfirmError,
+    record_template_answer,
+    refresh_fix_template,
+)
 from app.application.printerval_chat import read_fix_chat_text
 from app.application.support_compare import (
     ACTION_CHECK_NO as SUPPORT_COMPARE_ACTION_CHECK_NO,
@@ -287,8 +293,16 @@ def _legacy_pair_message_ids(db: Session, chat_id: str, prompt_id: int | None) -
     return [i for i in range(prompt_id - 3, prompt_id) if i > 0 and i not in others] + [prompt_id]
 
 
+FIX_CHOICE_TYPES = (
+    "APPROVE_FIX_WRITE_NOTE",
+    "APPROVE_FIX_USE_OUTSOURCE",
+    "APPROVE_FIX_TEMPLATE_AGREE",
+    "APPROVE_FIX_TEMPLATE_DISAGREE",
+)
+
+
 def _supersede_sibling_fix_choices(db: Session, action_log: TelegramActionLog) -> None:
-    """Ensure only one of the two note choices can release a Fix."""
+    """Ensure only one of the sibling choices (note, or template answer) can move a Fix forward."""
     parent_action_id = str((action_log.payload or {}).get("parent_action_id") or "")
     if not parent_action_id:
         return
@@ -296,13 +310,102 @@ def _supersede_sibling_fix_choices(db: Session, action_log: TelegramActionLog) -
         db.query(TelegramActionLog)
         .filter(
             TelegramActionLog.status == "pending",
-            TelegramActionLog.action_type.in_(("APPROVE_FIX_WRITE_NOTE", "APPROVE_FIX_USE_OUTSOURCE")),
+            TelegramActionLog.action_type.in_(FIX_CHOICE_TYPES),
         )
         .all()
     )
     for candidate in candidates:
         if candidate.id != action_log.id and str((candidate.payload or {}).get("parent_action_id") or "") == parent_action_id:
             candidate.status = "superseded"
+
+
+def _send_fix_note_choice(db: Session, order: Order, parent: TelegramActionLog, user_chat_id: str, expires_at) -> None:
+    """Ask Admin whether to write a Designer note or release the chat's Fix text (the Fix is not released yet)."""
+    write_note_token = secrets.token_urlsafe(16)
+    use_source_token = secrets.token_urlsafe(16)
+    common_payload = {
+        "order_id": str(order.id),
+        "external_order_id": order.external_order_id,
+        "parent_action_id": str(parent.id),
+    }
+    db.add_all([
+        TelegramActionLog(
+            order_id=order.id,
+            action_type="APPROVE_FIX_WRITE_NOTE",
+            callback_token=write_note_token,
+            payload=common_payload,
+            expires_at=expires_at,
+        ),
+        TelegramActionLog(
+            order_id=order.id,
+            action_type="APPROVE_FIX_USE_OUTSOURCE",
+            callback_token=use_source_token,
+            payload=common_payload,
+            expires_at=expires_at,
+        ),
+    ])
+    db.commit()
+    choice_message = send_message(
+        user_chat_id,
+        "📝 <b>Bạn có muốn soạn Ghi chú Admin riêng cho Designer không?</b>\n\n"
+        "Nếu chọn <b>Có</b>, bot sẽ yêu cầu bạn soạn Ghi chú Admin. Nếu chọn <b>Không</b>, "
+        "bot sẽ copy nguyên văn nội dung khung chat của lượt Fix này (không kèm link ảnh) "
+        "vào Ghi chú Admin để gửi Des.",
+        reply_markup={
+            "inline_keyboard": [
+                [{"text": "✍️ Có, soạn Ghi chú Admin", "callback_data": f"appfixnote:{write_note_token}"}],
+                [{"text": "➡️ Không, dùng nguyên văn nội dung chat", "callback_data": f"appfixsource:{use_source_token}"}],
+            ]
+        },
+    )
+    _track_fix_transient_message(
+        db, order.id, user_chat_id,
+        int(choice_message["message_id"]) if isinstance(choice_message, dict) and choice_message.get("message_id") is not None else None,
+    )
+
+
+def _send_template_question(
+    db: Session, order: Order, request: dict, parent: TelegramActionLog, user_chat_id: str, expires_at
+) -> None:
+    """Ask Admin Printerval's question "was this Fix about the template?" before the note choice."""
+    agree_token = secrets.token_urlsafe(16)
+    disagree_token = secrets.token_urlsafe(16)
+    common_payload = {
+        "order_id": str(order.id),
+        "external_order_id": order.external_order_id,
+        "parent_action_id": str(parent.id),
+    }
+    db.add_all([
+        TelegramActionLog(
+            order_id=order.id, action_type="APPROVE_FIX_TEMPLATE_AGREE", callback_token=agree_token,
+            payload=common_payload, expires_at=expires_at,
+        ),
+        TelegramActionLog(
+            order_id=order.id, action_type="APPROVE_FIX_TEMPLATE_DISAGREE", callback_token=disagree_token,
+            payload=common_payload, expires_at=expires_at,
+        ),
+    ])
+    db.commit()
+    lines = [f"🔶 <b>Printerval hỏi: Fix lần {html.escape(str(request.get('round') or '?'))} của đơn "
+             f"<code>{html.escape(order.external_order_id)}</code> có phải do đổi template không?</b>"]
+    if request.get("url"):
+        lines.append(f"Link template: {html.escape(str(request['url']))}")
+    if request.get("note"):
+        lines.append(f"Ghi chú: {html.escape(str(request['note']))}")
+    message = send_message(
+        user_chat_id,
+        "\n".join(lines),
+        reply_markup={
+            "inline_keyboard": [
+                [{"text": "✅ Xác nhận Fix do đổi template", "callback_data": f"tplagree:{agree_token}"}],
+                [{"text": "❌ Không đúng, không phải đổi template", "callback_data": f"tpldisagree:{disagree_token}"}],
+            ]
+        },
+    )
+    _track_fix_transient_message(
+        db, order.id, user_chat_id,
+        int(message["message_id"]) if isinstance(message, dict) and message.get("message_id") is not None else None,
+    )
 
 
 def _complete_telegram_fix_approval(
@@ -490,7 +593,7 @@ async def api_telegram_webhook(
             pending_logs = (
                 db.query(TelegramActionLog)
                 .filter(
-                    TelegramActionLog.action_type == "AWAIT_ADMIN_FIX_NOTE",
+                    TelegramActionLog.action_type.in_(("AWAIT_ADMIN_FIX_NOTE", "AWAIT_TEMPLATE_NOTE")),
                     TelegramActionLog.status == "pending",
                 )
                 .order_by(TelegramActionLog.created_at.desc())
@@ -509,7 +612,7 @@ async def api_telegram_webhook(
 
             if len(pending_logs) == 1:
                 note_log = pending_logs[0]
-                if not _action_is_pending_and_valid(note_log, "AWAIT_ADMIN_FIX_NOTE"):
+                if not _action_is_pending_and_valid(note_log, note_log.action_type):
                     note_log.status = "expired"
                     db.commit()
                     send_message(chat_id, "⚠️ Yêu cầu nhập ghi chú Fix đã hết hạn. Vui lòng xử lý lại từ thông báo Fix.")
@@ -519,6 +622,23 @@ async def api_telegram_webhook(
                     note_log.status = "failed"
                     db.commit()
                     send_message(chat_id, "❌ Không tìm thấy đơn hàng cho yêu cầu ghi chú này.")
+                    return {"ok": True}
+                if note_log.action_type == "AWAIT_TEMPLATE_NOTE":
+                    # The explanation Printerval requires when the Fix was not about the template.
+                    try:
+                        record_template_answer(db, order, admin_user, "disagree", text, source="telegram_callback")
+                    except TemplateConfirmError as exc:
+                        send_message(chat_id, f"⚠️ {exc}")
+                        return {"ok": True}
+                    note_log.status = "executed"
+                    note_log.executed_at = datetime.now(UTC)
+                    note_log.actor_id = admin_user.id
+                    db.commit()
+                    _send_fix_note_choice(
+                        db, order, note_log, chat_id,
+                        min(note_log.expires_at or (datetime.now(UTC) + timedelta(minutes=30)),
+                            datetime.now(UTC) + timedelta(minutes=30)),
+                    )
                     return {"ok": True}
                 try:
                     designer_id = _complete_telegram_fix_approval(
@@ -825,7 +945,7 @@ async def api_telegram_webhook(
 
         # Parse callback: first choose approve/reject, then (for approval)
         # choose whether to write an Admin note or release the QC text verbatim.
-        valid_prefixes = {"appfix", "rejfix", "appfixnote", "appfixsource", "remdes"}
+        valid_prefixes = {"appfix", "rejfix", "appfixnote", "appfixsource", "remdes", "tplagree", "tpldisagree"}
         if ":" in cb_data and cb_data.split(":", 1)[0] in valid_prefixes:
             prefix, token = cb_data.split(":", 1)
             action_log = (
@@ -838,6 +958,8 @@ async def api_telegram_webhook(
                 "rejfix": "REJECT_FIX",
                 "appfixnote": "APPROVE_FIX_WRITE_NOTE",
                 "appfixsource": "APPROVE_FIX_USE_OUTSOURCE",
+                "tplagree": "APPROVE_FIX_TEMPLATE_AGREE",
+                "tpldisagree": "APPROVE_FIX_TEMPLATE_DISAGREE",
                 "remdes": "REMIND_DESIGNER",
             }
             if not action_log or not _action_is_pending_and_valid(action_log, expected_action_types[prefix]):
@@ -868,8 +990,8 @@ async def api_telegram_webhook(
                     delete_messages(str(chat_id), [int(message_id)])
 
             elif prefix == "appfix":
-                # Do not release the Fix yet. Admin must first decide the only
-                # Designer-facing note that will be copied into Tacahu.
+                # Do not release the Fix yet. If Printerval asks whether this Fix is about the template,
+                # Admin answers that first; then decides the only Designer-facing note.
                 action_log.status = "executed"
                 action_log.executed_at = datetime.now(UTC)
                 action_log.actor_id = admin_user.id
@@ -877,47 +999,55 @@ async def api_telegram_webhook(
                     action_log.expires_at or (datetime.now(UTC) + timedelta(minutes=30)),
                     datetime.now(UTC) + timedelta(minutes=30),
                 )
-                write_note_token = secrets.token_urlsafe(16)
-                use_source_token = secrets.token_urlsafe(16)
-                common_payload = {
-                    "order_id": str(order.id),
-                    "external_order_id": order.external_order_id,
-                    "parent_action_id": str(action_log.id),
-                }
-                db.add_all([
-                    TelegramActionLog(
-                        order_id=order.id,
-                        action_type="APPROVE_FIX_WRITE_NOTE",
-                        callback_token=write_note_token,
-                        payload=common_payload,
-                        expires_at=expires_at,
-                    ),
-                    TelegramActionLog(
-                        order_id=order.id,
-                        action_type="APPROVE_FIX_USE_OUTSOURCE",
-                        callback_token=use_source_token,
-                        payload=common_payload,
-                        expires_at=expires_at,
-                    ),
-                ])
+                template_request = None
+                try:
+                    template_request = refresh_fix_template(db, order, force=True)
+                except Exception:
+                    logger.warning("Template question of %s unreadable", order.external_order_id, exc_info=True)
                 db.commit()
-                choice_message = send_message(
-                    user_chat_id,
-                    "📝 <b>Bạn có muốn soạn Ghi chú Admin riêng cho Designer không?</b>\n\n"
-                    "Nếu chọn <b>Có</b>, bot sẽ yêu cầu bạn soạn Ghi chú Admin. Nếu chọn <b>Không</b>, "
-                    "bot sẽ copy nguyên văn nội dung khung chat của lượt Fix này (không kèm link ảnh) "
-                    "vào Ghi chú Admin để gửi Des.",
-                    reply_markup={
-                        "inline_keyboard": [
-                            [{"text": "✍️ Có, soạn Ghi chú Admin", "callback_data": f"appfixnote:{write_note_token}"}],
-                            [{"text": "➡️ Không, dùng nguyên văn nội dung chat", "callback_data": f"appfixsource:{use_source_token}"}],
-                        ]
-                    },
+                if template_request is not None and not template_request.get("decision"):
+                    _send_template_question(db, order, template_request, action_log, user_chat_id, expires_at)
+                else:
+                    _send_fix_note_choice(db, order, action_log, user_chat_id, expires_at)
+
+            elif prefix in ("tplagree", "tpldisagree"):
+                action_log.status = "executed"
+                action_log.executed_at = datetime.now(UTC)
+                action_log.actor_id = admin_user.id
+                _supersede_sibling_fix_choices(db, action_log)
+                expires_at = min(
+                    action_log.expires_at or (datetime.now(UTC) + timedelta(minutes=30)),
+                    datetime.now(UTC) + timedelta(minutes=30),
                 )
-                _track_fix_transient_message(
-                    db, order.id, user_chat_id,
-                    int(choice_message["message_id"]) if isinstance(choice_message, dict) and choice_message.get("message_id") is not None else None,
-                )
+                if prefix == "tplagree":
+                    try:
+                        record_template_answer(db, order, admin_user, "agree", None, source="telegram_callback")
+                    except TemplateConfirmError as exc:
+                        db.commit()
+                        send_message(user_chat_id, f"⚠️ {exc}")
+                        return {"ok": True}
+                    db.commit()
+                    _send_fix_note_choice(db, order, action_log, user_chat_id, expires_at)
+                else:
+                    note_log = TelegramActionLog(
+                        order_id=order.id,
+                        action_type="AWAIT_TEMPLATE_NOTE",
+                        callback_token=secrets.token_urlsafe(16),
+                        payload={"order_id": str(order.id), "chat_id": user_chat_id, "parent_action_id": str(action_log.id)},
+                        expires_at=expires_at,
+                    )
+                    db.add(note_log)
+                    db.commit()
+                    prompt = send_message(
+                        user_chat_id,
+                        f"✍️ Hãy <b>trả lời tin nhắn này</b> bằng lời giải thích vì sao Fix đơn <code>{order.external_order_id}</code> "
+                        "không phải do đổi template (bắt buộc, Printerval sẽ nhận nội dung này).",
+                        reply_markup={"force_reply": True, "input_field_placeholder": "Vì sao không phải đổi template"},
+                    )
+                    if isinstance(prompt, dict) and prompt.get("message_id") is not None:
+                        note_log.payload = {**(note_log.payload or {}), "prompt_message_id": prompt["message_id"]}
+                        db.commit()
+                        _track_fix_transient_message(db, order.id, user_chat_id, int(prompt["message_id"]))
 
             elif prefix == "appfixsource":
                 # QC writes the Fix in Printerval's chat; note_outsource only holds the link Tacahu

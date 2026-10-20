@@ -341,6 +341,10 @@ class Order(Base):
     designer_note_released_for_fix: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
+    # Printerval's "was this Fix about the template?" question for the current Fix (``round``, ``url``,
+    # ``note``) and the Admin's answer (``decision`` agree|disagree, ``decision_note``), sent with the
+    # Review push (``sent_at``). See app/application/fix_template_confirm.py.
+    fix_template_confirm: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     order_note: Mapped[str] = mapped_column(
         Text, nullable=False, default="", server_default=text("''")
     )

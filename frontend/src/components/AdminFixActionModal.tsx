@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { X, CheckCircle2, RotateCcw, AlertTriangle, Loader2 } from 'lucide-react'
 import { apiFetch } from '../api/client'
 import { LinkifiedText } from './LinkifiedText'
+import { FixTemplateQuestion, useFixTemplate } from './FixTemplateQuestion'
 
 /** QC's messages of the order's latest Fix round, read from its chat (Admin only); null when there are none. */
 export function useFixChat(orderId: string | null) {
@@ -72,6 +73,7 @@ export function AdminFixActionModal({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fixChat = useFixChat(isOpen && isApprove ? orderId : null)
+  const template = useFixTemplate(isOpen && isApprove ? orderId : null)
 
   useEffect(() => {
     if (isOpen) {
@@ -97,6 +99,10 @@ export function AdminFixActionModal({
       setError('Chưa có nội dung Fix từ khung chat, hãy nhập Ghi chú cho Designer.')
       return
     }
+    if (isApprove && template.problem) {
+      setError(template.problem)
+      return
+    }
     setLoading(true)
     setError(null)
     try {
@@ -107,6 +113,7 @@ export function AdminFixActionModal({
             method: 'POST',
             body: JSON.stringify({
               designer_note: adminNote.trim(),
+              ...template.payload(),
               ...(typeof orderVersion === 'number' ? { expected_version: orderVersion } : {}),
             }),
           }
@@ -218,6 +225,8 @@ export function AdminFixActionModal({
               />
             </div>
           )}
+
+          {isApprove && <FixTemplateQuestion state={template} />}
 
           {isApprove ? <FixChatBox {...fixChat} /> : <div className="space-y-1.5">
             <label className="font-semibold text-slate-800 block text-xs flex items-center justify-between">
