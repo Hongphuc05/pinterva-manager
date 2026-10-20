@@ -1,7 +1,10 @@
 import { ExternalLink } from 'lucide-react'
+import { resolveAssetUrl } from '../api/client'
 import { resolveExternalUrl } from '../utils/statusTranslation'
 
-const URL_PATTERN = /(https?:\/\/[^\s<>"']+)/g
+// Full links, and Tacahu's image-proxy paths (QC images in a Fix note, shown as "Ảnh 1, Ảnh 2…").
+const URL_PATTERN = /(https?:\/\/[^\s<>"']+|\/api\/assets\/proxy\?u=[A-Za-z0-9_=-]+)/g
+const PROXY_PATH = /^\/api\/assets\/proxy\?u=/
 
 type LinkifiedTextProps = {
   text: string
@@ -10,10 +13,20 @@ type LinkifiedTextProps = {
 
 export function LinkifiedText({ text, linkClassName = 'font-semibold text-[#0052CC] underline underline-offset-2 hover:text-[#003D99]' }: LinkifiedTextProps) {
   const parts = text.split(URL_PATTERN)
+  let imageCount = 0
 
   return (
     <>
       {parts.map((part, index) => {
+        if (PROXY_PATH.test(part)) {
+          imageCount += 1
+          return (
+            <a key={`img-${index}`} href={resolveAssetUrl(part)} target="_blank" rel="noopener noreferrer"
+              className={linkClassName} title="Mở ảnh ở tab mới">
+              Ảnh {imageCount}
+            </a>
+          )
+        }
         const url = resolveExternalUrl(part)
         if (!url) return <span key={`text-${index}`}>{part}</span>
 

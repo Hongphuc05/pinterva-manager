@@ -128,9 +128,41 @@ def test_the_fix_card_quotes_every_qc_message_of_the_latest_round(world):
     assert chat.fix_chat_text(world.session, world.order) == (
         "Sai màu — Sửa lại phần tay áo\nhttps://img.test/a.png\nDùng temp adult"
     )
-    assert chat.fix_chat_text(world.session, world.order, with_images=False) == (
-        "Sai màu — Sửa lại phần tay áo\nDùng temp adult"
+    # Not a Printerval host: the Designer gets the link as it is.
+    assert chat.fix_chat_text(world.session, world.order, for_designer=True) == (
+        "Sai màu — Sửa lại phần tay áo\nẢnh: https://img.test/a.png\nDùng temp adult"
     )
+
+
+def test_remarks_sent_before_qc_pressed_fix_belong_to_that_fix(world):
+    """DJ4164173: QC wrote three remarks (still numbered round 0), then opened Fix round 1."""
+    from datetime import UTC, datetime
+
+    from app.adapters.db.models import WorkflowEvent
+
+    def msg(id_, round_, type_, content, at, images=()):
+        return {"id": id_, "fix_round": round_, "type": type_, "sender_type": "staff", "sender_name": "QC",
+                "mine": False, "content": content, "image_urls": list(images), "fix_reason_label": "",
+                "created_at": at}
+
+    world.session.add(WorkflowEvent(order_id=world.order.id, from_state="IN_PROGRESS", to_state="QC_PENDING",
+                                    created_at=datetime(2026, 10, 20, 10, 0, tzinfo=UTC)))  # 17:00 VN
+    world.session.commit()
+    messages = [
+        msg(6900, 0, "message", "Cảm ơn team", "2026-10-20 09:00:00"),  # before the submission: not this Fix
+        msg(6938, 0, "message", "fix des bên side", "2026-10-20 18:13:32"),
+        msg(6940, 0, "message", "fix visor", "2026-10-20 18:15:20",
+            ["https://asset.prtvstatic.com/chat/visor.png"]),
+        msg(6942, 1, "fix_open", "fix lại des 3 mặt t note", "2026-10-20 18:16:23"),
+    ]
+    chat.capture_chat(world.session, world.order, "fix", client_factory=FakeChat(messages))
+    world.session.commit()
+
+    assert chat.fix_chat_text(world.session, world.order) == (
+        "fix des bên side\nfix visor\nhttps://asset.prtvstatic.com/chat/visor.png\nfix lại des 3 mặt t note"
+    )
+    for_designer = chat.fix_chat_text(world.session, world.order, for_designer=True)
+    assert "Ảnh: /api/assets/proxy?u=" in for_designer and "prtvstatic" not in for_designer
 
 
 def test_a_chat_too_long_for_a_photo_caption_goes_out_as_a_text_message(world):
@@ -341,3 +373,11 @@ def test_admin_sees_the_fix_reason_on_list_rows_and_the_detail_but_nobody_else_d
     world.order.state = OrderState.QC_PENDING.value  # only orders in Fix carry a reason
     [back_in_review] = _summarize_orders(world.session, world.admin, [world.order])
     assert back_in_review.fix_reason is None
+
+
+def test_the_designers_telegram_fix_message_says_where_to_see_the_images():
+    from app.application.telegram_service import _without_proxy_links
+
+    assert _without_proxy_links("fix visor\nẢnh: /api/assets/proxy?u=aHR0cHM6Ly9h") == (
+        "fix visor\nẢnh: (xem ảnh trên web Tacahu)"
+    )

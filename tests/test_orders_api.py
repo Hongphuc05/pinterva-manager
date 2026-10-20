@@ -1053,7 +1053,9 @@ def test_approve_fix_sends_the_chat_fix_text_when_admin_note_is_empty(client, db
 
     assert response.status_code == 200
     db_session.refresh(order)
-    assert order.designer_note == "Đổi template — Dùng temp adult"  # no Printerval image link for the Designer
+    # QC's image comes through Tacahu's proxy: the Designer never sees a Printerval host.
+    assert order.designer_note.startswith("Đổi template — Dùng temp adult\nẢnh: /api/assets/proxy?u=")
+    assert "printerval" not in order.designer_note.lower()
     assert order.note_outsource == "https://drive.google.com/file/d/ours"
     assert order.designer_note_released_for_fix is True
 

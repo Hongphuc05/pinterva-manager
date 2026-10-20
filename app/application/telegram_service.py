@@ -586,6 +586,14 @@ def unlink_telegram_account(session: Session, user: User) -> dict[str, Any]:
 # Designer Notifications
 # =========================================================================
 
+_PROXY_LINK = re.compile(r"/api/assets/proxy\?u=[A-Za-z0-9_=-]+")
+
+
+def _without_proxy_links(note: str) -> str:
+    """Image links in a Designer note are Tacahu proxy paths: they only open on the web, so say so."""
+    return _PROXY_LINK.sub("(xem ảnh trên web Tacahu)", note)
+
+
 def notify_designer_new_order(
     session: Session,
     order_id: uuid.UUID,
@@ -606,7 +614,7 @@ def notify_designer_new_order(
         {
             "product_name": order.product_name or "Sản phẩm",
             "deadline": format_vietnam_time(order.deadline_tacahu),
-            "admin_note": order.designer_note or "",
+            "admin_note": _without_proxy_links(order.designer_note or ""),
         },
     )
 
@@ -637,7 +645,7 @@ def notify_designer_urgent_fix(
             "product_name": order.product_name or "Sản phẩm",
             "fix_count": fix_cnt,
             "deadline": format_vietnam_time(order.fix_deadline_at),
-            "admin_note": admin_note or order.designer_note or "Sửa theo yêu cầu của khách",
+            "admin_note": _without_proxy_links(admin_note or order.designer_note or "Sửa theo yêu cầu của khách"),
         },
     )
 

@@ -24,8 +24,9 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
-from app.adapters.db.models import ExternalObservation, Order, Platform
+from app.adapters.db.models import ExternalObservation, Order, Platform, WorkflowEvent
 from app.adapters.printerval.api_client import PrintervalApiClient
+from app.application.sanitization import encode_proxy_url
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -35,7 +36,7 @@ SOURCE = "printerval.chat"
 WATCHED_STATUSES = ("fix", "confirm", "done")
 ACTIVE_STATES = ("IN_PROGRESS", "QC_PENDING", "REVISION")
 PRINTERVAL_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
-SNAPSHOT_MESSAGES = 8
+SNAPSHOT_MESSAGES = 30  # a Fix can come as many messages; keep them all
 CONTENT_LIMIT = 1500
 UNREAD_CACHE_SECONDS = 60
 UNREAD_RETRY_SECONDS = 30
@@ -179,11 +180,24 @@ def _reason_from(evidence: dict | None) -> str | None:
     return None
 
 
-def fix_chat_text(session: Session, order: Order, *, with_images: bool = True) -> str | None:
-    """Every QC message of the latest Fix round captured for the order, oldest first, one per line.
+def _sent_to_review_before(session: Session, order: Order, moment: datetime | None) -> datetime | None:
+    """When the order last went to Review before ``moment`` (the Designer's submission QC is answering)."""
+    query = session.query(WorkflowEvent.created_at).filter(
+        WorkflowEvent.order_id == order.id, WorkflowEvent.to_state == "QC_PENDING"
+    )
+    if moment is not None:
+        query = query.filter(WorkflowEvent.created_at < moment)
+    return query.order_by(WorkflowEvent.created_at.desc()).limit(1).scalar()
 
-    The Telegram card quotes it in full and "use it verbatim" hands it to the Designer, who gets it
-    without image links (they point at Printerval hosts).
+
+def fix_chat_text(session: Session, order: Order, *, for_designer: bool = False) -> str | None:
+    """Every QC message of the latest Fix, oldest first, one per line, with its images.
+
+    QC often writes its remarks first and then presses Fix: Printerval numbers a round only when it is
+    opened, so those remarks carry the previous round's number. They belong to this Fix when sent after
+    the order last went to Review (DJ4164173: three remarks, then "fix lại des 3 mặt").
+
+    ``for_designer``: image links go through Tacahu's asset proxy, which never shows a Printerval host.
     """
     rows = (
         session.query(ExternalObservation)
@@ -197,24 +211,41 @@ def fix_chat_text(session: Session, order: Order, *, with_images: bool = True) -
     if not messages:
         return None
     last_round = messages[-1].get("fix_round") or 0
+    opened = next(
+        (m for m in messages if (m.get("fix_round") or 0) == last_round and m.get("type") == "fix_open"), None
+    )
+    opened_at = datetime.fromisoformat(opened["sent_at"]) if opened and opened.get("sent_at") else None
+    since = _sent_to_review_before(session, order, opened_at) if last_round > 0 else None
+
+    def in_this_fix(message: dict) -> bool:
+        round_ = message.get("fix_round") or 0
+        if round_ == last_round:
+            return True
+        return (
+            since is not None
+            and round_ == last_round - 1
+            and bool(message.get("sent_at"))
+            and datetime.fromisoformat(message["sent_at"]) >= since
+        )
+
     lines = []
-    for message in messages:
-        if (message.get("fix_round") or 0) != last_round:
-            continue
+    for message in filter(in_this_fix, messages):
         text = " — ".join(part for part in (message.get("fix_reason_label"), message.get("content")) if part)
-        images = (message.get("image_urls") or []) if with_images else []
+        images = message.get("image_urls") or []
+        if for_designer:
+            images = [f"Ảnh: {encode_proxy_url(url)}" for url in images]
         lines.extend(line for line in (text, *images) if line)
     return "\n".join(lines) or None
 
 
 def read_fix_chat_text(
-    session: Session, order: Order, *, with_images: bool = True, client_factory: ClientFactory = printerval_client_for
+    session: Session, order: Order, *, for_designer: bool = False, client_factory: ClientFactory = printerval_client_for
 ) -> str | None:
     """``fix_chat_text``, reading the chat once first when nothing was captured (the capture at Fix failed).
 
     Commits a new snapshot it stores; never raises on a Printerval failure.
     """
-    text = fix_chat_text(session, order, with_images=with_images)
+    text = fix_chat_text(session, order, for_designer=for_designer)
     if text is not None or not get_settings().order_chat_enabled:
         return text
     try:
@@ -224,7 +255,7 @@ def read_fix_chat_text(
         session.rollback()
         logger.warning("Chat of %s unreadable for its Fix text", order.external_order_id, exc_info=True)
         return None
-    return fix_chat_text(session, order, with_images=with_images)
+    return fix_chat_text(session, order, for_designer=for_designer)
 
 
 def fix_reasons(session: Session, order_ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:

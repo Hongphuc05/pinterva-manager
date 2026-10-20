@@ -191,7 +191,7 @@ def test_telegram_admin_fix_callbacks(client: TestClient, db_session):
 
     db_session.refresh(order)
     assert order.fix_approved_by_admin is True
-    assert order.designer_note == "Sai màu — Sửa lại màu áo theo QC"  # verbatim chat, no image link
+    assert order.designer_note == "Sai màu — Sửa lại màu áo theo QC\nẢnh: https://img.test/qc.png"  # verbatim chat
     assert order.designer_note_released_for_fix is True
     sibling_write_choice = db_session.query(TelegramActionLog).filter(
         TelegramActionLog.action_type == "APPROVE_FIX_WRITE_NOTE"

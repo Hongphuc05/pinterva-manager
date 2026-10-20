@@ -2781,7 +2781,7 @@ def api_approve_fix(
     # QC writes the Fix in Printerval's chat; note_outsource only holds the link Tacahu pushed, so it is
     # neither the Fix reason nor overwritten here. An explicit Admin note wins; otherwise the chat's Fix
     # text (without Printerval image links) is copied into designer_note.
-    outbound_designer_note = admin_designer_note or read_fix_chat_text(db, order, with_images=False) or ""
+    outbound_designer_note = admin_designer_note or read_fix_chat_text(db, order, for_designer=True) or ""
     if not outbound_designer_note:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,

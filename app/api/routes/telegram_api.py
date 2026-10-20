@@ -1052,7 +1052,7 @@ async def api_telegram_webhook(
             elif prefix == "appfixsource":
                 # QC writes the Fix in Printerval's chat; note_outsource only holds the link Tacahu
                 # pushed, so it is never the Fix reason. Read the chat now if no snapshot exists yet.
-                upstream_note = read_fix_chat_text(db, order, with_images=False)
+                upstream_note = read_fix_chat_text(db, order, for_designer=True)
                 if not upstream_note:
                     # Left pending: Admin can still pick "Có, soạn Ghi chú Admin" or try again.
                     send_message(

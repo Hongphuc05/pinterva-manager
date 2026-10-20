@@ -76,7 +76,7 @@ transition nhưng application layer không được tự động recover.
    chat của đơn trên Printerval — xem "Chat Printerval" bên dưới.
 6. **Fix**: Fix trước hết nằm ở Admin (thẻ Telegram trích nguyên văn nội dung Fix trong chat,
    hoặc nút "Chấp nhận Fix" trên web). Admin duyệt thì Designer nhận **Ghi chú cho Designer**;
-   Admin để trống thì Designer nhận nguyên văn nội dung Fix trong chat, bỏ link ảnh (chi tiết ở
+   Admin để trống thì Designer nhận nguyên văn nội dung Fix trong chat, ảnh qua proxy (chi tiết ở
    "Chat Printerval"). Designer sửa và nộp lại Review (lại kèm 1–3 ảnh mockup mới). Admin từ chối
    Fix thì trả về `QC_PENDING` cùng ghi chú phản hồi cho platform. Designer không bao giờ thấy
    chat hay `note_outsource`.
@@ -181,7 +181,11 @@ QC của Printerval ghi yêu cầu Fix và nhận xét vào khung chat từng đ
    "chưa đọc được khung chat" và việc đọc được thử lại sau 2 và 5 phút.
 
 **Nội dung Fix** = toàn bộ tin của QC (không tính tin của mình) thuộc lượt Fix mới nhất trong các
-snapshot, cũ trước mới sau, mỗi tin một dòng, kèm link ảnh (`fix_chat_text`). Dùng ở:
+snapshot (mỗi snapshot giữ tối đa 30 tin), cũ trước mới sau, mỗi tin một dòng, kèm ảnh (`fix_chat_text`).
+QC hay nhắn nhận xét trước rồi mới bấm Fix; Printerval chỉ tăng số lượt (`fix_round`) lúc bấm Fix nên các tin
+đó còn mang số lượt cũ. Chúng vẫn thuộc lượt Fix này nếu gửi **sau lần đơn sang Review gần nhất** trước tin
+"Mở Fix" (`WorkflowEvent` sang `QC_PENDING`); tin cũ hơn thì không (DJ4164173: 3 tin nhận xét rồi mới mở Fix).
+Dùng ở:
 
 - Thẻ Fix Telegram: trích nguyên văn (tối đa 3000 ký tự); dài quá 1024 ký tự thì gửi tin chữ thay ảnh.
 - Chi tiết đơn (Admin): `fix_reason` là nội dung này; dòng trong danh sách đơn chỉ hiện tin QC mới nhất.
@@ -189,8 +193,9 @@ snapshot, cũ trước mới sau, mỗi tin một dòng, kèm link ảnh (`fix_c
   thì đọc chat 1 lần ngay lúc đó, `read_fix_chat_text`).
 
 Duyệt Fix (web modal, hoặc Telegram "Có, soạn Ghi chú Admin" / "Không, dùng nguyên văn nội dung chat"):
-Admin nhập Ghi chú cho Designer thì des nhận đúng ghi chú đó; để trống thì copy nội dung Fix **không kèm
-link ảnh** (link trỏ host Printerval) vào `designer_note`. Không có nội dung chat thì web trả 422, Telegram
+Admin nhập Ghi chú cho Designer thì des nhận đúng ghi chú đó; để trống thì copy nội dung Fix vào
+`designer_note`, ảnh đi qua proxy ảnh của Tacahu (`Ảnh: /api/assets/proxy?u=…`, không lộ host Printerval; web
+hiển thị thành "Ảnh 1, Ảnh 2…", tin Telegram gửi des thay bằng "(xem ảnh trên web Tacahu)"). Không có nội dung chat thì web trả 422, Telegram
 báo bấm lại hoặc soạn ghi chú. Duyệt Fix không đọc hay ghi `note_outsource` (đó là link Tacahu đẩy lên).
 
 Đọc tin nhắn làm Printerval đánh dấu **đã đọc cho cả team**. Designer không thấy chat; muốn designer biết,
