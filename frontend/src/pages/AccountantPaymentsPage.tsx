@@ -29,16 +29,16 @@ export function AccountantPaymentsPage() {
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
-  // '' = every order; a Monday (YYYY-MM-DD) = that week; 'range' = the from/to days below.
+  // Week: '' = every order, or a Monday (YYYY-MM-DD). The from/to days below replace it while either is set.
   const [week, setWeek] = useState('')
   const [rangeFrom, setRangeFrom] = useState('')
   const [rangeTo, setRangeTo] = useState('')
   const [weeks] = useState(() => recentWeeks())
-  const rangeInvalid = week === 'range' && Boolean(rangeFrom && rangeTo && rangeFrom > rangeTo)
-  const period: PaymentPeriod | null =
-    week === 'range'
-      ? (rangeFrom || rangeTo) && !rangeInvalid ? { from: rangeFrom, to: rangeTo } : null
-      : week ? { week } : null
+  const hasRange = Boolean(rangeFrom || rangeTo)
+  const rangeInvalid = Boolean(rangeFrom && rangeTo && rangeFrom > rangeTo)
+  const period: PaymentPeriod | null = hasRange
+    ? !rangeInvalid ? { from: rangeFrom, to: rangeTo } : null
+    : week ? { week } : null
   const periodKey = JSON.stringify(period)
 
   const load = useCallback(async () => {
@@ -97,32 +97,42 @@ export function AccountantPaymentsPage() {
           <div className="flex flex-wrap items-center gap-2">
           <select
             aria-label="Lọc theo thời gian nộp bài"
-            value={week}
-            onChange={(e) => setWeek(e.target.value)}
+            value={hasRange ? '' : week}
+            onChange={(e) => {
+              setWeek(e.target.value)
+              setRangeFrom('')
+              setRangeTo('')
+            }}
             className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700 shadow-sm"
           >
             <option value="">Tất cả các tuần</option>
             {weeks.map((w) => (
               <option key={w.value} value={w.value}>{w.label}</option>
             ))}
-            <option value="range">Chọn khoảng ngày…</option>
           </select>
-          {week === 'range' && (
-            <>
+          <>
               <label className="flex items-center gap-1 text-xs text-slate-600">
-                Từ
+                Từ ngày
                 <input type="date" aria-label="Từ ngày" value={rangeFrom} max={rangeTo || undefined}
                   onChange={(e) => setRangeFrom(e.target.value)}
                   className="rounded-lg border border-slate-300 bg-white px-1.5 py-1 text-xs shadow-sm" />
               </label>
               <label className="flex items-center gap-1 text-xs text-slate-600">
-                đến
+                đến ngày
                 <input type="date" aria-label="Đến ngày" value={rangeTo} min={rangeFrom || undefined}
                   onChange={(e) => setRangeTo(e.target.value)}
                   className="rounded-lg border border-slate-300 bg-white px-1.5 py-1 text-xs shadow-sm" />
               </label>
-            </>
-          )}
+              {hasRange && (
+                <button
+                  type="button"
+                  onClick={() => { setRangeFrom(''); setRangeTo('') }}
+                  className="text-xs font-semibold text-slate-500 underline hover:text-slate-700"
+                >
+                  Xoá ngày
+                </button>
+              )}
+          </>
           <button
             type="button"
             onClick={() => void load()}

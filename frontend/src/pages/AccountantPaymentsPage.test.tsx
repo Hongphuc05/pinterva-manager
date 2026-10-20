@@ -188,7 +188,6 @@ describe('AccountantPaymentsPage', () => {
   })
 
   it('filters by a date range from day to day, both ends included', async () => {
-    const user = userEvent.setup()
     api.apiFetch.mockImplementation((path: string) => {
       if (path === '/accountant/designers') return Promise.resolve([dan, tram])
       if (path.startsWith('/accountant/designers?date_from=')) return Promise.resolve([tram])
@@ -198,7 +197,6 @@ describe('AccountantPaymentsPage', () => {
     render(<AccountantPaymentsPage />)
     await waitFor(() => expect(screen.getByText('Dân')).toBeInTheDocument())
 
-    await user.selectOptions(screen.getByLabelText('Lọc theo thời gian nộp bài'), 'range')
     const from = screen.getByLabelText('Từ ngày')
     const to = screen.getByLabelText('Đến ngày')
     fireEvent.change(to, { target: { value: '2026-10-10' } })
@@ -209,5 +207,8 @@ describe('AccountantPaymentsPage', () => {
     fireEvent.change(to, { target: { value: '2026-10-16' } })
     await waitFor(() => expect(screen.queryByText('Dân')).not.toBeInTheDocument())
     expect(api.apiFetch).toHaveBeenCalledWith('/accountant/designers?date_from=2026-10-14&date_to=2026-10-16')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Xoá ngày' }))
+    expect(await screen.findByText('Dân')).toBeInTheDocument()
   })
 })
