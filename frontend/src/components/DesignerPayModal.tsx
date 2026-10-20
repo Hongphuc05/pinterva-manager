@@ -139,9 +139,11 @@ export function DesignerPayModal({
               ) : (
                 <>
                   <p data-testid="pay-amount" className="mt-1 text-3xl font-extrabold text-slate-900">{money(invalid ? 0 : amount)}</p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    {empty && !invalid ? 'Không có đơn chờ thanh toán trong khoảng này.' : `${invalid ? 0 : count} đơn`}
-                  </p>
+                  {empty && !invalid ? (
+                    <p className="mt-1 text-xs text-slate-500">Không có đơn chờ thanh toán trong khoảng này.</p>
+                  ) : (
+                    <p className="mt-1 text-2xl font-bold text-slate-700">{invalid ? 0 : count} đơn</p>
+                  )}
                 </>
               )}
             </div>
