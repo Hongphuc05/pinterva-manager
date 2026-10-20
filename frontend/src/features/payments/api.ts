@@ -55,6 +55,26 @@ export interface PaymentHistoryResponse {
  */
 export type PaymentPeriod = { week: string } | { from: string; to: string }
 
+/** Editable form of a period: a week (Monday, '' = all) or a from/to range that replaces it while set. */
+export interface PeriodFilterValue {
+  week: string
+  from: string
+  to: string
+}
+
+export const EMPTY_PERIOD_FILTER: PeriodFilterValue = { week: '', from: '', to: '' }
+
+export function filterToPeriod(v: PeriodFilterValue): { period: PaymentPeriod | null; invalid: boolean } {
+  const invalid = Boolean(v.from && v.to && v.from > v.to)
+  if (v.from || v.to) return { period: invalid ? null : { from: v.from, to: v.to }, invalid }
+  return { period: v.week ? { week: v.week } : null, invalid: false }
+}
+
+export function periodToFilter(period: PaymentPeriod | null | undefined): PeriodFilterValue {
+  if (!period) return EMPTY_PERIOD_FILTER
+  return 'week' in period ? { week: period.week, from: '', to: '' } : { week: '', from: period.from, to: period.to }
+}
+
 export function periodQuery(period?: PaymentPeriod | null): string {
   if (!period) return ''
   const params = new URLSearchParams()

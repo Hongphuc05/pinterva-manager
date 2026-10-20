@@ -8,11 +8,13 @@ import {
   fetchPendingDesigners,
   loadDesignerQr,
   prefetchPendingDesignerDetail,
-  recentWeeks,
-  type PaymentPeriod,
+  EMPTY_PERIOD_FILTER,
+  filterToPeriod,
+  type PeriodFilterValue,
   type PendingDesigner,
 } from '../features/payments/api'
 import { DesignerPayModal } from '../components/DesignerPayModal'
+import { PaymentPeriodFilter } from '../components/PaymentPeriodFilter'
 import { PaymentHistoryModal } from '../components/PaymentHistoryModal'
 
 const money = (n: number) => `${n.toLocaleString('vi-VN')} đ`
@@ -29,16 +31,9 @@ export function AccountantPaymentsPage() {
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
-  // Week: '' = every order, or a Monday (YYYY-MM-DD). The from/to days below replace it while either is set.
-  const [week, setWeek] = useState('')
-  const [rangeFrom, setRangeFrom] = useState('')
-  const [rangeTo, setRangeTo] = useState('')
-  const [weeks] = useState(() => recentWeeks())
-  const hasRange = Boolean(rangeFrom || rangeTo)
-  const rangeInvalid = Boolean(rangeFrom && rangeTo && rangeFrom > rangeTo)
-  const period: PaymentPeriod | null = hasRange
-    ? !rangeInvalid ? { from: rangeFrom, to: rangeTo } : null
-    : week ? { week } : null
+  // Week: '' = every order, or a Monday (YYYY-MM-DD). The from/to days replace it while either is set.
+  const [filter, setFilter] = useState<PeriodFilterValue>(EMPTY_PERIOD_FILTER)
+  const { period, invalid: rangeInvalid } = filterToPeriod(filter)
   const periodKey = JSON.stringify(period)
 
   const load = useCallback(async () => {
@@ -95,44 +90,7 @@ export function AccountantPaymentsPage() {
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-bold text-slate-700">Chờ thanh toán ({rows?.length ?? 0} designer)</h2>
           <div className="flex flex-wrap items-center gap-2">
-          <select
-            aria-label="Lọc theo thời gian nộp bài"
-            value={hasRange ? '' : week}
-            onChange={(e) => {
-              setWeek(e.target.value)
-              setRangeFrom('')
-              setRangeTo('')
-            }}
-            className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700 shadow-sm"
-          >
-            <option value="">Tất cả các tuần</option>
-            {weeks.map((w) => (
-              <option key={w.value} value={w.value}>{w.label}</option>
-            ))}
-          </select>
-          <>
-              <label className="flex items-center gap-1 text-xs text-slate-600">
-                Từ ngày
-                <input type="date" aria-label="Từ ngày" value={rangeFrom} max={rangeTo || undefined}
-                  onChange={(e) => setRangeFrom(e.target.value)}
-                  className="rounded-lg border border-slate-300 bg-white px-1.5 py-1 text-xs shadow-sm" />
-              </label>
-              <label className="flex items-center gap-1 text-xs text-slate-600">
-                đến ngày
-                <input type="date" aria-label="Đến ngày" value={rangeTo} min={rangeFrom || undefined}
-                  onChange={(e) => setRangeTo(e.target.value)}
-                  className="rounded-lg border border-slate-300 bg-white px-1.5 py-1 text-xs shadow-sm" />
-              </label>
-              {hasRange && (
-                <button
-                  type="button"
-                  onClick={() => { setRangeFrom(''); setRangeTo('') }}
-                  className="text-xs font-semibold text-slate-500 underline hover:text-slate-700"
-                >
-                  Xoá ngày
-                </button>
-              )}
-          </>
+          <PaymentPeriodFilter value={filter} onChange={setFilter} />
           <button
             type="button"
             onClick={() => void load()}
@@ -186,6 +144,7 @@ export function AccountantPaymentsPage() {
       {selected && (
         <DesignerPayModal
           designerId={selected}
+          designerName={rows?.find((r) => r.designer_id === selected)?.designer_name ?? ''}
           period={period}
           onClose={() => setSelected(null)}
           onPaid={() => void load()}

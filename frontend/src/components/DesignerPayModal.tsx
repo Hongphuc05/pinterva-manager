@@ -1,56 +1,77 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowLeft, CheckCircle2, Image as ImageIcon, Loader2, Package, QrCode, X } from 'lucide-react'
+import { CheckCircle2, Image as ImageIcon, Loader2, X } from 'lucide-react'
 import { ApiError } from '../api/client'
 import {
+  clearPendingDetailCache,
   fetchPendingDesignerDetail,
+  filterToPeriod,
   loadDesignerQr,
   payDesigner,
-  periodQuery,
+  periodToFilter,
   type PaymentPeriod,
   type PendingDesignerDetail,
+  type PeriodFilterValue,
 } from '../features/payments/api'
+import { PaymentPeriodFilter } from './PaymentPeriodFilter'
 import { useToast } from '../context/ToastContext'
 
 const money = (n: number) => `${n.toLocaleString('vi-VN')} đ`
-const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('vi-VN') : '—')
-
-type Stage = 'list' | 'qr'
 
 /**
- * Detail + pay flow for one Designer: their orders waiting for payment (count/total only, no
- * per-order rate), then the bank QR and "Xác nhận đã thanh toán". The order list and total are
- * frozen at load time and sent back as-is on payment, so a server-side change (a new order
- * arriving, a rate edited) is refused rather than silently charging a different amount.
+ * Pay one Designer: the amount for the chosen week / date range on the left (it follows the
+ * filter), their bank QR on the right. The order list is not shown, but it is still loaded and
+ * sent back as-is on payment, so a server-side change (a new order arriving, a rate edited) is
+ * refused rather than silently charging a different amount. After paying, the period reads 0.
  */
 export function DesignerPayModal({
   designerId,
+  designerName,
   period = null,
   onClose,
   onPaid,
 }: {
   designerId: string
-  /** Only orders submitted in this week/date range; null means every order. */
+  designerName: string
+  /** The period chosen on the list; the popup starts with it and can change it. */
   period?: PaymentPeriod | null
   onClose: () => void
   onPaid: () => void
 }) {
   const { showToast: toast } = useToast()
+  const [filter, setFilter] = useState<PeriodFilterValue>(() => periodToFilter(period))
+  const { period: activePeriod, invalid } = filterToPeriod(filter)
+  const periodKey = JSON.stringify(activePeriod)
   const [detail, setDetail] = useState<PendingDesignerDetail | null>(null)
+  const [empty, setEmpty] = useState(false) // nothing waiting in this period (never loaded, or already paid)
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [stage, setStage] = useState<Stage>('list')
   const [qrUrls, setQrUrls] = useState<string[]>([])
   const [qrLoading, setQrLoading] = useState(false)
   const [paying, setPaying] = useState(false)
+  const [reload, setReload] = useState(0)
 
   useEffect(() => {
-    fetchPendingDesignerDetail(designerId, period)
-      .then(setDetail)
-      .catch((err) => setError(err instanceof ApiError ? err.message : 'Không tải được danh sách đơn.'))
-    // periodQuery(period): a stable key for the period object
-  }, [designerId, periodQuery(period)])
+    if (invalid) return
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    fetchPendingDesignerDetail(designerId, activePeriod)
+      .then((d) => { if (!cancelled) { setDetail(d); setEmpty(false) } })
+      .catch((err) => {
+        if (cancelled) return
+        if (err instanceof ApiError && err.status === 404) {
+          setDetail(null)
+          setEmpty(true)
+        } else {
+          setError(err instanceof ApiError ? err.message : 'Không tải được số tiền.')
+        }
+      })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+    // periodKey stands for activePeriod
+  }, [designerId, periodKey, invalid, reload])
 
-  // The QR loads alongside the order list (not after "Thanh toán"), from the per-session cache.
   useEffect(() => {
     let cancelled = false
     setQrLoading(true)
@@ -68,8 +89,9 @@ export function DesignerPayModal({
     try {
       await payDesigner(designerId, detail.orders.map((o) => o.order_id), detail.pending_amount)
       toast(`Đã ghi nhận thanh toán ${detail.pending_count} đơn cho ${detail.designer_name}.`, 'success')
-      onPaid()
-      onClose()
+      clearPendingDetailCache()
+      onPaid() // refresh the list behind
+      setReload((n) => n + 1) // this period now reads 0
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         toast(err.message, 'error')
@@ -77,103 +99,84 @@ export function DesignerPayModal({
         onClose()
       } else {
         toast(err instanceof ApiError ? err.message : 'Không thanh toán được.', 'error')
-        setPaying(false)
       }
+    } finally {
+      setPaying(false)
     }
   }
+
+  const name = detail?.designer_name || designerName
+  const amount = detail?.pending_amount ?? 0
+  const count = detail?.pending_count ?? 0
 
   return createPortal(
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/70 p-4" onClick={onClose}>
       <div
         data-testid="designer-pay-modal"
-        className="flex max-h-[88vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+        className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-5 py-4">
-          <div className="flex items-center gap-2">
-            {stage === 'qr' && (
-              <button type="button" onClick={() => setStage('list')} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700" aria-label="Quay lại">
-                <ArrowLeft className="h-4 w-4" />
-              </button>
-            )}
-            <div>
-              <h3 className="text-sm font-bold text-slate-900">{detail?.designer_name || 'Đang tải...'}</h3>
-              <p className="text-xs text-slate-500">{stage === 'qr' ? 'Quét QR để chuyển khoản' : 'Đơn chờ thanh toán'}</p>
-            </div>
-          </div>
+          <h3 className="text-sm font-bold text-slate-900">{name || 'Thanh toán'}</h3>
           <button type="button" onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-slate-200 hover:text-slate-700" aria-label="Đóng">
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
-          {error ? (
-            <p className="px-5 py-10 text-center text-sm text-rose-600">{error}</p>
-          ) : !detail ? (
-            <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
-              <Loader2 className="h-5 w-5 animate-spin" />Đang tải...
-            </div>
-          ) : stage === 'list' ? (
-            <ul className="divide-y divide-slate-100">
-              {detail.orders.map((o) => (
-                <li key={o.order_id} className="flex items-center gap-3 px-5 py-3">
-                  <div className="grid h-10 w-10 flex-none place-items-center overflow-hidden rounded-lg bg-slate-100">
-                    {o.thumbnail_url ? <img src={o.thumbnail_url} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" /> : <Package className="h-4 w-4 text-slate-400" />}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-mono text-xs font-bold text-slate-800">{o.external_order_id}</p>
-                    <p className="truncate text-xs text-slate-500">{o.product_name || '—'}</p>
-                  </div>
-                  <span className="flex-none text-xs text-slate-400">{when(o.submitted_at)}</span>
-                </li>
-              ))}
-            </ul>
-          ) : qrLoading ? (
-            <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
-              <Loader2 className="h-5 w-5 animate-spin" />Đang tải QR...
-            </div>
-          ) : qrUrls.length === 0 ? (
-            <div className="flex flex-col items-center gap-2 py-16 text-center text-sm text-slate-500">
-              <ImageIcon className="h-8 w-8 text-slate-300" />
-              <p>Designer chưa tải ảnh QR ngân hàng.</p>
-              <p className="text-xs text-slate-400">Vẫn có thể xác nhận đã thanh toán nếu bạn đã trả bằng cách khác.</p>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center gap-3 py-6">
-              {qrUrls.map((url, i) => (
-                <img key={i} src={url} alt={`QR ${i + 1} của ${detail.designer_name}`} className="max-h-[46vh] max-w-[85%] rounded-lg object-contain shadow" />
-              ))}
-            </div>
-          )}
-        </div>
+        <div className="grid flex-1 overflow-y-auto md:grid-cols-2">
+          <div className="flex flex-col gap-4 border-b border-slate-200 p-5 md:border-b-0 md:border-r">
+            <PaymentPeriodFilter value={filter} onChange={setFilter} />
+            {invalid && <p className="rounded-lg bg-red-50 px-3 py-1.5 text-xs text-red-700">Ngày bắt đầu phải trước ngày kết thúc.</p>}
 
-        {detail && (
-          <div className="border-t border-slate-200 bg-slate-50 px-5 py-4">
-            <div className="mb-3 flex items-center justify-between">
-              <span className="text-xs font-semibold text-slate-500">{detail.pending_count} đơn</span>
-              <span className="text-base font-bold text-slate-900">{money(detail.pending_amount)}</span>
+            <div className="mt-2 text-center md:text-left">
+              <p className="text-xs font-semibold text-slate-500">Số tiền cần thanh toán</p>
+              {error ? (
+                <p className="mt-2 text-sm text-rose-600">{error}</p>
+              ) : loading ? (
+                <div className="mt-3 flex items-center gap-2 text-sm text-slate-500">
+                  <Loader2 className="h-5 w-5 animate-spin" />Đang tải...
+                </div>
+              ) : (
+                <>
+                  <p data-testid="pay-amount" className="mt-1 text-3xl font-extrabold text-slate-900">{money(invalid ? 0 : amount)}</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {empty && !invalid ? 'Không có đơn chờ thanh toán trong khoảng này.' : `${invalid ? 0 : count} đơn`}
+                  </p>
+                </>
+              )}
             </div>
-            {stage === 'list' ? (
-              <button
-                type="button"
-                onClick={() => setStage('qr')}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#0052CC] px-4 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-[#0041A3]"
-              >
-                <QrCode className="h-4 w-4" />Thanh toán
-              </button>
+
+            <button
+              type="button"
+              onClick={confirmPaid}
+              disabled={paying || loading || !detail || invalid}
+              className="mt-auto flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50"
+            >
+              {paying ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+              Xác nhận đã thanh toán
+            </button>
+          </div>
+
+          <div className="flex items-center justify-center p-5">
+            {qrLoading ? (
+              <div className="flex items-center gap-2 text-sm text-slate-500">
+                <Loader2 className="h-5 w-5 animate-spin" />Đang tải QR...
+              </div>
+            ) : qrUrls.length === 0 ? (
+              <div className="flex flex-col items-center gap-2 text-center text-sm text-slate-500">
+                <ImageIcon className="h-8 w-8 text-slate-300" />
+                <p>Designer chưa tải ảnh QR ngân hàng.</p>
+                <p className="text-xs text-slate-400">Vẫn có thể xác nhận đã thanh toán nếu bạn đã trả bằng cách khác.</p>
+              </div>
             ) : (
-              <button
-                type="button"
-                onClick={confirmPaid}
-                disabled={paying}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50"
-              >
-                {paying ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                Xác nhận đã thanh toán
-              </button>
+              <div className="flex flex-col items-center gap-3">
+                {qrUrls.map((url, i) => (
+                  <img key={i} src={url} alt={`QR ${i + 1} của ${name}`} className="max-h-[56vh] max-w-full rounded-lg object-contain shadow" />
+                ))}
+              </div>
             )}
           </div>
-        )}
+        </div>
       </div>
     </div>,
     document.body,

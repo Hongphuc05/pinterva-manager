@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { clearPaymentCaches } from '../features/payments/api'
 import { AccountantPaymentsPage } from './AccountantPaymentsPage'
 
 const logout = vi.fn()
@@ -45,6 +46,7 @@ function routeFetch(overrides: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
+  clearPaymentCaches() // QR images are cached per designer for the session
   routeFetch()
   logout.mockReset()
 })
@@ -59,29 +61,38 @@ describe('AccountantPaymentsPage', () => {
     expect(screen.getByText('Chưa có QR')).toBeInTheDocument() // Trâm only
   })
 
-  it('opens a designer, shows their orders (no rate), pays, and the row is gone afterwards', async () => {
+  it('opens a designer: amount on the left, no order list; pays and the period reads 0', async () => {
     const user = userEvent.setup()
+    const { ApiError } = await import('../api/client')
     render(<AccountantPaymentsPage />)
     await waitFor(() => expect(screen.getByText('Dân')).toBeInTheDocument())
 
     await user.click(screen.getByText('Dân'))
     const modal = () => within(screen.getByTestId('designer-pay-modal'))
-    await waitFor(() => expect(modal().getByText('DJ-1')).toBeInTheDocument())
-    expect(modal().getByText('DJ-2')).toBeInTheDocument()
-    expect(modal().queryByText(/40\.000|55\.000/)).not.toBeInTheDocument() // no per-order price shown, only the total
-
-    await user.click(modal().getByText('Thanh toán'))
-    await waitFor(() => expect(modal().getByText('Quét QR để chuyển khoản')).toBeInTheDocument())
+    await waitFor(() => expect(modal().getByTestId('pay-amount')).toHaveTextContent('95.000 đ'))
+    expect(modal().getByText('2 đơn')).toBeInTheDocument()
+    expect(modal().queryByText('DJ-1')).not.toBeInTheDocument() // no per-order list
+    expect(modal().queryByText('Thanh toán')).not.toBeInTheDocument() // no intermediate step either
 
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
-    // After paying, Dân drops out of the pending list — the next fetch must return only Trâm.
+    // After paying, Dân drops out of the list and his orders for this period are gone (404).
     routeFetch({ designers: [tram] })
+    api.apiFetch.mockImplementation(((path: string, init?: RequestInit) => {
+      if (path === '/accountant/designers/dan1') return Promise.reject(new ApiError(404, 'Designer này không còn đơn chờ thanh toán.'))
+      if (path === '/accountant/designers') return Promise.resolve([tram])
+      if (path.includes('/pay')) {
+        expect(JSON.parse(init!.body as string)).toEqual({ order_ids: ['o1', 'o2'], expected_total: 95000 })
+        return Promise.resolve({ ok: true, paid_count: 2, total_amount: 95000 })
+      }
+      return Promise.resolve({ images: [] })
+    }) as never)
     await user.click(modal().getByText('Xác nhận đã thanh toán'))
 
     expect(confirmSpy).toHaveBeenCalledWith('Bạn chắc chắn đã thanh toán xong rồi chứ?')
-    await waitFor(() => expect(screen.queryByTestId('designer-pay-modal')).not.toBeInTheDocument())
-    await waitFor(() => expect(screen.queryByText('Dân')).not.toBeInTheDocument())
-    expect(screen.getByText('Trâm')).toBeInTheDocument()
+    await waitFor(() => expect(modal().getByTestId('pay-amount')).toHaveTextContent('0 đ'))
+    expect(modal().getByText('Không có đơn chờ thanh toán trong khoảng này.')).toBeInTheDocument()
+    expect(modal().getByText('Xác nhận đã thanh toán')).toBeDisabled()
+    await waitFor(() => expect(screen.queryByText('Dân', { selector: 'p' })).not.toBeInTheDocument())
     confirmSpy.mockRestore()
   })
 
@@ -91,21 +102,18 @@ describe('AccountantPaymentsPage', () => {
     await waitFor(() => expect(screen.getByText('Dân')).toBeInTheDocument())
     await user.click(screen.getByText('Dân'))
     const modal = () => within(screen.getByTestId('designer-pay-modal'))
-    await waitFor(() => expect(modal().getByText('DJ-1')).toBeInTheDocument())
-    await user.click(modal().getByText('Thanh toán'))
-    await waitFor(() => expect(modal().getByText('Quét QR để chuyển khoản')).toBeInTheDocument())
+    await waitFor(() => expect(modal().getByTestId('pay-amount')).toHaveTextContent('95.000 đ'))
 
     vi.spyOn(window, 'confirm').mockReturnValue(false)
     await user.click(modal().getByText('Xác nhận đã thanh toán'))
     expect(api.apiFetch).not.toHaveBeenCalledWith(expect.stringContaining('/pay'), expect.anything())
-    expect(modal().getByText('Quét QR để chuyển khoản')).toBeInTheDocument() // still open
+    expect(modal().getByTestId('pay-amount')).toHaveTextContent('95.000 đ') // still open and unchanged
   })
 
   it('a designer without a QR can still be paid, with a note instead of an image', async () => {
     const user = userEvent.setup()
     render(<AccountantPaymentsPage />)
     await waitFor(() => expect(screen.getByText('Trâm')).toBeInTheDocument())
-    routeFetch({ danDetail: { ...tram, orders: [{ order_id: 'o3', external_order_id: 'DJ-3', product_name: null, thumbnail_url: null, submitted_at: null }] } })
     api.apiFetch.mockImplementation((path: string) => {
       if (path === '/accountant/designers/tram1') return Promise.resolve({ ...tram, orders: [{ order_id: 'o3', external_order_id: 'DJ-3', product_name: null, thumbnail_url: null, submitted_at: null }] })
       if (path.includes('/bank-qr')) return Promise.resolve({ images: [] })
@@ -113,10 +121,27 @@ describe('AccountantPaymentsPage', () => {
     })
     await user.click(screen.getByText('Trâm'))
     const modal = () => within(screen.getByTestId('designer-pay-modal'))
-    await waitFor(() => expect(modal().getByText('DJ-3')).toBeInTheDocument())
-    await user.click(modal().getByText('Thanh toán'))
+    await waitFor(() => expect(modal().getByTestId('pay-amount')).toHaveTextContent('40.000 đ'))
     await waitFor(() => expect(modal().getByText('Designer chưa tải ảnh QR ngân hàng.')).toBeInTheDocument())
     expect(modal().getByText('Xác nhận đã thanh toán')).toBeEnabled()
+  })
+
+  it('shows the QR image next to the amount', async () => {
+    const user = userEvent.setup()
+    routeFetch()
+    api.apiFetch.mockImplementation((path: string) => {
+      if (path === '/accountant/designers') return Promise.resolve([dan, tram])
+      if (path === '/accountant/designers/dan1') return Promise.resolve(danDetail)
+      if (path.includes('/bank-qr')) return Promise.resolve({ images: [{ url: '/qr/1' }] })
+      return Promise.reject(new Error(`unexpected path ${path}`))
+    })
+    api.apiFetchBlob.mockResolvedValue(new Blob(['x']))
+    URL.createObjectURL = vi.fn(() => 'blob:qr-1')
+    render(<AccountantPaymentsPage />)
+    await waitFor(() => expect(screen.getByText('Dân')).toBeInTheDocument())
+    await user.click(screen.getByText('Dân'))
+    const modal = within(await screen.findByTestId('designer-pay-modal'))
+    expect(await modal.findByAltText('QR 1 của Dân')).toBeInTheDocument()
   })
 
   it('a server conflict (data changed) closes the modal and refreshes instead of pretending success', async () => {
@@ -125,9 +150,7 @@ describe('AccountantPaymentsPage', () => {
     await waitFor(() => expect(screen.getByText('Dân')).toBeInTheDocument())
     await user.click(screen.getByText('Dân'))
     const modal = () => within(screen.getByTestId('designer-pay-modal'))
-    await waitFor(() => expect(modal().getByText('DJ-1')).toBeInTheDocument())
-    await user.click(modal().getByText('Thanh toán'))
-    await waitFor(() => expect(modal().getByText('Quét QR để chuyển khoản')).toBeInTheDocument())
+    await waitFor(() => expect(modal().getByTestId('pay-amount')).toHaveTextContent('95.000 đ'))
 
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     const { ApiError } = await import('../api/client')
@@ -182,9 +205,32 @@ describe('AccountantPaymentsPage', () => {
 
     await user.click(screen.getByText('Dân'))
     const modal = within(await screen.findByTestId('designer-pay-modal'))
-    await waitFor(() => expect(modal.getByText('DJ-1')).toBeInTheDocument())
-    expect(modal.queryByText('DJ-2')).not.toBeInTheDocument()
+    // The popup starts with the list's week and shows only that week's amount.
+    await waitFor(() => expect(modal.getByTestId('pay-amount')).toHaveTextContent('40.000 đ'))
     expect(api.apiFetch).toHaveBeenCalledWith(`/accountant/designers/dan1?week=${thisWeek}`)
+  })
+
+  it('the popup has its own period filter: the amount follows it', async () => {
+    const user = userEvent.setup()
+    api.apiFetch.mockImplementation((path: string) => {
+      if (path === '/accountant/designers') return Promise.resolve([dan, tram])
+      if (path === '/accountant/designers/dan1') return Promise.resolve(danDetail)
+      if (path.startsWith('/accountant/designers/dan1?date_from=2026-10-01&date_to=2026-10-07')) {
+        return Promise.resolve({ ...dan, pending_count: 1, pending_amount: 30000, orders: [danDetail.orders[0]] })
+      }
+      if (path.includes('/bank-qr')) return Promise.resolve({ images: [] })
+      return Promise.reject(new Error(`unexpected path ${path}`))
+    })
+    render(<AccountantPaymentsPage />)
+    await waitFor(() => expect(screen.getByText('Dân')).toBeInTheDocument())
+    await user.click(screen.getByText('Dân'))
+    const modal = within(await screen.findByTestId('designer-pay-modal'))
+    await waitFor(() => expect(modal.getByTestId('pay-amount')).toHaveTextContent('95.000 đ'))
+
+    fireEvent.change(modal.getByLabelText('Từ ngày'), { target: { value: '2026-10-01' } })
+    fireEvent.change(modal.getByLabelText('Đến ngày'), { target: { value: '2026-10-07' } })
+    await waitFor(() => expect(modal.getByTestId('pay-amount')).toHaveTextContent('30.000 đ'))
+    expect(modal.getByText('1 đơn')).toBeInTheDocument()
   })
 
   it('filters by a date range from day to day, both ends included', async () => {
