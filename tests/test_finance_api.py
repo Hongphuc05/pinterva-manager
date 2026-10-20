@@ -239,3 +239,26 @@ def test_payment_telegram_notification_credits_latest_submitter_not_current_assi
     assert args[1] == str(designer_b.id)  # notified: the credited submitter B
     assert args[1] != str(designer_a.id)  # not: the stale current assignee A
     assert args[2] == 1 and args[3] == 40000
+
+
+def test_each_order_is_priced_by_its_own_platform_even_in_the_default_all_platforms_view(client, db_session):
+    """The "Mặc định" platform view lists every platform's orders: they were all priced at the default
+    platform's rates (Lan Anh Trello's 15k duplicates showed 40k on a phone left on that platform)."""
+    from app.api.deps import DEFAULT_PLATFORM_ID
+
+    default = db_session.get(Platform, DEFAULT_PLATFORM_ID)
+    if default is None:
+        default = Platform(id=DEFAULT_PLATFORM_ID, name="Mặc định", account_username="default-rate@example.com")
+        db_session.add(default)
+    default.standard_order_rate, default.duplicate_order_rate = 40000, 40000
+    platform, admin, des, order, foreign, hdr = _rate_setup(db_session, "own")
+    platform.duplicate_order_rate = 15000
+    order.work_domain = "duplicate"
+    db_session.commit()
+
+    def rate(platform_id):
+        stats = client.get("/api/finance/stats", headers={**hdr, "X-Platform-Id": str(platform_id)}).json()
+        return next(t for t in stats["tasks"] if t["order_id"] == str(order.id))["rate"]
+
+    assert rate(platform.id) == 15000
+    assert rate(DEFAULT_PLATFORM_ID) == 15000  # was 40000

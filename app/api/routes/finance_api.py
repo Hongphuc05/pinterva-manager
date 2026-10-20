@@ -30,7 +30,7 @@ from app.api.deps import (
     require_any_role,
 )
 from app.application.concurrency import require_expected_order_version
-from app.application.payments import pay_orders
+from app.application.payments import order_amount, pay_orders
 from app.application.sanitization import encode_proxy_url
 from app.domain.access import (
     DUPLICATE_CHECK_DUPLICATE,
@@ -377,6 +377,7 @@ def get_finance_stats(
         target_platform = db.query(Platform).first()
     standard_rate = target_platform.standard_order_rate if target_platform else 40000
     duplicate_rate = target_platform.duplicate_order_rate if target_platform else 40000
+    platforms_by_id = {platform.id: platform for platform in db.query(Platform).all()}
 
     # 1. Fetch all users for designer lookups. Unscoped: UUID lookups (user_map_by_id, used
     # whenever an event/assignment carries an actor/designer id) are exact regardless of
@@ -722,9 +723,9 @@ def get_finance_stats(
         l_sub = latest_submitted_at or order.review_submitted_at or time_anchor
 
         task_domain = order.work_domain or "standard"
-        task_rate = order.custom_rate if order.custom_rate is not None else (
-            duplicate_rate if task_domain == WORK_DOMAIN_DUPLICATE else standard_rate
-        )
+        # The order's own platform prices it (as pay_orders does), not the platform the Admin is viewing:
+        # the "Mặc định" view lists every platform's orders and priced them all at its own rates.
+        task_rate = order_amount(order, platforms_by_id.get(order.platform_id) or target_platform)
 
         submissions_by_order[order.id] = {
             "order_id": str(order.id),
