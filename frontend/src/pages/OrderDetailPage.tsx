@@ -272,6 +272,9 @@ export function OrderDetailPage() {
           })
           submittedByAssignment = true
         } catch (assignErr: any) {
+          // A server error or network failure must surface, not fall back to the state PATCH below
+          // (which would hide it behind a "success").
+          if (!(assignErr instanceof ApiError) || assignErr.status >= 500) throw assignErr
           console.warn('Ghi nhận assignment result:', assignErr)
         }
       }
@@ -280,8 +283,8 @@ export function OrderDetailPage() {
           method: 'PATCH',
           body: JSON.stringify({
             state: 'QC_PENDING',
-            drive_url: hasFixTag ? undefined : (submittedText || undefined),
-            note_outsource: hasFixTag ? undefined : (submittedText || undefined),
+            drive_url: submittedText || undefined,
+            note_outsource: submittedText || undefined,
             image_ids: mockupIds,
             ...(usesOrderConcurrency ? { expected_version: order.version } : {}),
           }),
@@ -1003,7 +1006,7 @@ export function OrderDetailPage() {
               )}
             </div>
 
-            {/* A Fix reuses its first result link; Designer can only update it back to Review. */}
+            {/* A Fix may send a new link; left blank it keeps the link already submitted. */}
             {!isDone && (
               <form
                 className="space-y-2 pt-3 border-t border-blue-100"
@@ -1014,8 +1017,7 @@ export function OrderDetailPage() {
                 }}
               >
                 <div className="flex flex-col sm:flex-row gap-3">
-                  {!hasFixTag && (
-                    <div className="relative flex-1">
+                  <div className="relative flex-1">
                       <input
                         type="text"
                         disabled={isReview || busyAssignment}
@@ -1027,7 +1029,9 @@ export function OrderDetailPage() {
                         placeholder={
                           isReview
                             ? 'Đã nộp bài - Đang ở Review (Bấm "Doing" ở trên nếu muốn sửa nộp lại)'
-                            : 'Nhập link Drive, link ảnh hoặc ghi chú hoàn thành (tùy chọn)...'
+                            : hasFixTag
+                              ? 'Link thiết kế mới (tùy chọn với đơn Fix, để trống thì giữ link cũ)...'
+                              : 'Nhập link Drive, link ảnh hoặc ghi chú hoàn thành (tùy chọn)...'
                         }
                         value={driveUrl}
                         onChange={(e) => setDriveUrl(e.target.value)}
@@ -1044,14 +1048,6 @@ export function OrderDetailPage() {
                         </span>
                       )}
                     </div>
-                  )}
-
-                  {hasFixTag && !isReview && (
-                    <div className="flex-1 flex items-center gap-2 text-xs font-semibold text-orange-900 bg-orange-50 border border-orange-200/80 px-3.5 py-2 rounded-xl">
-                      <AlertCircle className="h-4 w-4 text-orange-600 shrink-0" />
-                      <span>Đơn có tag Fix (Fix × {order.fix_return_count || 1}). Bài nộp giữ nguyên link gốc từ kho lưu trữ. Bạn thực hiện sửa bài và bấm Cập nhật đơn để gửi Review.</span>
-                    </div>
-                  )}
 
                   <button
                     type="submit"

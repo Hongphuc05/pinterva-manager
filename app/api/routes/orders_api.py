@@ -2599,11 +2599,12 @@ def api_update_order_state(
         or old_state in (OrderState.REVISION.value, "FIX", "REVISION_REQUESTED")
         or order.fix_approved_by_admin
     )
-    if not is_fix_order:
-        if submitted_link:
-            order.note_outsource = submitted_link
-        elif submitted_note:
-            order.note_outsource = submitted_note
+    # A Fix keeps its link unless the Designer sends a different one (then it replaces it on Printerval too).
+    new_link = submitted_link or submitted_note
+    link_changed = bool(new_link) and new_link != (order.note_outsource or "")
+    push_link = not is_fix_order or link_changed
+    if new_link and push_link:
+        order.note_outsource = new_link
 
     actor_name = user.full_name or user.username
     des_name = None
@@ -2721,7 +2722,7 @@ def api_update_order_state(
 
             sync_order_review_to_printerval_task.delay(
                 str(order.id),
-                None if is_fix_order else order.note_outsource,
+                order.note_outsource if push_link else None,
                 "Review",
                 # Only the state: this route has just cleared fix_approved_by_admin, so expecting it set
                 # made every Fix resubmission through here skip its own push silently.

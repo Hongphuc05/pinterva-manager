@@ -1282,8 +1282,10 @@ export function OrdersListPage() {
           })
           submittedByAssignment = true
         } catch (assignErr) {
-          // An already-submitted order must not fall back to a raw state PATCH.
+          // An already-submitted order must not fall back to a raw state PATCH, and neither must a
+          // server error or a network failure: the fallback would hide it behind a "success".
           if (['QC_PENDING', 'DONE'].includes((order.state || '').toUpperCase())) throw assignErr
+          if (!(assignErr instanceof ApiError) || assignErr.status >= 500) throw assignErr
           console.warn('Ghi nhận assignment result:', assignErr)
         }
       }

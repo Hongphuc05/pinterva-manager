@@ -285,3 +285,23 @@ def test_my_tasks_suppresses_note_outsource_when_flagged(client, db_session):
     task_order = response.json()["tasks"][0]["order"]
     assert task_order["note_outsource"] == ""
     assert task_order["designer_note"] == "Admin added template: https://example.com/template"
+
+
+def test_a_long_drive_link_submits_and_replays(client, db_session, monkeypatch, stage_mockup):
+    """DJ4161424: a Drive link with a long fbclid overflowed the idempotency fingerprint (500), and the web
+    then fell back to a route that dropped a Fix's new link."""
+    designer = _login(client, db_session, "designer", "long-link-submitter")
+    assignment, order = _seed_owned_task(db_session, designer, OrderState.IN_PROGRESS.value)
+    from app.workers import assignment_sync_tasks
+
+    monkeypatch.setattr(assignment_sync_tasks.sync_order_review_to_printerval_task, "delay", lambda *a, **k: None)
+    link = "https://drive.google.com/file/d/known-file/view?fbclid=" + "IwY2xjawEY7vNleHRuA2FlbQ" * 12
+    payload = {"drive_url": link, "request_id": "long-link", "image_ids": stage_mockup(order.id, designer.id)}
+
+    first = client.post(f"/api/assignments/{assignment.id}/results", json=payload)
+    replay = client.post(f"/api/assignments/{assignment.id}/results", json=payload)
+
+    assert first.status_code == 200 and first.json()["state"] == OrderState.QC_PENDING.value
+    assert replay.status_code == 200 and replay.json() == first.json()
+    changed = client.post(f"/api/assignments/{assignment.id}/results", json={**payload, "drive_url": link + "x"})
+    assert changed.status_code == 409  # same request id, different link: still refused

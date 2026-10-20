@@ -1493,6 +1493,114 @@ describe('OrdersListPage', () => {
     })
   })
 
+  it('does not fall back to the state route when the submission fails on the server', async () => {
+    let patchedStateBody: any = null
+    let assignmentResultBody: any = null
+    let staged: any[] = []
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(adminPageAdapter((url: string, init?: RequestInit) => {
+        if (url.includes('/api/me')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ id: 'des10', role: 'designer', full_name: 'Test Designer' }),
+          })
+        }
+        if (url.includes('/api/platforms')) {
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ platforms: [] }) })
+        }
+        if (url.includes('/api/assignments/assign-99/results')) {
+          assignmentResultBody = JSON.parse(init?.body as string)
+          return Promise.resolve({ ok: false, status: 500, json: async () => ({ detail: 'Lỗi máy chủ' }) })
+        }
+        if (url.includes('/api/orders/order-99/state')) {
+          patchedStateBody = JSON.parse(init?.body as string)
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ success: true }) })
+        }
+        if (url.includes('/api/orders/order-99/result-images/')) {
+          return Promise.resolve({ ok: true, status: 200, blob: async () => new Blob(['x']) })
+        }
+        if (url.includes('/api/orders/order-99/result-images')) {
+          if (init?.method === 'POST') {
+            staged = [{ id: 'img-1', filename: 'mockup.png', width: 10, height: 10, submitted_at: null,
+              pushed: null, url: '/api/orders/order-99/result-images/img-1/file' }]
+          }
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({ staged, submitted: [], max_images: 3 }) })
+        }
+        if (url.includes('/api/orders')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              orders: [
+                {
+                  id: 'order-99',
+                  assignment_id: 'assign-99',
+                  external_order_id: 'ORD-DESIGN-99',
+                  product_name: 'Awesome Vintage T-Shirt',
+                  state: 'IN_PROGRESS',
+                  template_missing: false,
+                  batch_id: null,
+                  sku: 'SKU99',
+                  thumbnail_url: null,
+                  order_created_at_ext: '2026-09-10T14:28:00',
+                  deadline_at_ext: null,
+                  created_at: '2026-01-01T00:00:00',
+                  drive_url: null,
+                },
+              ],
+            }),
+          })
+        }
+        return Promise.reject(new Error(`unexpected fetch: ${url}`))
+      }))
+    )
+
+    render(
+      <BrowserRouter>
+        <AuthProvider>
+          <PlatformProvider>
+            <ToastProvider>
+              <GallerySyncProvider>
+                <OrdersListPage />
+              </GallerySyncProvider>
+            </ToastProvider>
+          </PlatformProvider>
+        </AuthProvider>
+      </BrowserRouter>
+    )
+
+    // Wait for product name to be displayed
+    await waitFor(() => expect(screen.getByText('Awesome Vintage T-Shirt')).toBeInTheDocument())
+
+    // Product name button has copy title
+    const copyButton = screen.getByTitle('Click để sao chép tên sản phẩm')
+    expect(copyButton).toBeInTheDocument()
+
+    // Inline input with placeholder
+    const input = screen.getByPlaceholderText('Dán link thiết kế (Drive, Canva, DropBox...)') as HTMLInputElement
+    expect(input).toBeInTheDocument()
+
+    // Fill in link
+    fireEvent.change(input, { target: { value: 'https://drive.google.com/file/d/123/view' } })
+    expect(input.value).toBe('https://drive.google.com/file/d/123/view')
+
+    // "Nộp bài" stays locked until a mockup is attached (Printerval requires one in its Design column)
+    const submitBtn = screen.getByRole('button', { name: /Nộp bài/i })
+    expect(submitBtn).toBeDisabled()
+    const picker = screen.getByLabelText('Chọn ảnh mockup')
+    fireEvent.change(picker, { target: { files: [new File(['png'], 'mockup.png', { type: 'image/png' })] } })
+    await waitFor(() => expect(submitBtn).not.toBeDisabled())
+    fireEvent.click(submitBtn)
+
+    await waitFor(() => expect(assignmentResultBody).toBeTruthy())
+    // A server error must surface instead of a silent "success" through the state route (it dropped Fix links).
+    expect(await screen.findByText(/Lỗi máy chủ/)).toBeInTheDocument()
+    expect(patchedStateBody).toBeNull()
+  })
+
   it('renders Chia đơn nhanh button for admin on waiting tab and opens quick distribute modal', async () => {
     vi.stubGlobal(
       'fetch',

@@ -472,3 +472,27 @@ def test_an_answer_for_an_older_round_is_not_sent_for_a_newer_question(world, mo
 
     assert [c[3] for c in fake.calls if c[0] == "status"] == [None]
     assert tpl.open_request(world.order)["decision"] == "agree"  # still open, not marked sent
+
+
+def test_a_fix_resubmitted_through_the_state_route_sends_a_new_link_and_keeps_the_old_one_when_blank(
+    client, world, monkeypatch
+):
+    pushed = []
+    monkeypatch.setattr(tasks.sync_order_review_to_printerval_task, "delay", lambda *a, **_k: pushed.append(a[1]))
+    world.order.fix_return_count = 1
+    world.order.note_outsource = "https://drive.test/old"
+    world.session.commit()
+    url = f"/api/orders/{world.order.id}/state"
+
+    def submit(link):
+        [image] = _upload(client, world, world.designer, ("a.png", _png(10, 10))).json()["staged"]
+        body = {"state": "Review", "image_ids": [image["id"]], **({"drive_url": link} if link else {})}
+        assert client.patch(url, headers=_h(world.designer), json=body).status_code == 200
+        world.order.state = OrderState.IN_PROGRESS.value
+        world.session.commit()
+
+    submit(None)
+    assert pushed[-1] is None and world.order.note_outsource == "https://drive.test/old"
+    submit("https://drive.test/new")
+    world.session.refresh(world.order)
+    assert pushed[-1] == "https://drive.test/new" and world.order.note_outsource == "https://drive.test/new"

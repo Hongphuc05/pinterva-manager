@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -35,6 +36,19 @@ def _lease_expired(operation: Operation) -> bool:
     return datetime.now(UTC) - updated_at > PENDING_LEASE
 
 
+FINGERPRINT_MAX = 255  # operations.request_fingerprint is VARCHAR(255)
+
+
+def _fit_fingerprint(fingerprint: str | None) -> str | None:
+    """A fingerprint that fits the column: long ones (a Drive link with a long ``fbclid``...) are hashed.
+
+    Short ones stay as they are, so rows stored before this keep matching their retries.
+    """
+    if fingerprint is None or len(fingerprint) <= FINGERPRINT_MAX:
+        return fingerprint
+    return "sha256:" + hashlib.sha256(fingerprint.encode()).hexdigest()
+
+
 def run_idempotent(
     session,
     idempotency_key: str,
@@ -42,6 +56,7 @@ def run_idempotent(
     fn: Callable[[], dict],
     request_fingerprint: str | None = None,
 ) -> dict:
+    request_fingerprint = _fit_fingerprint(request_fingerprint)
     existing = session.query(Operation).filter_by(idempotency_key=idempotency_key).one_or_none()
     claimed = False
 
