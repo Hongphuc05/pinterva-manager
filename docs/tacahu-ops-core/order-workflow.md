@@ -105,9 +105,12 @@ Tacahu đáp ứng như sau:
 
 ### Fix "Đổi template": Admin trả lời lúc duyệt Fix
 
-Printerval có hai nút: **Xác nhận FIX do đổi template** (xong, đơn sang Review) và **Không đúng, không phải
-đổi template** (bắt buộc điền giải thích mới cho sang Review). Tacahu hỏi Admin ngay lúc duyệt Fix để
-Designer nộp lại là đơn lên Review luôn:
+Trên web Printerval, modal xác nhận chỉ **hiện ra lúc chuyển Fix → Review**, với hai nút: **Xác nhận FIX do
+đổi template** (xong, đơn sang Review) và **Không đúng, không phải đổi template** (bắt buộc điền giải thích mới
+cho sang Review). Printerval không chủ động hỏi lúc trả Fix, nhưng **lưu sẵn câu hỏi ngay khi QC trả Fix** với
+lý do "Đổi template" (lần Fix, link, ghi chú QC điền). Modal lúc chuyển Review chỉ đọc lại bản lưu đó
+(kiểm chứng 20/10: DJ4165458 câu hỏi tạo 14:09, des nộp lại 14:37; DJ4164886 tạo 12:52, nộp lại 13:51).
+Tacahu đọc trước bản lưu này để hỏi Admin ngay lúc duyệt Fix, nên Designer nộp lại là đơn lên Review luôn:
 
 1. **Biết đơn nào bị hỏi**: dòng Fix của đơn trên Printerval có `outsource_fix_template`
    (`{round, url, note, status}`); `status = "pending"` là đang hỏi (đơn Fix thường thì trường này `null`).
