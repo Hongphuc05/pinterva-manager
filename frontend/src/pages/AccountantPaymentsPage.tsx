@@ -5,16 +5,19 @@ import { useToast } from '../context/ToastContext'
 import { ApiError } from '../api/client'
 import {
   clearPendingDetailCache,
+  fetchPaymentSummary,
   fetchPendingDesigners,
   loadDesignerQr,
   prefetchPendingDesignerDetail,
   EMPTY_PERIOD_FILTER,
   filterToPeriod,
   type PeriodFilterValue,
+  type PaymentSummary,
   type PendingDesigner,
 } from '../features/payments/api'
 import { DesignerPayModal } from '../components/DesignerPayModal'
 import { PaymentPeriodFilter } from '../components/PaymentPeriodFilter'
+import { PaymentSummaryCards } from '../components/PaymentSummaryCards'
 import { PaymentHistoryModal } from '../components/PaymentHistoryModal'
 
 const money = (n: number) => `${n.toLocaleString('vi-VN')} đ`
@@ -28,6 +31,7 @@ export function AccountantPaymentsPage() {
   const { user, logout } = useAuth()
   const { showToast: toast } = useToast()
   const [rows, setRows] = useState<PendingDesigner[] | null>(null)
+  const [summary, setSummary] = useState<PaymentSummary | null>(null)
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -39,6 +43,8 @@ export function AccountantPaymentsPage() {
   const load = useCallback(async () => {
     setLoading(true)
     clearPendingDetailCache()
+    // The cards are a convenience: a failure there must not hide the list.
+    fetchPaymentSummary(period).then(setSummary).catch(() => {})
     try {
       setRows(await fetchPendingDesigners(period))
     } catch (err) {
@@ -83,7 +89,8 @@ export function AccountantPaymentsPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-3xl p-4 md:p-6">
+      <main className="mx-auto max-w-4xl p-4 md:p-6">
+        <PaymentSummaryCards summary={summary} />
         {rangeInvalid && (
           <p className="mb-2 rounded-lg bg-red-50 px-3 py-1.5 text-xs text-red-700">Ngày bắt đầu phải trước ngày kết thúc.</p>
         )}

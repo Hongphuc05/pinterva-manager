@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from app.adapters.db.models import User, UserBankQr
 from app.api.deps import get_current_platform_id, get_db, require_role
 from app.api.routes.finance_api import VN_TZ, get_task_submission_timestamp
-from app.application.payments import PaymentConflictError, pay_orders, pending_tasks
+from app.application.payments import PaymentConflictError, credited_tasks, pay_orders, pending_tasks
 from app.application.sanitization import encode_proxy_url
 from app.domain.access import ROLE_ACCOUNTANT
 
@@ -44,6 +44,15 @@ class PendingOrderOut(BaseModel):
 
 class PendingDesignerDetailOut(PendingDesignerOut):
     orders: list[PendingOrderOut]
+
+
+class PaymentSummaryOut(BaseModel):
+    credited_count: int
+    credited_amount: int
+    unpaid_count: int
+    unpaid_amount: int
+    paid_count: int
+    paid_amount: int
 
 
 class PayRequest(BaseModel):
@@ -103,6 +112,39 @@ def _qr_owners(db: Session, user_ids: list[str]) -> set[uuid.UUID]:
     if not ids:
         return set()
     return {row[0] for row in db.query(UserBankQr.user_id).filter(UserBankQr.user_id.in_(ids)).distinct().all()}
+
+
+@router.get("/summary", response_model=PaymentSummaryOut)
+def payment_summary(
+    week: date | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    _: User = Depends(require_role(ROLE_ACCOUNTANT)),
+    platform_id: uuid.UUID = Depends(get_current_platform_id),
+    db: Session = Depends(get_db),
+):
+    """The Admin finance page's three KPI cards (credited / unpaid / paid, count and amount), for the
+    same week or date range as the list, so the Accountant can check where the money stands."""
+    bounds = _period_bounds(week, date_from, date_to)
+    credited = []
+    for task in credited_tasks(db, platform_id):
+        if not (task.placeholder_filled or task.is_paid):
+            continue
+        if bounds:
+            submitted = get_task_submission_timestamp(task.model_dump() if hasattr(task, "model_dump") else vars(task))
+            if submitted is None or not bounds[0] <= submitted < bounds[1]:
+                continue
+        credited.append(task)
+    unpaid = [t for t in credited if not t.is_paid]
+    paid = [t for t in credited if t.is_paid]
+    return PaymentSummaryOut(
+        credited_count=len(credited),
+        credited_amount=sum(t.rate for t in credited),
+        unpaid_count=len(unpaid),
+        unpaid_amount=sum(t.rate for t in unpaid),
+        paid_count=len(paid),
+        paid_amount=sum(t.rate for t in paid),
+    )
 
 
 @router.get("/designers", response_model=list[PendingDesignerOut])

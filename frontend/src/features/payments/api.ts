@@ -87,6 +87,18 @@ export function periodQuery(period?: PaymentPeriod | null): string {
   return query ? `?${query}` : ''
 }
 
+export interface PaymentSummary {
+  credited_count: number
+  credited_amount: number
+  unpaid_count: number
+  unpaid_amount: number
+  paid_count: number
+  paid_amount: number
+}
+
+export const fetchPaymentSummary = (period?: PaymentPeriod | null) =>
+  apiFetch<PaymentSummary>(`/accountant/summary${periodQuery(period)}`)
+
 export const fetchPendingDesigners = (period?: PaymentPeriod | null) =>
   apiFetch<PendingDesigner[]>(`/accountant/designers${periodQuery(period)}`)
 

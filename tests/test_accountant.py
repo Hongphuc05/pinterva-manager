@@ -314,3 +314,32 @@ def test_accountant_filters_pending_orders_by_a_date_range_whole_days_vietnam_ti
     assert sorted(o["external_order_id"] for o in detail["orders"]) == ["AC-DAN-1", "AC-DAN-2"]
     backwards = client.get("/api/accountant/designers?date_from=2026-10-16&date_to=2026-10-14", headers=world.acct_hdr)
     assert backwards.status_code == 422
+
+
+def test_accountant_summary_matches_the_admin_kpi_cards_and_follows_the_period(client, db_session, world):
+    admin_stats = client.get("/api/finance/stats", headers=world.admin_hdr).json()
+    summary = client.get("/api/accountant/summary", headers=world.acct_hdr)
+    assert summary.status_code == 200
+    body = summary.json()
+    # The same three cards the Admin finance page shows.
+    assert body["credited_count"] == admin_stats["total_credited_tasks"]
+    assert body["credited_amount"] == admin_stats["total_amount_credited"]
+    assert body["unpaid_count"] == admin_stats["total_unpaid_tasks"]
+    assert body["unpaid_amount"] == admin_stats["total_amount_unpaid"]
+    assert body["paid_count"] == admin_stats["total_paid_tasks"]
+    assert body["paid_amount"] == admin_stats["total_amount_paid"]
+    assert body["paid_count"] >= 1 and body["unpaid_count"] >= 1
+
+    # A period with no submissions reads zero; paying moves money from unpaid to paid.
+    assert client.get("/api/accountant/summary?week=2001-01-01", headers=world.acct_hdr).json()["credited_count"] == 0
+    before = body["unpaid_amount"]
+    pending = client.get(f"/api/accountant/designers/{world.dan.id}", headers=world.acct_hdr).json()
+    pay = client.post(
+        f"/api/accountant/designers/{world.dan.id}/pay",
+        json={"order_ids": [o["order_id"] for o in pending["orders"]], "expected_total": pending["pending_amount"]},
+        headers=world.acct_hdr,
+    )
+    assert pay.status_code == 200
+    after = client.get("/api/accountant/summary", headers=world.acct_hdr).json()
+    assert after["unpaid_amount"] == before - pending["pending_amount"]
+    assert after["paid_amount"] == body["paid_amount"] + pending["pending_amount"]

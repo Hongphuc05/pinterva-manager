@@ -30,8 +30,13 @@ const danDetail = {
   ],
 }
 
+const summary = {
+  credited_count: 10, credited_amount: 400000, unpaid_count: 3, unpaid_amount: 135000, paid_count: 7, paid_amount: 265000,
+}
+
 function routeFetch(overrides: Record<string, unknown> = {}) {
   api.apiFetch.mockReset().mockImplementation((path: string, init?: RequestInit) => {
+    if (path.startsWith('/accountant/summary')) return Promise.resolve(overrides.summary ?? summary)
     if (path === '/accountant/designers') return Promise.resolve(overrides.designers ?? [dan, tram])
     if (path === '/accountant/designers/dan1') return Promise.resolve(overrides.danDetail ?? danDetail)
     if (path === '/finance/payment-history?page=1&page_size=50') return Promise.resolve(overrides.history ?? { batches: [], total: 0, page: 1, page_size: 50, total_pages: 1 })
@@ -162,6 +167,28 @@ describe('AccountantPaymentsPage', () => {
 
     await waitFor(() => expect(screen.queryByTestId('designer-pay-modal')).not.toBeInTheDocument())
     expect(screen.getByText('Dân')).toBeInTheDocument() // nothing was actually paid
+  })
+
+  it('shows the credited / unpaid / paid cards for the chosen period', async () => {
+    api.apiFetch.mockImplementation((path: string) => {
+      if (path === '/accountant/summary') return Promise.resolve(summary)
+      if (path.startsWith('/accountant/summary?week=')) {
+        return Promise.resolve({ ...summary, credited_count: 2, credited_amount: 80000, unpaid_count: 0, unpaid_amount: 0, paid_count: 2, paid_amount: 80000 })
+      }
+      if (path.startsWith('/accountant/designers')) return Promise.resolve([dan, tram])
+      return Promise.reject(new Error(`unexpected path ${path}`))
+    })
+    render(<AccountantPaymentsPage />)
+    const cards = within(await screen.findByTestId('payment-summary'))
+    await waitFor(() => expect(cards.getByText('(135.000 đ)')).toBeInTheDocument())
+    expect(cards.getByText('Tổng đơn tính công')).toBeInTheDocument()
+    expect(cards.getByText('(400.000 đ)')).toBeInTheDocument()
+    expect(cards.getByText('(265.000 đ)')).toBeInTheDocument()
+
+    const select = screen.getByLabelText('Lọc theo thời gian nộp bài') as HTMLSelectElement
+    await userEvent.setup().selectOptions(select, select.options[1].value)
+    await waitFor(() => expect(cards.getByText('(0 đ)')).toBeInTheDocument()) // unpaid in that week
+    expect(cards.getByText('(80.000 đ)', { selector: 'span.text-slate-500' })).toBeInTheDocument()
   })
 
   it('opens the shared payment history modal', async () => {
