@@ -184,7 +184,8 @@ QC của Printerval ghi yêu cầu Fix và nhận xét vào khung chat từng đ
 snapshot (mỗi snapshot giữ tối đa 30 tin), cũ trước mới sau, mỗi tin một dòng, kèm ảnh (`fix_chat_text`).
 QC hay nhắn nhận xét trước rồi mới bấm Fix; Printerval chỉ tăng số lượt (`fix_round`) lúc bấm Fix nên các tin
 đó còn mang số lượt cũ. Chúng vẫn thuộc lượt Fix này nếu gửi **sau lần đơn sang Review gần nhất** trước tin
-"Mở Fix" (`WorkflowEvent` sang `QC_PENDING`); tin cũ hơn thì không (DJ4164173: 3 tin nhận xét rồi mới mở Fix).
+"Mở Fix" (`WorkflowEvent` sang `QC_PENDING`), dù mang số lượt nào (QC có thể bấm Fix nhiều lần trước khi des
+nộp lại); tin cũ hơn thuộc các lần Fix trước nên không lấy (DJ4164173: 3 tin nhận xét rồi mới mở Fix).
 Dùng ở:
 
 - Thẻ Fix Telegram: trích nguyên văn (tối đa 3000 ký tự); dài quá 1024 ký tự thì gửi tin chữ thay ảnh.

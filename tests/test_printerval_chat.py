@@ -165,6 +165,28 @@ def test_remarks_sent_before_qc_pressed_fix_belong_to_that_fix(world):
     assert "Ảnh: /api/assets/proxy?u=" in for_designer and "prtvstatic" not in for_designer
 
 
+def test_fix_pressed_several_times_before_the_designer_submits_again_keeps_every_round(world):
+    from datetime import UTC, datetime
+
+    from app.adapters.db.models import WorkflowEvent
+
+    world.session.add(WorkflowEvent(order_id=world.order.id, from_state="IN_PROGRESS", to_state="QC_PENDING",
+                                    created_at=datetime(2026, 10, 20, 2, 0, tzinfo=UTC)))  # 09:00 VN
+    world.session.commit()
+    base = {"sender_type": "staff", "sender_name": "QC", "mine": False, "image_urls": [], "fix_reason_label": ""}
+    messages = [
+        {**base, "id": 1, "fix_round": 1, "type": "fix_open", "content": "Fix lần trước", "created_at": "2026-10-19 10:00:00"},
+        {**base, "id": 2, "fix_round": 1, "type": "message", "content": "nhận xét 1", "created_at": "2026-10-20 10:00:00"},
+        {**base, "id": 3, "fix_round": 2, "type": "fix_open", "content": "mở Fix", "created_at": "2026-10-20 10:05:00"},
+        {**base, "id": 4, "fix_round": 3, "type": "fix_open", "content": "mở Fix lần nữa", "created_at": "2026-10-20 10:10:00"},
+        {**base, "id": 5, "fix_round": 3, "type": "message", "content": "thêm ý", "created_at": "2026-10-20 10:12:00"},
+    ]
+    chat.capture_chat(world.session, world.order, "fix", client_factory=FakeChat(messages))
+    world.session.commit()
+
+    assert chat.fix_chat_text(world.session, world.order) == "nhận xét 1\nmở Fix\nmở Fix lần nữa\nthêm ý"
+
+
 def test_a_chat_too_long_for_a_photo_caption_goes_out_as_a_text_message(world):
     world.order.thumbnail_url = "https://img.test/thumb.png"
     long_message = {**FIX_OPEN, "content": "x" * 1400}

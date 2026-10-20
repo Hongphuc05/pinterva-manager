@@ -193,9 +193,10 @@ def _sent_to_review_before(session: Session, order: Order, moment: datetime | No
 def fix_chat_text(session: Session, order: Order, *, for_designer: bool = False) -> str | None:
     """Every QC message of the latest Fix, oldest first, one per line, with its images.
 
-    QC often writes its remarks first and then presses Fix: Printerval numbers a round only when it is
-    opened, so those remarks carry the previous round's number. They belong to this Fix when sent after
-    the order last went to Review (DJ4164173: three remarks, then "fix lại des 3 mặt").
+    This Fix = every QC message sent since the order last went to Review before QC opened the latest
+    round, plus that round's own messages; older messages belong to earlier Fixes. QC often writes its
+    remarks first and then presses Fix, and Printerval numbers a round only when it is opened, so those
+    remarks carry an older round number (DJ4164173: three remarks, then "fix lại des 3 mặt").
 
     ``for_designer``: image links go through Tacahu's asset proxy, which never shows a Printerval host.
     """
@@ -218,15 +219,11 @@ def fix_chat_text(session: Session, order: Order, *, for_designer: bool = False)
     since = _sent_to_review_before(session, order, opened_at) if last_round > 0 else None
 
     def in_this_fix(message: dict) -> bool:
-        round_ = message.get("fix_round") or 0
-        if round_ == last_round:
+        # This Fix = every QC message since the Designer's submission QC is answering, whatever its round
+        # (QC may also press Fix several times before the Designer submits again).
+        if (message.get("fix_round") or 0) == last_round:
             return True
-        return (
-            since is not None
-            and round_ == last_round - 1
-            and bool(message.get("sent_at"))
-            and datetime.fromisoformat(message["sent_at"]) >= since
-        )
+        return since is not None and bool(message.get("sent_at")) and datetime.fromisoformat(message["sent_at"]) >= since
 
     lines = []
     for message in filter(in_this_fix, messages):
