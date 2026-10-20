@@ -57,7 +57,9 @@ cập. Chỉ Admin trả lời câu hỏi "Fix có phải do đổi template kh�
 
 Chỉ Admin (đúng platform) đọc chat Printerval của đơn; mọi role khác nhận 403. Designer, Designer Trello và
 Support không thấy chat, lý do Fix (`fix_reason` chỉ có trong response của Admin) hay các snapshot
-`external_observations`; Admin muốn họ biết thì ghi vào Note làm việc.
+`external_observations`; Admin muốn họ biết thì ghi vào Note làm việc. Ngoại lệ duy nhất: khi Admin duyệt
+Fix mà để trống Ghi chú cho Designer, nội dung Fix của QC được copy vào `designer_note` (chỉ chữ, bỏ link
+ảnh vì link trỏ host Printerval). Đó là quyết định của Admin, Designer vẫn không gọi được API chat.
 
 ## Note làm việc: Support
 

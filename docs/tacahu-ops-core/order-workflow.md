@@ -74,10 +74,12 @@ transition nhưng application layer không được tự động recover.
    `Fix` đưa sang `REVISION` và tăng `fix_return_count`. Tacahu **không đọc** `note_outsource`
    từ Printerval về nữa (nó chỉ giữ link bài Tacahu đã đẩy lên); QC ghi yêu cầu sửa vào khung
    chat của đơn trên Printerval — xem "Chat Printerval" bên dưới.
-6. **Fix**: Fix trước hết nằm ở Admin. Admin duyệt sẽ release hướng dẫn riêng cho
-   Designer, Designer sửa và nộp lại Review (lại kèm 1–3 ảnh mockup mới). Admin từ chối Fix
-   thì trả về `QC_PENDING` cùng ghi chú phản hồi cho platform. Không expose trực tiếp upstream
-   `note_outsource` cho Designer.
+6. **Fix**: Fix trước hết nằm ở Admin (thẻ Telegram trích nguyên văn nội dung Fix trong chat,
+   hoặc nút "Chấp nhận Fix" trên web). Admin duyệt thì Designer nhận **Ghi chú cho Designer**;
+   Admin để trống thì Designer nhận nguyên văn nội dung Fix trong chat, bỏ link ảnh (chi tiết ở
+   "Chat Printerval"). Designer sửa và nộp lại Review (lại kèm 1–3 ảnh mockup mới). Admin từ chối
+   Fix thì trả về `QC_PENDING` cùng ghi chú phản hồi cho platform. Designer không bao giờ thấy
+   chat hay `note_outsource`.
 
 ## Chuyển đơn sang Review trên Printerval (luật Printerval từ 19/10/2026)
 
