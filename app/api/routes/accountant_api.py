@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
-from datetime import datetime
+from datetime import date, datetime, time, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.adapters.db.models import User, UserBankQr
 from app.api.deps import get_current_platform_id, get_db, require_role
+from app.api.routes.finance_api import VN_TZ, get_task_submission_timestamp
 from app.application.payments import PaymentConflictError, pay_orders, pending_tasks
 from app.application.sanitization import encode_proxy_url
 from app.domain.access import ROLE_ACCOUNTANT
@@ -50,9 +51,25 @@ class PayRequest(BaseModel):
     expected_total: int = Field(ge=0)
 
 
-def _designer_rows(db: Session, platform_id: uuid.UUID) -> dict[str, list]:
+def _week_bounds(week: date | None) -> tuple[float, float] | None:
+    """Monday 00:00 to the next Monday 00:00, Vietnam time, as timestamps (any day picks its week)."""
+    if week is None:
+        return None
+    monday = week - timedelta(days=week.weekday())
+    start = datetime.combine(monday, time.min, tzinfo=VN_TZ)
+    return start.timestamp(), (start + timedelta(days=7)).timestamp()
+
+
+def _designer_rows(db: Session, platform_id: uuid.UUID, week: date | None = None) -> dict[str, list]:
+    """Pending orders by designer; with ``week``, only those submitted that week (the date the Admin
+    finance page filters on)."""
+    bounds = _week_bounds(week)
     grouped: dict[str, list] = defaultdict(list)
     for task in pending_tasks(db, platform_id):
+        if bounds:
+            submitted = get_task_submission_timestamp(task.model_dump() if hasattr(task, "model_dump") else vars(task))
+            if submitted is None or not bounds[0] <= submitted < bounds[1]:
+                continue
         grouped[task.designer_id].append(task)
     return grouped
 
@@ -78,12 +95,13 @@ def _qr_owners(db: Session, user_ids: list[str]) -> set[uuid.UUID]:
 
 @router.get("/designers", response_model=list[PendingDesignerOut])
 def list_pending_designers(
+    week: date | None = None,
     _: User = Depends(require_role(ROLE_ACCOUNTANT)),
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
-    """Designers with orders waiting for payment, most orders first."""
-    grouped = _designer_rows(db, platform_id)
+    """Designers with orders waiting for payment, most orders first (optionally one week's orders)."""
+    grouped = _designer_rows(db, platform_id, week)
     owners = _qr_owners(db, list(grouped))
     rows = [_summary(db, designer_id, tasks, owners) for designer_id, tasks in grouped.items()]
     return sorted(rows, key=lambda r: (-r.pending_count, r.designer_name))
@@ -92,11 +110,12 @@ def list_pending_designers(
 @router.get("/designers/{designer_id}", response_model=PendingDesignerDetailOut)
 def get_pending_designer(
     designer_id: uuid.UUID,
+    week: date | None = None,
     _: User = Depends(require_role(ROLE_ACCOUNTANT)),
     platform_id: uuid.UUID = Depends(get_current_platform_id),
     db: Session = Depends(get_db),
 ):
-    tasks = _designer_rows(db, platform_id).get(str(designer_id), [])
+    tasks = _designer_rows(db, platform_id, week).get(str(designer_id), [])
     if not tasks:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Designer này không còn đơn chờ thanh toán.")
     summary = _summary(db, str(designer_id), tasks, _qr_owners(db, [str(designer_id)]))

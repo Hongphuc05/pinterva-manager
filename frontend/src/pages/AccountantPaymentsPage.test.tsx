@@ -160,4 +160,30 @@ describe('AccountantPaymentsPage', () => {
     await waitFor(() => expect(modal().getByText('Dân')).toBeInTheDocument())
     expect(modal().getByText('95.000 đ')).toBeInTheDocument()
   })
+
+  it('filters by week: the list and the pay popup show only that week\'s orders', async () => {
+    const user = userEvent.setup()
+    const weekly = { ...dan, pending_count: 1, pending_amount: 40000 }
+    api.apiFetch.mockImplementation((path: string) => {
+      if (path === '/accountant/designers') return Promise.resolve([dan, tram])
+      if (path.startsWith('/accountant/designers?week=')) return Promise.resolve([weekly])
+      if (path.startsWith('/accountant/designers/dan1?week=')) return Promise.resolve({ ...weekly, orders: [danDetail.orders[0]] })
+      return Promise.reject(new Error(`unexpected path ${path}`))
+    })
+    render(<AccountantPaymentsPage />)
+    await waitFor(() => expect(screen.getByText('Trâm')).toBeInTheDocument())
+
+    const select = screen.getByLabelText('Lọc theo tuần nộp bài') as HTMLSelectElement
+    const thisWeek = select.options[1].value
+    expect(select.options[1].textContent).toMatch(/^Tuần này \(\d\d\/\d\d – \d\d\/\d\d\)$/)
+    await user.selectOptions(select, thisWeek)
+    await waitFor(() => expect(screen.queryByText('Trâm')).not.toBeInTheDocument())
+    expect(api.apiFetch).toHaveBeenCalledWith(`/accountant/designers?week=${thisWeek}`)
+
+    await user.click(screen.getByText('Dân'))
+    const modal = within(await screen.findByTestId('designer-pay-modal'))
+    await waitFor(() => expect(modal.getByText('DJ-1')).toBeInTheDocument())
+    expect(modal.queryByText('DJ-2')).not.toBeInTheDocument()
+    expect(api.apiFetch).toHaveBeenCalledWith(`/accountant/designers/dan1?week=${thisWeek}`)
+  })
 })

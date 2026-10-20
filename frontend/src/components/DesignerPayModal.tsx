@@ -19,10 +19,13 @@ type Stage = 'list' | 'qr'
  */
 export function DesignerPayModal({
   designerId,
+  week = null,
   onClose,
   onPaid,
 }: {
   designerId: string
+  /** Only this week's orders (any day of it, YYYY-MM-DD); null means every week. */
+  week?: string | null
   onClose: () => void
   onPaid: () => void
 }) {
@@ -35,10 +38,10 @@ export function DesignerPayModal({
   const [paying, setPaying] = useState(false)
 
   useEffect(() => {
-    fetchPendingDesignerDetail(designerId)
+    fetchPendingDesignerDetail(designerId, week)
       .then(setDetail)
       .catch((err) => setError(err instanceof ApiError ? err.message : 'Không tải được danh sách đơn.'))
-  }, [designerId])
+  }, [designerId, week])
 
   useEffect(() => {
     if (stage !== 'qr') return

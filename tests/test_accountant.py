@@ -257,3 +257,34 @@ def test_backfill_rebuilds_one_row_per_payment_click_and_designer(db_session, wo
 
     assert backfill_payment_batches(db_session) == 0  # re-running adds nothing
     assert db_session.query(PaymentBatch).count() == 4
+
+
+def test_accountant_filters_pending_orders_by_week_in_vietnam_time(client, db_session, world):
+    vn = timedelta(hours=7)
+    submitted = {
+        "dan1": datetime(2026, 10, 12, 0, 5) - vn,   # Monday 00:05 VN: first minutes of the week
+        "dan2": datetime(2026, 10, 18, 23, 50) - vn,  # Sunday 23:50 VN: still the same week
+        "dan3": datetime(2026, 10, 19, 0, 10) - vn,   # Monday 00:10 VN: next week
+        "tram1": datetime(2026, 9, 1, 9, 0) - vn,
+    }
+    for key, when in submitted.items():
+        world.orders[key].review_submitted_at = when.replace(tzinfo=UTC)
+    db_session.commit()
+
+    def pending(week):
+        res = client.get(f"/api/accountant/designers?week={week}", headers=world.acct_hdr)
+        assert res.status_code == 200
+        return {r["designer_name"]: (r["pending_count"], r["pending_amount"]) for r in res.json()}
+
+    assert pending("2026-10-15") == {"Acct_Dan": (2, 40000 + 15000)}  # any day picks its Monday-Sunday week
+    assert pending("2026-10-19") == {"Acct_Dan": (1, 55000)}
+    assert pending("2026-10-05") == {}
+
+    detail = client.get(f"/api/accountant/designers/{world.dan.id}?week=2026-10-12", headers=world.acct_hdr).json()
+    assert sorted(o["external_order_id"] for o in detail["orders"]) == ["AC-DAN-1", "AC-DAN-2"]
+    assert detail["pending_amount"] == 55000
+    assert client.get(f"/api/accountant/designers/{world.tram.id}?week=2026-10-12",
+                      headers=world.acct_hdr).status_code == 404
+
+    all_weeks = client.get("/api/accountant/designers", headers=world.acct_hdr).json()
+    assert {r["designer_name"] for r in all_weeks} == {"Acct_Dan", "Acct_Tram"}  # no week: everything, as before

@@ -49,10 +49,32 @@ export interface PaymentHistoryResponse {
   total_pages: number
 }
 
-export const fetchPendingDesigners = () => apiFetch<PendingDesigner[]>('/accountant/designers')
+/** `week` is any day of the wanted Monday–Sunday week (YYYY-MM-DD); omitted means every week. */
+const weekQuery = (week?: string | null) => (week ? `?week=${encodeURIComponent(week)}` : '')
 
-export const fetchPendingDesignerDetail = (designerId: string) =>
-  apiFetch<PendingDesignerDetail>(`/accountant/designers/${designerId}`)
+export const fetchPendingDesigners = (week?: string | null) =>
+  apiFetch<PendingDesigner[]>(`/accountant/designers${weekQuery(week)}`)
+
+export const fetchPendingDesignerDetail = (designerId: string, week?: string | null) =>
+  apiFetch<PendingDesignerDetail>(`/accountant/designers/${designerId}${weekQuery(week)}`)
+
+const pad = (n: number) => String(n).padStart(2, '0')
+const isoDate = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+const dayMonth = (d: Date) => `${pad(d.getDate())}/${pad(d.getMonth() + 1)}`
+
+/** The last `count` Monday–Sunday weeks, newest first, as options for the week filter. */
+export function recentWeeks(count = 8, today = new Date()): { value: string; label: string }[] {
+  const monday = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7))
+  return Array.from({ length: count }, (_, i) => {
+    const start = new Date(monday)
+    start.setDate(monday.getDate() - 7 * i)
+    const end = new Date(start)
+    end.setDate(start.getDate() + 6)
+    const name = i === 0 ? 'Tuần này' : i === 1 ? 'Tuần trước' : 'Tuần'
+    return { value: isoDate(start), label: `${name} (${dayMonth(start)} – ${dayMonth(end)})` }
+  })
+}
 
 export const payDesigner = (designerId: string, orderIds: string[], expectedTotal: number) =>
   apiFetch<{ ok: boolean; paid_count: number; total_amount: number }>(`/accountant/designers/${designerId}/pay`, {

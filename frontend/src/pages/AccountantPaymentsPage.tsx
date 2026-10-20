@@ -3,7 +3,7 @@ import { History, LogOut, QrCode, RefreshCw, Wallet } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { ApiError } from '../api/client'
-import { fetchPendingDesigners, type PendingDesigner } from '../features/payments/api'
+import { fetchPendingDesigners, recentWeeks, type PendingDesigner } from '../features/payments/api'
 import { DesignerPayModal } from '../components/DesignerPayModal'
 import { PaymentHistoryModal } from '../components/PaymentHistoryModal'
 
@@ -21,17 +21,20 @@ export function AccountantPaymentsPage() {
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
+  // '' = every week; otherwise the Monday (YYYY-MM-DD) of the week whose submitted orders are paid.
+  const [week, setWeek] = useState('')
+  const [weeks] = useState(() => recentWeeks())
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      setRows(await fetchPendingDesigners())
+      setRows(await fetchPendingDesigners(week || null))
     } catch (err) {
       toast(err instanceof ApiError ? err.message : 'Không tải được danh sách.', 'error')
     } finally {
       setLoading(false)
     }
-  }, [toast])
+  }, [toast, week])
 
   useEffect(() => {
     void load()
@@ -68,8 +71,20 @@ export function AccountantPaymentsPage() {
       </header>
 
       <main className="mx-auto max-w-3xl p-4 md:p-6">
-        <div className="mb-3 flex items-center justify-between">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-bold text-slate-700">Chờ thanh toán ({rows?.length ?? 0} designer)</h2>
+          <div className="flex items-center gap-2">
+          <select
+            aria-label="Lọc theo tuần nộp bài"
+            value={week}
+            onChange={(e) => setWeek(e.target.value)}
+            className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700 shadow-sm"
+          >
+            <option value="">Tất cả các tuần</option>
+            {weeks.map((w) => (
+              <option key={w.value} value={w.value}>{w.label}</option>
+            ))}
+          </select>
           <button
             type="button"
             onClick={() => void load()}
@@ -78,13 +93,14 @@ export function AccountantPaymentsPage() {
           >
             <RefreshCw className={`h-3 w-3 ${loading ? 'animate-spin' : ''}`} />Làm mới
           </button>
+          </div>
         </div>
 
         {!rows ? (
           <div className="rounded-xl border border-slate-200 bg-white py-16 text-center text-sm text-slate-500">Đang tải...</div>
         ) : rows.length === 0 ? (
           <div className="rounded-xl border border-slate-200 bg-white py-16 text-center text-sm text-slate-500">
-            Không có đơn nào chờ thanh toán.
+            {week ? 'Tuần này không có đơn nào chờ thanh toán.' : 'Không có đơn nào chờ thanh toán.'}
           </div>
         ) : (
           <ul className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -117,6 +133,7 @@ export function AccountantPaymentsPage() {
       {selected && (
         <DesignerPayModal
           designerId={selected}
+          week={week || null}
           onClose={() => setSelected(null)}
           onPaid={() => void load()}
         />
