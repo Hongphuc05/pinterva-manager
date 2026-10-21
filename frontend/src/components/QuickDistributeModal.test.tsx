@@ -253,12 +253,15 @@ describe('QuickDistributeModal', () => {
       excluded: { fake: 0, admin_rejected: 0 },
     })
     const fixStats = new Map([['des-1', stat('des-1', 40, 4, 10, 1)], ['des-2', stat('des-2', 10, 1, 10)]])
+    const fixStats7 = new Map([['des-1', stat('des-1', 25, 1, 4)]])  // Hoa submitted nothing this week
     render(
       <QuickDistributeModal isOpen onClose={mockOnClose} waitingOrders={mockWaitingOrders} designers={mockDesigners}
-        fixStats={fixStats} fixThreshold={3} onSuccess={mockOnSuccess} setFlash={mockSetFlash} />
+        fixStats={fixStats} fixStats7={fixStats7} fixThreshold={3} onSuccess={mockOnSuccess} setFlash={mockSetFlash} />
     )
 
     expect(screen.getByText('40%')).toBeInTheDocument()
+    expect(screen.getByText('25%')).toBeInTheDocument()
+    expect(screen.getByText('Fix 7 ngày: chưa có đơn')).toBeInTheDocument()
     expect(screen.getByText('1 đơn Fix ≥3 lần')).toBeInTheDocument()
     const names = () => screen.getAllByText(/Quân Nguyễn|Hoa Trần/).map((el) => el.textContent)
     expect(names()).toEqual(['Quân Nguyễn', 'Hoa Trần'])

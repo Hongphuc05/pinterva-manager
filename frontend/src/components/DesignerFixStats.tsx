@@ -57,10 +57,10 @@ function formatVn(iso: string): string {
  * days). Fixes are credited to whoever made the submission QC answered; fake and Admin-rejected Fixes do
  * not count (see app/application/fix_stats.py).
  */
-export function useDesignerFixStats(enabled: boolean) {
+export function useDesignerFixStats(enabled: boolean, days = 30) {
   const [range, setRange] = useState<FixRange>(() => {
     const today = new Date()
-    return { from: isoDay(new Date(today.getTime() - 29 * 86400000)), to: isoDay(today) }
+    return { from: isoDay(new Date(today.getTime() - (days - 1) * 86400000)), to: isoDay(today) }
   })
   const [data, setData] = useState<StatsResponse | null>(null)
   const [loading, setLoading] = useState(false)
@@ -249,22 +249,34 @@ export function FixSortSelect({ value, onChange, className = '' }: { value: FixS
       className={`rounded-lg border px-2 py-1 text-xs font-semibold ${className}`}
     >
       <option value="name">Sắp xếp: Tên</option>
-      <option value="fix_asc">Tỷ lệ Fix thấp → cao</option>
-      <option value="fix_desc">Tỷ lệ Fix cao → thấp</option>
+      <option value="fix_asc">Fix 30 ngày thấp → cao</option>
+      <option value="fix_desc">Fix 30 ngày cao → thấp</option>
     </select>
   )
 }
 
-/** The Fix rate as a small line under a Designer's name (Quick distribute). */
-export function FixRateBadge({ stat, threshold = 3 }: { stat: DesignerFixStat | undefined; threshold?: number }) {
-  if (!stat) return <div className="text-[11px] text-slate-400">Fix 30 ngày: chưa có đơn</div>
+function RateLine({ label, stat }: { label: string; stat: DesignerFixStat | undefined }) {
+  if (!stat) return <span className="text-slate-400">{label}: chưa có đơn</span>
   const tone = stat.fix_rate >= 30 ? 'text-red-700' : stat.fix_rate >= 15 ? 'text-orange-700' : 'text-emerald-700'
   return (
-    <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-      <span className="text-slate-500">
-        Fix 30 ngày: <strong className={`font-mono ${tone}`}>{stat.fix_rate}%</strong> ({stat.fixed_orders}/{stat.submitted_orders} đơn)
-      </span>
-      {stat.repeat_orders > 0 && (
+    <span className="text-slate-500">
+      {label}: <strong className={`font-mono ${tone}`}>{stat.fix_rate}%</strong> ({stat.fixed_orders}/{stat.submitted_orders} đơn)
+    </span>
+  )
+}
+
+/** The Fix rate under a Designer's name (Quick distribute): last 7 days when given, and last 30 days. */
+export function FixRateBadge({ stat, stat7, threshold = 3 }: {
+  stat: DesignerFixStat | undefined
+  /** null: no orders in the last 7 days; left out: the 7-day line is not shown. */
+  stat7?: DesignerFixStat | null
+  threshold?: number
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px]">
+      {stat7 !== undefined && <RateLine label="Fix 7 ngày" stat={stat7 ?? undefined} />}
+      <RateLine label="Fix 30 ngày" stat={stat} />
+      {stat && stat.repeat_orders > 0 && (
         <span className="inline-flex items-center gap-0.5 rounded border border-red-200 bg-red-50 px-1 font-semibold text-red-700">
           <AlertTriangle className="h-3 w-3" />
           {stat.repeat_orders} đơn Fix ≥{threshold} lần

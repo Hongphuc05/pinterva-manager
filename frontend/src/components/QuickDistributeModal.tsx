@@ -25,6 +25,8 @@ export type QuickDistributeModalProps = {
   designers: UserOption[]
   /** Admin: each Designer's Fix rate (last 30 days), shown under the name and usable for sorting. */
   fixStats?: Map<string, DesignerFixStat>
+  /** The same for the last 7 days. */
+  fixStats7?: Map<string, DesignerFixStat>
   fixThreshold?: number
   onSuccess: () => Promise<void>
   setFlash: (msg: string) => void
@@ -37,6 +39,7 @@ export function QuickDistributeModal({
   initialCheckFilter = '',
   designers,
   fixStats,
+  fixStats7,
   fixThreshold = 3,
   onSuccess,
   setFlash,
@@ -184,7 +187,7 @@ export function QuickDistributeModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs animate-in fade-in duration-150">
-      <div className="relative w-full max-w-xl rounded-2xl bg-white shadow-2xl border border-slate-100 flex flex-col max-h-[90vh] overflow-hidden">
+      <div className="relative w-full max-w-3xl rounded-2xl bg-white shadow-2xl border border-slate-100 flex flex-col max-h-[90vh] overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4 bg-gradient-to-r from-blue-50/50 via-white to-white">
           <div className="flex items-center gap-2.5">
@@ -325,7 +328,7 @@ export function QuickDistributeModal({
         </div>
 
         {/* Table Body */}
-        <div className="flex-1 overflow-y-auto px-6 py-3 max-h-[340px]">
+        <div className="flex-1 overflow-y-auto px-6 py-3 max-h-[55vh]">
           {designers.length === 0 ? (
             <div className="py-8 text-center text-xs text-slate-400">Không có Designer nào trong hệ thống.</div>
           ) : filteredDesigners.length === 0 ? (
@@ -360,7 +363,7 @@ export function QuickDistributeModal({
                             <span className="text-slate-400">• Web mẹ: {des.platform_designer_option}</span>
                           )}
                         </div>
-                        {fixStats && <FixRateBadge stat={fixStats.get(des.id)} threshold={fixThreshold} />}
+                        {fixStats && <FixRateBadge stat={fixStats.get(des.id)} stat7={fixStats7 ? fixStats7.get(des.id) ?? null : undefined} threshold={fixThreshold} />}
                       </td>
                       <td className="py-2.5 pl-3 text-right">
                         <div className="inline-flex items-center gap-1.5 justify-end">

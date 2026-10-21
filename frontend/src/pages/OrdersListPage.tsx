@@ -528,6 +528,7 @@ export function OrdersListPage() {
 
   // Admin: each Designer's Fix rate (last 30 days) beside their name when splitting orders.
   const fixStats = useDesignerFixStats(isAdmin)
+  const fixStats7 = useDesignerFixStats(isAdmin, 7)
   const [designerSort, setDesignerSort] = useState<FixSort>('name')
   const regularDesigners = useMemo(() => {
     const candidates = usersList.filter(
@@ -3992,6 +3993,7 @@ export function OrdersListPage() {
         initialCheckFilter={checkFilter}
         designers={regularDesigners}
         fixStats={isAdmin ? fixStats.byDesigner : undefined}
+        fixStats7={isAdmin ? fixStats7.byDesigner : undefined}
         fixThreshold={fixStats.threshold}
         onSuccess={async () => { await loadOrders() }}
         setFlash={setFlash}
