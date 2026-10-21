@@ -1011,6 +1011,12 @@ def test_api_approve_and_reject_fix_flow(client, db_session, monkeypatch, stage_
     assert order.state == OrderState.QC_PENDING.value
     assert order.fix_approved_by_admin is False
     assert order.fix_rejected_by_admin is True
+    # Same as the Telegram path: nothing of the rejected Fix reaches the Designer, and the
+    # Review push only runs while the order is still that rejected Fix.
+    assert order.designer_note == ""
+    assert order.designer_note_released_for_fix is False
+    assert order.suppress_note_outsource_for_designer is True
+    assert sync_calls[-1][1] == {"expected_state": "QC_PENDING", "expected_fix_approved": False}
 
     review_orders = client.get("/api/orders?status=REVIEW").json()["orders"]
     fix_orders = client.get("/api/orders?status=FIX").json()["orders"]

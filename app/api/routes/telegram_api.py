@@ -20,6 +20,7 @@ from app.adapters.db.models import (
     WorkflowEvent,
 )
 from app.api.deps import get_current_user, get_db
+from app.application.fix_rejection import queue_review_push, reject_fix_to_review
 from app.application.fix_template_confirm import (
     TemplateConfirmError,
     record_template_answer,
@@ -1100,44 +1101,13 @@ async def api_telegram_webhook(
                     _track_fix_transient_message(db, order.id, user_chat_id, int(prompt["message_id"]))
 
             elif prefix == "rejfix":
-                # Admin rejects fix -> send back to Review
-                old_state = order.state
-                order.state = OrderState.QC_PENDING.value
-                order.fix_approved_by_admin = False
-                order.fix_rejected_by_admin = True
-                order.designer_note = ""
-                order.designer_note_released_for_fix = False
-                order.suppress_note_outsource_for_designer = True
-                order.status_changed_at = datetime.now(UTC)
+                # Admin rejects fix -> send back to Review (same path as the web button)
                 action_log.status = "executed"
                 action_log.executed_at = datetime.now(UTC)
                 action_log.actor_id = admin_user.id
-
-                db.add(
-                    WorkflowEvent(
-                        order_id=order.id,
-                        from_state=old_state,
-                        to_state=OrderState.QC_PENDING.value,
-                        actor_id=admin_user.id,
-                        evidence={
-                            "action": "REJECT_FIX_TO_REVIEW",
-                            "actor_name": admin_user.full_name or admin_user.username,
-                            "actor_role": "admin",
-                            "source": "telegram_callback",
-                            "description": f"Admin {admin_user.full_name} đã từ chối Fix qua Telegram và gửi lại Review",
-                        },
-                    )
-                )
+                reject_fix_to_review(db, order, admin=admin_user, source="telegram_callback")
                 db.commit()
-
-                # Sync to platform
-                try:
-                    from app.workers.assignment_sync_tasks import (
-                        sync_order_review_to_printerval_task,
-                    )
-                    sync_order_review_to_printerval_task.delay(str(order.id), order.note_outsource, "Review")
-                except Exception:
-                    pass
+                queue_review_push(order)
 
                 _clean_completed_fix_conversations(db, order.id)
 

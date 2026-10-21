@@ -70,6 +70,7 @@ from app.application.assignment_commands import (
 )
 from app.application.concurrency import lock_order_for_command
 from app.application.crawl import DiscoverFailedError, refresh_order_detail, scan_orders_fast
+from app.application.fix_rejection import queue_review_push, reject_fix_to_review
 from app.application.fix_template_confirm import (
     TemplateConfirmError,
     confirm_fix_template,
@@ -2965,33 +2966,7 @@ def api_reject_fix_to_review(
     if order is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
 
-    order.previous_note_outsource = order.note_outsource
-    if payload.note_outsource is not None:
-        order.note_outsource = payload.note_outsource.strip()
-
-    old_state = order.state
-    # The admin rejected Printerval's Fix request. The card is therefore waiting
-    # for QC review locally too; retaining REVISION here stranded it in the Fix tab.
-    order.state = OrderState.QC_PENDING.value
-    order.fix_approved_by_admin = False
-    order.fix_rejected_by_admin = True
-    order.status_changed_at = datetime.now(UTC)
-
-    admin_name = user.full_name or user.username
-    event = WorkflowEvent(
-        order_id=order.id,
-        from_state=old_state,
-        to_state=OrderState.QC_PENDING.value,
-        actor_id=user.id,
-        evidence={
-            "action": "REJECT_FIX_TO_REVIEW",
-            "actor_name": admin_name,
-            "actor_role": user.role,
-            "description": f"Admin {admin_name} từ chối Fix và gửi lại Review trên Printerval",
-            "note_outsource": order.note_outsource,
-        },
-    )
-    db.add(event)
+    reject_fix_to_review(db, order, admin=user, note_outsource=payload.note_outsource)
     db.commit()
     db.refresh(order)
 
@@ -3004,18 +2979,7 @@ def api_reject_fix_to_review(
     except Exception:
         logger.warning("Telegram Fix card cleanup failed for order %s", order.id, exc_info=True)
 
-    # Sync to Printerval in background
-    try:
-        from app.workers.assignment_sync_tasks import sync_order_review_to_printerval_task
-        sync_order_review_to_printerval_task.delay(
-            str(order.id),
-            order.note_outsource,
-            "Review",
-            expected_state=OrderState.QC_PENDING.value,
-            expected_fix_approved=False,
-        )
-    except Exception:
-        pass
+    queue_review_push(order)
 
     return {
         "ok": True,
