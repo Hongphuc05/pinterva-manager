@@ -26,6 +26,7 @@ import { OrderHistoryTimelineModal } from '../components/OrderHistoryTimelineMod
 import { AdminFixActionModal } from '../components/AdminFixActionModal'
 import { ProductQuickViewModal } from '../components/ProductQuickViewModal'
 import { LinkifiedText } from '../components/LinkifiedText'
+import { DesignerFixModal, FixStatsLine, FixStatsToolbar, useDesignerFixStats } from '../components/DesignerFixStats'
 import { readViewState, writeViewState } from '../utils/viewState'
 
 type DesignerOrder = {
@@ -112,6 +113,9 @@ export function DesignerBoardPage() {
   } | null>(null)
   const [quickViewOrderId, setQuickViewOrderId] = useState<string | null>(null)
   const [removingOrderId, setRemovingOrderId] = useState<string | null>(null)
+  const fixStats = useDesignerFixStats(isAdmin)
+  const [fixDetail, setFixDetail] = useState<{ id: string; name: string } | null>(null)
+  const [sortByFixRate, setSortByFixRate] = useState(false)
 
   useEffect(() => {
     writeViewState('designer-board', user?.role, {
@@ -238,6 +242,11 @@ export function DesignerBoardPage() {
     return true
   })
 
+  const fixRateOf = (designerId: string) => fixStats.byDesigner.get(designerId)?.fix_rate ?? -1
+  const shownDesigners = sortByFixRate
+    ? [...filteredDesigners].sort((a, b) => fixRateOf(b.id) - fixRateOf(a.id))
+    : filteredDesigners
+
   // The page-level action only checks the tasks currently represented by this
   // board.  It must never fall back to a platform-wide scan just because this
   // filtered view happens to be empty.
@@ -295,6 +304,15 @@ export function DesignerBoardPage() {
   return (
     <DashboardLayout>
       <div className="space-y-6">
+        {fixDetail && (
+          <DesignerFixModal
+            designerId={fixDetail.id}
+            name={fixDetail.name}
+            range={fixStats.range}
+            threshold={fixStats.threshold}
+            onClose={() => setFixDetail(null)}
+          />
+        )}
         {quickViewOrderId && (
           <ProductQuickViewModal
             orderId={quickViewOrderId}
@@ -539,6 +557,22 @@ export function DesignerBoardPage() {
           </div>
         </div>
 
+        {isAdmin && (
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex-1"><FixStatsToolbar stats={fixStats} /></div>
+            <button
+              type="button"
+              onClick={() => setSortByFixRate((current) => !current)}
+              aria-pressed={sortByFixRate}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer ${
+                sortByFixRate ? 'bg-orange-600 text-white border-orange-600' : 'bg-white text-orange-700 border-orange-200 hover:bg-orange-50'
+              }`}
+            >
+              Sắp xếp theo tỷ lệ Fix
+            </button>
+          </div>
+        )}
+
         <p aria-live="polite" className="-mt-3 hidden text-right text-[11px] font-medium text-slate-500 sm:block">
           Đang hiển thị {filteredDesigners.length}/{totalDesigners} Designer
         </p>
@@ -557,7 +591,7 @@ export function DesignerBoardPage() {
           </div>
         ) : (
           <div className="space-y-6">
-            {filteredDesigners.map((des) => {
+            {shownDesigners.map((des) => {
               const completionRate =
                 des.total_orders > 0 ? Math.round((des.done_count / des.total_orders) * 100) : 0
 
@@ -624,6 +658,13 @@ export function DesignerBoardPage() {
                           <span>•</span>
                           <span className="text-emerald-700 font-semibold">Done: {des.done_count}</span>
                         </div>
+                        {isAdmin && (
+                          <FixStatsLine
+                            stat={fixStats.byDesigner.get(des.id)}
+                            threshold={fixStats.threshold}
+                            onDetail={() => setFixDetail({ id: des.id, name: des.full_name })}
+                          />
+                        )}
                       </div>
                     </div>
 

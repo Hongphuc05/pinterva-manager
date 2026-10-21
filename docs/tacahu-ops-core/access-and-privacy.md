@@ -47,6 +47,15 @@ phải enforce role + platform + assignment ở backend.
   có hạn dùng, khóa theo chat/platform và không mở quyền cho tài khoản khác. Bấm **Không** chỉ
   hủy yêu cầu, không đổi trạng thái order.
 
+## Tỷ lệ Fix của Designer
+
+Chỉ Admin (đúng platform) xem được tỷ lệ Fix trên tab Tiến Độ Team (`/designers/fix-stats`); Support, Designer
+và Kế toán nhận 403. Số liệu tính từ lịch sử đơn (`workflow_events`), không dùng `fix_return_count`: mỗi lần Fix
+tính cho người đã nộp bài mà QC trả lời (Admin nộp hộ thì tính cho des được phân công); khoảng thời gian lọc
+theo ngày des nộp đơn lần đầu (giờ VN), các lần Fix của đơn đó tính bất kể xảy ra lúc nào. Không tính cho des
+nhưng vẫn liệt kê: Fix giả (báo trong 5 phút sau khi des nộp lại đơn Fix, trước 20/10 khi đồng bộ chưa chặn)
+và Fix bị Admin từ chối. Dữ liệu đầy đủ từ 21/09/2026 (trước đó Fix chưa được ghi lịch sử từng lần).
+
 ## Ảnh mockup nộp bài và xác nhận "Đổi template"
 
 Designer (standard và Trello) tải/xoá ảnh mockup trên đơn mình được xem; ảnh **chưa nộp** chỉ người
