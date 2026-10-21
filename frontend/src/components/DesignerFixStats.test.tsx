@@ -90,7 +90,7 @@ describe('MyFixRateCard (the Designer\'s own rate on My Tasks)', () => {
         summary: stat(),
         previous: stat({ fixed_orders: 3, submitted_orders: 10, fix_rate: 30 }),
         orders: [{
-          order_id: 'o1', external_order_id: 'DJ1', product_name: 'Áo DJ1', thumbnail_url: null,
+          order_id: 'o1', product_name: 'Áo Colombia', thumbnail_url: null,
           first_submitted_at: '2026-10-13T03:00:00Z', fix_count: 3,
           fixes: [{ at: '2026-10-13T04:00:00Z', reason: 'Lỗi làm khác mockup gốc', excluded: null }],
         }],
@@ -108,7 +108,8 @@ describe('MyFixRateCard (the Designer\'s own rate on My Tasks)', () => {
     expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/^\/api\/my\/fix-stats\?date_from=\d{4}-\d{2}-\d{2}&date_to=/), expect.anything())
 
     fireEvent.click(screen.getByRole('button', { name: 'Xem đơn bị Fix' }))
-    expect(await screen.findByText('DJ1')).toBeInTheDocument()
+    expect(await screen.findByText('Áo Colombia')).toBeInTheDocument()  // named by product, no order code
+    expect(document.body.textContent).not.toMatch(/DJ\d/)
     expect(fetch).toHaveBeenCalledTimes(1)  // the orders came with the card
     expect(document.body.textContent?.toLowerCase()).not.toContain('printerval')
   })

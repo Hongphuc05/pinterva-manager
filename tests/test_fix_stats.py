@@ -218,7 +218,8 @@ def test_a_designer_sees_only_their_own_rate_with_the_previous_period_to_compare
     body = get(w.a, "/api/my/fix-stats?date_from=2026-10-19&date_to=2026-10-25", platform=w.other).json()
     assert (body["summary"]["submitted_orders"], body["summary"]["fixed_orders"], body["summary"]["fix_rate"]) == (2, 1, 50.0)
     assert (body["previous"]["submitted_orders"], body["previous"]["fixed_orders"]) == (1, 1)  # 12/10-18/10
-    assert [o["external_order_id"] for o in body["orders"]] == ["DJ60"]
+    assert [o["product_name"] for o in body["orders"]] == ["Áo DJ60"]
+    assert "external_order_id" not in body["orders"][0]  # no order code for Designers
     assert body["summary"]["designer_id"] == str(w.a.id) and "DJ63" not in str(body)
 
     assert get(w.admin, "/api/my/fix-stats").status_code == 403

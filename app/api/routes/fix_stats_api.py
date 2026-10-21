@@ -86,5 +86,9 @@ def api_my_fix_stats(
         **meta,
         "summary": mine(date_from, date_to),
         "previous": previous,
-        "orders": designer_fixed_orders(db, user.platform_id, user.id, date_from, date_to, loaded=loaded),
+        # Designers never see the platform's order code: the product name identifies the order for them.
+        "orders": [
+            {key: value for key, value in order.items() if key != "external_order_id"}
+            for order in designer_fixed_orders(db, user.platform_id, user.id, date_from, date_to, loaded=loaded)
+        ],
     }

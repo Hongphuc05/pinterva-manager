@@ -19,7 +19,7 @@ type StatsResponse = { since: string; incomplete: boolean; repeat_threshold: num
 
 type FixedOrder = {
   order_id: string
-  external_order_id: string
+  external_order_id?: string // Admin only: the Designer's own view identifies orders by product name
   product_name: string | null
   thumbnail_url: string | null
   first_submitted_at: string
@@ -183,7 +183,11 @@ export function DesignerFixModal({ designerId, name, range, threshold, onClose, 
                 )}
                 <div className="min-w-0 flex-1 space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono font-bold text-[#0052CC]">{order.external_order_id}</span>
+                    {order.external_order_id ? (
+                      <span className="font-mono font-bold text-[#0052CC]">{order.external_order_id}</span>
+                    ) : (
+                      <span className="min-w-0 truncate font-bold text-slate-900">{order.product_name || 'Đơn không tên'}</span>
+                    )}
                     <span className={`rounded-md px-1.5 py-0.5 font-bold ${order.fix_count >= threshold ? 'bg-red-600 text-white' : order.fix_count > 0 ? 'bg-orange-100 text-orange-800' : 'bg-slate-100 text-slate-600'}`}>
                       Fix {order.fix_count} lần
                     </span>
@@ -191,7 +195,7 @@ export function DesignerFixModal({ designerId, name, range, threshold, onClose, 
                       Mở đơn <ExternalLink className="h-3 w-3" />
                     </Link>
                   </div>
-                  <p className="truncate text-slate-700">{order.product_name}</p>
+                  {order.external_order_id && <p className="truncate text-slate-700">{order.product_name}</p>}
                   <p className="text-[11px] text-slate-500">Nộp lần đầu: {formatVn(order.first_submitted_at)}</p>
                   <ol className="space-y-0.5 text-[11px]">
                     {order.fixes.map((fix, index) => (
