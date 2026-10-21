@@ -132,21 +132,24 @@ export function FixStatsLine({ stat, threshold, onDetail }: { stat: DesignerFixS
   )
 }
 
-export function DesignerFixModal({ designerId, name, range, threshold, onClose }: {
+export function DesignerFixModal({ designerId, name, range, threshold, onClose, preloaded }: {
   designerId: string
   name: string
   range: FixRange
   threshold: number
   onClose: () => void
+  /** Orders already in hand (the Designer's own view): nothing is fetched. */
+  preloaded?: FixedOrder[]
 }) {
-  const [orders, setOrders] = useState<FixedOrder[] | null>(null)
+  const [orders, setOrders] = useState<FixedOrder[] | null>(preloaded ?? null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    if (preloaded) return
     apiFetch<{ orders: FixedOrder[] }>(`/designers/${designerId}/fix-stats${rangeQuery(range)}`)
       .then((res) => setOrders(res.orders))
       .catch((caught: any) => setError(caught?.message || 'Không tải được danh sách đơn.'))
-  }, [designerId, range.from, range.to])
+  }, [designerId, range.from, range.to, preloaded])
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
@@ -260,5 +263,99 @@ export function FixRateBadge({ stat, threshold = 3 }: { stat: DesignerFixStat | 
         </span>
       )}
     </div>
+  )
+}
+
+type MyStats = {
+  incomplete: boolean
+  since: string
+  repeat_threshold: number
+  summary: DesignerFixStat | null
+  previous: DesignerFixStat | null
+  orders: FixedOrder[]
+}
+
+const MY_PERIODS = [7, 30, 90] as const
+
+/**
+ * Designer: their own Fix rate on My Tasks, with the same-length period before it so they can see
+ * whether they are improving, and the orders that came back.
+ */
+export function MyFixRateCard() {
+  const [days, setDays] = useState<(typeof MY_PERIODS)[number]>(30)
+  const [data, setData] = useState<MyStats | null>(null)
+  const [open, setOpen] = useState(false)
+  const today = new Date()
+  const range = { from: isoDay(new Date(today.getTime() - (days - 1) * 86400000)), to: isoDay(today) }
+
+  useEffect(() => {
+    let alive = true
+    apiFetch<MyStats>(`/my/fix-stats${rangeQuery(range)}`)
+      .then((res) => alive && setData(res))
+      .catch(() => alive && setData(null))
+    return () => {
+      alive = false
+    }
+    // range follows days
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [days])
+
+  if (!data) return null
+  const now = data.summary
+  const before = data.previous
+  const threshold = data.repeat_threshold
+  const tone = !now ? 'text-slate-500' : now.fix_rate >= 30 ? 'text-red-700' : now.fix_rate >= 15 ? 'text-orange-700' : 'text-emerald-700'
+  const delta = now && before ? Math.round((now.fix_rate - before.fix_rate) * 10) / 10 : null
+
+  return (
+    <section aria-label="Tỷ lệ Fix của bạn" className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-white p-3 shadow-2xs sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+        <span className="font-bold text-slate-800">Tỷ lệ Fix của bạn</span>
+        {now ? (
+          <>
+            <span className={`font-mono text-lg font-bold ${tone}`}>{now.fix_rate}%</span>
+            <span className="text-slate-600">
+              {now.fixed_orders}/{now.submitted_orders} đơn bị Fix{now.fix_count > now.fixed_orders ? ` · ${now.fix_count} lượt Fix` : ''}
+            </span>
+            {delta !== null && delta !== 0 && (
+              <span className={`font-semibold ${delta < 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                {delta < 0 ? '▼' : '▲'} {Math.abs(delta)} điểm so với {days} ngày trước ({before!.fix_rate}%)
+              </span>
+            )}
+            {delta === 0 && <span className="text-slate-500">bằng {days} ngày trước</span>}
+            {now.repeat_orders > 0 && (
+              <span className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-red-50 px-1.5 py-0.5 font-semibold text-red-700">
+                <AlertTriangle className="h-3 w-3" />
+                {now.repeat_orders} đơn bị Fix ≥{threshold} lần
+              </span>
+            )}
+          </>
+        ) : (
+          <span className="text-slate-500">Chưa có đơn nộp trong {days} ngày qua.</span>
+        )}
+      </div>
+      <div className="flex items-center gap-2">
+        <select
+          aria-label="Khoảng thời gian tỷ lệ Fix"
+          value={days}
+          onChange={(e) => setDays(Number(e.target.value) as (typeof MY_PERIODS)[number])}
+          className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700"
+        >
+          {MY_PERIODS.map((d) => (
+            <option key={d} value={d}>{d} ngày gần nhất</option>
+          ))}
+        </select>
+        {data.orders.length > 0 && (
+          <button type="button" onClick={() => setOpen(true)}
+            className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-[#0052CC] hover:bg-blue-50 cursor-pointer">
+            Xem đơn bị Fix
+          </button>
+        )}
+      </div>
+      {open && (
+        <DesignerFixModal designerId="me" name="bạn" range={range} threshold={threshold}
+          preloaded={data.orders} onClose={() => setOpen(false)} />
+      )}
+    </section>
   )
 }

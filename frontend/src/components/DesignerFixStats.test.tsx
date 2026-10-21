@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { DesignerFixModal, FixStatsLine, fixRateLabel, sortByFix, type DesignerFixStat } from './DesignerFixStats'
+import { DesignerFixModal, FixStatsLine, MyFixRateCard, fixRateLabel, sortByFix, type DesignerFixStat } from './DesignerFixStats'
 
 const stat = (over: Partial<DesignerFixStat> = {}): DesignerFixStat => ({
   designer_id: 'des-a', submitted_orders: 5, fixed_orders: 1, fix_rate: 20, fix_count: 3, max_fixes_per_order: 3,
@@ -77,5 +77,39 @@ describe('fixRateLabel and sortByFix (designer pickers when splitting orders)', 
     expect(sortByFix(list, stats, 'name').map((d) => d.id)).toEqual(['a', 'none', 'b'])
     expect(sortByFix(list, stats, 'fix_asc').map((d) => d.id)).toEqual(['b', 'a', 'none'])
     expect(sortByFix(list, stats, 'fix_desc').map((d) => d.id)).toEqual(['a', 'b', 'none'])
+  })
+})
+
+describe('MyFixRateCard (the Designer\'s own rate on My Tasks)', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        incomplete: false, since: '2026-09-21', repeat_threshold: 3,
+        summary: stat(),
+        previous: stat({ fixed_orders: 3, submitted_orders: 10, fix_rate: 30 }),
+        orders: [{
+          order_id: 'o1', external_order_id: 'DJ1', product_name: 'Áo DJ1', thumbnail_url: null,
+          first_submitted_at: '2026-10-13T03:00:00Z', fix_count: 3,
+          fixes: [{ at: '2026-10-13T04:00:00Z', reason: 'Lỗi làm khác mockup gốc', excluded: null }],
+        }],
+      }),
+    })))
+  })
+
+  it('shows their rate, whether it improved on the period before, and their Fixed orders', async () => {
+    render(<MemoryRouter><MyFixRateCard /></MemoryRouter>)
+
+    expect(await screen.findByText('20%')).toBeInTheDocument()
+    expect(screen.getByText('1/5 đơn bị Fix · 3 lượt Fix')).toBeInTheDocument()
+    expect(screen.getByText('▼ 10 điểm so với 30 ngày trước (30%)')).toBeInTheDocument()
+    expect(screen.getByText('1 đơn bị Fix ≥3 lần')).toBeInTheDocument()
+    expect(fetch).toHaveBeenCalledWith(expect.stringMatching(/^\/api\/my\/fix-stats\?date_from=\d{4}-\d{2}-\d{2}&date_to=/), expect.anything())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Xem đơn bị Fix' }))
+    expect(await screen.findByText('DJ1')).toBeInTheDocument()
+    expect(fetch).toHaveBeenCalledTimes(1)  // the orders came with the card
+    expect(document.body.textContent?.toLowerCase()).not.toContain('printerval')
   })
 })

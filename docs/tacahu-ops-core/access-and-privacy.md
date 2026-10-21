@@ -49,8 +49,10 @@ phải enforce role + platform + assignment ở backend.
 
 ## Tỷ lệ Fix của Designer
 
-Chỉ Admin (đúng platform) xem được tỷ lệ Fix trên tab Tiến Độ Team (`/designers/fix-stats`); Support, Designer
-và Kế toán nhận 403. Số liệu tính từ lịch sử đơn (`workflow_events`), không dùng `fix_return_count`: mỗi lần Fix
+Admin (đúng platform) xem tỷ lệ Fix của mọi des trên tab Tiến Độ Team (`/designers/fix-stats`). Mỗi des (thường
+và Trello) chỉ xem được **tỷ lệ của chính mình** ở đầu trang My Tasks (`/my/fix-stats`: 7/30/90 ngày, so với kỳ trước
+cùng độ dài, danh sách đơn của mình bị Fix kèm nhãn lý do QC như "Lỗi làm khác mockup gốc", không kèm nội dung chat);
+platform lấy từ tài khoản des, không từ header. Support và Kế toán nhận 403 ở cả hai. Số liệu tính từ lịch sử đơn (`workflow_events`), không dùng `fix_return_count`: mỗi lần Fix
 tính cho người đã nộp bài mà QC trả lời (Admin nộp hộ thì tính cho des được phân công); khoảng thời gian lọc
 theo ngày des nộp đơn lần đầu (giờ VN), các lần Fix của đơn đó tính bất kể xảy ra lúc nào. Không tính cho des
 nhưng vẫn liệt kê: Fix giả (báo trong 5 phút sau khi des nộp lại đơn Fix, trước 20/10 khi đồng bộ chưa chặn)

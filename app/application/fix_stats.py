@@ -144,12 +144,25 @@ def _in_period(moment: datetime, start: datetime | None, end: datetime | None) -
     return (start is None or moment >= start) and (end is None or moment < end)
 
 
+Histories = tuple[dict[uuid.UUID, Order], dict[uuid.UUID, OrderHistory]]
+
+
+def load_histories(session: Session, platform_id: uuid.UUID) -> Histories:
+    """The platform's order history, read once and reusable across the calls below."""
+    return _histories(session, platform_id)
+
+
 def designer_fix_stats(
-    session: Session, platform_id: uuid.UUID, date_from: date | None = None, date_to: date | None = None
+    session: Session,
+    platform_id: uuid.UUID,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    *,
+    loaded: Histories | None = None,
 ) -> list[dict]:
     """One row per Designer who submitted orders in the period."""
     start, end = period(date_from, date_to)
-    _, histories = _histories(session, platform_id)
+    _, histories = loaded or _histories(session, platform_id)
     rows: dict[uuid.UUID, dict] = {}
     for history in histories.values():
         for designer, first in history.first_submitted.items():
@@ -183,10 +196,12 @@ def designer_fixed_orders(
     designer_id: uuid.UUID,
     date_from: date | None = None,
     date_to: date | None = None,
+    *,
+    loaded: Histories | None = None,
 ) -> list[dict]:
     """The Designer's orders of the period that came back as a Fix, worst first, each Fix listed."""
     start, end = period(date_from, date_to)
-    orders, histories = _histories(session, platform_id)
+    orders, histories = loaded or _histories(session, platform_id)
     picked = {
         oid: history
         for oid, history in histories.items()

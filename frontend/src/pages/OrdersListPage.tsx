@@ -6,7 +6,7 @@ import { usePlatform } from '../auth/PlatformContext'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { FixChatBox, useFixChat } from '../components/AdminFixActionModal'
 import { FixTemplateQuestion, useFixTemplate } from '../components/FixTemplateQuestion'
-import { FixSortSelect, fixRateLabel, sortByFix, useDesignerFixStats, type FixSort } from '../components/DesignerFixStats'
+import { FixSortSelect, MyFixRateCard, fixRateLabel, sortByFix, useDesignerFixStats, type FixSort } from '../components/DesignerFixStats'
 import { ImageModal } from '../components/ImageModal'
 import { StatusDropdown } from '../components/StatusDropdown'
 import { Pagination } from '../components/Pagination'
@@ -1964,6 +1964,9 @@ export function OrdersListPage() {
           </p>
         </div>
       )}
+
+      {/* The Designer's own Fix rate, to see whether they are improving */}
+      {isDesigner && <MyFixRateCard />}
 
       {/* Designer Workflow Tabs (Only for Designer) */}
       {!isManager && (

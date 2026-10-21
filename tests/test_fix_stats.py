@@ -193,3 +193,38 @@ def test_only_admins_see_it_scoped_to_their_platform(client, world):
 
     assert get(w.a, "/api/designers/fix-stats").status_code == 403
     assert get(w.admin, "/api/designers/fix-stats?date_from=2026-10-31&date_to=2026-10-01").status_code == 422
+
+
+def test_a_designer_sees_only_their_own_rate_with_the_previous_period_to_compare(client, world):
+    w = world
+    w.a.platform_id = w.platform.id
+    this_week = w.order("DJ60")
+    w.submit(this_week, 60 * 24 * 7, w.a)  # 20/10
+    w.fix(this_week, 60 * 24 * 7 + 60)
+    w.submit(w.order("DJ61"), 60 * 24 * 7, w.a)
+    last_week = w.order("DJ62")
+    w.submit(last_week, 0, w.a)  # 13/10
+    w.fix(last_week, 60)
+    w.submit(w.order("DJ63"), 0, w.b)  # someone else's
+    w.session.commit()
+
+    def get(user, path, platform=None):
+        headers = {"Authorization": f"Bearer {create_session_token(str(user.id), user.role)}"}
+        if platform:
+            headers["X-Platform-Id"] = str(platform.id)
+        return client.get(path, headers=headers)
+
+    # Another platform in the header changes nothing: a Designer's numbers come from their own platform.
+    body = get(w.a, "/api/my/fix-stats?date_from=2026-10-19&date_to=2026-10-25", platform=w.other).json()
+    assert (body["summary"]["submitted_orders"], body["summary"]["fixed_orders"], body["summary"]["fix_rate"]) == (2, 1, 50.0)
+    assert (body["previous"]["submitted_orders"], body["previous"]["fixed_orders"]) == (1, 1)  # 12/10-18/10
+    assert [o["external_order_id"] for o in body["orders"]] == ["DJ60"]
+    assert body["summary"]["designer_id"] == str(w.a.id) and "DJ63" not in str(body)
+
+    assert get(w.admin, "/api/my/fix-stats").status_code == 403
+    support = User(username=f"sup-{uuid.uuid4().hex[:4]}", full_name="S", role="support", password_hash="x",
+                   active=True, platform_id=w.platform.id)
+    w.session.add(support)
+    w.session.commit()
+    assert get(support, "/api/my/fix-stats").status_code == 403
+    assert get(w.a, "/api/designers/fix-stats").status_code == 403  # nor anyone else's numbers
