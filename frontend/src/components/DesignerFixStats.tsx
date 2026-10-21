@@ -207,3 +207,58 @@ export function DesignerFixModal({ designerId, name, range, threshold, onClose }
     </div>
   )
 }
+
+export type FixSort = 'name' | 'fix_asc' | 'fix_desc'
+
+/** "Fix 20% (1/5)", with a warning sign when an order came back `threshold` times or more. */
+export function fixRateLabel(stat: DesignerFixStat | undefined, threshold = 3): string {
+  if (!stat) return 'Fix: chưa có đơn'
+  return `Fix ${stat.fix_rate}% (${stat.fixed_orders}/${stat.submitted_orders})${stat.repeat_orders > 0 ? ` ⚠ ${stat.repeat_orders} đơn Fix ≥${threshold} lần` : ''}`
+}
+
+/** Designers ordered as chosen; those without orders in the period go last either way. */
+export function sortByFix<T extends { id: string }>(list: T[], stats: Map<string, DesignerFixStat>, sort: FixSort): T[] {
+  if (sort === 'name') return list
+  const sign = sort === 'fix_asc' ? 1 : -1
+  return [...list].sort((a, b) => {
+    const ra = stats.get(a.id)?.fix_rate
+    const rb = stats.get(b.id)?.fix_rate
+    if (ra === undefined || rb === undefined) return ra === undefined ? (rb === undefined ? 0 : 1) : -1
+    return sign * (ra - rb)
+  })
+}
+
+export function FixSortSelect({ value, onChange, className = '' }: { value: FixSort; onChange: (sort: FixSort) => void; className?: string }) {
+  return (
+    <select
+      aria-label="Sắp xếp Designer"
+      value={value}
+      onChange={(e) => onChange(e.target.value as FixSort)}
+      title="Tỷ lệ Fix 30 ngày gần nhất (đơn nộp lần đầu trong 30 ngày)"
+      className={`rounded-lg border px-2 py-1 text-xs font-semibold ${className}`}
+    >
+      <option value="name">Sắp xếp: Tên</option>
+      <option value="fix_asc">Tỷ lệ Fix thấp → cao</option>
+      <option value="fix_desc">Tỷ lệ Fix cao → thấp</option>
+    </select>
+  )
+}
+
+/** The Fix rate as a small line under a Designer's name (Quick distribute). */
+export function FixRateBadge({ stat, threshold = 3 }: { stat: DesignerFixStat | undefined; threshold?: number }) {
+  if (!stat) return <div className="text-[11px] text-slate-400">Fix 30 ngày: chưa có đơn</div>
+  const tone = stat.fix_rate >= 30 ? 'text-red-700' : stat.fix_rate >= 15 ? 'text-orange-700' : 'text-emerald-700'
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+      <span className="text-slate-500">
+        Fix 30 ngày: <strong className={`font-mono ${tone}`}>{stat.fix_rate}%</strong> ({stat.fixed_orders}/{stat.submitted_orders} đơn)
+      </span>
+      {stat.repeat_orders > 0 && (
+        <span className="inline-flex items-center gap-0.5 rounded border border-red-200 bg-red-50 px-1 font-semibold text-red-700">
+          <AlertTriangle className="h-3 w-3" />
+          {stat.repeat_orders} đơn Fix ≥{threshold} lần
+        </span>
+      )}
+    </div>
+  )
+}

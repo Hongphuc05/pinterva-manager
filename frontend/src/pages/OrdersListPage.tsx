@@ -6,6 +6,7 @@ import { usePlatform } from '../auth/PlatformContext'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { FixChatBox, useFixChat } from '../components/AdminFixActionModal'
 import { FixTemplateQuestion, useFixTemplate } from '../components/FixTemplateQuestion'
+import { FixSortSelect, fixRateLabel, sortByFix, useDesignerFixStats, type FixSort } from '../components/DesignerFixStats'
 import { ImageModal } from '../components/ImageModal'
 import { StatusDropdown } from '../components/StatusDropdown'
 import { Pagination } from '../components/Pagination'
@@ -524,6 +525,9 @@ export function OrdersListPage() {
     })
   }, [user?.role, adminTab, supportTab, activeDesignerTab, adminDoingSubFilter, adminFixSubFilter, statusFilter, platformStatusFilter, designerFilter, batchFilter, searchQuery, syncedImagesFilter, fixReturnedFilter, checkFilter, dateFilterType, dateFrom, dateTo, datePreset, dateSort, currentPage])
 
+  // Admin: each Designer's Fix rate (last 30 days) beside their name when splitting orders.
+  const fixStats = useDesignerFixStats(isAdmin)
+  const [designerSort, setDesignerSort] = useState<FixSort>('name')
   const regularDesigners = useMemo(() => {
     const candidates = usersList.filter(
       (candidate) => candidate.role === 'designer' || candidate.role === 'designer_trello' || candidate.role === 'designer-trello'
@@ -2365,12 +2369,15 @@ export function OrdersListPage() {
               className="bg-white text-slate-800 text-xs font-semibold px-3 py-1.5 rounded-lg border border-white/30 focus:outline-none shadow-xs"
             >
               <option value="">-- Chọn Designer phân công --</option>
-              {regularDesigners.map((u) => (
+              {sortByFix(regularDesigners, fixStats.byDesigner, designerSort).map((u) => (
                 <option key={u.id} value={u.id}>
-                  {u.full_name || u.username} ({u.role})
+                  {u.full_name || u.username} ({u.role}){isAdmin ? ` — ${fixRateLabel(fixStats.byDesigner.get(u.id), fixStats.threshold)}` : ''}
                 </option>
               ))}
             </select>
+            {isAdmin && (
+              <FixSortSelect value={designerSort} onChange={setDesignerSort} className="bg-white text-slate-700 border-white/30" />
+            )}
 
             {/* Select Web mẹ Designer */}
             <select
@@ -3743,12 +3750,15 @@ export function OrdersListPage() {
                   className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-[#0052CC]/20 focus:border-[#0052CC]"
                 >
                   <option value="">-- Chọn Designer --</option>
-                  {regularDesigners.map((u) => (
+                  {sortByFix(regularDesigners, fixStats.byDesigner, designerSort).map((u) => (
                     <option key={u.id} value={u.id}>
-                      {u.full_name || u.username} ({u.role})
+                      {u.full_name || u.username} ({u.role}){isAdmin ? ` — ${fixRateLabel(fixStats.byDesigner.get(u.id), fixStats.threshold)}` : ''}
                     </option>
                   ))}
                 </select>
+                {isAdmin && (
+                  <FixSortSelect value={designerSort} onChange={setDesignerSort} className="mt-1 bg-white text-slate-700 border-slate-300" />
+                )}
               </div>
 
               <div className="space-y-1">
@@ -4063,6 +4073,8 @@ export function OrdersListPage() {
         waitingOrders={quickDistributeOrders}
         initialCheckFilter={checkFilter}
         designers={regularDesigners}
+        fixStats={isAdmin ? fixStats.byDesigner : undefined}
+        fixThreshold={fixStats.threshold}
         onSuccess={async () => { await loadOrders() }}
         setFlash={setFlash}
       />

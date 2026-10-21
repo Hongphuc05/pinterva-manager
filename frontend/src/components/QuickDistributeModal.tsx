@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
+import { FixRateBadge, FixSortSelect, sortByFix, type DesignerFixStat, type FixSort } from './DesignerFixStats'
 import {
   X,
   Zap,
@@ -22,6 +23,9 @@ export type QuickDistributeModalProps = {
   /** Which orders to distribute at first: all, still unchecked, or checked (= Không trùng lặp). */
   initialCheckFilter?: CheckFilter
   designers: UserOption[]
+  /** Admin: each Designer's Fix rate (last 30 days), shown under the name and usable for sorting. */
+  fixStats?: Map<string, DesignerFixStat>
+  fixThreshold?: number
   onSuccess: () => Promise<void>
   setFlash: (msg: string) => void
 }
@@ -32,9 +36,12 @@ export function QuickDistributeModal({
   waitingOrders: allWaitingOrders,
   initialCheckFilter = '',
   designers,
+  fixStats,
+  fixThreshold = 3,
   onSuccess,
   setFlash,
 }: QuickDistributeModalProps) {
+  const [designerSort, setDesignerSort] = useState<FixSort>('name')
   const [checkFilter, setCheckFilter] = useState<CheckFilter>(initialCheckFilter)
   useEffect(() => {
     if (isOpen) setCheckFilter(initialCheckFilter)
@@ -69,14 +76,16 @@ export function QuickDistributeModal({
 
   const filteredDesigners = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
-    if (!q) return designers
-    return designers.filter(
-      (des) =>
-        (des.full_name || '').toLowerCase().includes(q) ||
-        (des.username || '').toLowerCase().includes(q) ||
-        (des.platform_designer_option || '').toLowerCase().includes(q)
-    )
-  }, [designers, searchQuery])
+    const matching = !q
+      ? designers
+      : designers.filter(
+          (des) =>
+            (des.full_name || '').toLowerCase().includes(q) ||
+            (des.username || '').toLowerCase().includes(q) ||
+            (des.platform_designer_option || '').toLowerCase().includes(q)
+        )
+    return fixStats ? sortByFix(matching, fixStats, designerSort) : matching
+  }, [designers, searchQuery, fixStats, designerSort])
 
   const totalWaiting = waitingOrders.length
 
@@ -280,6 +289,9 @@ export function QuickDistributeModal({
           </div>
 
           <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0">
+            {fixStats && (
+              <FixSortSelect value={designerSort} onChange={setDesignerSort} className="bg-white text-slate-700 border-slate-200" />
+            )}
             <span className="text-xs font-semibold text-slate-500 flex items-center gap-1">
               <Users className="h-3.5 w-3.5 text-slate-400" />
               <span>
@@ -348,6 +360,7 @@ export function QuickDistributeModal({
                             <span className="text-slate-400">• Web mẹ: {des.platform_designer_option}</span>
                           )}
                         </div>
+                        {fixStats && <FixRateBadge stat={fixStats.get(des.id)} threshold={fixThreshold} />}
                       </td>
                       <td className="py-2.5 pl-3 text-right">
                         <div className="inline-flex items-center gap-1.5 justify-end">

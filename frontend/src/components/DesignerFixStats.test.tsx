@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { DesignerFixModal, FixStatsLine, type DesignerFixStat } from './DesignerFixStats'
+import { DesignerFixModal, FixStatsLine, fixRateLabel, sortByFix, type DesignerFixStat } from './DesignerFixStats'
 
 const stat = (over: Partial<DesignerFixStat> = {}): DesignerFixStat => ({
   designer_id: 'des-a', submitted_orders: 5, fixed_orders: 1, fix_rate: 20, fix_count: 3, max_fixes_per_order: 3,
@@ -61,5 +61,21 @@ describe('DesignerFixModal', () => {
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(
       '/api/designers/des-a/fix-stats?date_from=2026-10-12&date_to=2026-10-18', expect.anything(),
     ))
+  })
+})
+
+describe('fixRateLabel and sortByFix (designer pickers when splitting orders)', () => {
+  it('labels the rate and warns about orders Fixed three times', () => {
+    expect(fixRateLabel(stat(), 3)).toBe('Fix 20% (1/5) ⚠ 1 đơn Fix ≥3 lần')
+    expect(fixRateLabel(stat({ repeat_orders: 0 }), 3)).toBe('Fix 20% (1/5)')
+    expect(fixRateLabel(undefined)).toBe('Fix: chưa có đơn')
+  })
+
+  it('sorts by rate either way, Designers without orders last', () => {
+    const list = [{ id: 'a' }, { id: 'none' }, { id: 'b' }]
+    const stats = new Map([['a', stat({ designer_id: 'a', fix_rate: 40 })], ['b', stat({ designer_id: 'b', fix_rate: 10 })]])
+    expect(sortByFix(list, stats, 'name').map((d) => d.id)).toEqual(['a', 'none', 'b'])
+    expect(sortByFix(list, stats, 'fix_asc').map((d) => d.id)).toEqual(['b', 'a', 'none'])
+    expect(sortByFix(list, stats, 'fix_desc').map((d) => d.id)).toEqual(['a', 'b', 'none'])
   })
 })

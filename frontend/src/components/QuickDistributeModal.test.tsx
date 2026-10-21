@@ -245,4 +245,33 @@ describe('QuickDistributeModal', () => {
     fireEvent.click(screen.getByRole('radio', { name: /Đã kiểm tra/ }))
     expect(screen.getByText('Tổng Đơn Chờ').parentElement).toHaveTextContent('3')
   })
+
+  it('shows each Designer\'s Fix rate under the name and sorts by it', () => {
+    const stat = (id: string, rate: number, fixed: number, submitted: number, repeat = 0) => ({
+      designer_id: id, submitted_orders: submitted, fixed_orders: fixed, fix_rate: rate, fix_count: fixed,
+      max_fixes_per_order: repeat ? 3 : 1, repeat_orders: repeat, distribution: { '1': 0, '2': 0, '3+': repeat },
+      excluded: { fake: 0, admin_rejected: 0 },
+    })
+    const fixStats = new Map([['des-1', stat('des-1', 40, 4, 10, 1)], ['des-2', stat('des-2', 10, 1, 10)]])
+    render(
+      <QuickDistributeModal isOpen onClose={mockOnClose} waitingOrders={mockWaitingOrders} designers={mockDesigners}
+        fixStats={fixStats} fixThreshold={3} onSuccess={mockOnSuccess} setFlash={mockSetFlash} />
+    )
+
+    expect(screen.getByText('40%')).toBeInTheDocument()
+    expect(screen.getByText('1 đơn Fix ≥3 lần')).toBeInTheDocument()
+    const names = () => screen.getAllByText(/Quân Nguyễn|Hoa Trần/).map((el) => el.textContent)
+    expect(names()).toEqual(['Quân Nguyễn', 'Hoa Trần'])
+    fireEvent.change(screen.getByRole('combobox', { name: 'Sắp xếp Designer' }), { target: { value: 'fix_asc' } })
+    expect(names()).toEqual(['Hoa Trần', 'Quân Nguyễn'])
+  })
+
+  it('shows no Fix rates to anyone the page did not give them to', () => {
+    render(
+      <QuickDistributeModal isOpen onClose={mockOnClose} waitingOrders={mockWaitingOrders} designers={mockDesigners}
+        onSuccess={mockOnSuccess} setFlash={mockSetFlash} />
+    )
+    expect(screen.queryByText(/Fix 30 ngày/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: 'Sắp xếp Designer' })).not.toBeInTheDocument()
+  })
 })
