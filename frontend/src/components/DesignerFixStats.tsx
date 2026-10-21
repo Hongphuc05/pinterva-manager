@@ -12,7 +12,7 @@ export type DesignerFixStat = {
   max_fixes_per_order: number
   repeat_orders: number
   distribution: { '1': number; '2': number; '3+': number }
-  excluded: { fake: number; admin_rejected: number }
+  excluded: { fake: number; admin_rejected: number; dispute_accepted?: number }
 }
 
 type StatsResponse = { since: string; incomplete: boolean; repeat_threshold: number; designers: DesignerFixStat[] }
@@ -24,12 +24,16 @@ type FixedOrder = {
   thumbnail_url: string | null
   first_submitted_at: string
   fix_count: number
-  fixes: { at: string; reason: string | null; excluded: 'fake' | 'admin_rejected' | null }[]
+  fixes: { at: string; reason: string | null; excluded: 'fake' | 'admin_rejected' | 'dispute_accepted' | null }[]
 }
 
 export type FixRange = { from: string; to: string }
 
-const EXCLUDED_LABEL = { fake: 'Fix giả (lỗi đồng bộ), không tính', admin_rejected: 'Admin đã từ chối, không tính' }
+const EXCLUDED_LABEL = {
+  fake: 'Fix giả (lỗi đồng bộ), không tính',
+  admin_rejected: 'Admin đã từ chối, không tính',
+  dispute_accepted: 'Khiếu nại được chấp nhận (fix sai), không tính',
+}
 
 function isoDay(date: Date): string {
   const shifted = new Date(date.getTime() - date.getTimezoneOffset() * 60000)
@@ -122,7 +126,7 @@ export function FixStatsLine({ stat, threshold, onDetail }: { stat: DesignerFixS
           {stat.repeat_orders} đơn bị Fix ≥{threshold} lần (nhiều nhất {stat.max_fixes_per_order} lần)
         </span>
       )}
-      {stat.fixed_orders + stat.excluded.fake + stat.excluded.admin_rejected > 0 && (
+      {stat.fixed_orders + stat.excluded.fake + stat.excluded.admin_rejected + (stat.excluded.dispute_accepted ?? 0) > 0 && (
         <button type="button" onClick={(e) => { e.stopPropagation(); onDetail() }}
           className="rounded-md border border-slate-300 bg-white px-1.5 py-0.5 font-semibold text-[#0052CC] hover:bg-blue-50 cursor-pointer">
           Chi tiết Fix

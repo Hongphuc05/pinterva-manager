@@ -41,6 +41,7 @@ celery_app.conf.task_routes = {
         "queue": "assignment",
         "priority": 9,
     },
+    "app.workers.assignment_sync_tasks.send_fix_dispute_task": {"queue": "assignment"},
     "app.workers.assignment_sync_tasks.sync_assignment_to_printerval_task": {
         "queue": "assignment"
     },

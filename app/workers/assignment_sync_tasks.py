@@ -507,3 +507,86 @@ def _review_sync_gave_up(session, order: Order, action: str, target_status: str 
     )
     logger.error("Review sync for %s gave up: %s (%s)", order.external_order_id, failure, failure.error_class)
     _alert_admins(session, order, action=action, error=str(failure), manual=manual, error_class=failure.error_class)
+
+
+@celery_app.task(
+    bind=True,
+    name="app.workers.assignment_sync_tasks.send_fix_dispute_task",
+    max_retries=len(REVIEW_SYNC_RETRY_DELAYS),
+)
+def send_fix_dispute_task(self, order_id: str) -> None:
+    """Send the Admin's "Báo fix không đúng" to Printerval, then confirm the job went to Review.
+
+    Never sent twice: if Printerval already holds a pending dispute for the job (an earlier attempt
+    landed but its answer was lost), that is taken as sent. Transient failures are retried after 1, 3
+    and 7 minutes; a refusal or the last failure marks the dispute failed and toasts the Admins, who
+    can send it again from the order."""
+    from app.adapters.printerval.api_client import PrintervalApiError
+    from app.application import fix_dispute
+    from app.application.printerval_alerts import record_write_failure
+
+    session = SessionLocal()
+    try:
+        order = session.get(Order, uuid.UUID(order_id))
+        record = fix_dispute.current(order) if order is not None else None
+        if record is None or record.get("push") != "queued":
+            return
+        code = order.external_order_id
+
+        def fail(error: str, error_class: str = "PERMANENT_EXTERNAL") -> None:
+            fix_dispute.mark_failed(session, order, error)
+            session.commit()
+            record_write_failure(
+                session, order, action="gửi khiếu nại Fix (Báo fix không đúng)", error=error,
+                error_class=error_class,
+                manual=f"mở đơn {code} trên Tacahu và bấm Gửi lại, hoặc báo fix không đúng trực tiếp trên Printerval",
+            )
+
+        platform = session.get(Platform, order.platform_id) if order.platform_id else None
+        if platform is None or not (platform.account_password or platform.session_cookie):
+            fail("Platform chưa có cookie hoặc mật khẩu Printerval", "AUTH")
+            return
+        try:
+            with PrintervalApiClient(
+                base_url="https://printerval.com",
+                username=platform.account_username,
+                password=platform.account_password,
+                team_outsource=platform.team_outsource,
+                session_cookie=platform.session_cookie,
+                timeout=REVIEW_SYNC_TIMEOUT_SECONDS,
+            ) as client:
+                row = client.find_order(code, statuses=("fix", "review"))
+                existing = row.get("outsource_fix_dispute") if row else None
+                already_sent = isinstance(existing, dict) and existing.get("status") == fix_dispute.PENDING
+                if not already_sent:
+                    if row is None or str(row.get("status") or "").lower() != "fix":
+                        fail("Đơn không còn ở Fix trên Printerval")
+                        return
+                    if row.get("outsource_fix_dispute_can") is False:
+                        fail("Printerval không cho khiếu nại lượt Fix này")
+                        return
+                    client.submit_fix_dispute(int(code.upper().removeprefix("DJ")), record["note"], record["images"])
+                    row = client.find_order(code, statuses=("review", "fix")) or row
+                fix_dispute.mark_sent(order)
+                fix_dispute.observe(
+                    session, order,
+                    status=row.get("status"),
+                    dispute=row.get("outsource_fix_dispute") if isinstance(row.get("outsource_fix_dispute"), dict) else None,
+                    can=row.get("outsource_fix_dispute_can") if isinstance(row.get("outsource_fix_dispute_can"), bool) else None,
+                )
+                order.printerval_status = str(row.get("status") or order.printerval_status or "").lower() or None
+                order.printerval_status_synced_at = datetime.now(UTC)
+                session.commit()
+                logger.info("Fix dispute sent to Printerval for %s", code)
+        except Exception as exc:
+            session.rollback()
+            failure = _as_review_failure(exc)
+            # A refusal (job not disputable, bad input) will not change by waiting; a timeout may have
+            # landed, which the next attempt checks before sending again.
+            retryable = exc.retryable if isinstance(exc, PrintervalApiError) else True
+            if retryable and self.request.retries < len(REVIEW_SYNC_RETRY_DELAYS):
+                raise self.retry(countdown=REVIEW_SYNC_RETRY_DELAYS[self.request.retries], exc=exc) from exc
+            session.refresh(order)
+            fail(str(failure), failure.error_class)
+    finally:
+        session.close()

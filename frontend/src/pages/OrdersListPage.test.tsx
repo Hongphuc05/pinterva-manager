@@ -729,9 +729,9 @@ describe('OrdersListPage', () => {
     expect(screen.getByText('Thời Gian')).toBeInTheDocument()
     expect(screen.getByText('Lọc thời gian:')).toBeInTheDocument()
 
-    // Verify Fix Tab action buttons exist: "Chấp nhận Fix" and "Từ chối Fix"
+    // Verify Fix Tab action buttons exist: "Chấp nhận Fix" and "Báo fix không đúng"
     expect(screen.getByText('Chấp nhận Fix')).toBeInTheDocument()
-    expect(screen.getByText('Từ chối Fix')).toBeInTheDocument()
+    expect(screen.getByText('Báo fix không đúng')).toBeInTheDocument()
 
     // Verify old manual approve/fix buttons do NOT exist
     expect(screen.queryByText('Duyệt Done')).not.toBeInTheDocument()
@@ -924,7 +924,7 @@ describe('OrdersListPage', () => {
 
     // Verify badges and action buttons
     expect(screen.getByText('Chấp nhận Fix')).toBeInTheDocument()
-    expect(screen.getByText('Từ chối Fix')).toBeInTheDocument()
+    expect(screen.getByText('Báo fix không đúng')).toBeInTheDocument()
     expect(screen.getByText('Đã gửi fix cho des')).toBeInTheDocument()
     expect(screen.getByText('Đã từ chối fix')).toBeInTheDocument()
   })

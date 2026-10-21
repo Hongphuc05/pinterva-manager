@@ -31,7 +31,8 @@ stateDiagram-v2
     QC_PENDING --> DONE: platform xác nhận done hoặc Admin action hợp lệ
     QC_PENDING --> REVISION: platform trả Fix
     REVISION --> IN_PROGRESS: Admin duyệt Fix, Designer bắt đầu sửa
-    REVISION --> QC_PENDING: Admin từ chối Fix về Review
+    REVISION --> QC_PENDING: Admin báo fix không đúng, Printerval chuyển Review chờ phân xử
+    QC_PENDING --> REVISION: khiếu nại bị bác (cùng lượt Fix, không tăng fix_return_count)
     QC_PENDING --> IN_PROGRESS: nộp lại/làm lại
     DONE --> REVISION: Fix muộn từ platform
     state EXCEPTION
@@ -77,9 +78,34 @@ transition nhưng application layer không được tự động recover.
 6. **Fix**: Fix trước hết nằm ở Admin (thẻ Telegram trích nguyên văn nội dung Fix trong chat,
    hoặc nút "Chấp nhận Fix" trên web). Admin duyệt thì Designer nhận **Ghi chú cho Designer**;
    Admin để trống thì Designer nhận nguyên văn nội dung Fix trong chat, ảnh qua proxy (chi tiết ở
-   "Chat Printerval"). Designer sửa và nộp lại Review (lại kèm 1–3 ảnh mockup mới). Admin từ chối
-   Fix thì trả về `QC_PENDING` cùng ghi chú phản hồi cho platform. Designer không bao giờ thấy
-   chat hay `note_outsource`.
+   "Chat Printerval"). Designer sửa và nộp lại Review (lại kèm 1–3 ảnh mockup mới). Admin cho rằng
+   Fix sai thì **Báo fix không đúng** (xem dưới), không còn tự đẩy đơn về Review. Designer không bao
+   giờ thấy chat, `note_outsource` hay khiếu nại.
+
+### Báo fix không đúng (khiếu nại Fix, Printerval từ 21/10/2026)
+
+Thay cho "Từ chối Fix" cũ. Printerval nhận `POST /outsource/pod/design-job/fix-dispute`
+`{id, note, images}` (đọc từ JS trang Printerval): lý do bắt buộc 10–1000 ký tự, tối đa 5 link ảnh
+`http(s)`. Printerval chuyển job sang **Review ngay**, người review khác phân xử; job có
+`outsource_fix_dispute = {round, status, note, at, arbiter_note, arbiter_at}` và
+`outsource_fix_dispute_can` (được khiếu nại lúc này không).
+
+1. Admin gửi trên web (modal giống Printerval ở danh sách đơn, chi tiết đơn, Tiến Độ Team) hoặc Telegram
+   (nút "🚩 Báo fix không đúng" trên thẻ Fix → bot hỏi theo mẫu `LÝ DO: …` / `ẢNH:` mỗi link một dòng,
+   sai thì báo lỗi và hỏi lại, đúng thì cho xem lại với nút **Gửi khiếu nại / Huỷ**).
+   `POST /orders/{id}/fix-dispute` ghi `orders.fix_dispute` (`push=queued`) + `WorkflowEvent`
+   `FIX_DISPUTE_SUBMITTED`, dọn thẻ Fix Telegram và đẩy task `send_fix_dispute_task` (queue `assignment`).
+2. Task đọc job trước: đã có khiếu nại `pending` (lần gửi trước tới nơi nhưng mất phản hồi) thì **không gửi
+   lại**; job không còn Fix hoặc `can=false` thì báo lỗi. Gửi xong đọc lại job, đơn sang `QC_PENDING`
+   (`FIX_DISPUTE_TO_REVIEW`). Lỗi tạm thời thử lại sau 1/3/7 phút; bị từ chối hoặc hết lượt thử thì
+   `push=failed`, ghi `dead_letters` (toast Admin) và Admin bấm **Gửi lại** (`/fix-dispute/retry`).
+3. Đồng bộ trạng thái (cả 3 đường) đọc khiếu nại **trước** luật Fix/Review: `rejected` + job về `fix`
+   → đơn về `REVISION` ngay (không chờ tin "Mở Fix", **không** tăng `fix_return_count`, gửi lại thẻ Fix
+   kèm lời phân xử, nút khiếu nại ẩn đi) — `FIX_DISPUTE_REJECTED`; trạng thái khác `pending`/`rejected`
+   khi job không ở Fix → `FIX_DISPUTE_ACCEPTED`.
+4. Mỗi lượt Fix khiếu nại một lần: đã gửi hoặc bị bác thì nút bị khoá kèm lý do (`fix_dispute_blocked`).
+5. Tỉ lệ Fix của Designer: khiếu nại được chấp nhận thì lần Fix đó không tính (`dispute_accepted`), bị bác
+   thì vẫn tính.
 
 ## Chuyển đơn sang Review trên Printerval (luật Printerval từ 19/10/2026)
 

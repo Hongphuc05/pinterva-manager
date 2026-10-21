@@ -827,16 +827,17 @@ def notify_admin_new_fix(session: Session, order_id: uuid.UUID) -> bool:
     )
     session.commit()
 
-    reply_markup = {
-        "inline_keyboard": [
-            [
-                {"text": "✅ Chấp nhận Fix & Giao Des", "callback_data": f"appfix:{approve_token}"},
-            ],
-            [
-                {"text": "❌ Từ chối Fix (Về Review)", "callback_data": f"rejfix:{reject_token}"},
-            ],
-        ]
-    }
+    from app.application import fix_dispute
+
+    keyboard = [[{"text": "✅ Chấp nhận Fix & Giao Des", "callback_data": f"appfix:{approve_token}"}]]
+    # A Fix already disputed and upheld cannot be disputed again: only "Chấp nhận" is left.
+    if fix_dispute.blocked_reason(order) is None:
+        keyboard.append([{"text": "🚩 Báo fix không đúng", "callback_data": f"rejfix:{reject_token}"}])
+    reply_markup = {"inline_keyboard": keyboard}
+    dispute = fix_dispute.current(order)
+    if dispute and dispute.get("outcome") == fix_dispute.REJECTED:
+        verdict = (dispute.get("arbiter_note") or "").strip()
+        qc_note = f"⚖️ Khiếu nại bị bác — FIX đúng{': ' + verdict if verdict else ''}\n\n{qc_note}"[:3000]
 
     text = render_telegram_template(
         session,

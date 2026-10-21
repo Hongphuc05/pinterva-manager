@@ -299,6 +299,9 @@ class Order(Base):
     fix_approved_by_admin: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=text("false"), nullable=False
     )
+    # "Báo fix không đúng": the Admin's dispute of the current Fix, sent to Printerval, and Printerval's
+    # arbitration mirrored back. See app/application/fix_dispute.py for the keys.
+    fix_dispute: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     fix_rejected_by_admin: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=text("false"), nullable=False
     )

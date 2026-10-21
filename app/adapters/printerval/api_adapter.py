@@ -173,6 +173,8 @@ class PrintervalApiAdapter:
                         product_category=category,
                         product_skus=[product_sku.model_dump() for product_sku in extract_product_skus(row)],
                         designer=designer_name,
+                        fix_dispute=row.get("outsource_fix_dispute") if isinstance(row.get("outsource_fix_dispute"), dict) else None,
+                        fix_dispute_can=row.get("outsource_fix_dispute_can") if isinstance(row.get("outsource_fix_dispute_can"), bool) else None,
                     )
                 )
 

@@ -254,6 +254,20 @@ logger = logging.getLogger(__name__)
 REVIEW_PUSH_GRACE = timedelta(minutes=30)
 
 
+def _observe_dispute(session: Session, order: Order, row: dict, status: str | None, actor_id) -> tuple[bool, bool]:
+    """Printerval's view of the Admin's "Báo fix không đúng" (see fix_dispute.observe)."""
+    from app.application import fix_dispute
+
+    dispute = row.get("outsource_fix_dispute")
+    can = row.get("outsource_fix_dispute_can")
+    return fix_dispute.observe(
+        session, order, status=status,
+        dispute=dispute if isinstance(dispute, dict) else None,
+        can=can if isinstance(can, bool) else None,
+        actor_id=actor_id,
+    )
+
+
 def _is_new_fix(order: Order, platform: Platform) -> bool:
     """Whether Printerval's "fix" for this order is a new Fix rather than our Review push not landed yet."""
     from app.application.printerval_alerts import pending_template_confirm
@@ -424,8 +438,14 @@ def reconcile_active_platform_orders(
                 order.printerval_status = incoming_status
                 changed = True
 
+            dispute_changed, back_in_fix = _observe_dispute(
+                session, order,
+                {"outsource_fix_dispute": summary.fix_dispute, "outsource_fix_dispute_can": summary.fix_dispute_can},
+                incoming_status, actor_id,
+            )
+            changed = changed or dispute_changed
             is_fix = incoming_status == "fix" and _is_new_fix(order, platform)
-            entered_fix = is_fix and order.state != OrderState.REVISION.value
+            entered_fix = (is_fix and order.state != OrderState.REVISION.value) or back_in_fix
             if is_fix:
                 changed = _transition_to_fix_from_observation(session, order, actor_id=actor_id) or changed
 
@@ -647,6 +667,9 @@ def sync_selected_order_statuses(
                     else:
                         found_status = str(row.get("status") or "").strip()
                         norm_status = found_status.upper()
+                        dispute_changed, back_in_fix = _observe_dispute(session, order, row, found_status, actor_id)
+                        changed = changed or dispute_changed
+                        notify_admin_fix = notify_admin_fix or back_in_fix
                         old_state = order.state
 
                         if order.state not in ("WAITING", "OPEN_FOR_ALLOCATION", "DISCOVERED", "PENDING"):
@@ -833,6 +856,9 @@ def sync_platform_order_statuses(
                     order_changed = True
 
                 norm_st = (found_status or "").upper()
+                dispute_changed, back_in_fix = _observe_dispute(session, order, row, found_status, None)
+                order_changed = order_changed or dispute_changed
+                notify_admin_fix = notify_admin_fix or back_in_fix
                 old_state = order.state
                 if norm_st == "FIX" and _is_new_fix(order, platform) and order.state in (
                     "QC_PENDING", "REVIEW", "RESULT_SUBMITTED", "SUBMITTING_TO_SITE",

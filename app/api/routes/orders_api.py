@@ -63,14 +63,13 @@ from app.api.deps import (
     require_any_role,
     require_role,
 )
-from app.application import order_pages
+from app.application import fix_dispute, order_pages
 from app.application.assignment_commands import (
     AssignmentCommandError,
     revoke_assignment_command,
 )
 from app.application.concurrency import lock_order_for_command
 from app.application.crawl import DiscoverFailedError, refresh_order_detail, scan_orders_fast
-from app.application.fix_rejection import queue_review_push, reject_fix_to_review
 from app.application.fix_template_confirm import (
     TemplateConfirmError,
     confirm_fix_template,
@@ -130,6 +129,9 @@ class OrderSummaryOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     # Admin only: QC's latest message in Printerval's chat, for orders in Fix (see printerval_chat).
     fix_reason: str | None = None
+    # Admin only: "Báo fix không đúng" of the current Fix and why a new one cannot be filed.
+    fix_dispute: dict | None = None
+    fix_dispute_blocked: str | None = None
     id: uuid.UUID
     version: int
     external_order_id: str
@@ -740,6 +742,8 @@ class ResultVersionOut(BaseModel):
 class OrderDetailOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     fix_reason: str | None = None  # Admin only, see OrderSummaryOut
+    fix_dispute: dict | None = None  # Admin only
+    fix_dispute_blocked: str | None = None
     # Admin only: Printerval waits for a confirmation that this Fix was about the template.
     fix_template_confirm: dict | None = None
     id: uuid.UUID
@@ -995,6 +999,12 @@ def _summarize_orders(db: Session, user: User, orders: list[Order]) -> list[Orde
     for o in orders:
         item = OrderSummaryOut.model_validate(o)
         item.fix_reason = fix_reason_map.get(o.id)
+        if is_admin and (o.fix_dispute or o.state == OrderState.REVISION.value):
+            dispute_view = fix_dispute.view(o)
+            item.fix_dispute = dispute_view["dispute"]
+            item.fix_dispute_blocked = dispute_view["blocked_reason"]
+        elif not is_admin:
+            item.fix_dispute = None
         item.assigned_designer_name = designer_map.get(o.id)
         if not item.assigned_designer_name and (
             (user.printerval_designer_option and o.printerval_designer == user.printerval_designer_option)
@@ -1929,6 +1939,10 @@ def api_order_detail(
     is_admin = user.role == ROLE_ADMIN
     if is_admin and order.state == OrderState.REVISION.value:
         order_out.fix_reason = fix_chat_text(db, order)
+    if is_admin and (order.fix_dispute or order.state == OrderState.REVISION.value):
+        dispute_view = fix_dispute.view(order)
+        order_out.fix_dispute = dispute_view["dispute"]
+        order_out.fix_dispute_blocked = dispute_view["blocked_reason"]
     if is_admin:
         pending = pending_template_confirm(db, order)
         if pending is not None:
@@ -2888,8 +2902,9 @@ def api_approve_fix(
     }
 
 
-class RejectFixRequest(OrderCommandPayload):
-    note_outsource: str | None = None
+class FixDisputeRequest(OrderCommandPayload):
+    note: str = Field(max_length=fix_dispute.NOTE_MAX + 200)
+    images: list[str] = Field(default_factory=list, max_length=20)
 
 
 class FixTemplateConfirmRequest(BaseModel):
@@ -2954,24 +2969,8 @@ def api_confirm_fix_template(
     return {"ok": True, "order_id": result["order_id"]}
 
 
-@router.post("/orders/{order_id}/reject-fix-to-review")
-def api_reject_fix_to_review(
-    order_id: str,
-    payload: RejectFixRequest,
-    user: User = Depends(require_role("admin")),
-    db: Session = Depends(get_db),
-):
-    order = _lock_order_by_identifier(db, order_id, expected_version=payload.expected_version)
-
-    if order is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
-
-    reject_fix_to_review(db, order, admin=user, note_outsource=payload.note_outsource)
-    db.commit()
-    db.refresh(order)
-
-
-    # The Fix card in the Admins' Telegram chats is settled: remove it.
+def _clean_fix_cards(db: Session, order: Order) -> None:
+    """The Fix card in the Admins' Telegram chats is settled: remove it."""
     try:
         from app.api.routes.telegram_api import _clean_completed_fix_conversations
 
@@ -2979,19 +2978,63 @@ def api_reject_fix_to_review(
     except Exception:
         logger.warning("Telegram Fix card cleanup failed for order %s", order.id, exc_info=True)
 
-    queue_review_push(order)
 
+def _dispute_response(order: Order) -> dict:
+    view = fix_dispute.view(order)
     return {
         "ok": True,
         "order_id": str(order.id),
-        "external_order_id": order.external_order_id,
         "state": order.state,
-        "note_outsource": order.note_outsource,
-        "fix_approved_by_admin": order.fix_approved_by_admin,
-        "fix_rejected_by_admin": order.fix_rejected_by_admin,
         "version": order.version,
-        "message": "Đã hủy Fix, cập nhật note outsource và chuyển lại trạng thái Review trên Printerval.",
+        "fix_dispute": view["dispute"],
+        "fix_dispute_blocked": view["blocked_reason"],
     }
+
+
+@router.post("/orders/{order_id}/fix-dispute")
+def api_submit_fix_dispute(
+    order_id: str,
+    payload: FixDisputeRequest,
+    user: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    """"Báo fix không đúng": dispute Printerval's Fix (reason + up to 5 image links). Printerval moves
+    the job to Review and another reviewer arbitrates (see app/application/fix_dispute.py)."""
+    order = _lock_order_by_identifier(db, order_id, expected_version=payload.expected_version)
+    if order is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
+    try:
+        fix_dispute.submit(db, order, admin=user, note=payload.note, images=payload.images, source="web")
+    except fix_dispute.FixDisputeError as exc:
+        db.rollback()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    db.commit()
+    db.refresh(order)
+    _clean_fix_cards(db, order)
+    fix_dispute.queue_send(order)
+    return _dispute_response(order)
+
+
+@router.post("/orders/{order_id}/fix-dispute/retry")
+def api_retry_fix_dispute(
+    order_id: str,
+    payload: OrderCommandPayload,
+    user: User = Depends(require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    """Send a dispute whose push to Printerval failed again, unchanged."""
+    order = _lock_order_by_identifier(db, order_id, expected_version=payload.expected_version)
+    if order is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Không tìm thấy đơn hàng")
+    try:
+        fix_dispute.retry(db, order, admin=user)
+    except fix_dispute.FixDisputeError as exc:
+        db.rollback()
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    db.commit()
+    db.refresh(order)
+    fix_dispute.queue_send(order)
+    return _dispute_response(order)
 
 
 class SyncPrintervalStatusPayload(BaseModel):

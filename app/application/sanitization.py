@@ -217,6 +217,8 @@ def sanitize_order_summary_for_designer(item: Any) -> Any:
         "source_download_all_url",
         "design_tool_url",
         "deadline_at_ext",
+        "fix_dispute",
+        "fix_dispute_blocked",
     ]:
         item_dict.pop(k, None)
 

@@ -12,7 +12,6 @@ from app.adapters.db.models import (
     Platform,
     SupportCompareJob,
     TelegramActionLog,
-    TelegramFixConversation,
     User,
 )
 from app.application.auth import create_session_token, hash_password
@@ -495,27 +494,6 @@ def test_urgent_fix_telegram_never_includes_printerval_outsource_note(db_session
     payload = mock_send.call_args.args[1]
     assert "Chỉnh lại logo theo ảnh mẫu" in payload["text"]
     assert "PRIVATE PRINT QC NOTE" not in payload["text"]
-
-
-def test_rejected_fix_deletes_root_card_and_transient_chat(client, db_session):
-    platform = Platform(name="Telegram cleanup", account_username="cleanup@example.com")
-    admin = User(username="cleanup-admin", full_name="Cleanup Admin", role="admin", password_hash=hash_password("pass"), telegram_chat_id="777", active=True)
-    order = Order(external_order_id="DJ-CLEANUP", platform_id=platform.id, state=OrderState.REVISION.value)
-    db_session.add_all([platform, admin, order])
-    db_session.flush()
-    db_session.add_all([
-        TelegramActionLog(order_id=order.id, action_type="REJECT_FIX", callback_token="reject-cleanup", payload={}, expires_at=None),
-        TelegramFixConversation(order_id=order.id, chat_id="777", root_message_id=100, transient_message_ids=[101, 102]),
-    ])
-    db_session.commit()
-
-    with patch("app.api.routes.telegram_api.delete_messages") as delete:
-        delete.return_value = True
-        response = client.post("/api/telegram/webhook", json={"callback_query": {"data": "rejfix:reject-cleanup", "from": {"id": 777}}})
-    assert response.status_code == 200
-    delete.assert_called_once_with("777", [100, 101, 102])
-    conversation = db_session.query(TelegramFixConversation).one()
-    assert conversation.status == "cleaned"
 
 
 def test_resolve_tacahu_designer_name_and_excessive_fix_notification(db_session):

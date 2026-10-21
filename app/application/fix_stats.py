@@ -9,7 +9,9 @@ that counter was bumped without an event before 21/09 and cannot say who a Fix b
   counted whenever they came.
 * Not counted against the Designer, but listed: a **fake Fix** (reported within 5 minutes of a Fix
   resubmission, before the 20/10 guard: the sync saw the old Fix before Printerval took the Review) and
-  a Fix the **Admin rejected** (sent back to Review as not a real Fix).
+  a Fix the **Admin rejected** (sent back to Review as not a real Fix), and a Fix the Admin **disputed
+  on Printerval** ("Báo fix không đúng") that the arbiter **accepted**. A rejected dispute leaves the
+  Fix counted.
 """
 
 from __future__ import annotations
@@ -38,9 +40,10 @@ FAKE_FIX_GUARD_SINCE = datetime(2026, 10, 20, tzinfo=UTC)
 REASON_LAG = timedelta(minutes=10)  # the sync records a Fix a few minutes after QC opens it
 
 DESIGNER_ROLES = (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO)
-NOT_A_SUBMISSION = ("REJECT_FIX_TO_REVIEW", "CONFIRM_FIX_TEMPLATE")
+NOT_A_SUBMISSION = ("REJECT_FIX_TO_REVIEW", "CONFIRM_FIX_TEMPLATE", "FIX_DISPUTE_TO_REVIEW")
 FAKE = "fake"
 ADMIN_REJECTED = "admin_rejected"
+DISPUTE_ACCEPTED = "dispute_accepted"
 
 
 @dataclass
@@ -90,6 +93,7 @@ def _histories(session: Session, platform_id: uuid.UUID) -> tuple[dict[uuid.UUID
     histories: dict[uuid.UUID, OrderHistory] = defaultdict(OrderHistory)
     last_submission: dict[uuid.UUID, tuple[uuid.UUID, datetime]] = {}
     open_fix: dict[uuid.UUID, Fix] = {}
+    disputed: dict[uuid.UUID, Fix] = {}  # Fixes sent to Review by a "Báo fix không đúng", awaiting the verdict
     for event in events:
         oid, evidence = event.order_id, event.evidence or {}
         action, history = evidence.get("action"), histories[event.order_id]
@@ -119,6 +123,17 @@ def _histories(session: Session, platform_id: uuid.UUID) -> tuple[dict[uuid.UUID
             fix = open_fix.pop(oid)
             if action == "REJECT_FIX_TO_REVIEW" and fix.excluded is None:
                 fix.excluded = ADMIN_REJECTED
+            elif action == "FIX_DISPUTE_TO_REVIEW":
+                disputed[oid] = fix
+        elif action == "FIX_DISPUTE_ACCEPTED" and oid in disputed:
+            fix = disputed.pop(oid)
+            if fix.excluded is None:
+                fix.excluded = DISPUTE_ACCEPTED
+        elif action == "FIX_DISPUTE_REJECTED" and event.to_state == "REVISION":
+            # The same Fix is open again (still counted); a later Review/approval closes it as usual.
+            fix = disputed.pop(oid, None)
+            if fix is not None:
+                open_fix[oid] = fix
     return orders, histories
 
 
@@ -171,7 +186,7 @@ def designer_fix_stats(
             row = rows.setdefault(designer, {
                 "designer_id": str(designer), "submitted_orders": 0, "fixed_orders": 0, "fix_count": 0,
                 "max_fixes_per_order": 0, "repeat_orders": 0, "distribution": {"1": 0, "2": 0, "3+": 0},
-                "excluded": {FAKE: 0, ADMIN_REJECTED: 0},
+                "excluded": {FAKE: 0, ADMIN_REJECTED: 0, DISPUTE_ACCEPTED: 0},
             })
             row["submitted_orders"] += 1
             mine = [f for f in history.fixes if f.designer_id == designer]

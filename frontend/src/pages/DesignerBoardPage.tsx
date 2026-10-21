@@ -21,6 +21,7 @@ import {
   History,
   RefreshCw,
   Trash2,
+  Flag,
 } from 'lucide-react'
 import { OrderHistoryTimelineModal } from '../components/OrderHistoryTimelineModal'
 import { AdminFixActionModal } from '../components/AdminFixActionModal'
@@ -1099,10 +1100,10 @@ export function DesignerBoardPage() {
                                             })
                                           }
                                           className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1 text-[11px] font-bold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg transition-all shadow-2xs cursor-pointer"
-                                          title="Hủy Fix, kiểm tra lại link cũ và trả lại Review trên Print"
+                                          title="Báo Fix không đúng: gửi khiếu nại lên Print, người review khác sẽ phân xử"
                                         >
-                                          <RotateCcw className="h-3 w-3" />
-                                          <span>Hủy trả Review</span>
+                                          <Flag className="h-3 w-3" />
+                                          <span>Báo fix không đúng</span>
                                         </button>
                                       </>
                                     ) : (

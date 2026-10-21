@@ -616,6 +616,20 @@ class PrintervalApiClient:
             reason = _refusal_reason(resp.status_code, body, resp.text)
         raise PrintervalApiError(error_class, f"Printerval không nhận {what} ({reason})", retryable=retryable)
 
+    FIX_DISPUTE_PATH = "/outsource/pod/design-job/fix-dispute"
+
+    def submit_fix_dispute(self, design_job_id: int | str, note: str, images: list[str]) -> None:
+        """"Báo fix không đúng" on a job in Fix, as Printerval's own modal sends it (read from its JS on
+        21/10/2026): Printerval moves the job to Review and another reviewer arbitrates. Raises
+        ``PrintervalApiError`` when Printerval refuses (e.g. the job may not be disputed)."""
+        self._validate_configuration()
+        resp = self._post_once_relogin(
+            self.FIX_DISPUTE_PATH,
+            json={"id": int(design_job_id), "note": note, "images": images},
+            headers={"Accept": "application/json", "X-Requested-With": "XMLHttpRequest"},
+        )
+        self._successful_json(resp, "khiếu nại Fix")
+
     def upload_design_file(self, filename: str, content: bytes, content_type: str) -> str:
         """Step 1 of the Design column's "+" button: put the image on Printerval's storage, get its URL."""
         self._validate_configuration()

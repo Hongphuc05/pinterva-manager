@@ -1,3 +1,4 @@
+import { FixDisputeModal } from './FixDispute'
 import { useState, useEffect } from 'react'
 import { X, CheckCircle2, RotateCcw, AlertTriangle, Loader2 } from 'lucide-react'
 import { apiFetch } from '../api/client'
@@ -69,7 +70,6 @@ export function AdminFixActionModal({
 }: AdminFixActionModalProps) {
   const isApprove = mode === 'approve'
   const [adminNote, setAdminNote] = useState(currentDesignerNote || '')
-  const [outsourceNote, setOutsourceNote] = useState(currentNote || previousNote || '')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fixChat = useFixChat(isOpen && isApprove ? orderId : null)
@@ -78,7 +78,6 @@ export function AdminFixActionModal({
   useEffect(() => {
     if (isOpen) {
       setAdminNote(currentDesignerNote || '')
-      setOutsourceNote(currentNote || previousNote || '')
       setError(null)
     }
   }, [isOpen, mode, currentNote, previousNote, currentDesignerNote])
@@ -93,6 +92,18 @@ export function AdminFixActionModal({
   }, [isOpen, onClose])
 
   if (!isOpen) return null
+  // "Từ chối" is now Printerval's "Báo fix không đúng": a dispute another reviewer arbitrates.
+  if (!isApprove) {
+    return (
+      <FixDisputeModal
+        orderId={orderId}
+        orderVersion={orderVersion}
+        externalOrderId={externalOrderId}
+        onClose={onClose}
+        onSent={() => onSuccess(currentNote)}
+      />
+    )
+  }
 
   async function handleConfirm() {
     if (isApprove && !adminNote.trim() && !fixChat.text) {
@@ -106,32 +117,18 @@ export function AdminFixActionModal({
     setLoading(true)
     setError(null)
     try {
-      if (isApprove) {
-        const res = await apiFetch<{ ok: boolean; note_outsource: string; message: string }>(
-          `/orders/${orderId}/approve-fix`,
-          {
-            method: 'POST',
-            body: JSON.stringify({
-              designer_note: adminNote.trim(),
-              ...template.payload(),
-              ...(typeof orderVersion === 'number' ? { expected_version: orderVersion } : {}),
-            }),
-          }
-        )
-        onSuccess(res.note_outsource || '')
-      } else {
-        const res = await apiFetch<{ ok: boolean; note_outsource: string; message: string }>(
-          `/orders/${orderId}/reject-fix-to-review`,
-          {
-            method: 'POST',
-            body: JSON.stringify({
-              note_outsource: outsourceNote.trim(),
-              ...(typeof orderVersion === 'number' ? { expected_version: orderVersion } : {}),
-            }),
-          }
-        )
-        onSuccess(res.note_outsource || outsourceNote.trim())
-      }
+      const res = await apiFetch<{ ok: boolean; note_outsource: string; message: string }>(
+        `/orders/${orderId}/approve-fix`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            designer_note: adminNote.trim(),
+            ...template.payload(),
+            ...(typeof orderVersion === 'number' ? { expected_version: orderVersion } : {}),
+          }),
+        }
+      )
+      onSuccess(res.note_outsource || '')
       onClose()
     } catch (err: any) {
       setError(err?.message || 'Không thể thực hiện thao tác.')
@@ -228,18 +225,7 @@ export function AdminFixActionModal({
 
           {isApprove && <FixTemplateQuestion state={template} />}
 
-          {isApprove ? <FixChatBox {...fixChat} /> : <div className="space-y-1.5">
-            <label className="font-semibold text-slate-800 block text-xs flex items-center justify-between">
-              <span>Nội dung Note outsource gửi lên Print:</span>
-            </label>
-            <textarea
-              rows={6}
-              value={outsourceNote}
-              onChange={(e) => setOutsourceNote(e.target.value)}
-              placeholder="Nhập nội dung note outsource, link drive, link ảnh mockup..."
-              className="w-full p-3 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#0052CC] font-mono leading-relaxed bg-white"
-            />
-          </div>}
+          <FixChatBox {...fixChat} />
         </div>
 
         {/* Footer */}

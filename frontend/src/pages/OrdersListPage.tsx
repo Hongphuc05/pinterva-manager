@@ -5,6 +5,7 @@ import { useAuth } from '../auth/AuthContext'
 import { usePlatform } from '../auth/PlatformContext'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { FixChatBox, useFixChat } from '../components/AdminFixActionModal'
+import { FixDisputeBadge, FixDisputeModal, type FixDisputeRecord } from '../components/FixDispute'
 import { FixTemplateQuestion, useFixTemplate } from '../components/FixTemplateQuestion'
 import { FixSortSelect, MyFixRateCard, fixRateLabel, sortByFix, useDesignerFixStats, type FixSort } from '../components/DesignerFixStats'
 import { ImageModal } from '../components/ImageModal'
@@ -88,6 +89,9 @@ export type OrderSummary = {
   fix_reason?: string | null
   fix_approved_by_admin?: boolean
   fix_rejected_by_admin?: boolean
+  // Admin only: "Báo fix không đúng" of the current Fix, and why a new one cannot be filed.
+  fix_dispute?: FixDisputeRecord | null
+  fix_dispute_blocked?: string | null
   fix_return_count?: number
   designer_note?: string
   admin_note?: string | null
@@ -445,8 +449,6 @@ export function OrdersListPage() {
 
   // Reject Fix Modal state
   const [rejectFixOrder, setRejectFixOrder] = useState<OrderSummary | null>(null)
-  const [rejectFixOutsourceNote, setRejectFixOutsourceNote] = useState('')
-  const [rejectFixSubmitting, setRejectFixSubmitting] = useState(false)
 
   // Status-only Web mẹ update modal
   const [platformStatusTarget, setPlatformStatusTarget] = useState<PlatformStatusTarget | null>(null)
@@ -483,7 +485,6 @@ export function OrdersListPage() {
         if (platformStatusTarget && !updatingPlatformStatus) setPlatformStatusTarget(null)
         else if (assigningOrder && !assigning) setAssigningOrder(null)
         else if (acceptFixOrder && !acceptFixSubmitting) setAcceptFixOrder(null)
-        else if (rejectFixOrder && !rejectFixSubmitting) setRejectFixOrder(null)
         else if (deleteConfirmModalOpen && !isBulkDeleting) setDeleteConfirmModalOpen(false)
         else if (quickDistributeOpen) setQuickDistributeOpen(false)
       }
@@ -494,7 +495,7 @@ export function OrdersListPage() {
     platformStatusTarget, updatingPlatformStatus,
     assigningOrder, assigning,
     acceptFixOrder, acceptFixSubmitting,
-    rejectFixOrder, rejectFixSubmitting,
+    rejectFixOrder,
     deleteConfirmModalOpen, isBulkDeleting,
     quickDistributeOpen,
   ])
@@ -1513,30 +1514,6 @@ export function OrdersListPage() {
 
   function openRejectFixModal(order: OrderSummary) {
     setRejectFixOrder(order)
-    setRejectFixOutsourceNote(order.note_outsource || '')
-  }
-
-  async function handleRejectFix(e: React.FormEvent) {
-    e.preventDefault()
-    if (!rejectFixOrder) return
-    setRejectFixSubmitting(true)
-    try {
-      await apiFetch(`/orders/${rejectFixOrder.id}/reject-fix-to-review`, {
-        method: 'POST',
-        body: JSON.stringify({
-          note_outsource: rejectFixOutsourceNote,
-          expected_version: rejectFixOrder.version,
-        }),
-      })
-      showToast(`Đã từ chối Fix và gửi lại Review trên Web mẹ cho đơn ${rejectFixOrder.external_order_id}.`, 'success')
-      markTabMoved(rejectFixOrder.id)
-      setRejectFixOrder(null)
-      await loadOrders()
-    } catch (err: any) {
-      showToast(err?.message || 'Không thể từ chối Fix.', 'error')
-    } finally {
-      setRejectFixSubmitting(false)
-    }
   }
 
   function handlePageChange(page: number) {
@@ -3087,6 +3064,10 @@ export function OrdersListPage() {
                                   Fix × {o.fix_return_count}
                                 </span>
                               )}
+                              {/* Outside the Fix tab (e.g. Review while Printerval arbitrates) the dispute shows here. */}
+                              {isAdmin && adminTab !== 'fix' && o.fix_dispute && (
+                                <FixDisputeBadge dispute={o.fix_dispute} orderId={o.id} orderVersion={o.version} onRetried={() => void loadOrders()} />
+                              )}
 
                               {/* Image Count & Sync Status Badge */}
                               {(() => {
@@ -3296,7 +3277,9 @@ export function OrdersListPage() {
                                       <Check className="h-3.5 w-3.5 text-emerald-600" />
                                       <span>Đã gửi fix cho des</span>
                                     </span>
-                                  ) : o.fix_rejected_by_admin ? (
+                                  ) : o.fix_dispute && o.fix_dispute_blocked ? (
+                                    <FixDisputeBadge dispute={o.fix_dispute} orderId={o.id} orderVersion={o.version} onRetried={() => void loadOrders()} />
+                                  ) : o.fix_rejected_by_admin && !o.fix_dispute ? (
                                     <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-purple-50 text-purple-700 border border-purple-200 shadow-2xs">
                                       <Undo2 className="h-3.5 w-3.5 text-purple-600" />
                                       <span>Đã từ chối fix</span>
@@ -3312,14 +3295,16 @@ export function OrdersListPage() {
                                         <UserPlus className="h-3 w-3" />
                                         <span>Chấp nhận Fix</span>
                                       </button>
+                                      <FixDisputeBadge dispute={o.fix_dispute} orderId={o.id} orderVersion={o.version} onRetried={() => void loadOrders()} />
                                       <button
                                         type="button"
                                         onClick={() => openRejectFixModal(o)}
-                                        className="inline-flex items-center gap-1 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 px-2.5 py-1 rounded-lg transition-colors cursor-pointer shadow-2xs"
-                                        title="Từ chối Fix và gửi lại Review trên Web mẹ"
+                                        disabled={Boolean(o.fix_dispute_blocked)}
+                                        className="inline-flex items-center gap-1 text-xs font-bold text-slate-900 bg-amber-400 hover:bg-amber-500 px-2.5 py-1 rounded-lg transition-colors cursor-pointer shadow-2xs disabled:cursor-not-allowed disabled:opacity-50"
+                                        title={o.fix_dispute_blocked || 'Báo Fix không đúng: gửi khiếu nại lên Web mẹ, người review khác sẽ phân xử'}
                                       >
-                                        <Undo2 className="h-3 w-3" />
-                                        <span>Từ chối Fix</span>
+                                        <Flag className="h-3 w-3" />
+                                        <span>Báo fix không đúng</span>
                                       </button>
                                     </>
                                   )}
@@ -3925,88 +3910,18 @@ export function OrdersListPage() {
         </div>
       )}
 
-      {/* Reject Fix Modal (Admin từ chối Fix & gửi lại Review trên Web mẹ) */}
+      {/* Báo fix không đúng: the dispute Printerval's reviewer arbitrates */}
       {rejectFixOrder && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-200"
-          onClick={() => !rejectFixSubmitting && setRejectFixOrder(null)}
-        >
-          <div
-            className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col border border-slate-200"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-purple-50/80">
-              <div className="flex items-center gap-2">
-                <Undo2 className="h-5 w-5 text-purple-600" />
-                <h2 className="text-base font-bold text-slate-800">Từ Chối Fix & Trả Lại Review</h2>
-              </div>
-              <button
-                onClick={() => !rejectFixSubmitting && setRejectFixOrder(null)}
-                disabled={rejectFixSubmitting}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition-colors disabled:opacity-50"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleRejectFix} className="p-6 space-y-4">
-              <div className="text-xs space-y-1 bg-slate-50 p-3 rounded-xl border border-slate-200/70">
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-500 font-medium">Mã đơn hàng:</span>
-                  <span className="font-mono font-bold text-[#0052CC] text-sm">{rejectFixOrder.external_order_id}</span>
-                </div>
-                {rejectFixOrder.assigned_designer_name && (
-                  <p className="text-slate-600 font-semibold mt-0.5">
-                    Designer: <span className="text-slate-800">{rejectFixOrder.assigned_designer_name}</span>
-                  </p>
-                )}
-              </div>
-
-              {/* Note Outsource field for explanation */}
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-700 block">
-                  Ghi chú Outsource gửi lên Print
-                </label>
-                <textarea
-                  rows={4}
-                  value={rejectFixOutsourceNote}
-                  onChange={(e) => setRejectFixOutsourceNote(e.target.value)}
-                  placeholder="Nhập giải trình lý do từ chối Fix hoặc ghi chú link hoàn thiện..."
-                  className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-600 resize-none font-mono"
-                />
-              </div>
-
-              <div className="rounded-xl border border-purple-100 bg-purple-50/60 p-3 text-[11px] leading-relaxed text-purple-900">
-                <p className="font-bold mb-0.5 flex items-center gap-1">
-                  <RefreshCw className="h-3.5 w-3.5 text-purple-600" />
-                  <span>Cơ chế hoạt động:</span>
-                </p>
-                <span>
-                  Hệ thống sẽ cập nhật trạng thái đơn trên Web mẹ thành <strong>Review</strong> kèm ghi chú outsource trên, và chuyển đơn trong hệ thống quay về tab <strong>Review</strong> để bên Print xem xét lại.
-                </span>
-              </div>
-
-              <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setRejectFixOrder(null)}
-                  disabled={rejectFixSubmitting}
-                  className="px-4 py-2 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
-                >
-                  Hủy
-                </button>
-                <button
-                  type="submit"
-                  disabled={rejectFixSubmitting}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 rounded-xl transition-colors shadow-2xs disabled:opacity-50 cursor-pointer"
-                >
-                  {rejectFixSubmitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                  <span>{rejectFixSubmitting ? 'Đang gửi...' : 'Xác Nhận Gửi Lại Review'}</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <FixDisputeModal
+          orderId={rejectFixOrder.id}
+          orderVersion={rejectFixOrder.version}
+          externalOrderId={rejectFixOrder.external_order_id}
+          onClose={() => setRejectFixOrder(null)}
+          onSent={() => {
+            showToast(`Đã gửi khiếu nại Fix đơn ${rejectFixOrder.external_order_id} lên Web mẹ, chờ phân xử.`, 'success')
+            void loadOrders()
+          }}
+        />
       )}
 
       {/* Bulk Delete Confirm Modal */}

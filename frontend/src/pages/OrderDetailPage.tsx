@@ -30,12 +30,12 @@ import {
   CheckCircle2,
   ArrowRight,
   Flame,
-  RotateCcw,
   Image as ImageIcon,
   Flag,
   Layers,
 } from 'lucide-react'
 import { AdminFixActionModal } from '../components/AdminFixActionModal'
+import { FixDisputeBadge, type FixDisputeRecord } from '../components/FixDispute'
 import { LinkifiedText, OpenExternalLinkButton } from '../components/LinkifiedText'
 import { OrderWorkNotesCard } from '../components/OrderWorkNotesCard'
 import { PrintervalChatCard } from '../components/PrintervalChatCard'
@@ -51,6 +51,9 @@ type ResultVersion = {
 }
 
 type OrderDetail = {
+  // Admin only: "Báo fix không đúng" of the current Fix and why a new one cannot be filed.
+  fix_dispute?: FixDisputeRecord | null
+  fix_dispute_blocked?: string | null
   id: string
   version: number
   external_order_id: string
@@ -855,6 +858,11 @@ export function OrderDetailPage() {
               <span>Nhiệm Vụ & Tiến Độ Thiết Kế</span>
             </h3>
 
+            {/* While Printerval arbitrates a "Báo fix không đúng" the order is in Review */}
+            {isAdmin && !isFix && order.fix_dispute && (
+              <FixDisputeBadge dispute={order.fix_dispute} orderId={order.id} orderVersion={order.version} onRetried={() => void loadOrderDetail(true)} />
+            )}
+
             {/* Fix Notice Banner if order is in REVISION */}
             {isFix && (
               <div className="p-4 rounded-xl bg-orange-50 border border-orange-200 text-xs text-orange-950 space-y-2.5">
@@ -866,6 +874,8 @@ export function OrderDetailPage() {
                       <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
                         Đã gửi fix cho des
                       </span>
+                    ) : order.fix_dispute ? (
+                      <FixDisputeBadge dispute={order.fix_dispute} orderId={order.id} orderVersion={order.version} onRetried={() => void loadOrderDetail(true)} />
                     ) : order.fix_rejected_by_admin ? (
                       <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200">
                         Đã từ chối fix
@@ -891,21 +901,15 @@ export function OrderDetailPage() {
                           <button
                             type="button"
                             onClick={() => setFixActionModal({ isOpen: true, mode: 'reject' })}
-                            className="px-3 py-1 text-xs font-bold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg shadow-2xs cursor-pointer flex items-center gap-1"
+                            disabled={Boolean(order.fix_dispute_blocked)}
+                            title={order.fix_dispute_blocked || 'Báo Fix không đúng: gửi khiếu nại lên Print, người review khác sẽ phân xử'}
+                            className="px-3 py-1 text-xs font-bold text-slate-900 bg-amber-400 hover:bg-amber-500 rounded-lg shadow-2xs cursor-pointer flex items-center gap-1 disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            <RotateCcw className="h-3 w-3" />
-                            <span>Hủy trả Review</span>
+                            <Flag className="h-3 w-3" />
+                            <span>Báo fix không đúng</span>
                           </button>
                         </>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => setFixActionModal({ isOpen: true, mode: 'reject' })}
-                          className="px-2.5 py-1 text-xs font-semibold text-slate-600 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg cursor-pointer"
-                        >
-                          Đổi ý: Hủy trả Review
-                        </button>
-                      )}
+                      ) : null}
                     </div>
                   )}
                 </div>

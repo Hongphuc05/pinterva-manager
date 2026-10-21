@@ -56,7 +56,7 @@ platform lấy từ tài khoản des, không từ header. Support và Kế toán
 tính cho người đã nộp bài mà QC trả lời (Admin nộp hộ thì tính cho des được phân công); khoảng thời gian lọc
 theo ngày des nộp đơn lần đầu (giờ VN), các lần Fix của đơn đó tính bất kể xảy ra lúc nào. Không tính cho des
 nhưng vẫn liệt kê: Fix giả (báo trong 5 phút sau khi des nộp lại đơn Fix, trước 20/10 khi đồng bộ chưa chặn)
-và Fix bị Admin từ chối. Dữ liệu đầy đủ từ 21/09/2026 (trước đó Fix chưa được ghi lịch sử từng lần).
+Fix bị Admin từ chối, và Fix Admin đã "Báo fix không đúng" được Printerval chấp nhận (khiếu nại bị bác thì vẫn tính). Dữ liệu đầy đủ từ 21/09/2026 (trước đó Fix chưa được ghi lịch sử từng lần).
 
 ## Ảnh mockup nộp bài và xác nhận "Đổi template"
 

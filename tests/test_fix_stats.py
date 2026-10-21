@@ -102,7 +102,7 @@ def test_fake_and_admin_rejected_fixes_are_listed_but_not_counted(world):
 
     row = _row(fix_stats.designer_fix_stats(w.session, w.platform.id), w.a)
     assert (row["submitted_orders"], row["fixed_orders"], row["fix_count"]) == (2, 1, 1)
-    assert row["excluded"] == {"fake": 1, "admin_rejected": 1}
+    assert row["excluded"] == {"fake": 1, "admin_rejected": 1, "dispute_accepted": 0}
 
     orders = fix_stats.designer_fixed_orders(w.session, w.platform.id, w.a.id)
     by_code = {o["external_order_id"]: o for o in orders}

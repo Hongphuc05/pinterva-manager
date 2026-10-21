@@ -996,33 +996,6 @@ def test_api_approve_and_reject_fix_flow(client, db_session, monkeypatch, stage_
     todo_orders = resp.json()["orders"]
     assert any(o["id"] == str(order.id) for o in todo_orders)
 
-    # 5. Admin rejects fix to review
-    resp = client.post(
-        f"/api/orders/{order.id}/reject-fix-to-review",
-        json={"note_outsource": "https://drive.google.com/test_fix_v1 - mau da dung voi mockup"},
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["state"] == "QC_PENDING"
-    assert data["fix_rejected_by_admin"] is True
-    assert "mau da dung voi mockup" in data["note_outsource"]
-
-    db_session.refresh(order)
-    assert order.state == OrderState.QC_PENDING.value
-    assert order.fix_approved_by_admin is False
-    assert order.fix_rejected_by_admin is True
-    # Same as the Telegram path: nothing of the rejected Fix reaches the Designer, and the
-    # Review push only runs while the order is still that rejected Fix.
-    assert order.designer_note == ""
-    assert order.designer_note_released_for_fix is False
-    assert order.suppress_note_outsource_for_designer is True
-    assert sync_calls[-1][1] == {"expected_state": "QC_PENDING", "expected_fix_approved": False}
-
-    review_orders = client.get("/api/orders?status=REVIEW").json()["orders"]
-    fix_orders = client.get("/api/orders?status=FIX").json()["orders"]
-    assert any(item["id"] == str(order.id) for item in review_orders)
-    assert all(item["id"] != str(order.id) for item in fix_orders)
-
 
 def test_approve_fix_sends_the_chat_fix_text_when_admin_note_is_empty(client, db_session):
     platform = _seed_platform(db_session)

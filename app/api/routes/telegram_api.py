@@ -20,7 +20,7 @@ from app.adapters.db.models import (
     WorkflowEvent,
 )
 from app.api.deps import get_current_user, get_db
-from app.application.fix_rejection import queue_review_push, reject_fix_to_review
+from app.application import fix_dispute
 from app.application.fix_template_confirm import (
     TemplateConfirmError,
     record_template_answer,
@@ -134,6 +134,89 @@ def _clean_completed_fix_conversations(db: Session, order_id, extra_message: tup
             logger.warning("Telegram Fix chat cleanup remains pending for order %s chat %s", order_id, conversation.chat_id)
     if conversations:
         db.commit()
+
+
+FIX_DISPUTE_TEMPLATE = (
+    "LÝ DO: <vì sao FIX không đúng, ít nhất 10 ký tự>\n"
+    "ẢNH:\n"
+    "https://link-anh-1\n"
+    "https://link-anh-2"
+)
+
+
+def _ask_fix_dispute(db: Session, order: Order, reject_log: TelegramActionLog, chat_id: str) -> None:
+    """"Báo fix không đúng" from the Fix card: ask for the reason and image links in one reply."""
+    blocked = fix_dispute.blocked_reason(order)
+    if blocked:
+        send_message(chat_id, f"⚠️ Không báo fix không đúng được cho đơn <code>{html.escape(order.external_order_id)}</code>: {html.escape(blocked)}")
+        return
+    expires_at = min(
+        reject_log.expires_at or (datetime.now(UTC) + timedelta(minutes=30)),
+        datetime.now(UTC) + timedelta(minutes=30),
+    )
+    ask_log = TelegramActionLog(
+        order_id=order.id,
+        action_type="AWAIT_FIX_DISPUTE",
+        callback_token=secrets.token_urlsafe(16),
+        payload={"order_id": str(order.id), "chat_id": chat_id, "parent_action_id": str(reject_log.id)},
+        expires_at=expires_at,
+    )
+    db.add(ask_log)
+    db.commit()
+    prompt = send_message(
+        chat_id,
+        f"🚩 <b>Báo FIX không đúng</b> cho đơn <code>{html.escape(order.external_order_id)}</code>\n"
+        "Người review khác của Printerval sẽ phân xử. Đúng là fix sai thì lần fix này không tính vào tỉ lệ fix/phạt; "
+        "khiếu nại sai thì đơn quay lại FIX và vẫn tính như cũ.\n\n"
+        "<b>Trả lời tin này</b> theo mẫu:\n"
+        f"<pre>{html.escape(FIX_DISPUTE_TEMPLATE)}</pre>\n"
+        "• <b>LÝ DO</b>: bắt buộc, 10–1000 ký tự, viết được nhiều dòng.\n"
+        "• <b>ẢNH</b>: không bắt buộc, mỗi link một dòng, bắt đầu bằng https://, tối đa 5. Không có ảnh thì bỏ cả phần ẢNH.\n"
+        "Bot sẽ cho xem lại trước khi gửi.",
+        reply_markup={"force_reply": True, "input_field_placeholder": "LÝ DO: ..."},
+    )
+    if isinstance(prompt, dict) and prompt.get("message_id") is not None:
+        ask_log.payload = {**(ask_log.payload or {}), "prompt_message_id": prompt["message_id"]}
+        db.commit()
+        _track_fix_transient_message(db, order.id, chat_id, int(prompt["message_id"]))
+
+
+def _preview_fix_dispute(db: Session, order: Order, ask_log: TelegramActionLog, chat_id: str, text: str) -> None:
+    """Check the reply; on a mistake say what is wrong and keep waiting, else show it with Gửi / Huỷ."""
+    try:
+        note, images = fix_dispute.parse_reply(text)
+    except fix_dispute.FixDisputeError as exc:
+        send_message(chat_id, f"⚠️ {html.escape(str(exc))}\nHãy trả lời lại tin hướng dẫn, đúng mẫu:\n<pre>{html.escape(FIX_DISPUTE_TEMPLATE)}</pre>")
+        return
+    ask_log.status = "executed"
+    ask_log.executed_at = datetime.now(UTC)
+    confirm_log = TelegramActionLog(
+        order_id=order.id,
+        action_type="FIX_DISPUTE_CONFIRM",
+        callback_token=secrets.token_urlsafe(16),
+        payload={
+            "order_id": str(order.id),
+            "chat_id": chat_id,
+            "note": note,
+            "images": images,
+            "parent_action_id": (ask_log.payload or {}).get("parent_action_id"),
+        },
+        expires_at=ask_log.expires_at,
+    )
+    db.add(confirm_log)
+    db.commit()
+    image_lines = "\n".join(f"{i}. {html.escape(url)}" for i, url in enumerate(images, 1)) or "(không có)"
+    sent = send_message(
+        chat_id,
+        f"🔎 <b>Xem lại khiếu nại đơn <code>{html.escape(order.external_order_id)}</code></b>\n\n"
+        f"<b>Lý do:</b>\n{html.escape(note)}\n\n<b>Link ảnh:</b>\n{image_lines}",
+        reply_markup={"inline_keyboard": [[
+            {"text": "📨 Gửi khiếu nại", "callback_data": f"dispsend:{confirm_log.callback_token}"},
+            {"text": "✖️ Huỷ", "callback_data": f"dispcancel:{confirm_log.callback_token}"},
+        ]]},
+    )
+    if isinstance(sent, dict) and sent.get("message_id") is not None:
+        _track_fix_transient_message(db, order.id, chat_id, int(sent["message_id"]))
 
 
 def _action_is_pending_and_valid(action_log: TelegramActionLog, action_type: str) -> bool:
@@ -594,7 +677,7 @@ async def api_telegram_webhook(
             pending_logs = (
                 db.query(TelegramActionLog)
                 .filter(
-                    TelegramActionLog.action_type.in_(("AWAIT_ADMIN_FIX_NOTE", "AWAIT_TEMPLATE_NOTE")),
+                    TelegramActionLog.action_type.in_(("AWAIT_ADMIN_FIX_NOTE", "AWAIT_TEMPLATE_NOTE", "AWAIT_FIX_DISPUTE")),
                     TelegramActionLog.status == "pending",
                 )
                 .order_by(TelegramActionLog.created_at.desc())
@@ -623,6 +706,9 @@ async def api_telegram_webhook(
                     note_log.status = "failed"
                     db.commit()
                     send_message(chat_id, "❌ Không tìm thấy đơn hàng cho yêu cầu ghi chú này.")
+                    return {"ok": True}
+                if note_log.action_type == "AWAIT_FIX_DISPUTE":
+                    _preview_fix_dispute(db, order, note_log, chat_id, text)
                     return {"ok": True}
                 if note_log.action_type == "AWAIT_TEMPLATE_NOTE":
                     # The explanation Printerval requires when the Fix was not about the template.
@@ -946,7 +1032,10 @@ async def api_telegram_webhook(
 
         # Parse callback: first choose approve/reject, then (for approval)
         # choose whether to write an Admin note or release the QC text verbatim.
-        valid_prefixes = {"appfix", "rejfix", "appfixnote", "appfixsource", "remdes", "tplagree", "tpldisagree"}
+        valid_prefixes = {
+            "appfix", "rejfix", "appfixnote", "appfixsource", "remdes", "tplagree", "tpldisagree",
+            "dispsend", "dispcancel",
+        }
         if ":" in cb_data and cb_data.split(":", 1)[0] in valid_prefixes:
             prefix, token = cb_data.split(":", 1)
             action_log = (
@@ -962,6 +1051,8 @@ async def api_telegram_webhook(
                 "tplagree": "APPROVE_FIX_TEMPLATE_AGREE",
                 "tpldisagree": "APPROVE_FIX_TEMPLATE_DISAGREE",
                 "remdes": "REMIND_DESIGNER",
+                "dispsend": "FIX_DISPUTE_CONFIRM",
+                "dispcancel": "FIX_DISPUTE_CONFIRM",
             }
             if not action_log or not _action_is_pending_and_valid(action_log, expected_action_types[prefix]):
                 send_message(user_chat_id, "⚠️ Nút bấm này đã được xử lý trước đó hoặc đã hết hạn.")
@@ -1101,14 +1192,48 @@ async def api_telegram_webhook(
                     _track_fix_transient_message(db, order.id, user_chat_id, int(prompt["message_id"]))
 
             elif prefix == "rejfix":
-                # Admin rejects fix -> send back to Review (same path as the web button)
+                # "Báo fix không đúng": ask for the reason + image links. The Fix card's buttons stay
+                # usable until the dispute is actually sent.
+                _ask_fix_dispute(db, order, action_log, user_chat_id)
+
+            elif prefix == "dispcancel":
+                action_log.status = "cancelled"
+                action_log.executed_at = datetime.now(UTC)
+                action_log.actor_id = admin_user.id
+                db.commit()
+                send_message(user_chat_id, f"Đã huỷ khiếu nại đơn <code>{html.escape(order.external_order_id)}</code>. Fix vẫn chờ Admin quyết định.")
+
+            elif prefix == "dispsend":
+                payload = action_log.payload or {}
+                order = db.query(Order).filter(Order.id == order.id).with_for_update().one()
+                try:
+                    fix_dispute.submit(
+                        db, order, admin=admin_user, note=payload.get("note") or "",
+                        images=list(payload.get("images") or []), source="telegram",
+                    )
+                except fix_dispute.FixDisputeError as exc:
+                    db.rollback()
+                    action_log = db.get(TelegramActionLog, action_log.id)
+                    action_log.status = "failed"
+                    db.commit()
+                    send_message(user_chat_id, f"⚠️ Không gửi được khiếu nại: {html.escape(str(exc))}")
+                    return {"ok": True}
                 action_log.status = "executed"
                 action_log.executed_at = datetime.now(UTC)
                 action_log.actor_id = admin_user.id
-                reject_fix_to_review(db, order, admin=admin_user, source="telegram_callback")
+                parent_id = payload.get("parent_action_id")
+                parent = db.get(TelegramActionLog, uuid.UUID(parent_id)) if parent_id else None
+                if parent is not None and parent.status == "pending":
+                    parent.status = "executed"
+                    parent.executed_at = datetime.now(UTC)
+                    parent.actor_id = admin_user.id
                 db.commit()
-                queue_review_push(order)
-
+                fix_dispute.queue_send(order)
+                send_message(
+                    user_chat_id,
+                    f"📨 Đã gửi khiếu nại đơn <code>{html.escape(order.external_order_id)}</code> lên Printerval. "
+                    "Kết quả phân xử sẽ hiện trên web.",
+                )
                 _clean_completed_fix_conversations(db, order.id)
 
     return {"ok": True}
