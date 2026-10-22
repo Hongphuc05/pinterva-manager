@@ -49,8 +49,10 @@ transition nhưng application layer không được tự động recover.
 ## Luồng chuẩn
 
 1. **Crawl/refresh**: worker hoặc Admin lấy job/platform detail, asset, gallery, custom
-   configuration và metadata. Import tạo/mapping order về `OPEN` hoặc `WAITING` theo
-   command hiện hành; refresh metadata không tự đổi state.
+   configuration, **template của job** (ảnh, link PSD, note trong nút "Xem template của job" trên
+   Printerval, lưu ở `orders.job_templates`) và metadata. Import tạo/mapping order về `OPEN` hoặc
+   `WAITING` theo command hiện hành; refresh metadata không tự đổi state. Template được cập nhật theo
+   crawl đơn Waiting và theo đồng bộ định kỳ đơn Doing/Fix; đơn đã Review/Done giữ bản đã lưu.
 2. **Phân loại**: Admin/Support đặt `work_domain` là `standard` hoặc `duplicate` và cập
    nhật duplicate check status. Support chỉ được thực hiện bước này khi order còn ở
    `Waiting`; chỉ quyết định `duplicate` mới ghi người + thời điểm, timeline và công

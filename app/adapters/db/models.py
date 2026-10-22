@@ -257,6 +257,9 @@ class Order(Base):
     # may contain multiple sizes/variants; each item keeps its own image,
     # category, variants and custom configuration.
     product_skus: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # Templates of the job's "Xem template của job" dialog on Printerval: [{url, note, image_url}].
+    # NULL = never read; [] = read and the job has none.
+    job_templates: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     # Loại design job (2D/3D/ART/...) — chưa xác nhận được vị trí hiển thị per-order
     # trong DOM (chỉ là tiêu chí filter, không phải field hiển thị). Cột giữ chỗ, không
     # ai ghi vào cột này ở V1 — xem 2026-09-07-order-detail-mirror-design.md §3.

@@ -469,3 +469,32 @@ def test_custom_configuration_is_read_when_product_skus_is_a_list():
     assert "applied_discount_type" not in entries  # pricing, hidden on Printerval too
     [sku] = extract_product_skus(row)
     assert sku.sku == "SKU-1" and sku.custom_config is not None
+
+
+def test_job_templates_keep_only_each_templates_image_psd_link_and_note():
+    from app.adapters.printerval.row_mapper import extract_job_templates
+
+    row = {
+        "templateJobs": [{
+            "id": 1, "provider_name": "S-ff", "note": "<p>Long-sleeved</p>", "category_name": "Pants Sets",
+            "psd_file": [{"url": "https://drive.google.com/drive/folders/aaa", "note": "TEMP + MOCKUP",
+                          "image_url": "https://assets.printerval.com/2026/09/t1.jpg"}],
+        }],
+        # Printer has none: Printerval lists another printer's templates in the same dialog.
+        "templateJobsOther": [{
+            "psd_file": [
+                {"url": "https://drive.google.com/drive/folders/bbb", "note": " Folder Mẫu PSD + JPG ", "image_url": ""},
+                {"url": "https://drive.google.com/drive/folders/aaa", "note": "same link again", "image_url": None},
+                {"url": "", "note": "nothing to open", "image_url": ""},
+                "not a file",
+            ],
+        }, "not a job"],
+    }
+
+    assert extract_job_templates(row) == [
+        {"url": "https://drive.google.com/drive/folders/aaa", "note": "TEMP + MOCKUP",
+         "image_url": "https://assets.printerval.com/2026/09/t1.jpg"},
+        {"url": "https://drive.google.com/drive/folders/bbb", "note": "Folder Mẫu PSD + JPG", "image_url": None},
+    ]
+    assert extract_job_templates({}) == [] and extract_job_templates({"templateJobs": None}) == []
+    assert parse_order_detail_from_row(row | {"id": 1, "status": "doing"}, "DJ1", download_images=False).job_templates[0]["note"] == "TEMP + MOCKUP"

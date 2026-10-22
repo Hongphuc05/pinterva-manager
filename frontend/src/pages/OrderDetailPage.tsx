@@ -6,6 +6,7 @@ import { useAuth } from '../auth/AuthContext'
 import { DashboardLayout } from '../components/DashboardLayout'
 import { ImageModal } from '../components/ImageModal'
 import { SourceFilesCard, type SourceFile } from '../components/SourceFilesCard'
+import { JobTemplatesCard, type JobTemplate } from '../components/JobTemplatesCard'
 import { ProductGalleryCard } from '../components/ProductGalleryCard'
 import { ProductSkusCard, type ProductSku } from '../components/ProductSkusCard'
 import { CustomConfigurationSection } from '../components/CustomConfigurationSection'
@@ -96,6 +97,7 @@ type OrderDetail = {
   sku_image_url: string | null
   external_order_url: string | null
   source_files: SourceFile[] | null
+  job_templates?: JobTemplate[] | null
   source_download_all_url: string | null
   product_image_urls?: string[] | null
   platform_designer?: string | null
@@ -1268,6 +1270,9 @@ export function OrderDetailPage() {
             }}
           />
         )}
+
+        {/* Templates of the job (image, PSD link, note) */}
+        <JobTemplatesCard templates={order.job_templates} />
 
         {/* Source Files Card */}
         <SourceFilesCard

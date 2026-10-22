@@ -121,6 +121,8 @@ def discover_waiting_orders_with_summaries(
                 existing_order.product_category = summary.product_category
             if summary.product_skus:
                 existing_order.product_skus = summary.product_skus
+            if summary.job_templates is not None:
+                existing_order.job_templates = summary.job_templates
             if summary.sku_image_url:
                 existing_order.sku_image_url = summary.sku_image_url
             if summary.external_order_url:
@@ -238,6 +240,7 @@ def scan_orders_fast(
                     sku=summary.sku,
                     product_category=summary.product_category,
                     product_skus=summary.product_skus,
+                    job_templates=summary.job_templates,
                     printerval_designer=summary.designer,
                     printerval_designer_synced_at=datetime.now(UTC) if summary.designer else None,
                     printerval_status=incoming_status,
@@ -290,6 +293,8 @@ def scan_orders_fast(
                 order.product_variants = [variant.model_dump() for variant in detail.product_variants]
                 if detail.product_skus:
                     order.product_skus = [product_sku.model_dump() for product_sku in detail.product_skus]
+                if detail.job_templates or order.job_templates is None:
+                    order.job_templates = detail.job_templates  # [] = read, the job has none
                 order.multiple_design = detail.multiple_design
                 order.double_sided = detail.double_sided
                 order.created_at_ext = detail.created_at
@@ -521,6 +526,10 @@ def _apply_order_detail_result(order: Order, detail_result) -> None:
     order.product_variants = [v.model_dump() for v in detail_result.product_variants]
     if detail_result.product_skus:
         order.product_skus = [product_sku.model_dump() for product_sku in detail_result.product_skus]
+    # ponytail: a scrape that finds none never blanks templates we have, so a template Printerval later
+    # removes lingers until the next list sync (status sync overwrites with the list's own value).
+    if detail_result.job_templates or order.job_templates is None:
+        order.job_templates = detail_result.job_templates
     order.multiple_design = detail_result.multiple_design
     order.double_sided = detail_result.double_sided
     order.priority_label = detail_result.priority_label

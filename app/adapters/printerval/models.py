@@ -16,6 +16,7 @@ class OrderSummary(BaseModel):
     sku: str | None = None
     product_category: str | None = None
     product_skus: list[dict] | None = None
+    job_templates: list[dict] | None = None
     sku_image_url: str | None = None
     external_order_url: str | None = None
     source_files: list[dict] | None = None
@@ -81,6 +82,7 @@ class OrderDetailResult(AdapterResult):
     product_category: str | None = None
     product_variants: list[ProductVariant] = []
     product_skus: list[ProductSku] = []
+    job_templates: list[dict] = []
     multiple_design: bool = False
     double_sided: bool = False
     priority_label: str | None = None

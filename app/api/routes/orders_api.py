@@ -103,6 +103,7 @@ from app.application.result_images import ResultImageError, attach_images
 from app.application.sanitization import (
     decode_proxy_url,
     is_printerval_asset_host,
+    sanitize_job_templates,
     sanitize_order_detail_for_designer,
     sanitize_order_summary_for_designer,
     sanitize_workflow_event_for_designer,
@@ -785,6 +786,7 @@ class OrderDetailOut(BaseModel):
     sku_image_url: str | None = None
     external_order_url: str | None = None
     source_files: list[dict] | None = None
+    job_templates: list[dict] | None = None
     source_download_all_url: str | None = None
     product_image_urls: list[str] | None = None
     printerval_designer: str | None = None
@@ -1853,6 +1855,9 @@ def api_order_detail(
             "updated_at": order.updated_at,
         }
         order_out = OrderDetailOut.model_validate(raw_dict)
+
+    if user.role == ROLE_ADMIN:  # everyone else goes through the Designer sanitizer below
+        order_out.job_templates = sanitize_job_templates(order.job_templates)
 
     # 2. Defensive custom config & sources normalization
     try:

@@ -620,3 +620,25 @@ def test_refresh_order_detail_does_not_duplicate_the_asset_row_when_checksum_is_
     refresh_order_detail(db_session, adapter, order)
 
     assert db_session.query(OrderAsset).filter_by(order_id=order.id).count() == 2
+
+
+def test_a_crawl_keeps_the_jobs_templates_and_a_scrape_that_finds_none_does_not_blank_them(db_session):
+    adapter = FakePrintervalAdapter()
+    templates = [{"url": "https://drive.google.com/drive/folders/aaa", "note": "TEMP", "image_url": "https://assets.printerval.com/t.jpg"}]
+    _seed_waiting_order(adapter, "DJ0000001", job_templates=templates)
+    claim_batch(db_session, adapter, ["DJ0000001"], owner="ntth")
+
+    import_claimed_orders(db_session, adapter)
+    order = db_session.query(Order).filter_by(external_order_id="DJ0000001").one()
+    assert order.job_templates == templates
+
+    adapter._orders["DJ0000001"].job_templates = []
+    assert refresh_order_detail(db_session, adapter, order) == {"success": True}
+    assert order.job_templates == templates  # kept
+
+    fresh = Order(external_order_id="DJ0000002", state=OrderState.IN_PROGRESS.value)
+    db_session.add(fresh)
+    db_session.commit()
+    _seed_waiting_order(adapter, "DJ0000002", job_templates=[])
+    refresh_order_detail(db_session, adapter, fresh)
+    assert fresh.job_templates == []  # read, the job has none

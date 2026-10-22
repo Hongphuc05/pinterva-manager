@@ -421,6 +421,7 @@ def reconcile_active_platform_orders(
                     ("sku", summary.sku),
                     ("product_category", summary.product_category),
                     ("product_skus", summary.product_skus),
+                    ("job_templates", summary.job_templates),
             ):
                 if value is not None and value != getattr(order, field):
                     setattr(order, field, value)

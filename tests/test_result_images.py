@@ -496,3 +496,20 @@ def test_a_fix_resubmitted_through_the_state_route_sends_a_new_link_and_keeps_th
     submit("https://drive.test/new")
     world.session.refresh(world.order)
     assert pushed[-1] == "https://drive.test/new" and world.order.note_outsource == "https://drive.test/new"
+
+
+def test_the_jobs_templates_reach_admin_and_the_assigned_designer_with_images_through_the_proxy(client, world):
+    world.order.job_templates = [{"url": "https://drive.google.com/drive/folders/aaa", "note": "TEMP + MOCKUP",
+                                  "image_url": "https://assets.printerval.com/2026/09/t1.jpg"}]
+    world.session.commit()
+    stranger = User(username=f"d-{uuid.uuid4().hex[:5]}", full_name="S", role="designer", password_hash="x",
+                    active=True, platform_id=world.platform.id)
+    world.session.add(stranger)
+    world.session.commit()
+
+    for user in (world.admin, world.designer):
+        body = client.get(f"/api/orders/{world.order.id}", headers=_h(user)).json()
+        [template] = body["order"]["job_templates"]
+        assert template["url"] == "https://drive.google.com/drive/folders/aaa" and template["note"] == "TEMP + MOCKUP"
+        assert template["image_url"].startswith("/api/assets/proxy?u=")  # never a Printerval host
+    assert client.get(f"/api/orders/{world.order.id}", headers=_h(stranger)).status_code in (403, 404)

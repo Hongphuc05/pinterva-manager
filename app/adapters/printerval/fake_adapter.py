@@ -32,6 +32,7 @@ class _FakeOrder:
     product_category: str | None = None
     product_variants: list[ProductVariant] = field(default_factory=list)
     product_skus: list[dict] = field(default_factory=list)
+    job_templates: list[dict] = field(default_factory=list)
     multiple_design: bool = False
     double_sided: bool = False
     priority_label: str | None = None
@@ -105,6 +106,7 @@ class FakePrintervalAdapter:
             product_category=order.product_category,
             product_variants=order.product_variants,
             product_skus=order.product_skus,
+            job_templates=order.job_templates,
             multiple_design=order.multiple_design,
             double_sided=order.double_sided,
             priority_label=order.priority_label,

@@ -67,6 +67,19 @@ def sanitize_source_files(source_files: list[dict[str, Any]] | None) -> list[dic
     return cleaned_sources
 
 
+def sanitize_job_templates(templates: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Template images go through the asset proxy; the PSD link and note are the template's own."""
+    cleaned = []
+    for item in templates or []:
+        if isinstance(item, dict) and (item.get("url") or item.get("image_url")):
+            cleaned.append({
+                "url": item.get("url"),
+                "note": sanitize_text(str(item["note"]), "") if item.get("note") else None,
+                "image_url": encode_proxy_url(item.get("image_url")),
+            })
+    return cleaned
+
+
 def sanitize_custom_config(config: dict[str, Any] | None) -> dict[str, Any] | None:
     if not config or not isinstance(config, dict):
         return config
@@ -172,6 +185,7 @@ class DesignerOrderDetailOut(BaseModel):
     sku_image_url: str | None = None
     thumbnail_url: str | None = None
     source_files: list[dict] | None = None
+    job_templates: list[dict] | None = None
     product_image_urls: list[str] | None = None
 
 
@@ -267,6 +281,7 @@ def sanitize_order_detail_for_designer(item: Any) -> Any:
         ]
     if item_dict.get("source_files"):
         item_dict["source_files"] = sanitize_source_files(item_dict["source_files"])
+    item_dict["job_templates"] = sanitize_job_templates(item_dict.get("job_templates"))
     if item_dict.get("custom_config"):
         item_dict["custom_config"] = sanitize_custom_config(item_dict["custom_config"])
     _apply_designer_note_policy(item_dict)

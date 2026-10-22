@@ -411,6 +411,35 @@ def normalize_order_custom_config_and_sources(
     return norm_config if (norm_config and (norm_config.get("original") or norm_config.get("translated_vn"))) else None, norm_sources if norm_sources else None
 
 
+def extract_job_templates(row: dict[str, Any]) -> list[dict[str, str | None]]:
+    """The templates of a job's "Xem template của job" dialog: for each, its preview image, PSD link and note.
+
+    Printerval lists them under ``templateJobs`` (the job's printer) and ``templateJobsOther`` (another
+    printer's, shown when the printer has none); each template job carries its files in ``psd_file``.
+    Only those three fields are kept; the same link is listed once.
+    """
+    templates: list[dict[str, str | None]] = []
+    seen: set[str] = set()
+    for key in ("templateJobs", "templateJobsOther"):
+        for job in row.get(key) or []:
+            if not isinstance(job, dict):
+                continue
+            for file in job.get("psd_file") or []:
+                if not isinstance(file, dict):
+                    continue
+                url = str(file.get("url") or "").strip()
+                image = str(file.get("image_url") or "").strip()
+                if not (url or image) or (url or image) in seen:
+                    continue
+                seen.add(url or image)
+                templates.append({
+                    "url": url or None,
+                    "note": str(file.get("note") or "").strip() or None,
+                    "image_url": image or None,
+                })
+    return templates
+
+
 def extract_product_skus(row: dict[str, Any]) -> list[ProductSku]:
     """Normalize every Printerval ``meta_data.product_skus`` entry.
 
@@ -787,6 +816,7 @@ def parse_order_detail_from_row(
     product_name, sku, category = parse_product_summary_fields(row)
     meta = _meta_data(row)
     product_skus = extract_product_skus(row)
+    job_templates = extract_job_templates(row)
     sku_data = _first_sku_data(meta)
 
     raw_image_url = extract_image_url_from_dict_or_html(row)
@@ -829,6 +859,7 @@ def parse_order_detail_from_row(
         product_category=category,
         product_variants=_parse_variants(sku_data),
         product_skus=product_skus,
+        job_templates=job_templates,
         multiple_design=bool(row.get("multiple_design_id")),
         double_sided=bool(row.get("double_sided_id")),
         has_uploaded_design=bool(row.get("designs")),

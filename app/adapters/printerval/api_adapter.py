@@ -30,6 +30,7 @@ from app.adapters.printerval.models import (
     WriteResult,
 )
 from app.adapters.printerval.row_mapper import (
+    extract_job_templates,
     extract_product_skus,
     extract_source_asset_url,
     parse_external_order_id,
@@ -172,6 +173,7 @@ class PrintervalApiAdapter:
                         sku=sku,
                         product_category=category,
                         product_skus=[product_sku.model_dump() for product_sku in extract_product_skus(row)],
+                        job_templates=extract_job_templates(row),
                         designer=designer_name,
                         fix_dispute=row.get("outsource_fix_dispute") if isinstance(row.get("outsource_fix_dispute"), dict) else None,
                         fix_dispute_can=row.get("outsource_fix_dispute_can") if isinstance(row.get("outsource_fix_dispute_can"), bool) else None,
