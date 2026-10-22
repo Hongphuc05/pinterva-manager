@@ -360,7 +360,8 @@ class Order(Base):
     external_order_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     source_files: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     source_download_all_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
-    product_image_urls: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # none_as_null: Python None is stored as SQL NULL, never as JSON null (see order_pages._has_synced_gallery).
+    product_image_urls: Mapped[list | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
     printerval_designer: Mapped[str | None] = mapped_column(String(255), nullable=True)
     printerval_designer_synced_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

@@ -201,3 +201,25 @@ def test_admin_filters_by_duplicate_check_tag(client, db_session):  # noqa: F811
     ids = client.get("/api/orders/page?tab=waiting&check_status=checked&ids_only=true").json()["ids"]
     assert len(ids) == 1
     assert client.get("/api/orders/page?tab=waiting&check_status=bogus").status_code == 422
+
+
+def test_an_order_whose_gallery_is_json_null_does_not_take_the_page_down(client, db_session):  # noqa: F811
+    """DJ4171681: one crawled order stored JSON null as its gallery and every order tab returned 500."""
+    from sqlalchemy import text
+
+    _seed_platform(db_session)
+    broken = _order(db_session, "W-NULL", "WAITING")
+    synced = _order(db_session, "W-SYNC", "WAITING", product_image_urls=["a.jpg", "b.jpg"])
+    empty = _order(db_session, "W-NONE", "WAITING", product_image_urls=None)
+    db_session.commit()
+    db_session.execute(text("UPDATE orders SET product_image_urls = 'null'::jsonb WHERE id = :id"), {"id": broken.id})
+    db_session.commit()
+    _login(client, db_session, "admin", "admin_page_json_null")
+
+    body = client.get("/api/orders/page?tab=waiting").json()
+    assert body["counts"]["waiting"] == 3 and body["aux"]["synced_images"] == 1
+    only_synced = client.get("/api/orders/page?tab=waiting&synced_images=true").json()
+    assert [o["external_order_id"] for o in only_synced["items"]] == [synced.external_order_id]
+    # Python None is stored as SQL NULL from now on, never as JSON null.
+    kind = db_session.execute(text("SELECT jsonb_typeof(product_image_urls) FROM orders WHERE id = :id"), {"id": empty.id})
+    assert kind.scalar() is None

@@ -34,6 +34,13 @@ MAX_PAGE_SIZE = 200
 MAX_IDS = 5000
 
 
+
+def _has_synced_gallery():
+    """More than one gallery image. A JSON ``null`` (not an array) counts as none instead of failing the
+    whole list: ``jsonb_array_length`` raises on a scalar, and one such order took the order page down."""
+    images = Order.product_image_urls
+    return case((func.jsonb_typeof(images) == "array", func.jsonb_array_length(images)), else_=0) > 1
+
 def tabs_for_role(role: str) -> tuple[str, ...]:
     if role == ROLE_ADMIN:
         return tuple(TAB_STATES)
@@ -199,7 +206,7 @@ def _apply_filters(query: Query, p: PageParams) -> Query:
     if p.fix_returned:
         query = query.filter(Order.fix_return_count > 0)
     if p.synced_images:
-        query = query.filter(func.coalesce(func.jsonb_array_length(Order.product_image_urls), 0) > 1)
+        query = query.filter(_has_synced_gallery())
     if p.check_status == "unchecked":
         query = query.filter(or_(Order.duplicate_check_status.is_(None), Order.duplicate_check_status == "uncheck"))
     elif p.check_status == "checked":
@@ -260,7 +267,7 @@ def load_orders_page(
         "counts": summary_counts(scope) if p.role == ROLE_ADMIN else _count_by_tab(scope, p.role),
         "aux": {
             "synced_images": tab_scope.filter(
-                func.coalesce(func.jsonb_array_length(Order.product_image_urls), 0) > 1
+                _has_synced_gallery()
             ).count(),
             "fix_returned": tab_scope.filter(Order.fix_return_count > 0).count(),
         },
