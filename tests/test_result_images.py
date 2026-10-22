@@ -131,6 +131,22 @@ def test_submitting_without_a_mockup_is_refused_and_with_one_it_is_attached(clie
     assert "printerval" not in refused.json()["detail"].lower()
 
 
+def test_an_admin_submitting_for_the_designer_must_attach_mockups_too(client, world, monkeypatch):
+    monkeypatch.setattr(tasks.sync_order_review_to_printerval_task, "delay", lambda *_a, **_k: None)
+    url = f"/api/orders/{world.order.id}/state"
+    refused = client.patch(url, headers=_h(world.admin), json={"state": "Review", "drive_url": "https://x.test/d"})
+    assert refused.status_code == 422 and "ảnh mockup" in refused.json()["detail"]
+    world.session.refresh(world.order)
+    assert world.order.state == OrderState.IN_PROGRESS.value
+
+    [image] = _upload(client, world, world.admin, ("admin.png", _png(10, 10))).json()["staged"]
+    ok = client.patch(url, headers=_h(world.admin),
+                      json={"state": "Review", "drive_url": "https://x.test/d", "image_ids": [image["id"]]})
+    assert ok.status_code == 200
+    listed = client.get(f"/api/orders/{world.order.id}/result-images", headers=_h(world.admin)).json()
+    assert [i["id"] for i in listed["submitted"]] == [image["id"]]  # pushed with the Review like a Designer's
+
+
 def test_another_users_staged_image_cannot_be_submitted(client, world, monkeypatch):
     monkeypatch.setattr(tasks.sync_order_review_to_printerval_task, "delay", lambda *_a, **_k: None)
     foreign = ResultImage(order_id=world.order.id, uploaded_by_id=world.admin.id, storage_key="result_images/f.png",

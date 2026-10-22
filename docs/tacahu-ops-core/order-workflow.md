@@ -63,7 +63,9 @@ transition nhưng application layer không được tự động recover.
    `IN_PROGRESS`. Assignment/status Printerval là write async, serialized trên queue
    `assignment`.
 4. **Nộp bài**: Designer gửi link **và 1–3 ảnh mockup (bắt buộc)**, tạo `ResultVersion`, state
-   sang `QC_PENDING`. Worker đẩy sang Printerval theo thứ tự link → ảnh vào cột Design → trạng
+   sang `QC_PENDING`. Admin nộp thay (form nộp bài ở chi tiết đơn) cũng phải gắn 1–3 ảnh mới; menu
+   đổi trạng thái không còn chuyển thẳng sang Review cho bất kỳ ai (`PATCH /orders/{id}/state` sang
+   Review luôn đòi `image_ids`). Worker đẩy sang Printerval theo thứ tự link → ảnh vào cột Design → trạng
    thái Review, và chỉ thực hiện khi order vẫn ở state mong đợi. Chi tiết ở "Chuyển đơn sang
    Review trên Printerval" bên dưới.
    **Nộp lại / đổi link** (Designer standard, không áp dụng cho Trello): đơn ở

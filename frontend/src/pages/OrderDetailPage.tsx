@@ -238,7 +238,7 @@ export function OrderDetailPage() {
     if (!order) return
     const norm = (order.state || '').toUpperCase()
     if (norm === 'QC_PENDING' || norm === 'REVIEW') return
-    if (!isAdmin && mockupIds.length === 0) {
+    if (mockupIds.length === 0) {
       setActionError('Cần gắn ít nhất 1 ảnh mockup trước khi nộp bài.')
       return
     }
@@ -253,7 +253,7 @@ export function OrderDetailPage() {
 
   async function handleConfirmSubmit() {
     if (!order) return
-    if (!isAdmin && mockupIds.length === 0) {
+    if (mockupIds.length === 0) {
       setActionError('Cần gắn ít nhất 1 ảnh mockup trước khi nộp bài.')
       return
     }
@@ -264,7 +264,8 @@ export function OrderDetailPage() {
     try {
       const submittedText = driveUrl.trim()
       let submittedByAssignment = false
-      if (order.assignment_id) {
+      // The results route is the Designer's; an Admin submitting on their behalf uses the state route.
+      if (order.assignment_id && !isAdmin) {
         try {
           await apiFetch(`/assignments/${order.assignment_id}/results`, {
             method: 'POST',
@@ -1069,7 +1070,7 @@ export function OrderDetailPage() {
                   </button>
                 </div>
 
-                {!isReview && !isAdmin && (
+                {!isReview && (
                   <MockupPicker orderId={order.id} onChange={setMockupIds} disabled={busyAssignment} />
                 )}
 

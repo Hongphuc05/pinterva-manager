@@ -180,6 +180,7 @@ export function StatusDropdown({
   async function handleSelect(opt: StatusOption) {
     if (disabled || loading) return
     if (!isAdmin && opt.adminOnly) return
+    if (opt.key === 'QC_PENDING') return // Review needs a submission with mockup images
 
     setLoading(true)
     setIsOpen(false)
@@ -256,21 +257,29 @@ export function StatusDropdown({
                   (opt.key === 'DONE' && (normalizedState === 'SKIPPED' || normalizedState === 'DONE'))
 
                 const isLocked = !isAdmin && opt.adminOnly
+                // Review only through a submission, which needs 1-3 mockup images (Designer and Admin alike).
+                const needsSubmission = opt.key === 'QC_PENDING' && !isSelected
 
                 return (
                   <button
                     key={opt.key}
                     type="button"
-                    disabled={isLocked || loading}
+                    disabled={isLocked || needsSubmission || loading}
                     onClick={() => handleSelect(opt)}
                     className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-left transition-colors ${
-                      isLocked
+                      isLocked || needsSubmission
                         ? 'opacity-40 cursor-not-allowed bg-slate-50'
                         : isSelected
                         ? 'bg-blue-50 font-bold text-slate-900'
                         : 'hover:bg-slate-100 text-slate-700 cursor-pointer'
                     }`}
-                    title={isLocked ? 'Chỉ Admin mới có quyền duyệt trạng thái này' : opt.description}
+                    title={
+                      isLocked
+                        ? 'Chỉ Admin mới có quyền duyệt trạng thái này'
+                        : needsSubmission
+                        ? 'Sang Review bằng nút nộp bài, kèm 1–3 ảnh mockup'
+                        : opt.description
+                    }
                   >
                     <div className="flex items-center gap-2 min-w-0">
                       <span className={`h-2 w-2 rounded-full shrink-0 ${opt.dotColor}`} />
@@ -281,6 +290,11 @@ export function StatusDropdown({
                     </div>
 
                     <div className="shrink-0 flex items-center gap-1 pl-1">
+                      {needsSubmission && (
+                        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 bg-slate-200/80 px-1 py-0.5 rounded">
+                          Nộp bài
+                        </span>
+                      )}
                       {isLocked && (
                         <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 bg-slate-200/80 px-1 py-0.5 rounded">
                           Chỉ Admin
@@ -295,7 +309,7 @@ export function StatusDropdown({
 
             {!isAdmin && (
               <div className="px-2.5 py-1.5 border-t border-slate-100 bg-slate-50/80 rounded-b-lg text-[10px] text-slate-500">
-                Des chỉ được chuyển <strong className="text-blue-600">Doing</strong> hoặc <strong className="text-purple-600">Review</strong>.
+                Des chỉ được chuyển <strong className="text-blue-600">Doing</strong>. Sang <strong className="text-purple-600">Review</strong> bằng nút nộp bài, kèm ảnh mockup.
               </div>
             )}
           </div>,

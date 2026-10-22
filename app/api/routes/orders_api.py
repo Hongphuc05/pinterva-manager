@@ -2669,12 +2669,13 @@ def api_update_order_state(
             action_type = "START_DOING"
             desc = f"{actor_disp} nhận đơn vào Doing"
     elif target_state == OrderState.QC_PENDING:
-        if user.role in (ROLE_DESIGNER, ROLE_DESIGNER_TRELLO):
-            try:
-                attach_images(db, order, user, payload.image_ids)
-            except ResultImageError as exc:
-                db.rollback()
-                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+        # Printerval only takes a job to Review with a mockup in its Design column: every submission,
+        # the Designer's or an Admin's on their behalf, carries 1-3 new images.
+        try:
+            attach_images(db, order, user, payload.image_ids)
+        except ResultImageError as exc:
+            db.rollback()
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
         order.fix_approved_by_admin = False
         order.fix_rejected_by_admin = False
         order.designer_note_released_for_fix = False
